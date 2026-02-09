@@ -1,0 +1,18 @@
+# team_doc 配置文件
+
+database:
+  url: "postgresql+asyncpg://developer:devpass@localhost:5432/team_doc"
+
+embedding:
+  provider: openai  # openai / local
+  openai:
+    api_key: ${OPENAI_API_KEY}
+    model: text-embedding-3-small
+    dimension: 1536
+  local:
+    model_name: BAAI/bge-m3
+    device: cpu
+    dimension: 1024
+
+auth:
+  type: api_key
