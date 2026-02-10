@@ -39,13 +39,34 @@ class MockEmbeddingProvider(EmbeddingProvider):
         return [self._text_to_vector(t) for t in texts]
 
     def _text_to_vector(self, text: str) -> list[float]:
-        """Convert text to a deterministic vector."""
-        # Use character codes to create a reproducible vector
+        """Convert text to a deterministic vector.
+
+        Uses a hash-spreading approach so that:
+        - Same text always produces the same vector
+        - Similar texts produce somewhat similar vectors
+        - Works well at any dimensionality (8, 1536, etc.)
+        """
+        import hashlib
+
         values = [0.0] * self._dimension
+
+        # Spread character information across all dimensions
         for i, ch in enumerate(text):
-            idx = i % self._dimension
-            values[idx] += ord(ch) / 1000.0
-        # Normalize
+            # Use hash to distribute each character across multiple dimensions
+            seed = hashlib.md5(f"{ch}:{i}".encode()).digest()
+            for j in range(min(4, self._dimension)):
+                idx = (seed[j] + seed[j + 4]) % self._dimension
+                values[idx] += ord(ch) / 1000.0
+
+        # Also add word-level features for better semantic similarity
+        words = text.lower().split()
+        for word in words:
+            word_hash = hashlib.md5(word.encode()).digest()
+            for j in range(min(8, self._dimension)):
+                idx = word_hash[j] % self._dimension
+                values[idx] += 0.1
+
+        # Normalize to unit vector
         magnitude = sum(v * v for v in values) ** 0.5
         if magnitude > 0:
             values = [v / magnitude for v in values]

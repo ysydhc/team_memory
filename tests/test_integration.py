@@ -59,8 +59,8 @@ pytestmark = pytest.mark.skipif(
     reason="PostgreSQL not available",
 )
 
-# Dimension for test embeddings
-TEST_DIM = 8
+# Dimension must match the database column Vector(1536)
+TEST_DIM = 1536
 
 
 @pytest.fixture
