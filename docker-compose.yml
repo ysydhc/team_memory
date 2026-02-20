@@ -1,8 +1,11 @@
 services:
+  # ============================================================
+  # PostgreSQL with pgvector extension
+  # ============================================================
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_DB: team_doc
+      POSTGRES_DB: team_memory
       POSTGRES_USER: developer
       POSTGRES_PASSWORD: devpass
     ports:
@@ -10,10 +13,95 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U developer -d team_doc"]
+      test: ["CMD-SHELL", "pg_isready -U developer -d team_memory"]
       interval: 5s
       timeout: 5s
       retries: 5
 
+  # ============================================================
+  # Ollama (local embedding + LLM)
+  # Model is auto-pulled by docker-entrypoint.sh on first start.
+  # ============================================================
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================
+  # Redis (optional: cache backend)
+  # Only needed if cache.backend is set to "redis" in config.yaml
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================================
+  # team_memory Web Application
+  # ============================================================
+  team-memory-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "9111:9111"
+    environment:
+      TEAM_MEMORY_DB_URL: "postgresql+asyncpg://developer:devpass@postgres:5432/team_memory"
+      TEAM_MEMORY_WEB_HOST: "0.0.0.0"
+      TEAM_MEMORY_WEB_PORT: "9111"
+      TEAM_MEMORY_API_KEY: "${TEAM_MEMORY_API_KEY:-changeme}"
+      TEAM_MEMORY_USER: "${TEAM_MEMORY_USER:-admin}"
+      RUN_MIGRATIONS: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    command: ["team-memory-web"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:${TEAM_MEMORY_WEB_PORT:-9111}/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ============================================================
+  # team_memory MCP Server (stdio-based, for Cursor integration)
+  # Uncomment if you want to run MCP server in a container.
+  # Typically this is run locally for Cursor IDE integration.
+  # ============================================================
+  # team-memory-mcp:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   environment:
+  #     TEAM_MEMORY_DB_URL: "postgresql+asyncpg://developer:devpass@postgres:5432/team_memory"
+  #     TEAM_MEMORY_API_KEY: "${TEAM_MEMORY_API_KEY:-changeme}"
+  #     TEAM_MEMORY_USER: "${TEAM_MEMORY_USER:-admin}"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   command: ["team-memory"]
+  #   stdin_open: true
+  #   tty: true
+
 volumes:
   pgdata:
+  ollama_data:
+  redis_data:

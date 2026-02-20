@@ -1,12 +1,11 @@
 """Tests for embedding providers."""
 
-import json
 
 import httpx
 import pytest
 
-from team_doc.embedding.base import EmbeddingProvider
-from team_doc.embedding.openai_provider import OpenAIEmbedding
+from team_memory.embedding.base import EmbeddingProvider
+from team_memory.embedding.openai_provider import OpenAIEmbedding
 
 
 class TestEmbeddingProviderInterface:

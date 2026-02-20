@@ -1,0 +1,18 @@
+# Test configuration overrides
+# Load with: TEAM_MEMORY_ENV=test
+
+database:
+  url: "postgresql+asyncpg://developer:devpass@localhost:5432/team_memory_test"
+
+auth:
+  type: none
+
+web:
+  host: "127.0.0.1"
+  port: 9222
+
+cache:
+  enabled: false
+
+lifecycle:
+  scan_interval_hours: 999999

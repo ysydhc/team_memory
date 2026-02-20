@@ -1,15 +1,11 @@
-"""Shared pytest fixtures for team_doc tests."""
+"""Shared pytest fixtures for team_memory tests."""
 
 from __future__ import annotations
 
-import uuid
-from unittest.mock import AsyncMock
-
 import pytest
 
-from team_doc.auth.provider import ApiKeyAuth, NoAuth, User
-from team_doc.embedding.base import EmbeddingProvider
-
+from team_memory.auth.provider import ApiKeyAuth, NoAuth
+from team_memory.embedding.base import EmbeddingProvider
 
 # ============================================================
 # Mock Embedding Provider
@@ -23,7 +19,7 @@ class MockEmbeddingProvider(EmbeddingProvider):
     similar texts produce similar vectors.
     """
 
-    def __init__(self, dimension: int = 8):
+    def __init__(self, dimension: int = 768):
         self._dimension = dimension
 
     @property
@@ -75,8 +71,8 @@ class MockEmbeddingProvider(EmbeddingProvider):
 
 @pytest.fixture
 def mock_embedding() -> MockEmbeddingProvider:
-    """Provide a mock embedding provider."""
-    return MockEmbeddingProvider(dimension=8)
+    """Provide a mock embedding provider (768 dims, matching Ollama nomic-embed-text)."""
+    return MockEmbeddingProvider(dimension=768)
 
 
 @pytest.fixture

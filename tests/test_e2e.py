@@ -25,24 +25,24 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 async def run_e2e():
     """Run the end-to-end test."""
     from fastmcp import Client
-    from team_doc.server import mcp
 
     # Override service with mock embedding to avoid needing OpenAI API key
-    import team_doc.server as srv
-    from team_doc.auth.provider import NoAuth
-    from team_doc.services.experience import ExperienceService
+    import team_memory.server as srv
+    from team_memory.auth.provider import NoAuth
+    from team_memory.server import mcp
+    from team_memory.services.experience import ExperienceService
 
     sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
     from conftest import MockEmbeddingProvider
 
-    mock_embed = MockEmbeddingProvider(dimension=1536)
+    mock_embed = MockEmbeddingProvider(dimension=768)
     srv._service = ExperienceService(
         embedding_provider=mock_embed,
         auth_provider=NoAuth(),
     )
 
     print("=" * 60)
-    print("team_doc MCP Server — End-to-End Test")
+    print("team_memory MCP Server — End-to-End Test")
     print("=" * 60)
 
     async with Client(mcp) as client:
@@ -110,12 +110,12 @@ async def run_e2e():
         print(f"    ✓ Found {len(search_data['results'])} result(s), including the CORS fix")
 
         # ---- Step 5: Feedback ----
-        print("\n[5] Submitting feedback (helpful=true)...")
+        print("\n[5] Submitting feedback (rating=5)...")
         result = await client.call_tool(
             "feedback_experience",
             {
                 "experience_id": exp_id,
-                "helpful": True,
+                "rating": 5,
                 "comment": "Exactly what I needed!",
             },
         )

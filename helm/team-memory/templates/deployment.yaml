@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-team-memory
+  labels:
+    app: team-memory
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: team-memory
+  template:
+    metadata:
+      labels:
+        app: team-memory
+    spec:
+      containers:
+        - name: team-memory
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 9111
+              protocol: TCP
+          env:
+            - name: TEAM_MEMORY_ENV
+              value: {{ .Values.config.env | quote }}
+            - name: TEAM_MEMORY_API_KEY
+              value: {{ .Values.config.apiKey | quote }}
+            - name: TEAM_MEMORY_DATABASE__URL
+              value: "postgresql+asyncpg://{{ .Values.postgresql.username }}:{{ .Values.postgresql.password }}@{{ .Values.postgresql.host }}:{{ .Values.postgresql.port }}/{{ .Values.postgresql.database }}"
+            {{- if .Values.ollama.enabled }}
+            - name: TEAM_MEMORY_OLLAMA_URL
+              value: "http://{{ .Values.ollama.host }}:{{ .Values.ollama.port }}"
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9111
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 9111
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

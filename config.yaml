@@ -1,18 +1,240 @@
-# team_doc 配置文件
+# ============================================================
+# team_memory 完整配置文件
+# ============================================================
+# 配置项分为三级：
+#   [必改]  — 首次使用必须修改
+#   [可选]  — 有特殊需求时修改，默认值适合大多数场景
+#   [高级]  — 深度调优，仅在性能或功能有明确需求时修改
+#
+# 快速开始？使用 config.minimal.yaml，只需改 2 项即可启动。
+# ============================================================
 
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [必改] 数据库连接                                       ║
+# ╚══════════════════════════════════════════════════════════╝
 database:
-  url: "postgresql+asyncpg://developer:devpass@localhost:5432/team_doc"
+  url: "postgresql+asyncpg://developer:devpass@localhost:5432/team_memory"
 
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [可选] Embedding 模型 — 默认使用 Ollama 本地服务         ║
+# ╚══════════════════════════════════════════════════════════╝
 embedding:
-  provider: openai  # openai / local
-  openai:
-    api_key: ${OPENAI_API_KEY}
-    model: text-embedding-3-small
-    dimension: 1536
-  local:
-    model_name: BAAI/bge-m3
-    device: cpu
-    dimension: 1024
+  provider: ollama  # ollama / openai / local
+  ollama:
+    model: nomic-embed-text
+    base_url: http://localhost:11434
+    dimension: 768
+  # openai:
+  #   api_key: ${OPENAI_API_KEY}
+  #   model: text-embedding-3-small
+  #   dimension: 1536
+  # local:
+  #   model_name: BAAI/bge-m3
+  #   device: cpu
+  #   dimension: 1024
 
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [可选] LLM 配置 — 用于文档解析、摘要生成等 AI 功能       ║
+# ╚══════════════════════════════════════════════════════════╝
+llm:
+  model: gpt-oss:20b-cloud        # Ollama LLM model for document parsing
+  base_url: http://localhost:11434
+  prompt_dir: null                 # Custom prompt template directory (null = built-in)
+                                   # Example: "prompts/" to load from prompts/*.md
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [必改] 认证配置 — 首次使用必须修改 api_key               ║
+# ╚══════════════════════════════════════════════════════════╝
 auth:
   type: api_key
+  api_key: "CHANGE_ME_your_api_key"
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [可选] 多项目默认上下文                                  ║
+# ╚══════════════════════════════════════════════════════════╝
+default_project: "default"
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [可选] Web 服务配置                                     ║
+# ╚══════════════════════════════════════════════════════════╝
+web:
+  host: "0.0.0.0"
+  port: 9111
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [可选] 可安装规则/提示词目录与共享注册表                ║
+# ╚══════════════════════════════════════════════════════════╝
+installable_catalog:
+  sources: ["local"]            # local | registry
+  local_base_dir: ".debug/knowledge-pack"
+  registry_manifest_url: ""     # 示例: https://example.com/team-memory-manifest.json
+  target_rules_dir: ".cursor/rules"
+  target_prompts_dir: ".cursor/prompts"
+  request_timeout_seconds: 8
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [可选] 检索与上下文裁剪 — 经验数量 >100 时考虑调整       ║
+# ╚══════════════════════════════════════════════════════════╝
+retrieval:
+  max_tokens: null          # Token budget (null = no limit)
+  max_count: 20             # Maximum experience groups returned
+  trim_strategy: top_k      # top_k | summary
+  top_k_children: 3         # Max children per group (top_k mode)
+  min_avg_rating: 0.0       # Minimum avg_rating filter (0 = off)
+  rating_weight: 0.3        # Weight of rating in final score (0-1)
+  summary_model: null       # LLM model for summary strategy (null = use llm.model)
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [可选] PageIndex-Lite — 长文档章节树检索增强层           ║
+# ╚══════════════════════════════════════════════════════════╝
+pageindex_lite:
+  enabled: true                # Enable PageIndex-Lite enhancement
+  only_long_docs: true         # Build tree only for long documents
+  min_doc_chars: 800           # Minimum chars to treat as long document
+  max_tree_depth: 4            # Maximum section depth
+  max_nodes_per_doc: 40        # Maximum tree nodes per document
+  max_node_chars: 1200         # Max chars kept per node content
+  tree_weight: 0.15            # Score boost weight in search pipeline
+  min_node_score: 0.01         # Min node match score to keep
+  include_matched_nodes: true  # Include matched_nodes in search response
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [高级] Reranker 精排 — 需要配置 Ollama LLM 或第三方服务  ║
+# ╚══════════════════════════════════════════════════════════╝
+reranker:
+  provider: none            # none | ollama_llm | cross_encoder | jina
+  ollama_llm:
+    # model: null            # null = reuse llm.model
+    # base_url: null         # null = reuse llm.base_url
+    top_k: 10               # Keep top K results after reranking
+    batch_size: 5            # Documents per LLM scoring call
+    # prompt_template: null  # Custom prompt (null = built-in default)
+  # cross_encoder:
+  #   model_name: cross-encoder/ms-marco-MiniLM-L6-v2
+  #   device: cpu
+  #   top_k: 10
+  # jina:
+  #   api_key: ""
+  #   model: jina-reranker-v2-base-multilingual
+  #   top_k: 10
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [高级] 搜索管线 — 混合搜索策略与参数                     ║
+# ╚══════════════════════════════════════════════════════════╝
+search:
+  mode: hybrid              # hybrid | vector | fts
+  rrf_k: 60                 # RRF constant (standard value, rarely needs changing)
+  vector_weight: 0.7        # Weight for vector results in hybrid fusion
+  fts_weight: 0.3           # Weight for FTS results in hybrid fusion
+  adaptive_filter: true     # Enable adaptive score filtering
+  score_gap_threshold: 0.15 # Gap threshold for elbow detection
+  min_confidence_ratio: 0.6 # Min ratio vs top-1 score for dynamic threshold
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [可选] 缓存配置 — 默认使用内存缓存，无需额外依赖         ║
+# ╚══════════════════════════════════════════════════════════╝
+cache:
+  enabled: true             # Enable/disable query result caching
+  backend: memory           # memory | redis (memory=default, redis=shared/persistent)
+  redis_url: "redis://localhost:6379/0"  # Redis URL (only used when backend=redis)
+  ttl_seconds: 300          # Cache TTL in seconds (5 minutes)
+  max_size: 100             # Max cached search results
+  embedding_cache_size: 200 # Max cached embedding vectors
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [可选] 经验生命周期 — 过期检测、去重                     ║
+# ╚══════════════════════════════════════════════════════════╝
+lifecycle:
+  stale_months: 6             # Months of inactivity before marking as stale
+  scan_interval_hours: 24     # Background scan interval (hours)
+  duplicate_threshold: 0.92   # Cosine similarity threshold for dedup detection
+  dedup_on_save: true         # Check for duplicates before saving
+  dedup_on_save_threshold: 0.90  # Similarity threshold for save-time dedup
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [可选] 审核工作流                                       ║
+# ╚══════════════════════════════════════════════════════════╝
+review:
+  enabled: true               # Enable review workflow
+  auto_publish_threshold: 0.0 # Auto-publish if avg_rating >= this (0 = disabled)
+  require_review_for_ai: true # AI-created experiences require review
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [高级] 记忆压缩与摘要生成                                ║
+# ╚══════════════════════════════════════════════════════════╝
+memory:
+  auto_summarize: true          # Auto-generate summary for long experiences
+  summary_threshold_tokens: 500 # Token threshold to trigger summarization
+  summary_model: ""             # LLM model override (empty = use llm.model)
+  batch_size: 10                # Batch size for bulk summarization
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [高级] 向量索引 — 经验数量 >10K 时考虑切换到 HNSW       ║
+# ╚══════════════════════════════════════════════════════════╝
+vector:
+  index_type: ivfflat        # ivfflat | hnsw
+  hnsw_m: 16                 # HNSW: max connections per node
+  hnsw_ef_construction: 200  # HNSW: construction parameter
+  hnsw_ef_search: 100        # HNSW: search parameter
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [高级] MCP 输出控制 — 防止上下文窗口溢出                 ║
+# ╚══════════════════════════════════════════════════════════╝
+mcp:
+  max_output_tokens: 4000   # Max token budget for a single MCP tool response
+  truncate_solution_at: 2000 # Max chars per solution field before truncation
+  include_code_snippets: true # Whether to include code_snippets in search results
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [可选] Schema 定制 — 经验类型/分类/严重等级可配置化      ║
+# ╚══════════════════════════════════════════════════════════╝
+# 渐进式复杂度:
+#   层 0: 只设 preset，零配置
+#   层 1: 通过 POST /api/v1/schema/generate 从示例文档自动生成
+#   层 2: 手写 YAML 精确控制
+custom_schema:
+  preset: "software-dev"           # software-dev / data-engineering / devops / general
+  # experience_types:              # 新增或覆盖（同 id = 覆盖，新 id = 追加）
+  #   - id: custom_type
+  #     label: "自定义类型"
+  #     severity: false
+  #     progress_states: ["todo", "in_progress", "done"]
+  #     structured_fields:
+  #       - { name: "field_name", type: "text", label: "字段名" }
+  # categories:
+  #   - { id: "custom_cat", label: "自定义分类" }
+  # severity_levels: []            # 空 = 沿用 preset 默认
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [可选] AI 行为配置 — 用自然语言控制 AI 输出偏好          ║
+# ╚══════════════════════════════════════════════════════════╝
+ai_behavior:
+  output_language: "zh-CN"         # zh-CN / en / ja / ko
+  detail_level: "detailed"         # detailed / concise
+  focus_areas:                     # AI 重点关注的方面
+    - "root_cause"
+    - "solution"
+    - "code_snippets"
+  custom_instructions: ""          # 团队自定义指令（自然语言）
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [可选] Webhook 通知 — 事件发生时发送 HTTP 通知           ║
+# ╚══════════════════════════════════════════════════════════╝
+webhooks: []
+  # - url: "https://hooks.slack.com/services/xxx"
+  #   events: ["experience.created", "experience.published"]
+  #   secret: "my-hmac-secret"
+  #   active: true
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [可选] 标签同义词 — 自动将缩写映射为标准名称             ║
+# ╚══════════════════════════════════════════════════════════╝
+tag_synonyms:
+  PG: PostgreSQL
+  pg: PostgreSQL
+  JS: JavaScript
+  js: JavaScript
+  TS: TypeScript
+  ts: TypeScript
+  py: Python
+  k8s: Kubernetes

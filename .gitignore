@@ -28,6 +28,15 @@ config.local.yaml
 htmlcov/
 .pytest_cache/
 
+# Debug / operations docs (personal)
+.debug/
+
 # OS
 .DS_Store
 Thumbs.db
+
+
+.ruff_cache/
+migrations/
+.claude/
+.cursor/

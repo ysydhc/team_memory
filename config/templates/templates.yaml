@@ -1,0 +1,218 @@
+# Workflow templates for experience creation (v3 type system)
+#
+# Each template maps to an experience_type and defines:
+#   - structured_fields: type-specific structured_data fields with priority
+#     (required / recommended / optional)
+#   - progress_states: ordered list of valid progress_status values
+#   - severity_options: valid severity levels (if applicable)
+#   - category_options: valid category values (if applicable)
+#   - core_fields: top-level required fields with priority
+#   - hints: placeholder text for UI form inputs
+#   - suggested_tags: default tags for this type
+
+templates:
+  # ==========================================================================
+  # 1. General (default)
+  # ==========================================================================
+  - id: general
+    experience_type: general
+    name: 通用经验
+    description: 通用的知识记录和经验分享
+    icon: "📝"
+    core_fields:
+      - { field: title, priority: required }
+      - { field: problem, priority: required }
+      - { field: solution, priority: recommended }
+      - { field: root_cause, priority: optional }
+      - { field: tags, priority: recommended }
+      - { field: code_snippets, priority: optional }
+    structured_fields: []
+    progress_states: []
+    severity_options: []
+    category_options: []
+    suggested_tags: []
+    hints:
+      title: "简要描述这条经验"
+      problem: "描述遇到的问题或需要记录的背景"
+      solution: "描述解决方案或知识要点"
+
+  # ==========================================================================
+  # 2. Feature (需求)
+  # ==========================================================================
+  - id: feature
+    experience_type: feature
+    name: 功能需求
+    description: 记录功能需求的完整开发过程 — 从设计到发布
+    icon: "🚀"
+    core_fields:
+      - { field: title, priority: required }
+      - { field: problem, priority: required, label: "需求背景" }
+      - { field: solution, priority: recommended, label: "实现方案" }
+      - { field: root_cause, priority: optional, label: "技术背景" }
+      - { field: tags, priority: recommended }
+      - { field: code_snippets, priority: optional, label: "关键代码" }
+      - { field: git_refs, priority: recommended }
+      - { field: related_links, priority: optional }
+    structured_fields:
+      - { field: requirements, type: text, priority: recommended, label: "需求描述", hint: "详细的功能需求说明" }
+      - { field: acceptance_criteria, type: list, priority: recommended, label: "验收标准", hint: "每行一条验收标准" }
+      - { field: test_summary, type: text, priority: optional, label: "测试总结", hint: "测试覆盖情况和结果" }
+      - { field: release_notes, type: text, priority: optional, label: "发布说明", hint: "面向用户的变更说明" }
+    progress_states: [planning, developing, testing, released]
+    severity_options: [P0, P1, P2, P3, P4]
+    category_options: [frontend, backend, database, infra, mobile, other]
+    suggested_tags: [feature, requirement]
+    hints:
+      title: "需求: [简要描述]"
+      problem: "描述需求背景、目标用户和要解决的问题"
+      solution: "描述最终的实现方案、关键设计决策"
+
+  # ==========================================================================
+  # 3. Bugfix
+  # ==========================================================================
+  - id: bugfix
+    experience_type: bugfix
+    name: Bug 修复
+    description: 记录 Bug 的发现、分析和修复全过程
+    icon: "🐛"
+    core_fields:
+      - { field: title, priority: required }
+      - { field: problem, priority: required, label: "Bug 描述" }
+      - { field: solution, priority: recommended, label: "修复方案" }
+      - { field: root_cause, priority: recommended, label: "根本原因" }
+      - { field: tags, priority: recommended }
+      - { field: code_snippets, priority: recommended, label: "关键代码变更" }
+      - { field: git_refs, priority: recommended }
+      - { field: severity, priority: recommended }
+      - { field: category, priority: recommended }
+    structured_fields:
+      - { field: reproduction_steps, type: text, priority: required, label: "复现步骤", hint: "1. 打开页面\n2. 点击按钮\n3. 观察错误" }
+      - { field: environment, type: text, priority: recommended, label: "环境信息", hint: "OS / 浏览器 / 版本号等" }
+      - { field: error_logs, type: text, priority: recommended, label: "错误日志", hint: "关键的错误堆栈或日志" }
+      - { field: impact_scope, type: text, priority: recommended, label: "影响范围", hint: "受影响的用户量 / 功能模块" }
+      - { field: verification_result, type: text, priority: optional, label: "验证结果", hint: "修复后的验证情况" }
+    progress_states: [open, investigating, fixed, verified]
+    severity_options: [P0, P1, P2, P3, P4]
+    category_options: [frontend, backend, database, performance, security, mobile, other]
+    suggested_tags: [bug, fix]
+    hints:
+      title: "修复: [简要描述]"
+      problem: "描述 Bug 现象和复现步骤"
+      root_cause: "分析 Bug 的根本原因"
+      solution: "描述修复步骤和关键代码变更"
+
+  # ==========================================================================
+  # 4. Tech Design (技术方案)
+  # ==========================================================================
+  - id: tech_design
+    experience_type: tech_design
+    name: 技术方案
+    description: 记录技术方案设计 — 选型分析、架构决策、实现路径
+    icon: "📐"
+    core_fields:
+      - { field: title, priority: required }
+      - { field: problem, priority: required, label: "技术背景" }
+      - { field: solution, priority: recommended, label: "方案设计" }
+      - { field: tags, priority: recommended }
+      - { field: code_snippets, priority: optional }
+      - { field: git_refs, priority: optional }
+      - { field: related_links, priority: recommended }
+    structured_fields:
+      - { field: alternatives, type: alternatives, priority: recommended, label: "方案对比", hint: "列出考虑过的替代方案及其优劣" }
+      - { field: rollback_plan, type: text, priority: recommended, label: "回滚方案", hint: "如果方案失败，如何回滚" }
+      - { field: data_migration, type: text, priority: optional, label: "数据迁移", hint: "涉及的数据迁移步骤" }
+      - { field: performance_data, type: text, priority: optional, label: "性能数据", hint: "压测结果 / 性能对比" }
+      - { field: upstream_downstream, type: text, priority: optional, label: "上下游影响", hint: "对依赖方和被依赖方的影响" }
+      - { field: monitoring, type: text, priority: optional, label: "监控方案", hint: "需要增加的监控指标和告警规则" }
+    progress_states: [researching, reviewing, implementing, completed]
+    severity_options: []
+    category_options: [frontend, backend, database, infra, performance, security, other]
+    suggested_tags: [tech-design, architecture]
+    hints:
+      title: "技术方案: [简要描述]"
+      problem: "描述需求背景、技术挑战和约束条件"
+      solution: "描述选择的技术方案及核心设计决策"
+
+  # ==========================================================================
+  # 5. Incident (故障)
+  # ==========================================================================
+  - id: incident
+    experience_type: incident
+    name: 故障记录
+    description: 记录线上故障的处理全过程 — 发现、止损、复盘
+    icon: "🔥"
+    core_fields:
+      - { field: title, priority: required }
+      - { field: problem, priority: required, label: "故障描述" }
+      - { field: solution, priority: recommended, label: "处理方案" }
+      - { field: root_cause, priority: required, label: "根本原因" }
+      - { field: tags, priority: recommended }
+      - { field: severity, priority: required }
+      - { field: category, priority: recommended }
+      - { field: git_refs, priority: optional }
+    structured_fields:
+      - { field: reproduction_steps, type: text, priority: recommended, label: "故障现象", hint: "故障的具体表现" }
+      - { field: environment, type: text, priority: recommended, label: "故障环境", hint: "生产环境 / 灰度 / 版本" }
+      - { field: error_logs, type: text, priority: recommended, label: "关键日志", hint: "关键的错误日志和监控截图" }
+      - { field: impact_scope, type: text, priority: required, label: "影响范围", hint: "影响的用户量、时长、核心指标变化" }
+      - { field: verification_result, type: text, priority: optional, label: "恢复验证", hint: "故障恢复后的验证结果" }
+      - { field: timeline, type: text, priority: recommended, label: "处理时间线", hint: "HH:MM 发现 → HH:MM 止损 → HH:MM 恢复" }
+      - { field: prevention, type: text, priority: recommended, label: "预防措施", hint: "防止类似故障再次发生的措施" }
+    progress_states: [detected, mitigating, resolved, post_mortem]
+    severity_options: [P0, P1, P2, P3, P4]
+    category_options: [frontend, backend, database, infra, performance, security, other]
+    suggested_tags: [incident, outage]
+    hints:
+      title: "故障: [简要描述]"
+      problem: "描述故障现象、发现时间和影响范围"
+      root_cause: "分析故障的根本原因"
+      solution: "描述止损和修复方案"
+
+  # ==========================================================================
+  # 6. Best Practice (最佳实践)
+  # ==========================================================================
+  - id: best_practice
+    experience_type: best_practice
+    name: 最佳实践
+    description: 记录团队开发中的最佳实践和规范
+    icon: "✨"
+    core_fields:
+      - { field: title, priority: required }
+      - { field: problem, priority: recommended, label: "适用场景" }
+      - { field: solution, priority: required, label: "实践内容" }
+      - { field: tags, priority: recommended }
+      - { field: code_snippets, priority: optional, label: "示例代码" }
+    structured_fields: []
+    progress_states: []
+    severity_options: []
+    category_options: [frontend, backend, database, infra, performance, security, other]
+    suggested_tags: [best-practice, guideline]
+    hints:
+      title: "最佳实践: [简要描述]"
+      problem: "描述适用场景和为什么需要这条实践"
+      solution: "描述具体的实践内容和示例"
+
+  # ==========================================================================
+  # 7. Learning (学习笔记)
+  # ==========================================================================
+  - id: learning
+    experience_type: learning
+    name: 学习笔记
+    description: 记录学习新技术、工具或概念的笔记
+    icon: "📚"
+    core_fields:
+      - { field: title, priority: required }
+      - { field: problem, priority: recommended, label: "学习背景" }
+      - { field: solution, priority: recommended, label: "知识总结" }
+      - { field: tags, priority: recommended }
+      - { field: code_snippets, priority: optional, label: "代码示例" }
+      - { field: related_links, priority: recommended, label: "参考资料" }
+    structured_fields: []
+    progress_states: []
+    severity_options: []
+    category_options: [frontend, backend, database, infra, other]
+    suggested_tags: [learning, note]
+    hints:
+      title: "[技术名称] 学习笔记"
+      problem: "学习这个技术的背景和动机"
+      solution: "记录关键概念、用法示例和注意事项"

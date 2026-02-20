@@ -10,22 +10,21 @@ Requires: PostgreSQL with pgvector running (docker compose up -d)
 from __future__ import annotations
 
 import os
-import uuid
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from team_doc.auth.provider import NoAuth
-from team_doc.services.experience import ExperienceService
-from team_doc.storage.models import Base
-from team_doc.storage.repository import ExperienceRepository
+from team_memory.auth.provider import NoAuth
+from team_memory.services.experience import ExperienceService
+from team_memory.storage.models import Base
+from team_memory.storage.repository import ExperienceRepository
 from tests.conftest import MockEmbeddingProvider
 
 # Skip all tests if DB is not available
 DB_URL = os.environ.get(
-    "TEAM_DOC_TEST_DB_URL",
-    "postgresql+asyncpg://developer:devpass@localhost:5432/team_doc",
+    "TEAM_MEMORY_TEST_DB_URL",
+    "postgresql+asyncpg://developer:devpass@localhost:5432/team_memory",
 )
 
 _db_available = None
@@ -38,6 +37,7 @@ def _check_db():
         return _db_available
     try:
         import asyncio
+
         from sqlalchemy.ext.asyncio import create_async_engine
 
         async def _try_connect():
@@ -59,8 +59,8 @@ pytestmark = pytest.mark.skipif(
     reason="PostgreSQL not available",
 )
 
-# Dimension must match the database column Vector(1536)
-TEST_DIM = 1536
+# Dimension must match the database column Vector(768) — Ollama nomic-embed-text
+TEST_DIM = 768
 
 
 @pytest.fixture
@@ -214,14 +214,14 @@ class TestRepositoryIntegration:
         )
         await session.commit()
 
-        await repo.add_feedback(exp.id, helpful=True, feedback_by="user1")
-        await repo.add_feedback(exp.id, helpful=False, feedback_by="user2")
+        await repo.add_feedback(exp.id, rating=5, feedback_by="user1")
+        await repo.add_feedback(exp.id, rating=1, feedback_by="user2")
         await session.commit()
 
         updated = await repo.get_by_id(exp.id)
         assert updated is not None
-        # avg_rating should be 0.5 (one True, one False)
-        assert abs(updated.avg_rating - 0.5) < 0.01
+        # avg_rating should be 3.0 (average of 5 and 1)
+        assert abs(updated.avg_rating - 3.0) < 0.01
 
     @pytest.mark.asyncio
     async def test_list_recent(self, session, mock_embed):
@@ -337,7 +337,7 @@ class TestServiceIntegration:
         success = await service.feedback(
             session=session,
             experience_id=result["id"],
-            helpful=True,
+            rating=5,
             feedback_by="reviewer",
             comment="Very helpful!",
         )
@@ -364,5 +364,5 @@ class TestServiceIntegration:
         )
         assert updated is not None
         assert "Additional approach" in updated["solution"]
-        assert "test" in updated["tags"]
+        # In-place update replaces tags (not merge)
         assert "operations" in updated["tags"]

@@ -1,0 +1,27 @@
+# ============================================================
+# team_memory 最小配置
+# ============================================================
+# 注意：
+# - 本文件默认不会自动覆盖 config.yaml。
+# - 仅在显式指定时生效（推荐）：
+#     TEAM_MEMORY_CONFIG_PATH=config.minimal.yaml python -m team_memory.web.app
+# - 或启用叠加开关（不推荐长期使用）：
+#     TEAM_MEMORY_ENABLE_MINIMAL_OVERLAY=1
+#
+# 只需修改以下几项即可启动服务。
+# 其他所有配置使用 config.yaml 中的默认值，无需修改。
+# 如需自定义更多选项，将对应配置项从 config.yaml 复制到此文件中。
+# ============================================================
+
+# [必改] 数据库连接
+database:
+  url: "postgresql+asyncpg://developer:devpass@localhost:5432/team_memory"
+
+# [必改] 认证密钥 — 用于 Web 登录和 MCP 工具认证
+auth:
+  api_key: "请替换为你的API密钥"
+
+# [可选] 如果你的 Ollama 不在默认地址，取消注释并修改
+# embedding:
+#   ollama:
+#     base_url: http://localhost:11434

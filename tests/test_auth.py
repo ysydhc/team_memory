@@ -2,7 +2,7 @@
 
 import pytest
 
-from team_doc.auth.provider import ApiKeyAuth, NoAuth, User, create_auth_provider
+from team_memory.auth.provider import ApiKeyAuth, NoAuth, create_auth_provider
 
 
 class TestNoAuth:
@@ -29,9 +29,9 @@ class TestApiKeyAuth:
     @pytest.mark.asyncio
     async def test_valid_key_returns_user(self):
         auth = ApiKeyAuth()
-        auth.register_key("td_test_key_123", "alice", "admin")
+        auth.register_key("tm_test_key_123", "alice", "admin")
 
-        user = await auth.authenticate({"api_key": "td_test_key_123"})
+        user = await auth.authenticate({"api_key": "tm_test_key_123"})
         assert user is not None
         assert user.name == "alice"
         assert user.role == "admin"
@@ -39,7 +39,7 @@ class TestApiKeyAuth:
     @pytest.mark.asyncio
     async def test_invalid_key_returns_none(self):
         auth = ApiKeyAuth()
-        auth.register_key("td_test_key_123", "alice", "admin")
+        auth.register_key("tm_test_key_123", "alice", "admin")
 
         user = await auth.authenticate({"api_key": "wrong_key"})
         assert user is None

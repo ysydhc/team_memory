@@ -1,0 +1,30 @@
+# Production configuration overrides
+# Load with: TEAM_MEMORY_ENV=production
+# Only values that differ from config.yaml need to be specified here.
+
+database:
+  url: "${TEAM_MEMORY_DATABASE_URL}"
+
+embedding:
+  provider: ollama
+  ollama:
+    base_url: "${OLLAMA_BASE_URL}"
+
+auth:
+  type: api_key
+  api_key: "${TEAM_MEMORY_API_KEY}"
+  user: admin
+
+web:
+  host: "0.0.0.0"
+  port: 9111
+
+cache:
+  enabled: true
+  backend: memory
+  ttl_seconds: 600
+  max_size: 500
+
+lifecycle:
+  stale_months: 6
+  scan_interval_hours: 12

@@ -1,0 +1,61 @@
+# Default values for team-memory Helm chart
+
+replicaCount: 1
+
+image:
+  repository: team-memory
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 9111
+
+# External PostgreSQL (recommended for production)
+postgresql:
+  external: true
+  host: ""
+  port: 5432
+  database: team_memory
+  username: developer
+  password: ""
+  # Set to false to use embedded PostgreSQL (not recommended for production)
+  # external: false
+
+# Ollama configuration
+ollama:
+  enabled: true
+  # If running Ollama as a separate service
+  host: "ollama"
+  port: 11434
+
+# team_memory configuration
+config:
+  apiKey: ""
+  env: production
+
+# Resource limits
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+# Autoscaling
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+
+# Ingress
+ingress:
+  enabled: false
+  className: ""
+  hosts:
+    - host: team-memory.local
+      paths:
+        - path: /
+          pathType: Prefix
