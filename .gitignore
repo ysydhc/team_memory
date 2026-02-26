@@ -42,3 +42,7 @@ migrations/
 .cursor/
 .mcpregistry_github_token
 .mcpregistry_registry_token
+.playwright-mcp/
+
+# Internal docs (not for public repo)
+pm.md

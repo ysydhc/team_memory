@@ -3,7 +3,7 @@
 
 Usage:
   python scripts/smoke_web_dashboard.py [--api-key KEY] [--port PORT]
-  Default API key CHANGE_ME_your_api_key; port 9111.
+  Default API key from $TEAM_MEMORY_API_KEY env var; port 9111.
 
 Prints: health (including dashboard_stats), and /api/v1/stats response or error.
 No browser required. For full UI test use Playwright (see README).
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -61,7 +62,11 @@ def get_stats(port: int, api_key: str) -> tuple[int, str, dict | None]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Smoke test Web UI dashboard (health + /stats)")
-    ap.add_argument("--api-key", default="CHANGE_ME_your_api_key", help="API key")
+    ap.add_argument(
+        "--api-key",
+        default=os.environ.get("TEAM_MEMORY_API_KEY", ""),
+        help="API key (default: $TEAM_MEMORY_API_KEY)",
+    )
     ap.add_argument("--port", type=int, default=9111, help="Web port")
     args = ap.parse_args()
 
