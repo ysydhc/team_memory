@@ -40,3 +40,5 @@ Thumbs.db
 migrations/
 .claude/
 .cursor/
+.mcpregistry_github_token
+.mcpregistry_registry_token
