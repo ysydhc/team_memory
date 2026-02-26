@@ -1,0 +1,37 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ysydhc/team-memory",
+  "title": "TeamMemory",
+  "description": "Team experience database - let AI accumulate, retrieve and apply team knowledge across chats.",
+  "repository": {
+    "url": "https://github.com/ysydhc/team_memory",
+    "source": "github"
+  },
+  "version": "0.1.2",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "team_memory",
+      "version": "0.1.2",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "DATABASE_URL",
+          "description": "PostgreSQL connection string (with pgvector extension)",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "TEAM_MEMORY_CONFIG",
+          "description": "Path to config.yaml (optional)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

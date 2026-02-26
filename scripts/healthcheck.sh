@@ -89,6 +89,33 @@ else
     echo "SKIP  (no LLM model configured)"
 fi
 
+# 6. Dashboard /stats (if Web returned health JSON)
+if [ -n "$HEALTH_RESP" ]; then
+    DASH=$(echo "$HEALTH_RESP" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    c = d.get('checks', {}).get('dashboard_stats', {})
+    if c.get('status') == 'down':
+        print('FAIL')
+        print(c.get('error', 'unknown'))
+        print(c.get('ops_hint', ''))
+    else:
+        print('OK')
+except Exception:
+    print('SKIP')
+" 2>/dev/null)
+    if [ -n "$DASH" ]; then
+        printf "  %-22s" "Dashboard /stats:"
+        echo "$DASH" | head -1
+        if echo "$DASH" | tail -n +2 | grep -q .; then
+            echo "$DASH" | tail -n +2 | sed 's/^/                        /'
+            echo ""
+            echo "  → 若 Web 仪表盘报「加载仪表盘失败」请按上面 ops_hint 排查（如：执行 alembic upgrade head、检查 config 中 database.url）。"
+        fi
+    fi
+fi
+
 echo ""
 echo "================================="
 if [ "$FAILURES" -gt 0 ]; then

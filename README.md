@@ -1,5 +1,7 @@
 # TeamMemory
 
+mcp-name: io.github.ysydhc/team-memory
+
 **让 AI 拥有团队记忆 -- 跨会话积累经验，像资深成员一样理解你的项目。**
 
 基于 MCP 协议的团队经验数据库。AI 在开发过程中自动提取、存储和检索团队的历史经验，解决 AI 编程助手"每次对话都从零开始"的核心痛点。
@@ -22,6 +24,11 @@
 - 下次任何团队成员遇到同类问题，AI 直接命中历史方案
 
 适用场景：3-10 人技术团队 + Cursor / Claude Desktop。
+
+**安装与获取**
+
+- **PyPI**：`pip install team_memory`（推荐用于部署或本地 MCP 客户端）。
+- **MCP 官方注册表**：在 [MCP Registry](https://registry.modelcontextprotocol.io) 或 Cursor / Claude Desktop 的 MCP 市场中搜索「TeamMemory」或「team-memory」，可一键发现并安装（安装后仍需配置数据库连接与 API Key，见下文）。
 
 ## TeamMemory 在 AI 知识体系中的位置
 
@@ -119,85 +126,160 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 
 ## 快速开始
 
-### 方式一：使用 Makefile（推荐）
+以下从**初次部署者**（把 TeamMemory 跑起来的人）和**初级使用者**（在 Cursor/Claude 里连上已有服务的人）两种角色，按最小步骤说明。
+
+### 前提条件
+
+| 依赖 | 确认方式 |
+|------|----------|
+| Docker Desktop | `docker --version` |
+| Python 3.11+ | `python3 --version` |
+| Make | `make --version`（macOS/Linux 一般自带） |
+| Ollama | `ollama --version`（首次 `make web` 前拉取模型用，见下） |
+
+### 一、初次部署者：一键部署
+
+你是第一次在团队里部署，目标是：跑起 Web、拿到 API Key、并交给同事用。
+
+**1. 一键初始化**
+
+克隆仓库后，在项目根目录执行：
 
 ```bash
-# 首次安装：启动 Docker + 安装依赖 + 初始化数据库
 make setup
-
-# 启动 Web 管理界面（默认端口 9111）
-make web
-
-# 查看所有可用命令
-make help
 ```
 
-### 方式二：手动安装
+会完成：启动 Docker（PostgreSQL+pgvector、Ollama、Redis）、安装 Python 依赖、执行数据库迁移。
+
+**2. 改一处配置**
+
+打开 `config.minimal.yaml`，把 `auth.api_key` 改成你自己的密钥（例如 `openssl rand -hex 16` 生成）。
+若使用默认 Docker 数据库，`database.url` 无需改；否则改为你的 PostgreSQL 连接串。
+
+**3. 拉取 Embedding 模型（仅首次）**
 
 ```bash
-# 1. 启动基础设施（PostgreSQL + Ollama + Redis）
-docker compose up -d
-
-# 2. 安装 Python 依赖
-pip install -e ".[dev]"
-
-# 3. 初始化数据库
-alembic upgrade head
-
-# 4. 准备 Embedding 模型（仅首次需要）
 ollama pull nomic-embed-text
-
-# 5. 启动服务
-python -m team_memory.web.app    # Web 管理界面（http://localhost:9111）
-python -m team_memory.server     # MCP Server（供 Cursor / Claude Desktop 使用）
 ```
 
-### 配置
+**4. 启动 Web**
 
-- **最小配置**: 修改 `config.minimal.yaml` 中的 `auth.api_key` 即可启动
-- **完整配置**: `config.yaml` 包含所有选项，按 `[必改]` / `[可选]` / `[高级]` 分级标注
-- **健康检查**: `make health` 或 `./scripts/healthcheck.sh`
+```bash
+make web
+```
 
-## MCP 接入指南
+浏览器打开 **http://localhost:9111**，用上一步设置的 API Key 登录。在 Web「设置」中可查看/管理 API Key，**把要用的 API Key 发给需要接入 MCP 的同事**。
 
-### Cursor 配置
+**5. 可选：健康检查**
 
-在项目的 `.cursor/mcp.json` 中添加：
+```bash
+make health
+```
+
+日常再次启动只需：`make dev`（或先 `docker compose up -d` 再 `make web`）。更多命令见下方「运维」。
+
+---
+
+### 二、初级使用者：在 Cursor / Claude 里接入
+
+你已经从部署者拿到 **API Key**，TeamMemory 的数据库（和 Web）已就绪。只需在本机配置 MCP 并验证。
+
+**1. 安装（本机跑 MCP 时）**
+
+```bash
+pip install team_memory
+```
+
+若通过 Cursor/Claude 的「MCP 市场」安装 TeamMemory，按客户端说明即可，可能无需本机再装。
+
+**2. 拿到 API Key 与数据库连接**
+
+- 向部署者索取 **TEAM_MEMORY_API_KEY**。
+- 若你**本机直连**团队 PostgreSQL（即 MCP 进程自己连库），还需 **TEAM_MEMORY_DB_URL**（如 `postgresql+asyncpg://用户:密码@主机:5432/team_memory`）。若你使用「从源码运行」且项目目录下已有正确配置，可不设 DB_URL，由 config 提供。
+
+**3. 配置 MCP**
+
+在 **Cursor** 中编辑项目或用户下的 `.cursor/mcp.json`；在 **Claude Desktop** 中编辑 MCP Servers 对应配置。
+
+- **从 pip 安装、无项目目录**（推荐）：用本机 Python + 环境变量，无需 `cwd`：
 
 ```json
 {
   "mcpServers": {
     "team_memory": {
-      "command": "/path/to/team_memory/.venv/bin/python",
+      "command": "python3",
       "args": ["-m", "team_memory.server"],
-      "cwd": "/path/to/team_memory",
       "env": {
-        "TEAM_MEMORY_API_KEY": "your-api-key",
-        "TEAM_MEMORY_USER": "your-name"
+        "TEAM_MEMORY_DB_URL": "postgresql+asyncpg://用户:密码@主机:5432/team_memory",
+        "TEAM_MEMORY_API_KEY": "你的API密钥",
+        "TEAM_MEMORY_USER": "你的名字"
       }
     }
   }
 }
 ```
 
-### Claude Desktop 配置
-
-在 Claude Desktop 设置中添加 MCP Server：
+- **从源码运行**（本地有仓库、用项目 venv 和 config）：替换路径为你的项目根目录：
 
 ```json
 {
   "mcpServers": {
     "team_memory": {
-      "command": "/path/to/team_memory/.venv/bin/python",
+      "command": "/path/to/team_doc/.venv/bin/python",
       "args": ["-m", "team_memory.server"],
-      "cwd": "/path/to/team_memory",
+      "cwd": "/path/to/team_doc",
       "env": {
-        "TEAM_MEMORY_API_KEY": "your-api-key"
+        "TEAM_MEMORY_API_KEY": "你的API密钥",
+        "TEAM_MEMORY_USER": "你的名字"
       }
     }
   }
 }
 ```
+
+**4. 验证**
+
+重启 Cursor 或 Claude Desktop，在对话里输入：「请搜索经验库中关于 Docker 的经验」。若配置正确，AI 会调用 `tm_search` 并返回结果。
+
+---
+
+### 其他安装方式
+
+- **仅 Docker、不克隆源码**：若你只想跑 Web 不跑本地 MCP，可用 `docker compose up -d` 启动（含数据库迁移）。在 `.env` 中设置 `TEAM_MEMORY_API_KEY`（默认 `changeme` 请修改），访问 http://localhost:9111 。
+- **从 PyPI 部署、无 Make**：`pip install team_memory` 后，需自备 PostgreSQL（pgvector）并从本仓库克隆后在项目根目录执行 `alembic upgrade head`，再通过 `TEAM_MEMORY_CONFIG_PATH` 或 `TEAM_MEMORY_DB_URL` 启动 `team-memory-web` 或 `python -m team_memory.server`。
+
+---
+
+## MCP 接入指南（配置参考）
+
+**Cursor**（`.cursor/mcp.json`）— 从 pip 安装、无项目目录：
+
+```json
+{
+  "mcpServers": {
+    "team_memory": {
+      "command": "python3",
+      "args": ["-m", "team_memory.server"],
+      "env": {
+        "TEAM_MEMORY_DB_URL": "postgresql+asyncpg://用户:密码@主机:5432/team_memory",
+        "TEAM_MEMORY_API_KEY": "你的API密钥",
+        "TEAM_MEMORY_USER": "你的名字"
+      }
+    }
+  }
+}
+```
+
+**从源码目录运行**（使用项目 venv 与 config）：将 `command` 改为 `/path/to/team_doc/.venv/bin/python`，增加 `"cwd": "/path/to/team_doc"`，`env` 中至少保留 `TEAM_MEMORY_API_KEY` 与 `TEAM_MEMORY_USER`（数据库由项目内 config 提供）。
+
+**Claude Desktop**：在 MCP 设置中添加同名 `team_memory` 条目，`command` / `args` / `env` 与上一致即可。
+
+| 变量 | 必填 | 说明 |
+|------|------|------|
+| `TEAM_MEMORY_DB_URL` | 是（或由 config 提供） | PostgreSQL 连接串，`postgresql+asyncpg://...`，库需启用 pgvector |
+| `TEAM_MEMORY_API_KEY` | 是 | 与部署者在 auth 中配置一致 |
+| `TEAM_MEMORY_USER` | 否 | 当前用户标识，默认 `anonymous` |
+| `TEAM_MEMORY_CONFIG_PATH` | 否 | 配置文件路径，设置则优先从该文件加载 |
 
 ### 实际场景：AI 如何使用 TeamMemory
 
@@ -349,6 +431,18 @@ make backup    # 备份数据库
 make test      # 运行测试
 make lint      # 代码检查（ruff）
 ```
+
+### 仪表盘报「加载仪表盘失败」时
+
+1. **先看健康检查**：`make health` 或 `GET http://localhost:9111/health`。
+   - 若输出中有 **`dashboard_stats: FAIL`** 及后面的 `error` / `ops_hint`，按提示排查（常见原因：数据库未启动、未执行迁移、或 config 中 `database.url` 错误）。
+   - 若 **database 为 FAIL**：先启动数据库（如 `docker compose up -d postgres`），执行 `alembic upgrade head` 后再访问仪表盘。
+
+2. **API 错误会返回 JSON**：若后端报 500，接口会返回 `detail`、`ops_error_id`、`ops_hint`。
+   - 前端会把这些信息拼进错误提示；
+   - 在服务端日志中按 `ops_error_id` 搜索可定位对应异常。
+
+3. **本地快速诊断**：`python scripts/smoke_web_dashboard.py [--api-key KEY]` 会请求 `/health` 和 `/api/v1/stats` 并打印结果，便于确认是数据库、配置还是鉴权问题。
 
 ### 备份恢复
 

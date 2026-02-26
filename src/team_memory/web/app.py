@@ -104,6 +104,11 @@ def _get_catalog_service() -> InstallableCatalogService:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     ctx = bootstrap()
     _init_from_context(ctx)
+    # Defer route registration to avoid circular import (routes -> app)
+    from team_memory.web.routes import mount_all
+    v1_router = APIRouter(prefix="/api/v1")
+    mount_all(v1_router)
+    app.include_router(v1_router)
     await start_background_tasks(ctx)
     logger.info("TeamMemory web server started")
     yield
@@ -121,7 +126,7 @@ mcp_app = mcp.http_app(path="/mcp")
 app = FastAPI(
     title="TeamMemory",
     description="Team Experience Database Management",
-    version="0.1.0",
+    version="0.1.2",
     lifespan=lifespan,
 )
 app.mount("/mcp", mcp_app)
@@ -172,6 +177,33 @@ async def _check_cache() -> dict:
     return {"status": "unknown"}
 
 
+async def _check_dashboard_stats() -> dict:
+    """Check that dashboard /stats can run (DB schema and service ready).
+
+    If this fails, the web UI dashboard will show '加载仪表盘失败'.
+    Error message is included for ops: run make health or GET /health to see it.
+    """
+    if _service is None:
+        return {
+            "status": "down",
+            "error": "Service not initialized (bootstrap not run or failed)",
+            "ops_hint": "Ensure app started with valid config and DB; check server startup logs.",
+        }
+    try:
+        await _service.get_stats()
+        return {"status": "up"}
+    except Exception as e:
+        return {
+            "status": "down",
+            "error": str(e),
+            "ops_hint": (
+                "Dashboard /api/v1/stats failed. Common causes: "
+                "DB migration not run (alembic upgrade head), "
+                "wrong database url in config, or missing table 'experiences'."
+            ),
+        }
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint — no authentication required.
@@ -179,10 +211,11 @@ async def health_check():
     Returns overall status: healthy / degraded / unhealthy.
     Checks: database, ollama, cache.
     """
-    db_check, ollama_check, cache_check = await asyncio.gather(
+    db_check, ollama_check, cache_check, dashboard_check = await asyncio.gather(
         _check_database(),
         _check_ollama(),
         _check_cache(),
+        _check_dashboard_stats(),
     )
 
     # Event bus stats
@@ -194,6 +227,7 @@ async def health_check():
         "database": db_check,
         "ollama": ollama_check,
         "cache": cache_check,
+        "dashboard_stats": dashboard_check,
         "event_bus": {"status": "up", **event_bus_info},
     }
 
@@ -207,7 +241,7 @@ async def health_check():
     # Determine overall status
     if db_check["status"] == "down":
         status = "unhealthy"
-    elif ollama_check["status"] == "down":
+    elif ollama_check["status"] == "down" or dashboard_check.get("status") == "down":
         status = "degraded"
     else:
         status = "healthy"
@@ -245,6 +279,36 @@ async def readiness_check():
 from team_memory.web.middleware import api_version_compat  # noqa: E402
 
 app.middleware("http")(api_version_compat)
+
+
+# ============================================================
+# Global exception handler — always return JSON for API clients
+# ============================================================
+@app.exception_handler(Exception)
+async def _global_exception_handler(request: Request, exc: Exception):
+    """Ensure unhandled exceptions return JSON with ops hint (no HTML/plain text)."""
+    err_id = f"web-{id(exc) & 0xFFFF:04x}"
+    logger.exception(
+        "Unhandled exception [%s] path=%s: %s",
+        err_id,
+        request.scope.get("path", "?") if hasattr(request, "scope") else "?",
+        exc,
+    )
+    path = request.scope.get("path", "") if hasattr(request, "scope") else ""
+    if path.startswith("/api/"):
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "Internal server error. See server logs for diagnosis.",
+                "ops_error_id": err_id,
+                "ops_hint": (
+                    "Grep server log for '[%s]' or run: make health to check DB and services."
+                    % err_id
+                ),
+                "message": str(exc),
+            },
+        )
+    raise exc
 
 
 # ============================================================
@@ -783,14 +847,8 @@ async def prometheus_metrics():
 
 
 # ============================================================
-# API v1 Router (D3)
+# API v1 Router — registered in lifespan to avoid circular import
 # ============================================================
-v1_router = APIRouter(prefix="/api/v1")
-from team_memory.web.routes import mount_all  # noqa: E402
-
-mount_all(v1_router)
-app.include_router(v1_router)
-
 
 # ============================================================
 # Static / SPA

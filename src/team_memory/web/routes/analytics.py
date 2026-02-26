@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text as sa_text
 
 from team_memory.auth.provider import User
@@ -17,17 +17,29 @@ from team_memory.web.app import (
 router = APIRouter(tags=["analytics"])
 
 
+def _get_service():
+    """Return experience service; raise 503 if not ready."""
+    if app_module._service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Service not ready (bootstrap may not have run)",
+        )
+    return app_module._service
+
+
 @router.get("/stats")
 async def get_stats(user: User | None = Depends(get_optional_user)):
     """Get experience database statistics. Supports anonymous access."""
-    stats = await app_module._service.get_stats()
+    service = _get_service()
+    stats = await service.get_stats()
     return stats
 
 
 @router.get("/tags")
 async def get_tags(user: User | None = Depends(get_optional_user)):
     """Get all tags with counts. Supports anonymous access."""
-    stats = await app_module._service.get_stats()
+    service = _get_service()
+    stats = await service.get_stats()
     return {"tags": stats.get("tag_distribution", {})}
 
 
@@ -37,14 +49,16 @@ async def get_query_logs(
     user: User = Depends(get_current_user),
 ):
     """Get recent query logs for analytics."""
-    logs = await app_module._service.get_query_logs(limit=limit)
+    service = _get_service()
+    logs = await service.get_query_logs(limit=limit)
     return {"logs": logs, "total": len(logs)}
 
 
 @router.get("/query-stats")
 async def get_query_stats(user: User = Depends(get_current_user)):
     """Get query analytics summary."""
-    stats = await app_module._service.get_query_stats()
+    service = _get_service()
+    stats = await service.get_query_stats()
     return stats
 
 
@@ -54,6 +68,7 @@ async def analytics_overview(
     user: User = Depends(get_current_user),
 ):
     """Get analytics overview for dashboard charts."""
+    _get_service()  # ensure service is ready
     db_url = _get_db_url()
     async with get_session(db_url) as session:
         # Search volume by day

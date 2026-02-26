@@ -2,5 +2,5 @@ apiVersion: v2
 name: team-memory
 description: Team Experience Database - AI-powered knowledge management
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.1.2
+appVersion: "0.1.2"

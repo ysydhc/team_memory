@@ -4,9 +4,21 @@ build-backend = "hatchling.build"
 
 [project]
 name = "team_memory"
-version = "0.1.0"
+version = "0.1.2"
 description = "Team experience database service based on MCP protocol"
+readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.11"
+authors = [
+    {name = "ysydhc", email = "ysydhc@gmail.com"},
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Software Development :: Libraries",
+]
 dependencies = [
     "fastmcp>=2.0.0",
     "sqlalchemy[asyncio]>=2.0.0",
@@ -36,6 +48,11 @@ dev = [
     "ruff>=0.4.0",
     "testcontainers[postgres]>=4.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ysydhc/team_memory"
+Repository = "https://github.com/ysydhc/team_memory"
+Issues = "https://github.com/ysydhc/team_memory/issues"
 
 [project.scripts]
 team-memory = "team_memory.server:main"

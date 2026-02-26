@@ -4,7 +4,7 @@
 
 import { state, defaultTypeIcons } from './store.js';
 import { esc, formatDate, timeAgo } from './utils.js';
-import { resolveProjectInput, loadSchemaAndPopulateFilters } from './schema.js';
+import { resolveProjectInput, loadSchemaAndPopulateFilters, applyProjectPlaceholders } from './schema.js';
 
 function api(...args) {
     return window.__api(...args);

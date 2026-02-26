@@ -16,19 +16,32 @@ help:           ## 显示所有可用命令
 
 setup:          ## 首次安装：启动 Docker + 安装依赖 + 初始化数据库
 	docker compose up -d
+	@echo "  Waiting for PostgreSQL to be ready..."
+	@until docker compose exec -T postgres pg_isready -U developer -d postgres >/dev/null 2>&1; do sleep 2; done
+	@docker compose exec -T postgres psql -U developer -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='team_memory'" | grep -q 1 || \
+	  (echo "  Creating database team_memory..." && docker compose exec -T postgres psql -U developer -d postgres -c "CREATE DATABASE team_memory;")
+	@if lsof -i :11434 >/dev/null 2>&1; then \
+	  echo "  ℹ Port 11434 in use: using host Ollama for embedding (skip Ollama container)."; \
+	else \
+	  echo "  Starting Ollama container (profile ollama)..."; \
+	  docker compose --profile ollama up -d; \
+	fi
 	pip install -e ".[dev]"
 	alembic upgrade head
 	@echo ""
 	@echo "  ✔ Setup complete!"
 	@echo "  Run 'make web' to start the Web UI."
 	@echo "  Run 'make mcp' to start the MCP server."
+	@echo "  If Ollama is unavailable, set embedding.provider to openai in config for embedding."
 	@echo ""
 
-dev:            ## 启动全部服务（Docker 基础设施 + Web 管理界面）
-	docker compose up -d
+dev:            ## 启动全部服务（Docker 基础设施 + 本机 Web；若 Web 容器在跑会先停掉以释放 9111）
+	@docker compose stop team-memory-web 2>/dev/null || true
+	docker compose up -d postgres redis
+	@if ! lsof -i :11434 >/dev/null 2>&1; then docker compose --profile ollama up -d 2>/dev/null || true; fi
 	python -m team_memory.web.app
 
-web:            ## 仅启动 Web 管理界面（默认端口 9111）
+web:            ## 仅启动 Web 管理界面（默认端口 9111；确保无其他进程占用 9111）
 	python -m team_memory.web.app
 
 mcp:            ## 仅启动 MCP Server（供 Cursor / Claude Desktop 使用）

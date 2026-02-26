@@ -121,6 +121,14 @@ input, textarea, select {
   outline: none;
 }
 
+.filter-select {
+  width: auto;
+  min-width: 0;
+  padding: 5px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 input:focus, textarea:focus, select:focus {
   border-color: var(--border-focus);
   box-shadow: 0 0 0 3px var(--accent-glow);
@@ -1113,6 +1121,18 @@ textarea {
 .import-drop-zone input[type="file"] { display: none; }
 
 .hidden { display: none !important; }
+
+/* ===== Page Transitions ===== */
+.page:not(.hidden) { animation: fadeIn 0.2s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ===== Filter Bar (list page) ===== */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 </style>
 </head>
 <body>
@@ -1202,41 +1222,33 @@ textarea {
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <h3 style="font-size:16px;font-weight:600;color:var(--text-secondary)">经验列表</h3>
-          <select id="list-status-filter" onchange="loadList(1)" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius);padding:4px 10px;font-size:13px;cursor:pointer">
+          <select id="list-status-filter" onchange="loadList(1)" class="filter-select">
             <option value="">已发布</option>
             <option value="all">全部状态</option>
             <option value="draft">仅草稿</option>
           </select>
-          <select id="list-type-filter" onchange="loadList(1)" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius);padding:4px 10px;font-size:13px;cursor:pointer">
+          <select id="list-type-filter" onchange="loadList(1)" class="filter-select">
             <option value="">全部类型</option>
           </select>
-          <select id="list-severity-filter" onchange="loadList(1)" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius);padding:4px 10px;font-size:13px;cursor:pointer">
+          <select id="list-severity-filter" onchange="loadList(1)" class="filter-select">
             <option value="">全部严重程度</option>
           </select>
-          <select id="list-category-filter" onchange="loadList(1)" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius);padding:4px 10px;font-size:13px;cursor:pointer">
+          <select id="list-category-filter" onchange="loadList(1)" class="filter-select">
             <option value="">全部分类</option>
             <option value="other">other</option>
           </select>
-          <select id="list-progress-filter" onchange="loadList(1)" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius);padding:4px 10px;font-size:13px;cursor:pointer">
+          <select id="list-progress-filter" onchange="loadList(1)" class="filter-select">
             <option value="">全部进度</option>
-            <option value="open">open</option>
-            <option value="investigating">investigating</option>
-            <option value="fixed">fixed</option>
-            <option value="verified">verified</option>
-            <option value="planning">planning</option>
-            <option value="developing">developing</option>
-            <option value="testing">testing</option>
-            <option value="released">released</option>
-            <option value="researching">researching</option>
-            <option value="reviewing">reviewing</option>
-            <option value="implementing">implementing</option>
-            <option value="completed">completed</option>
-            <option value="detected">detected</option>
-            <option value="mitigating">mitigating</option>
-            <option value="resolved">resolved</option>
-            <option value="post_mortem">post_mortem</option>
+            <option value="open">待处理</option>
+            <option value="planning">计划中</option>
+            <option value="developing">开发中</option>
+            <option value="testing">测试中</option>
+            <option value="reviewing">审核中</option>
+            <option value="fixed">已修复</option>
+            <option value="released">已发布</option>
+            <option value="resolved">已关闭</option>
           </select>
-          <input type="text" id="list-project-filter" onchange="loadList(1)" placeholder="项目（默认 default）" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius);padding:4px 10px;font-size:13px;min-width:180px">
+          <input type="text" id="list-project-filter" onchange="loadList(1)" placeholder="项目（默认 default）" class="filter-select" style="min-width:140px">
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-secondary btn-sm" onclick="batchSummarize()">批量生成摘要</button>
@@ -1735,8 +1747,8 @@ textarea {
       <!-- Manual Mode (form fields) -->
       <div id="create-mode-manual">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-          <label style="font-size:13px;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;gap:6px">
-            <input type="checkbox" id="create-quick-mode" onchange="toggleCreateQuickMode()" style="accent-color:var(--accent)">
+          <label style="font-size:13px;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap">
+            <input type="checkbox" id="create-quick-mode" onchange="toggleCreateQuickMode()" style="accent-color:var(--accent);flex-shrink:0">
             快捷模式（仅标题+问题+标签）
           </label>
         </div>
@@ -1802,8 +1814,8 @@ textarea {
       </div>
     </div>
     <div class="modal-footer" style="display:flex;align-items:center;gap:16px">
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);cursor:pointer;margin-right:auto">
-        <input type="checkbox" id="create-draft-checkbox" style="accent-color:var(--accent)">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);cursor:pointer;margin-right:auto;white-space:nowrap">
+        <input type="checkbox" id="create-draft-checkbox" style="accent-color:var(--accent);flex-shrink:0">
         保存为草稿
       </label>
       <button class="btn btn-secondary" onclick="closeCreateModal()">取消</button>

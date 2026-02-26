@@ -19,10 +19,13 @@ services:
       retries: 5
 
   # ============================================================
-  # Ollama (local embedding + LLM)
+  # Ollama (local embedding + LLM) — optional profile
+  # Only started when port 11434 is free (make setup skips if host already has Ollama).
   # Model is auto-pulled by docker-entrypoint.sh on first start.
   # ============================================================
   ollama:
+    profiles:
+      - ollama
     image: ollama/ollama:latest
     ports:
       - "11434:11434"
@@ -67,10 +70,10 @@ services:
       TEAM_MEMORY_API_KEY: "${TEAM_MEMORY_API_KEY:-changeme}"
       TEAM_MEMORY_USER: "${TEAM_MEMORY_USER:-admin}"
       RUN_MIGRATIONS: "true"
+      # Use host port 11434 for Ollama (host or container with profile ollama). On Linux without Docker Desktop you may need extra_hosts: ["host.docker.internal:host-gateway"].
+      TEAM_MEMORY_EMBEDDING__OLLAMA__BASE_URL: "http://host.docker.internal:11434"
     depends_on:
       postgres:
-        condition: service_healthy
-      ollama:
         condition: service_healthy
     command: ["team-memory-web"]
     restart: unless-stopped

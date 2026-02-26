@@ -31,6 +31,11 @@ router = APIRouter(tags=["experiences"])
 
 
 def _svc():
+    if app_module._service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Service not ready (bootstrap may not have run)",
+        )
     return app_module._service
 
 
@@ -147,22 +152,19 @@ async def list_drafts(
     user: User = Depends(get_current_user),
 ):
     """List draft experiences for the current user."""
-    db_url = _get_db_url()
     resolved_project = _resolve_project(project)
-    async with app_module.get_session(db_url) as session:
-        drafts = await _svc().get_drafts(
-            session,
-            created_by=user.name,
-            limit=page_size,
-            offset=(page - 1) * page_size,
-            project=resolved_project,
-        )
-        return {
-            "experiences": drafts,
-            "total": len(drafts),
-            "page": page,
-            "project": resolved_project,
-        }
+    drafts = await _svc().get_drafts(
+        created_by=user.name,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+        project=resolved_project,
+    )
+    return {
+        "experiences": drafts,
+        "total": len(drafts),
+        "page": page,
+        "project": resolved_project,
+    }
 
 
 @router.post("/experiences/batch-summarize")
@@ -349,17 +351,14 @@ async def update_experience_route(
     if "solution_addendum" in raw:
         kwargs["solution_addendum"] = raw["solution_addendum"]
 
-    db_url = _get_db_url()
-    async with app_module.get_session(db_url) as session:
-        result = await _svc().update(
-            session=session,
-            experience_id=experience_id,
-            user=user.name,
-            **kwargs,
-        )
-        if result is None:
-            raise HTTPException(status_code=404, detail="Experience not found")
-        return result
+    result = await _svc().update(
+        experience_id=experience_id,
+        user=user.name,
+        **kwargs,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Experience not found")
+    return result
 
 
 @router.delete("/experiences/{experience_id}")
@@ -512,18 +511,15 @@ async def add_feedback(
     user: User = Depends(get_current_user),
 ):
     """Add feedback to an experience (requires auth)."""
-    db_url = _get_db_url()
-    async with app_module.get_session(db_url) as session:
-        success = await _svc().feedback(
-            session=session,
-            experience_id=experience_id,
-            rating=req.rating,
-            feedback_by=user.name,
-            comment=req.comment,
-        )
-        if not success:
-            raise HTTPException(status_code=404, detail="Experience not found")
-        return {"message": "Feedback recorded"}
+    success = await _svc().feedback(
+        experience_id=experience_id,
+        rating=req.rating,
+        feedback_by=user.name,
+        comment=req.comment,
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Experience not found")
+    return {"message": "Feedback recorded"}
 
 
 @router.get("/experiences/{experience_id}/versions")
@@ -556,19 +552,16 @@ async def rollback_to_version(
     user: User = Depends(get_current_user),
 ):
     """Rollback an experience to a specific version."""
-    db_url = _get_db_url()
-    async with app_module.get_session(db_url) as session:
-        result = await _svc().rollback_to_version(
-            session=session,
-            experience_id=experience_id,
-            version_id=version_id,
-            user=user.name,
+    result = await _svc().rollback_to_version(
+        experience_id=experience_id,
+        version_id=version_id,
+        user=user.name,
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=404, detail="Experience or version not found"
         )
-        if result is None:
-            raise HTTPException(
-                status_code=404, detail="Experience or version not found"
-            )
-        return {"message": "Rollback successful", "experience": result}
+    return {"message": "Rollback successful", "experience": result}
 
 
 @router.get("/reviews/pending")
@@ -591,18 +584,15 @@ async def review_experience(
         raise HTTPException(
             status_code=400, detail="review_status must be 'approved' or 'rejected'"
         )
-    db_url = _get_db_url()
-    async with app_module.get_session(db_url) as session:
-        result = await _svc().review(
-            session=session,
-            experience_id=experience_id,
-            review_status=req.review_status,
-            reviewed_by=user.name,
-            review_note=req.review_note,
-        )
-        if result is None:
-            raise HTTPException(status_code=404, detail="Experience not found")
-        return result
+    result = await _svc().review(
+        experience_id=experience_id,
+        review_status=req.review_status,
+        reviewed_by=user.name,
+        review_note=req.review_note,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Experience not found")
+    return result
 
 
 @router.post("/experiences/{experience_id}/publish")
@@ -611,16 +601,13 @@ async def publish_experience(
     user: User = Depends(get_current_user),
 ):
     """Publish a draft experience (set publish_status='published')."""
-    db_url = _get_db_url()
-    async with app_module.get_session(db_url) as session:
-        result = await _svc().publish_experience(
-            session=session,
-            experience_id=experience_id,
-            user=user.name,
-        )
-        if result is None:
-            raise HTTPException(status_code=404, detail="Experience not found")
-        return {"message": "Experience published", "experience": result}
+    result = await _svc().publish_experience(
+        experience_id=experience_id,
+        user=user.name,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Experience not found")
+    return {"message": "Experience published", "experience": result}
 
 
 @router.post("/experiences/{experience_id}/summarize")

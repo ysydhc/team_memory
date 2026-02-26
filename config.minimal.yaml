@@ -19,7 +19,7 @@ database:
 
 # [必改] 认证密钥 — 用于 Web 登录和 MCP 工具认证
 auth:
-  api_key: "请替换为你的API密钥"
+  api_key: "CHANGE_ME_your_api_key"
 
 # [可选] 如果你的 Ollama 不在默认地址，取消注释并修改
 # embedding:

@@ -29,7 +29,8 @@ async function api(method, path, body = null) {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
     };
-    if (state.apiKey) opts.headers['Authorization'] = `Bearer ${state.apiKey}`;
+    const key = state.apiKey || (typeof localStorage !== 'undefined' && localStorage.getItem('api_key'));
+    if (key) opts.headers['Authorization'] = `Bearer ${key}`;
     if (body) opts.body = JSON.stringify(body);
 
     const res = await fetch(path, opts);
@@ -37,8 +38,18 @@ async function api(method, path, body = null) {
         doLogout();
         throw new Error('Session expired');
     }
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Request failed');
+    let data;
+    try {
+        const text = await res.text();
+        data = text ? JSON.parse(text) : {};
+    } catch (_) {
+        throw new Error(res.statusText || `HTTP ${res.status}`);
+    }
+    if (!res.ok) {
+        const msg = data.detail || res.statusText || 'Request failed';
+        const hint = data.ops_hint ? ' [' + data.ops_hint + ']' : '';
+        throw new Error(msg + hint);
+    }
     return data;
 }
 
@@ -51,6 +62,7 @@ async function doLogin() {
         const data = await api('POST', '/api/v1/auth/login', { api_key: key });
         if (data.success) {
             state.apiKey = key;
+            if (typeof localStorage !== 'undefined') localStorage.setItem('api_key', key);
             state.currentUser = { name: data.user, role: data.role };
             showApp();
         } else {
@@ -67,6 +79,7 @@ async function doLogin() {
 
 function doLogout() {
     state.apiKey = '';
+    if (typeof localStorage !== 'undefined') localStorage.removeItem('api_key');
     api('POST', '/api/v1/auth/logout').catch(() => {});
     document.getElementById('login-screen').style.display = 'flex';
     document.getElementById('app-screen').style.display = 'none';
@@ -75,6 +88,8 @@ function doLogout() {
 }
 
 async function checkAuth() {
+    const stored = typeof localStorage !== 'undefined' && localStorage.getItem('api_key');
+    if (stored) state.apiKey = stored;
     try {
         const data = await api('GET', '/api/v1/auth/me');
         state.currentUser = { name: data.user, role: data.role };
