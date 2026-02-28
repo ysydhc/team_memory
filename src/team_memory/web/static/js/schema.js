@@ -20,26 +20,7 @@ export function loadSchemaAndPopulateFilters(api) {
                 typeSelect.innerHTML = html;
                 if (current) typeSelect.value = current;
             }
-            const sevSelect = document.getElementById('list-severity-filter');
-            if (sevSelect) {
-                const current = sevSelect.value;
-                let sevHtml = '<option value="">全部严重程度</option>';
-                (schema.severity_levels || []).forEach((s) => {
-                    sevHtml += `<option value="${esc(s)}">${esc(s)}</option>`;
-                });
-                sevSelect.innerHTML = sevHtml;
-                if (current) sevSelect.value = current;
-            }
-            const catSelect = document.getElementById('list-category-filter');
-            if (catSelect) {
-                const current = catSelect.value;
-                let catHtml = '<option value="">全部分类</option>';
-                (schema.categories || []).forEach((c) => {
-                    catHtml += `<option value="${esc(c.id)}">${esc(c.label || c.id)}</option>`;
-                });
-                catSelect.innerHTML = catHtml;
-                if (current) catSelect.value = current;
-            }
+            // severity/category filters removed — simplified to type + tier + visibility
         })
         .catch(() => {});
 }
@@ -47,12 +28,13 @@ export function loadSchemaAndPopulateFilters(api) {
 export function resolveProjectInput(raw) {
     const v = (raw || '').trim();
     if (v) return v;
-    return state.defaultProject || 'default';
+    return state.activeProject || state.defaultProject || 'default';
 }
 
 export function applyProjectPlaceholders() {
-    const hint = `默认: ${state.defaultProject || 'default'}`;
-    const ids = ['list-project-filter', 'search-project', 'create-project', 'group-parent-project'];
+    const proj = state.activeProject || state.defaultProject || 'default';
+    const hint = `默认: ${proj}`;
+    const ids = ['search-project', 'create-project', 'group-parent-project'];
     ids.forEach((id) => {
         const el = document.getElementById(id);
         if (!el) return;

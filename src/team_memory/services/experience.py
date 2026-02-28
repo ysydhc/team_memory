@@ -125,6 +125,7 @@ class ExperienceService:
                     min_similarity=min_similarity,
                     tags=tags,
                     user_name=user_name,
+                    current_user=user_name,
                     source=source,
                     grouped=grouped,
                     top_k_children=top_k_children,
@@ -201,6 +202,7 @@ class ExperienceService:
                     min_avg_rating=min_avg_rating,
                     rating_weight=rating_weight,
                     project=project,
+                    current_user=user_name,
                 )
             else:
                 results = await repo.search_by_vector(
@@ -209,6 +211,7 @@ class ExperienceService:
                     min_similarity=min_similarity,
                     tags=tags,
                     project=project,
+                    current_user=user_name,
                 )
         except Exception as e:
             logger.warning(
@@ -220,6 +223,7 @@ class ExperienceService:
                 max_results=max_results,
                 tags=tags,
                 project=project,
+                current_user=user_name,
             )
 
         duration_ms = int((time.monotonic() - start) * 1000)
@@ -405,7 +409,7 @@ class ExperienceService:
         framework: str | None = None,
         source: str = "auto_extract",
         root_cause: str | None = None,
-        publish_status: str = "published",
+        publish_status: str = "personal",
         review_status: str = "approved",
         sync_embedding: bool = True,
         skip_dedup: bool = False,
@@ -418,6 +422,7 @@ class ExperienceService:
         git_refs: list | None = None,
         related_links: list | None = None,
         project: str | None = None,
+        quality_score: int = 0,
         *,
         session=None,  # noqa: ANN001 - for internal reuse (e.g. hard_delete_and_rebuild)
     ) -> dict:
@@ -503,10 +508,13 @@ class ExperienceService:
                     logger.warning("Dedup-on-save check failed, proceeding with save")
 
             # P0-2: Auto-set draft + pending_review for AI-created experiences
+            # Skip override when caller explicitly requests "personal" — personal
+            # experiences are private to the creator and don't need team review.
             if (
                 self._review_config is not None
                 and self._review_config.require_review_for_ai
                 and source in ("auto_extract", "mcp")
+                and publish_status != "personal"
             ):
                 publish_status = "draft"
                 review_status = "pending"
@@ -534,6 +542,7 @@ class ExperienceService:
                 git_refs=git_refs,
                 related_links=related_links,
                 project=project or "default",
+                quality_score=quality_score,
             )
 
             # Build tree nodes for long-document experience
@@ -603,6 +612,31 @@ class ExperienceService:
                 })
             return updated.to_dict() if updated else None
 
+    async def publish_to_team(
+        self,
+        experience_id: uuid.UUID,
+        user: str,
+        is_admin: bool = False,
+    ) -> dict | None:
+        """Publish a personal experience to the team.
+
+        Admin users go directly to 'published'; others go to 'pending_team'.
+        """
+        async with self._session() as session:
+            repo = ExperienceRepository(session)
+            experience = await repo.publish_to_team(experience_id, is_admin=is_admin)
+            return experience.to_dict() if experience else None
+
+    async def publish_personal(
+        self,
+        experience_id: uuid.UUID,
+    ) -> dict | None:
+        """Move a draft experience to personal (visible to creator only)."""
+        async with self._session() as session:
+            repo = ExperienceRepository(session)
+            experience = await repo.publish_personal(experience_id)
+            return experience.to_dict() if experience else None
+
     async def get_drafts(
         self,
         created_by: str | None = None,
@@ -624,8 +658,11 @@ class ExperienceService:
         rating: int,
         feedback_by: str,
         comment: str | None = None,
+        fitness_score: int | None = None,
+        *,
+        session=None,  # noqa: ANN001
     ) -> bool:
-        async with self._session() as session:
+        async with self._session_or(session) as session:
             """Submit feedback for an experience. rating: 1-5, 5=best."""
             if not (1 <= rating <= 5):
                 raise ValueError("rating must be between 1 and 5")
@@ -641,6 +678,7 @@ class ExperienceService:
                 rating=rating,
                 feedback_by=feedback_by,
                 comment=comment,
+                fitness_score=fitness_score,
             )
             await self._event_bus.emit(Events.FEEDBACK_ADDED, {
                 "experience_id": experience_id,
@@ -653,9 +691,11 @@ class ExperienceService:
         self,
         experience_id: str,
         user: str = "system",
+        *,
+        session=None,  # noqa: ANN001
         **kwargs,
     ) -> dict | None:
-        async with self._session() as session:
+        async with self._session_or(session) as session:
             """Update an existing experience (in-place).
 
             Only kwargs that are explicitly provided will be applied.
@@ -985,11 +1025,22 @@ class ExperienceService:
 
     async def get_stats(
         self,
+        project: str | None = None,
+        scope: str | None = None,
+        current_user: str | None = None,
     ) -> dict:
         async with self._session() as session:
             """Get experience database statistics."""
             repo = ExperienceRepository(session)
-            return await repo.get_stats()
+            return await repo.get_stats(
+                project=project, scope=scope, current_user=current_user
+            )
+
+    async def list_projects(self) -> list[str]:
+        """Return distinct project names."""
+        async with self._session() as session:
+            repo = ExperienceRepository(session)
+            return await repo.list_projects()
 
     async def get_query_logs(
         self,

@@ -21,7 +21,7 @@ database:
 embedding:
   provider: ollama  # ollama / openai / local
   ollama:
-    model: nomic-embed-text
+    model: gpt-oss:120b-cloud #nomic-embed-text
     base_url: http://localhost:11434
     dimension: 768
   # openai:
@@ -43,16 +43,20 @@ llm:
                                    # Example: "prompts/" to load from prompts/*.md
 
 # ╔══════════════════════════════════════════════════════════╗
-# ║  [必改] 认证配置 — 首次使用必须修改 api_key               ║
+# ║  [必改] 认证配置                                          ║
+# ║  type 选项:                                               ║
+# ║    db_api_key — 数据库多用户（推荐，支持注册/审批/密码登录） ║
+# ║    api_key    — 内存单 key（仅用于快速测试）               ║
+# ║    none       — 无认证（仅开发环境）                       ║
 # ╚══════════════════════════════════════════════════════════╝
 auth:
-  type: api_key
+  type: db_api_key
   api_key: "${TEAM_MEMORY_API_KEY}"
 
 # ╔══════════════════════════════════════════════════════════╗
 # ║  [可选] 多项目默认上下文                                  ║
 # ╚══════════════════════════════════════════════════════════╝
-default_project: "default"
+default_project: "team_memory"
 
 # ╔══════════════════════════════════════════════════════════╗
 # ║  [可选] Web 服务配置                                     ║

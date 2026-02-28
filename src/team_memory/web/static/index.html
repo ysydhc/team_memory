@@ -3,9 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>team_memory — 团队经验库</title>
+<title>TeamMemory — 团队经验库</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <style>
 :root {
   --bg-primary: #0a0e17;
@@ -128,6 +129,48 @@ input, textarea, select {
   font-size: 13px;
   cursor: pointer;
 }
+.project-multi-select { position: relative; display: inline-block; }
+.project-multi-select .proj-trigger {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border: 1px solid var(--border);
+  border-radius: 20px; background: var(--bg-card);
+  font-size: 13px; cursor: pointer; transition: all .2s;
+  color: var(--text-secondary); white-space: nowrap;
+}
+.project-multi-select .proj-trigger:hover { border-color: var(--accent); color: var(--text-primary); }
+.project-multi-select .proj-tags { display: inline-flex; gap: 4px; align-items: center; }
+.project-multi-select .proj-tag {
+  display: inline-block; padding: 1px 8px; border-radius: 10px;
+  font-size: 11px; background: var(--accent-glow); color: var(--accent);
+  font-weight: 500; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.project-multi-select .proj-dropdown {
+  position: absolute; z-index: 100; min-width: 220px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.25); margin-top: 6px;
+  max-height: 280px; overflow-y: auto;
+  opacity: 0; transform: translateY(-4px); pointer-events: none;
+  transition: opacity .15s ease, transform .15s ease;
+}
+.project-multi-select .proj-dropdown.open {
+  opacity: 1; transform: translateY(0); pointer-events: auto;
+}
+.proj-opt {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 6px; cursor: pointer;
+  font-size: 13px; color: var(--text-secondary); transition: background .1s;
+}
+.proj-opt:hover { background: var(--bg-secondary); }
+.proj-opt .proj-check {
+  width: 16px; height: 16px; border: 2px solid var(--border);
+  border-radius: 4px; display: flex; align-items: center; justify-content: center;
+  font-size: 10px; color: transparent; transition: all .15s; flex-shrink: 0;
+}
+.proj-opt.selected .proj-check {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.proj-opt.selected { color: var(--text-primary); }
 
 input:focus, textarea:focus, select:focus {
   border-color: var(--border-focus);
@@ -273,6 +316,7 @@ textarea {
   background: none;
   border: none;
   font-family: var(--font-sans);
+  white-space: nowrap;
 }
 .logout-btn:hover { color: var(--red); }
 
@@ -489,9 +533,10 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
 }
 
-.exp-card-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.exp-card-tags { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; overflow: hidden; }
 
 .similarity-badge {
   padding: 3px 10px;
@@ -610,17 +655,20 @@ textarea {
 }
 
 .back-btn {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg-primary);
+  padding: 12px 0;
+  margin-bottom: 8px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 20px;
   font-size: 13px;
   color: var(--text-muted);
   cursor: pointer;
-  background: none;
   border: none;
   font-family: var(--font-sans);
-  padding: 0;
 }
 .back-btn:hover { color: var(--accent); }
 
@@ -740,7 +788,28 @@ textarea {
 .settings-card h2 {
   font-size: 18px;
   font-weight: 600;
-  margin-bottom: 8px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+}
+.settings-card h2::after {
+  content: '▾';
+  font-size: 12px;
+  color: var(--text-muted);
+  transition: transform 0.2s;
+}
+.settings-card.collapsed h2::after {
+  transform: rotate(-90deg);
+}
+.settings-card-body {
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+.settings-card.collapsed .settings-card-body {
+  max-height: 0 !important;
+  overflow: hidden;
 }
 
 .settings-card .settings-desc {
@@ -802,7 +871,8 @@ textarea {
 }
 
 .modal {
-  width: 640px;
+  width: 80%;
+  max-width: 960px;
   max-height: 85vh;
   overflow-y: auto;
   background: var(--bg-card);
@@ -1016,6 +1086,57 @@ textarea {
 .btn-parse .parse-loading-text { display: none; }
 .btn-parse.loading .parse-loading-text { display: inline; }
 
+/* ===== Kanban Board ===== */
+.kanban-col { background: var(--bg-card); border-radius: 8px; padding: 12px; min-height: 200px; border: 1px solid var(--border); }
+.kanban-col-header { font-size: 13px; font-weight: 600; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+.kanban-col-header .col-count { font-size: 11px; font-weight: 400; color: var(--text-muted); }
+.kanban-col-header .wip-warn { color: var(--red); font-size: 11px; }
+.task-card { background: var(--bg-main); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 8px; cursor: pointer; transition: border-color 0.15s; }
+.task-card:hover { border-color: var(--accent); }
+.task-card-title { font-size: 13px; font-weight: 500; margin-bottom: 4px; }
+.task-card-meta { font-size: 11px; color: var(--text-muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.priority-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.priority-urgent { background: var(--red); }
+.priority-high { background: #f59e0b; }
+.priority-medium { background: var(--accent); }
+.priority-low { background: var(--text-muted); }
+.importance-stars { color: #f59e0b; font-size: 10px; }
+.task-group-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; cursor: pointer; transition: border-color .2s, box-shadow .2s; min-width: 320px; max-width: 360px; flex-shrink: 0; scroll-snap-align: start; }
+.task-group-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+.task-group-header { display: flex; justify-content: space-between; align-items: center; }
+.task-groups-grid {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+.task-groups-grid::-webkit-scrollbar { height: 4px; }
+.task-groups-grid::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.toggle-groups-btn { background: none; border: 1px solid var(--border); border-radius: 6px; padding: 4px 12px; font-size: 12px; color: var(--accent); cursor: pointer; transition: background .2s; }
+.toggle-groups-btn:hover { background: var(--bg-hover); }
+.group-eye-btn { background: none; border: 1px solid var(--border); border-radius: 4px; width: 28px; height: 28px; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; opacity: 0.4; transition: opacity .2s, border-color .2s; padding: 0; line-height: 1; }
+.group-eye-btn.active { opacity: 1; border-color: var(--accent); }
+.group-eye-btn:hover { opacity: 0.8; }
+.task-group-progress { height: 4px; background: var(--border); border-radius: 2px; margin-top: 8px; }
+.task-group-progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width 0.3s; }
+
+/* ===== Task Slideout Panel ===== */
+.task-slideout-overlay { position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:199;opacity:0;transition:opacity 0.25s;pointer-events:none; }
+.task-slideout-overlay.open { opacity:1;pointer-events:auto; }
+.task-slideout { position:fixed;top:0;right:0;width:440px;height:100vh;background:var(--bg-card);border-left:1px solid var(--border);z-index:200;transform:translateX(100%);transition:transform 0.25s;overflow-y:auto;padding:24px;box-shadow:-4px 0 20px rgba(0,0,0,0.15); }
+.task-slideout.open { transform:translateX(0); }
+.task-slideout h2 { font-size:16px;font-weight:600;margin-bottom:16px; }
+.task-slideout .field-group { margin-bottom:14px; }
+.task-slideout .field-label { font-size:12px;font-weight:500;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase; }
+.task-slideout input, .task-slideout textarea, .task-slideout select { width:100%;padding:8px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:13px;font-family:inherit; }
+.task-slideout textarea { min-height:80px;resize:vertical; }
+.task-slideout .slideout-actions { display:flex;gap:8px;margin-top:16px;flex-wrap:wrap; }
+.task-slideout .msg-list { margin-top:16px;border-top:1px solid var(--border);padding-top:12px; }
+.task-slideout .msg-item { padding:8px 0;border-bottom:1px solid var(--border);font-size:13px; }
+.task-slideout .msg-meta { font-size:11px;color:var(--text-muted); }
+
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
   .stats-grid { grid-template-columns: 1fr; }
@@ -1024,6 +1145,8 @@ textarea {
   .modal { width: 95%; margin: 16px; }
   .login-box { width: 90%; padding: 32px 24px; }
   .search-params-row { grid-template-columns: 1fr; }
+  .task-groups-grid { flex-direction: column; }
+  .task-group-card { min-width: 100%; max-width: 100%; }
 }
 
 /* ===== Stale Badge (B1) ===== */
@@ -1133,6 +1256,384 @@ textarea {
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* ===== Custom Checkbox ===== */
+.custom-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  user-select: none;
+  white-space: nowrap;
+  padding: 6px 12px;
+  border-radius: 8px;
+  transition: background .15s;
+}
+.custom-check:hover { background: var(--bg-secondary); }
+.custom-check input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+  transition: all 0.2s ease;
+}
+.custom-check input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.custom-check input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 5px;
+  width: 5px;
+  height: 9px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.custom-check input[type="checkbox"]:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* ===== Circular Progress ===== */
+.circular-progress {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+}
+.circular-progress .circle-bg {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 3;
+}
+.circular-progress .circle-fill {
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.4s ease;
+}
+.circular-progress .pct-text {
+  fill: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  text-anchor: middle;
+}
+
+/* ===== Card Metrics Row ===== */
+.card-metrics {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  align-items: center;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.card-metrics span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* ===== Compact Form Grid ===== */
+.compact-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+}
+.compact-fields .form-group {
+  margin-bottom: 0;
+}
+.compact-fields label {
+  font-size: 11px;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+}
+.compact-fields select, .compact-fields input {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+/* ===== Tag Suggestions ===== */
+.tag-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.tag-suggest-btn {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  transition: all 0.15s;
+}
+.tag-suggest-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-glow);
+}
+
+/* ===== Diff View ===== */
+.diff-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+.diff-pane {
+  padding: 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--text-secondary);
+  max-height: 400px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+.diff-pane h4 {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ===== Task Group Subtask Preview ===== */
+.group-subtask-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.group-subtask-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.group-subtask-item .status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-dot.completed { background: var(--green); }
+.status-dot.in_progress { background: var(--accent); }
+.status-dot.plan { background: var(--yellow); }
+.status-dot.wait { background: var(--text-muted); }
+.status-dot.cancelled { background: var(--red); }
+
+/* ===== Archive Icon Btn ===== */
+.archive-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.archive-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ===== Notify Dot (pulse) ===== */
+.notify-dot {
+  display: none; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--red, #ef4444);
+  margin-left: 8px; vertical-align: middle;
+}
+.notify-dot.active {
+  display: inline-block;
+  animation: notifyPulse 2s ease-in-out infinite;
+}
+@keyframes notifyPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .6; transform: scale(1.3); }
+}
+
+/* ===== Settings Group Sections ===== */
+.settings-group-title {
+  font-size: 14px; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: .5px;
+  margin: 28px 0 8px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-group-title:first-child { margin-top: 0; }
+.settings-card + .settings-card { margin-top: 16px; }
+/* ===== Settings Nav Card (clickable row) ===== */
+.settings-nav-card {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 18px; margin-top: 16px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.settings-nav-card:hover { border-color: var(--accent); background: var(--bg-card-hover); }
+.settings-nav-icon {
+  width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+  background: var(--accent-glow); border-radius: 8px; font-size: 18px; flex-shrink: 0;
+}
+.settings-nav-body { flex: 1; min-width: 0; }
+.settings-nav-title {
+  font-size: 14px; font-weight: 500; color: var(--text-primary);
+  display: flex; align-items: center; gap: 6px;
+}
+.settings-nav-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.settings-nav-arrow { font-size: 20px; color: var(--text-muted); flex-shrink: 0; }
+
+/* ===== Scan Path Rows ===== */
+.scan-path-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; margin-bottom: 2px;
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.scan-path-row .scan-path-val {
+  flex: 1; color: var(--text-secondary);
+}
+.scan-path-row.builtin .scan-path-lock {
+  font-size: 11px; opacity: .5;
+}
+.scan-path-row.custom .scan-path-val {
+  background: transparent; border: none; color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 12px; outline: none; flex: 1;
+}
+.scan-path-row.custom .scan-path-del {
+  cursor: pointer; color: var(--red); font-size: 14px; opacity: .6;
+  transition: opacity .15s;
+}
+.scan-path-row.custom .scan-path-del:hover { opacity: 1; }
+.settings-group-advanced .settings-group-body { display: block; }
+.settings-group-advanced.collapsed .settings-group-body { display: none; }
+.settings-group-advanced .settings-group-title {
+  cursor: pointer; user-select: none;
+}
+.settings-group-advanced .settings-group-title:hover { color: var(--text-secondary); }
+
+/* ===== Project Config Sub-tabs ===== */
+.proj-cfg-tabs {
+  display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 16px;
+}
+/* ===== Skills/Rules Cards ===== */
+.sr-category-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px; margin-bottom: 16px;
+}
+.sr-category-header {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 12px; font-size: 13px; font-weight: 600; color: var(--text-secondary);
+}
+.sr-category-icon { font-size: 16px; }
+.sr-category-count {
+  margin-left: auto; font-size: 11px; color: var(--text-muted);
+  background: var(--bg-input); padding: 2px 8px; border-radius: 10px;
+}
+.sr-category-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+}
+.sr-category-more {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);
+}
+.sr-category-more.hidden { display: none !important; }
+.sr-more-btn { margin-top: 12px; }
+@media (max-width: 900px) {
+  .sr-category-grid, .sr-category-more { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 500px) {
+  .sr-category-grid, .sr-category-more { grid-template-columns: 1fr; }
+}
+
+.sr-card {
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px; transition: opacity .2s;
+}
+.sr-card.disabled { opacity: .5; }
+.sr-card-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-bottom: 6px;
+}
+.sr-card-name {
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+}
+.sr-card-summary {
+  font-size: 11px; color: var(--text-muted); line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; margin-bottom: 8px;
+}
+.sr-card-actions { display: flex; gap: 6px; }
+.sr-file-btn {
+  background: none; border: 1px solid var(--border); border-radius: 4px;
+  padding: 4px 8px; font-size: 12px; cursor: pointer;
+  color: var(--text-muted); transition: all .15s;
+}
+.sr-file-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+.sr-toggle {
+  position: relative; width: 36px; height: 20px;
+  flex-shrink: 0; cursor: pointer; display: inline-block;
+}
+.sr-toggle-bg {
+  position: absolute; inset: 0; border-radius: 10px;
+  transition: background .2s;
+}
+.sr-toggle-knob {
+  position: absolute; top: 2px; width: 16px; height: 16px;
+  border-radius: 50%; background: #fff; transition: left .2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,.3);
+}
+
+/* ===== Sticky Page Toolbar ===== */
+.page-toolbar {
+  position: sticky; top: 56px; z-index: 10;
+  background: var(--bg-primary);
+  padding: 12px 0;
+  margin: 0 0 16px;
+}
+
+.proj-cfg-tab {
+  padding: 8px 16px; font-size: 13px; color: var(--text-muted);
+  cursor: pointer; border-bottom: 2px solid transparent;
+  transition: all .15s; background: none; border-top: none; border-left: none; border-right: none;
+  font-family: var(--font-sans);
+}
+.proj-cfg-tab:hover { color: var(--text-secondary); }
+.proj-cfg-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.proj-cfg-panel { display: none; }
+.proj-cfg-panel.active { display: block; }
 </style>
 </head>
 <body>
@@ -1140,14 +1641,59 @@ textarea {
 <!-- ===== Login Screen ===== -->
 <div id="login-screen">
   <div class="login-box">
-    <div class="logo">team_memory</div>
-    <div class="subtitle">团队经验数据库 — 请输入 API Key 登录</div>
+    <div class="logo">TeamMemory</div>
+    <div class="subtitle" id="login-subtitle">团队经验数据库</div>
     <div id="login-error" class="error-msg"></div>
-    <div class="form-group">
-      <label for="login-key">API Key</label>
-      <input type="password" id="login-key" placeholder="输入你的 API Key..." autofocus>
+    <div id="login-success" class="success-msg" style="display:none; color:#2e7d32; background:#e8f5e9; padding:8px 12px; border-radius:6px; margin-bottom:12px; font-size:13px;"></div>
+
+    <!-- Password Login (default) -->
+    <div id="login-mode-password">
+      <div class="form-group">
+        <label for="login-username">用户名</label>
+        <input type="text" id="login-username" placeholder="输入用户名" autofocus>
+      </div>
+      <div class="form-group">
+        <label for="login-password">密码</label>
+        <input type="password" id="login-password" placeholder="输入密码">
+      </div>
+      <button class="btn btn-primary btn-full" onclick="doLogin()">登 录</button>
+      <div style="display:flex; justify-content:space-between; margin-top:12px; font-size:13px;">
+        <a href="#" onclick="switchLoginMode('apikey'); return false;" style="color:var(--primary);">使用 API Key 登录</a>
+        <a href="#" onclick="switchLoginMode('register'); return false;" style="color:var(--primary);">没有账号？注册</a>
+      </div>
     </div>
-    <button class="btn btn-primary btn-full" onclick="doLogin()">登 录</button>
+
+    <!-- API Key Login -->
+    <div id="login-mode-apikey" style="display:none;">
+      <div class="form-group">
+        <label for="login-key">API Key</label>
+        <input type="password" id="login-key" placeholder="输入你的 API Key...">
+      </div>
+      <button class="btn btn-primary btn-full" onclick="doLogin()">登 录</button>
+      <div style="text-align:center; margin-top:12px; font-size:13px;">
+        <a href="#" onclick="switchLoginMode('password'); return false;" style="color:var(--primary);">使用密码登录</a>
+      </div>
+    </div>
+
+    <!-- Register -->
+    <div id="login-mode-register" style="display:none;">
+      <div class="form-group">
+        <label for="reg-username">用户名</label>
+        <input type="text" id="reg-username" placeholder="设置用户名（至少 2 个字符）">
+      </div>
+      <div class="form-group">
+        <label for="reg-password">密码</label>
+        <input type="password" id="reg-password" placeholder="设置密码（至少 6 个字符）">
+      </div>
+      <div class="form-group">
+        <label for="reg-password2">确认密码</label>
+        <input type="password" id="reg-password2" placeholder="再次输入密码">
+      </div>
+      <button class="btn btn-primary btn-full" onclick="doRegister()">注 册</button>
+      <div style="text-align:center; margin-top:12px; font-size:13px;">
+        <a href="#" onclick="switchLoginMode('password'); return false;" style="color:var(--primary);">已有账号？登录</a>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1156,19 +1702,17 @@ textarea {
   <!-- Top Bar -->
   <div class="topbar">
     <div class="topbar-left">
-      <div class="topbar-logo">team_memory</div>
+      <div class="topbar-logo"><img src="/static/favicon.svg" alt="" style="width:20px;height:20px;vertical-align:middle;margin-right:6px">TeamMemory</div>
       <nav class="topbar-nav">
-        <a onclick="navigate('dashboard')" data-page="dashboard">仪表盘</a>
-        <a onclick="navigate('list')" data-page="list">经验列表</a>
-        <a onclick="navigate('drafts')" data-page="drafts">草稿箱</a>
-        <a onclick="navigate('reviews')" data-page="reviews">审核队列</a>
+        <a onclick="navigate('tasks')" data-page="tasks">任务列表</a>
+        <a onclick="navigate('list')" data-page="list">经验管理</a>
         <a onclick="navigate('search')" data-page="search">语义搜索</a>
-        <a onclick="navigate('dedup')" data-page="dedup">去重检测</a>
+        <a onclick="navigate('usage')" data-page="usage">使用统计</a>
         <a onclick="navigate('settings')" data-page="settings">设置</a>
       </nav>
     </div>
     <div class="topbar-right">
-      <button class="btn btn-primary btn-sm" onclick="openCreateModal()">+ 新建经验</button>
+      <button class="btn btn-primary btn-sm" onclick="openCreateModal()" style="white-space:nowrap">+ 新建经验</button>
       <div class="user-badge">
         <div class="user-avatar" id="user-avatar">A</div>
         <span id="user-name">admin</span>
@@ -1179,9 +1723,10 @@ textarea {
 
   <!-- Main Content -->
   <div class="main-content">
-    <!-- Dashboard Page -->
-    <div id="page-dashboard" class="page">
-      <div class="stats-grid" style="grid-template-columns: repeat(6, 1fr)">
+    <!-- List Page -->
+    <div id="page-list" class="page hidden">
+      <!-- Stats row (merged from dashboard) -->
+      <div id="list-stats" class="stats-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom:20px">
         <div class="stat-card">
           <div class="stat-value" id="stat-total">—</div>
           <div class="stat-label">总经验数</div>
@@ -1190,71 +1735,73 @@ textarea {
           <div class="stat-value" id="stat-recent">—</div>
           <div class="stat-label">近 7 天新增</div>
         </div>
+        <div class="stat-card" style="cursor:pointer" onclick="switchListSubTab('review')">
+          <div class="stat-value" id="stat-pending" style="color:var(--yellow)">—</div>
+          <div class="stat-label">待审核</div>
+        </div>
         <div class="stat-card">
           <div class="stat-value" id="stat-tags">—</div>
           <div class="stat-label">标签数量</div>
         </div>
-        <div class="stat-card" style="cursor:pointer" onclick="navigate('reviews')" title="点击查看待审核经验">
-          <div class="stat-value" id="stat-pending" style="color:var(--yellow)">—</div>
-          <div class="stat-label">待审核</div>
-        </div>
-        <div class="stat-card" style="cursor:pointer" onclick="navigate('drafts')" title="点击查看草稿箱">
-          <div class="stat-value" id="stat-drafts" style="color:var(--accent)">—</div>
-          <div class="stat-label">草稿</div>
-        </div>
-        <div class="stat-card" style="cursor:pointer" onclick="navigate('dedup')" title="点击查看过期经验">
-          <div class="stat-value" id="stat-stale" style="color:var(--yellow)">—</div>
-          <div class="stat-label">疑似过时</div>
-        </div>
       </div>
-      <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:var(--text-secondary)">标签分布</h3>
-      <div id="dashboard-tags" class="tags-bar">
-        <span class="tag-label">加载中...</span>
-      </div>
-      <h3 style="font-size:16px;font-weight:600;margin:24px 0 16px;color:var(--text-secondary)">最近添加</h3>
-      <div id="dashboard-recent" class="exp-list">
-        <div class="loading"><div class="spinner"></div></div>
-      </div>
-    </div>
 
-    <!-- List Page -->
-    <div id="page-list" class="page hidden">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div class="page-toolbar">
+      <!-- Sub tabs -->
+      <div class="mode-tabs" style="margin-bottom:12px">
+        <button class="mode-tab active" onclick="switchListSubTab('all')" id="list-tab-all">全部经验</button>
+        <button class="mode-tab" onclick="switchListSubTab('draft')" id="list-tab-draft">我的草稿</button>
+        <button class="mode-tab" onclick="switchListSubTab('review')" id="list-tab-review">待审核</button>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-          <h3 style="font-size:16px;font-weight:600;color:var(--text-secondary)">经验列表</h3>
+          <div class="project-multi-select" id="page-list-projects">
+            <button class="proj-trigger" onclick="toggleProjectDropdown(this)">
+              <span class="proj-label">全部项目</span><span class="proj-tags"></span><span style="font-size:10px">▼</span>
+            </button>
+            <div class="proj-dropdown"></div>
+          </div>
           <select id="list-status-filter" onchange="loadList(1)" class="filter-select">
             <option value="">已发布</option>
             <option value="all">全部状态</option>
-            <option value="draft">仅草稿</option>
+            <option value="draft">草稿</option>
+            <option value="review">审核中</option>
+            <option value="rejected">已拒绝</option>
           </select>
           <select id="list-type-filter" onchange="loadList(1)" class="filter-select">
             <option value="">全部类型</option>
           </select>
-          <select id="list-severity-filter" onchange="loadList(1)" class="filter-select">
-            <option value="">全部严重程度</option>
+          <select id="list-tier-filter" onchange="loadList(1)" class="filter-select">
+            <option value="">全部等级</option>
+            <option value="gold">Gold</option>
+            <option value="silver">Silver</option>
+            <option value="bronze">Bronze</option>
+            <option value="outdated">Outdated</option>
           </select>
-          <select id="list-category-filter" onchange="loadList(1)" class="filter-select">
-            <option value="">全部分类</option>
-            <option value="other">other</option>
+          <select id="list-visibility-filter" onchange="loadList(1)" class="filter-select">
+            <option value="">全部范围</option>
+            <option value="global">全局通用</option>
+            <option value="project">项目内</option>
+            <option value="private">仅自己</option>
           </select>
-          <select id="list-progress-filter" onchange="loadList(1)" class="filter-select">
-            <option value="">全部进度</option>
-            <option value="open">待处理</option>
-            <option value="planning">计划中</option>
-            <option value="developing">开发中</option>
-            <option value="testing">测试中</option>
-            <option value="reviewing">审核中</option>
-            <option value="fixed">已修复</option>
-            <option value="released">已发布</option>
-            <option value="resolved">已关闭</option>
-          </select>
-          <input type="text" id="list-project-filter" onchange="loadList(1)" placeholder="项目（默认 default）" class="filter-select" style="min-width:140px">
         </div>
         <div style="display:flex;gap:8px">
+          <button id="btn-manage-outdated" class="btn btn-secondary btn-sm" onclick="toggleOutdatedPanel()" style="position:relative;display:none">
+            管理 Outdated
+            <span id="outdated-dot" style="display:none;position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-radius:50%;background:var(--red,#ef4444)"></span>
+          </button>
           <button class="btn btn-secondary btn-sm" onclick="batchSummarize()">批量生成摘要</button>
           <button class="btn btn-secondary btn-sm" onclick="openImportModal()">导入</button>
           <button class="btn btn-secondary btn-sm" onclick="openExportModal()">导出</button>
         </div>
+      </div>
+      </div>
+      <div id="outdated-panel" class="hidden" style="margin-bottom:16px;padding:16px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h3 style="margin:0;font-size:15px">Outdated 经验管理</h3>
+          <button class="btn btn-secondary btn-sm" onclick="refreshScores()">刷新分值</button>
+        </div>
+        <div id="outdated-list"></div>
       </div>
       <div id="list-tags-bar" class="tags-bar">
         <span class="tag-label">标签筛选:</span>
@@ -1265,33 +1812,21 @@ textarea {
       <div id="list-pagination" class="pagination"></div>
     </div>
 
-    <!-- Drafts Page (P0-1) -->
-    <div id="page-drafts" class="page hidden">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-        <h3 style="font-size:16px;font-weight:600;color:var(--text-secondary)">草稿箱</h3>
-        <span style="font-size:13px;color:var(--text-muted)">草稿需发布后才能被搜索到</span>
-      </div>
-      <div id="drafts-content" class="exp-list">
-        <div class="loading"><div class="spinner"></div></div>
-      </div>
-    </div>
-
-    <!-- Reviews Page (P0-2) -->
-    <div id="page-reviews" class="page hidden">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-        <h3 style="font-size:16px;font-weight:600;color:var(--text-secondary)">审核队列</h3>
-        <span style="font-size:13px;color:var(--text-muted)">AI 录入的经验需审核后发布</span>
-      </div>
-      <div id="reviews-content" class="exp-list">
-        <div class="loading"><div class="spinner"></div></div>
-      </div>
-    </div>
-
     <!-- Search Page -->
     <div id="page-search" class="page hidden">
+      <div class="page-toolbar">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <div class="project-multi-select" id="page-search-projects">
+          <button class="proj-trigger" onclick="toggleProjectDropdown(this)">
+            <span class="proj-label">全部项目</span><span class="proj-tags"></span><span style="font-size:10px">▼</span>
+          </button>
+          <div class="proj-dropdown"></div>
+        </div>
+      </div>
       <div class="search-bar">
         <input type="text" id="search-input" placeholder="输入自然语言描述进行语义搜索..." onkeydown="if(event.key==='Enter')doSearch()">
         <button class="btn btn-primary" onclick="doSearch()">搜索</button>
+      </div>
       </div>
       <div class="search-advanced-toggle" onclick="toggleSearchAdvanced()">
         <span>高级参数</span>
@@ -1334,37 +1869,202 @@ textarea {
       </div>
     </div>
 
-    <!-- Dedup Page (B2) -->
-    <div id="page-dedup" class="page hidden">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
-        <div>
-          <h3 style="font-size:18px;font-weight:600;color:var(--text-primary);margin-bottom:4px">去重检测与合并</h3>
-          <p style="font-size:13px;color:var(--text-muted)">检测语义相似度超过阈值的经验对，选择保留主经验并合并</p>
-        </div>
-        <div style="display:flex;gap:12px;align-items:center">
-          <label style="font-size:13px;color:var(--text-secondary)">相似度阈值:</label>
-          <input type="number" id="dedup-threshold" value="0.92" min="0.5" max="1" step="0.01" style="width:80px;padding:6px 10px;font-size:13px">
-          <button class="btn btn-primary btn-sm" onclick="loadDuplicates()">扫描</button>
-          <button class="btn btn-secondary btn-sm" onclick="scanStale()">扫描过期</button>
+    <!-- Tasks Page -->
+    <div id="page-tasks" class="page hidden">
+      <div class="page-toolbar">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2 style="font-size:16px;font-weight:600;color:var(--text-secondary)">任务列表</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div class="project-multi-select" id="page-tasks-projects">
+            <button class="proj-trigger" onclick="toggleProjectDropdown(this)">
+              <span class="proj-label">全部项目</span><span class="proj-tags"></span><span style="font-size:10px">▼</span>
+            </button>
+            <div class="proj-dropdown"></div>
+          </div>
+          <select id="tasks-group-filter" onchange="loadTasks()" class="filter-select">
+            <option value="">全部任务</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="openCreateTaskModal()">+ 新建任务</button>
         </div>
       </div>
-      <div id="stale-results" class="hidden" style="margin-bottom:24px">
-        <h4 style="font-size:14px;font-weight:600;color:var(--yellow);margin-bottom:12px">疑似过时的经验</h4>
-        <div id="stale-list" class="exp-list"></div>
       </div>
-      <div id="dedup-results">
-        <div class="empty-state">
-          <div class="icon">🔍</div>
-          <h3>点击"扫描"检测重复经验</h3>
-          <p>系统将比较所有经验的向量嵌入，找出相似度超过阈值的经验对</p>
+      <div id="tasks-groups" style="margin-bottom:24px;overflow:hidden"></div>
+      <div id="tasks-board" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;min-height:300px"></div>
+    </div>
+
+    <!-- Usage Stats Page -->
+    <div id="page-usage" class="page hidden">
+      <div class="page-toolbar">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="display:flex;align-items:center;gap:12px">
+          <h2 style="font-size:16px;font-weight:600;color:var(--text-secondary);margin:0">使用统计</h2>
+          <div class="project-multi-select" id="page-usage-projects">
+            <button class="proj-trigger" onclick="toggleProjectDropdown(this)">
+              <span class="proj-label">全部项目</span><span class="proj-tags"></span><span style="font-size:10px">▼</span>
+            </button>
+            <div class="proj-dropdown"></div>
+          </div>
         </div>
+        <button class="btn btn-secondary btn-sm" onclick="loadUsageStats()">🔄 刷新</button>
+      </div>
+      </div>
+      <div id="usage-content">
+        <div class="loading"><div class="spinner"></div></div>
       </div>
     </div>
 
     <!-- Settings Page -->
     <div id="page-settings" class="page hidden">
-      <div class="settings-card">
+      <h2 class="settings-group-title">常用配置</h2>
+
+      <div class="settings-card" style="margin-top:20px" onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
+        <h2>项目配置</h2>
+        <div class="settings-card-body" style="max-height:3000px">
+        <div class="proj-cfg-tabs">
+          <button class="proj-cfg-tab active" onclick="switchProjCfgTab('basic')">基础配置</button>
+          <button class="proj-cfg-tab" onclick="switchProjCfgTab('scan')">扫描目录</button>
+          <button class="proj-cfg-tab" onclick="switchProjCfgTab('installables')">可安装 Rules / Prompts / Skills</button>
+        </div>
+
+        <!-- Basic Config -->
+        <div class="proj-cfg-panel active" id="proj-cfg-basic">
+          <p class="settings-desc">用于多项目轻量隔离。未显式传 project 时，回退到默认值。</p>
+          <div class="settings-grid">
+            <div class="form-group full-width">
+              <label>default_project</label>
+              <select id="cfg-default-project"></select>
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button class="btn btn-primary" onclick="saveDefaultProjectConfig()">保存默认项目</button>
+          </div>
+        </div>
+
+        <!-- Scan Dirs Config -->
+        <div class="proj-cfg-panel" id="proj-cfg-scan">
+          <p class="settings-desc">配置项目路径映射和 Skills/Rules 扫描目录。</p>
+          <div class="form-group">
+            <label>项目路径映射（每行一个，格式: 项目名=绝对路径）</label>
+            <textarea id="cfg-project-paths" placeholder="default=/Users/you/Work/my-project&#10;team_doc=/Users/you/Work/agent/team_doc" style="min-height:100px;font-family:var(--font-mono);font-size:12px"></textarea>
+          </div>
+          <div class="form-group">
+            <label>默认扫描路径（内置不可删除，可添加新路径）</label>
+            <div id="default-scan-paths" style="font-family:var(--font-mono);font-size:12px;line-height:1.6">
+              <div style="margin-bottom:8px;color:var(--text-muted);font-size:11px;font-weight:500">项目级</div>
+              <div class="scan-path-row builtin"><span class="scan-path-val">.claude/skills/</span><span class="scan-path-lock">🔒</span></div>
+              <div class="scan-path-row builtin"><span class="scan-path-val">.cursor/skills/</span><span class="scan-path-lock">🔒</span></div>
+              <div class="scan-path-row builtin"><span class="scan-path-val">.cursor/rules/</span><span class="scan-path-lock">🔒</span></div>
+              <div class="scan-path-row builtin"><span class="scan-path-val">.cursor/prompts/</span><span class="scan-path-lock">🔒</span></div>
+              <div style="margin:8px 0;color:var(--text-muted);font-size:11px;font-weight:500">用户级</div>
+              <div class="scan-path-row builtin"><span class="scan-path-val">~/.claude/skills/</span><span class="scan-path-lock">🔒</span></div>
+              <div class="scan-path-row builtin"><span class="scan-path-val">~/.cursor/skills-cursor/</span><span class="scan-path-lock">🔒</span></div>
+              <div class="scan-path-row builtin"><span class="scan-path-val">~/.cursor/rules/</span><span class="scan-path-lock">🔒</span></div>
+              <div id="custom-scan-paths"></div>
+              <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="addCustomScanPath()">+ 添加扫描路径</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>额外扫描目录（每行一个，格式: 标签=路径=匹配模式）</label>
+            <textarea id="cfg-extra-scan-dirs" placeholder="my_rules=/path/to/rules=*.md" style="min-height:60px;font-family:var(--font-mono);font-size:12px"></textarea>
+          </div>
+          <div class="settings-actions">
+            <button class="btn btn-primary" onclick="saveScanDirsConfig()">保存扫描配置</button>
+          </div>
+        </div>
+
+        <!-- Installables -->
+        <div class="proj-cfg-panel" id="proj-cfg-installables">
+          <p class="settings-desc">浏览本地与共享注册表中的可安装项，支持预览并一键安装到项目目录。</p>
+          <div class="settings-grid">
+            <div class="form-group">
+              <label>来源</label>
+              <select id="installables-source-filter" onchange="loadInstallables()">
+                <option value="">全部</option>
+                <option value="local">local</option>
+                <option value="registry">registry</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>类型</label>
+              <select id="installables-type-filter" onchange="loadInstallables()">
+                <option value="">全部</option>
+                <option value="rule">rule</option>
+                <option value="prompt">prompt</option>
+                <option value="skill">skill</option>
+              </select>
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button class="btn btn-secondary" onclick="loadInstallables()">刷新列表</button>
+          </div>
+          <div id="installables-list" class="exp-list" style="margin-top:10px">
+            <div class="empty-state"><h3>暂无数据</h3><p>点击"刷新列表"加载可安装项</p></div>
+          </div>
+        </div>
+        </div>
+      </div>
+
+      <div class="settings-card collapsed" style="margin-top:20px" onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
+        <h2>经验质量打分规则</h2>
+        <div class="settings-card-body" style="max-height:2000px">
+        <p class="settings-desc">配置经验质量评分的衰减、加分和等级阈值。</p>
+        <div class="settings-grid">
+          <div class="form-group">
+            <label>初始分值 <span class="hint">(新经验起始分)</span></label>
+            <input type="number" id="scoring-initial" placeholder="100" min="1" step="1">
+          </div>
+          <div class="form-group">
+            <label>分值上限 <span class="hint">(max_score)</span></label>
+            <input type="number" id="scoring-max" placeholder="300" min="100" step="10">
+          </div>
+          <div class="form-group">
+            <label>保护期天数 <span class="hint">(前N天不衰减)</span></label>
+            <input type="number" id="scoring-protection" placeholder="10" min="0" step="1">
+          </div>
+          <div class="form-group">
+            <label>衰减速率 <span class="hint">(每天扣分)</span></label>
+            <input type="number" id="scoring-decay-rate" placeholder="1.0" min="0" step="0.1">
+          </div>
+          <div class="form-group">
+            <label>慢衰减阈值 <span class="hint">(低于此值减速)</span></label>
+            <input type="number" id="scoring-slow-threshold" placeholder="50" min="0" step="1">
+          </div>
+          <div class="form-group">
+            <label>慢衰减速率 <span class="hint">(低分衰减速度)</span></label>
+            <input type="number" id="scoring-slow-rate" placeholder="0.5" min="0" step="0.1">
+          </div>
+          <div class="form-group">
+            <label>引用加分 <span class="hint">(每次被引用)</span></label>
+            <input type="number" id="scoring-ref-boost" placeholder="2" min="0" step="1">
+          </div>
+          <div class="form-group">
+            <label>好评加分 <span class="hint">(rating >= 阈值时)</span></label>
+            <input type="number" id="scoring-rating-boost" placeholder="1" min="0" step="1">
+          </div>
+          <div class="form-group">
+            <label>好评阈值 <span class="hint">(rating >= N 才算好评)</span></label>
+            <input type="number" id="scoring-rating-threshold" placeholder="4" min="1" max="5" step="1">
+          </div>
+          <div class="form-group">
+            <label>Gold 阈值 <span class="hint">(score >= N)</span></label>
+            <input type="number" id="scoring-tier-gold" placeholder="120" min="1" step="1">
+          </div>
+          <div class="form-group">
+            <label>Silver 阈值 <span class="hint">(score >= N)</span></label>
+            <input type="number" id="scoring-tier-silver" placeholder="60" min="1" step="1">
+          </div>
+          <div class="form-group">
+            <label>Bronze 阈值 <span class="hint">(score >= N)</span></label>
+            <input type="number" id="scoring-tier-bronze" placeholder="20" min="0" step="1">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="saveScoringConfig()" style="margin-top:12px">保存打分规则</button>
+        </div>
+      </div>
+
+      <div class="settings-card" onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
         <h2>检索参数配置</h2>
+        <div class="settings-card-body" style="max-height:2000px">
         <p class="settings-desc">调整经验检索和上下文裁剪参数。修改后即时生效（运行时），重启服务后恢复 config.yaml 中的默认值。</p>
         <div class="settings-grid">
           <div class="form-group">
@@ -1404,24 +2104,98 @@ textarea {
           <button class="btn btn-secondary" onclick="loadAllConfig()">重新加载全部</button>
           <span id="settings-save-status" class="save-status"></span>
         </div>
+        </div>
       </div>
 
-      <div class="settings-card" style="margin-top:20px">
-        <h2>默认项目配置</h2>
-        <p class="settings-desc">用于多项目轻量隔离。未显式传 `project` 时，Web/API/MCP 将回退到该默认值。</p>
+      <div class="settings-nav-card" onclick="navigate('dedup')">
+        <div class="settings-nav-icon">🔍</div>
+        <div class="settings-nav-body">
+          <div class="settings-nav-title">去重检测与合并 <span id="merge-suggestion-dot" class="notify-dot"></span></div>
+          <div class="settings-nav-desc">检测语义相似度超过阈值的经验对，选择保留并合并</div>
+        </div>
+        <div class="settings-nav-arrow">›</div>
+      </div>
+
+      <div class="settings-group-advanced collapsed" onclick="if(event.target.classList.contains('settings-group-title'))this.classList.toggle('collapsed')">
+        <h2 class="settings-group-title" style="cursor:pointer;font-size:16px;font-weight:700;letter-spacing:1px">高级配置 ▸</h2>
+        <div class="settings-group-body">
+
+      <div class="settings-card collapsed" style="margin-top:20px" onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
+        <h2>搜索管线配置</h2>
+        <div class="settings-card-body" style="max-height:2000px">
+        <p class="settings-desc">配置混合检索模式、RRF 融合参数和自适应过滤。</p>
         <div class="settings-grid">
-          <div class="form-group full-width">
-            <label>default_project</label>
-            <input type="text" id="cfg-default-project" placeholder="default">
+          <div class="form-group">
+            <label>search mode <span class="hint">(搜索模式)</span></label>
+            <select id="cfg-search-mode">
+              <option value="hybrid">hybrid — 向量 + 全文混合检索</option>
+              <option value="vector">vector — 仅向量搜索</option>
+              <option value="fts">fts — 仅全文搜索</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>rrf_k <span class="hint">(RRF 常数，通常不需修改)</span></label>
+            <input type="number" id="cfg-rrf-k" placeholder="60" min="1" step="1">
+          </div>
+          <div class="form-group">
+            <label>vector_weight <span class="hint">(向量搜索权重)</span></label>
+            <input type="number" id="cfg-vector-weight" placeholder="0.7" min="0" max="1" step="0.05">
+          </div>
+          <div class="form-group">
+            <label>fts_weight <span class="hint">(全文搜索权重)</span></label>
+            <input type="number" id="cfg-fts-weight" placeholder="0.3" min="0" max="1" step="0.05">
+          </div>
+          <div class="form-group">
+            <label>adaptive_filter <span class="hint">(自适应过滤)</span></label>
+            <select id="cfg-adaptive-filter">
+              <option value="true">启用 — 自动过滤低分结果</option>
+              <option value="false">禁用</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>score_gap_threshold <span class="hint">(分数间隙阈值)</span></label>
+            <input type="number" id="cfg-score-gap" placeholder="0.15" min="0" max="1" step="0.05">
+          </div>
+          <div class="form-group">
+            <label>min_confidence_ratio <span class="hint">(最低置信度比率)</span></label>
+            <input type="number" id="cfg-min-confidence" placeholder="0.6" min="0" max="1" step="0.05">
           </div>
         </div>
         <div class="settings-actions">
-          <button class="btn btn-primary" onclick="saveDefaultProjectConfig()">保存默认项目</button>
+          <button class="btn btn-primary" onclick="saveSearchConfig()">保存搜索配置</button>
+        </div>
         </div>
       </div>
 
-      <div class="settings-card" style="margin-top:20px">
+      <!-- Reranker Config -->
+
+      <div class="settings-card collapsed" style="margin-top:20px" onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
+        <h2>Reranker 精排配置</h2>
+        <div class="settings-card-body" style="max-height:2000px">
+        <p class="settings-desc">配置服务端精排。provider=none 时不启用精排，由客户端 LLM 通过 confidence 字段自行判断。更改 provider 需重启服务生效。</p>
+        <div class="settings-grid">
+          <div class="form-group full-width">
+            <label>provider <span class="hint">(精排模式)</span></label>
+            <select id="cfg-reranker-provider">
+              <option value="none">none — 不启用服务端精排（客户端自行判断）</option>
+              <option value="ollama_llm">ollama_llm — 使用 Ollama LLM 打分精排</option>
+              <option value="cross_encoder">cross_encoder — 使用本地 cross-encoder 模型</option>
+              <option value="jina">jina — 使用 Jina Reranker API</option>
+            </select>
+          </div>
+        </div>
+        <div class="settings-actions">
+          <button class="btn btn-primary" onclick="saveRerankerConfig()">保存 Reranker 配置</button>
+          <span class="hint" style="margin-left:10px">更改 provider 后需重启服务</span>
+        </div>
+        </div>
+      </div>
+
+      <!-- Cache Config -->
+
+      <div class="settings-card collapsed" style="margin-top:20px" onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
         <h2>PageIndex-Lite 配置</h2>
+        <div class="settings-card-body" style="max-height:2000px">
         <p class="settings-desc">长文档章节树检索增强层配置（不替代原向量/FTS主流程）。</p>
         <div class="settings-grid">
           <div class="form-group">
@@ -1473,111 +2247,14 @@ textarea {
         <div class="settings-actions">
           <button class="btn btn-primary" onclick="savePageIndexLiteConfig()">保存 PageIndex-Lite 配置</button>
         </div>
-      </div>
-
-      <div class="settings-card" style="margin-top:20px">
-        <h2>可安装 Rules / Prompts</h2>
-        <p class="settings-desc">浏览本地与共享注册表中的可安装项，支持预览并一键安装到项目 `.cursor/` 目录。</p>
-        <div class="settings-grid">
-          <div class="form-group">
-            <label>来源</label>
-            <select id="installables-source-filter" onchange="loadInstallables()">
-              <option value="">全部</option>
-              <option value="local">local</option>
-              <option value="registry">registry</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>类型</label>
-            <select id="installables-type-filter" onchange="loadInstallables()">
-              <option value="">全部</option>
-              <option value="rule">rule</option>
-              <option value="prompt">prompt</option>
-            </select>
-          </div>
-        </div>
-        <div class="settings-actions">
-          <button class="btn btn-secondary" onclick="loadInstallables()">刷新列表</button>
-        </div>
-        <div id="installables-list" class="exp-list" style="margin-top:10px">
-          <div class="empty-state"><h3>暂无数据</h3><p>点击“刷新列表”加载可安装项</p></div>
-        </div>
-        <div style="margin-top:12px">
-          <label style="font-size:12px;color:var(--text-muted)">预览内容</label>
-          <pre id="installables-preview" class="code-block" style="max-height:260px;overflow:auto;white-space:pre-wrap">选择一项后点击“预览”</pre>
         </div>
       </div>
 
       <!-- Search Pipeline Config -->
-      <div class="settings-card" style="margin-top:20px">
-        <h2>搜索管线配置</h2>
-        <p class="settings-desc">配置混合检索模式、RRF 融合参数和自适应过滤。</p>
-        <div class="settings-grid">
-          <div class="form-group">
-            <label>search mode <span class="hint">(搜索模式)</span></label>
-            <select id="cfg-search-mode">
-              <option value="hybrid">hybrid — 向量 + 全文混合检索</option>
-              <option value="vector">vector — 仅向量搜索</option>
-              <option value="fts">fts — 仅全文搜索</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>rrf_k <span class="hint">(RRF 常数，通常不需修改)</span></label>
-            <input type="number" id="cfg-rrf-k" placeholder="60" min="1" step="1">
-          </div>
-          <div class="form-group">
-            <label>vector_weight <span class="hint">(向量搜索权重)</span></label>
-            <input type="number" id="cfg-vector-weight" placeholder="0.7" min="0" max="1" step="0.05">
-          </div>
-          <div class="form-group">
-            <label>fts_weight <span class="hint">(全文搜索权重)</span></label>
-            <input type="number" id="cfg-fts-weight" placeholder="0.3" min="0" max="1" step="0.05">
-          </div>
-          <div class="form-group">
-            <label>adaptive_filter <span class="hint">(自适应过滤)</span></label>
-            <select id="cfg-adaptive-filter">
-              <option value="true">启用 — 自动过滤低分结果</option>
-              <option value="false">禁用</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>score_gap_threshold <span class="hint">(分数间隙阈值)</span></label>
-            <input type="number" id="cfg-score-gap" placeholder="0.15" min="0" max="1" step="0.05">
-          </div>
-          <div class="form-group">
-            <label>min_confidence_ratio <span class="hint">(最低置信度比率)</span></label>
-            <input type="number" id="cfg-min-confidence" placeholder="0.6" min="0" max="1" step="0.05">
-          </div>
-        </div>
-        <div class="settings-actions">
-          <button class="btn btn-primary" onclick="saveSearchConfig()">保存搜索配置</button>
-        </div>
-      </div>
 
-      <!-- Reranker Config -->
-      <div class="settings-card" style="margin-top:20px">
-        <h2>Reranker 精排配置</h2>
-        <p class="settings-desc">配置服务端精排。provider=none 时不启用精排，由客户端 LLM 通过 confidence 字段自行判断。更改 provider 需重启服务生效。</p>
-        <div class="settings-grid">
-          <div class="form-group full-width">
-            <label>provider <span class="hint">(精排模式)</span></label>
-            <select id="cfg-reranker-provider">
-              <option value="none">none — 不启用服务端精排（客户端自行判断）</option>
-              <option value="ollama_llm">ollama_llm — 使用 Ollama LLM 打分精排</option>
-              <option value="cross_encoder">cross_encoder — 使用本地 cross-encoder 模型</option>
-              <option value="jina">jina — 使用 Jina Reranker API</option>
-            </select>
-          </div>
-        </div>
-        <div class="settings-actions">
-          <button class="btn btn-primary" onclick="saveRerankerConfig()">保存 Reranker 配置</button>
-          <span class="hint" style="margin-left:10px">更改 provider 后需重启服务</span>
-        </div>
-      </div>
-
-      <!-- Cache Config -->
-      <div class="settings-card" style="margin-top:20px">
+      <div class="settings-card collapsed" style="margin-top:20px" onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
         <h2>缓存配置</h2>
+        <div class="settings-card-body" style="max-height:2000px">
         <p class="settings-desc">查询结果和向量嵌入的内存缓存，减少重复计算。</p>
         <div class="settings-grid">
           <div class="form-group">
@@ -1604,20 +2281,12 @@ textarea {
           <button class="btn btn-primary" onclick="saveCacheConfig()">保存缓存配置</button>
           <button class="btn btn-danger" onclick="clearCache()" style="margin-left:10px">清除缓存</button>
         </div>
-      </div>
-
-      <div class="settings-card" style="margin-top:20px">
-        <h2>Webhook 通知</h2>
-        <p class="settings-desc">配置事件通知目标 URL，当经验创建/更新/发布时自动发送 HTTP 通知。</p>
-        <div id="webhook-list" style="margin-bottom:12px"></div>
-        <div class="settings-actions">
-          <button class="btn btn-primary" onclick="addWebhookRow()">添加 Webhook</button>
-          <button class="btn btn-primary" onclick="saveWebhookConfig()" style="margin-left:10px">保存配置</button>
         </div>
       </div>
 
-      <div class="settings-card" style="margin-top:20px">
+      <div class="settings-card collapsed" style="margin-top:20px" onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
         <h2>Schema 配置</h2>
+        <div class="settings-card-body" style="max-height:2000px">
         <p class="settings-desc">当前生效的经验类型体系。可切换预设包或从示例文档自动生成。</p>
         <div style="margin-bottom:12px">
           <label>预设包:</label>
@@ -1640,11 +2309,103 @@ textarea {
           <button class="btn btn-primary" onclick="applyGeneratedSchema()" style="margin-top:8px">应用此配置</button>
         </div>
         <div id="schema-current-types" style="margin-top:12px"></div>
+        </div>
+      </div>
+
+      <!-- User Management (admin only) -->
+
+      <div class="settings-card collapsed" style="margin-top:20px" onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
+        <h2>Webhook 通知</h2>
+        <div class="settings-card-body" style="max-height:2000px">
+        <p class="settings-desc">配置事件通知目标 URL，当经验创建/更新/发布时自动发送 HTTP 通知。</p>
+        <div id="webhook-list" style="margin-bottom:12px"></div>
+        <div class="settings-actions">
+          <button class="btn btn-primary" onclick="addWebhookRow()">添加 Webhook</button>
+          <button class="btn btn-primary" onclick="saveWebhookConfig()" style="margin-left:10px">保存配置</button>
+        </div>
+        </div>
+      </div>
+
+      <div id="settings-key-mgmt" class="settings-card collapsed" style="margin-top:20px; display:none;" onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
+        <h2>用户管理</h2>
+        <div class="settings-card-body" style="max-height:2000px">
+        <p class="settings-desc">管理团队成员账号、审批注册申请、分配角色和 API Key。</p>
+
+        <!-- Pending approvals -->
+        <div id="keys-pending-section" style="margin-bottom:20px; display:none;">
+          <h3 style="margin-bottom:8px; color:var(--warning, #f59e0b);">待审批用户</h3>
+          <div id="keys-pending-list"></div>
+        </div>
+
+        <!-- Active users -->
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0;">已有用户</h3>
+          <button class="btn btn-primary" onclick="openAdminCreateUser()" style="font-size:13px; padding:5px 14px;">+ 添加用户</button>
+        </div>
+        <div id="keys-active-list"></div>
+
+        <!-- Admin create user form (hidden by default) -->
+        <div id="admin-create-user-form" style="display:none; margin-top:16px; padding:16px; background:var(--bg-input); border:1px solid var(--border); border-radius:var(--radius);">
+          <h3 style="margin-top:0; margin-bottom:12px;">添加新用户</h3>
+          <div class="settings-grid" style="gap:10px;">
+            <div class="form-group">
+              <label>用户名</label>
+              <input type="text" id="admin-new-username" placeholder="用户名">
+            </div>
+            <div class="form-group">
+              <label>角色</label>
+              <select id="admin-new-role" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius);padding:6px 10px;">
+                <option value="editor">editor</option>
+                <option value="viewer">viewer</option>
+                <option value="admin">admin</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>初始密码 <span class="hint">(可选，用于 Web 登录)</span></label>
+              <input type="password" id="admin-new-password" placeholder="留空则只能用 API Key">
+            </div>
+          </div>
+          <div style="margin-top:12px;">
+            <button class="btn btn-primary" onclick="createUserAdmin()">创建</button>
+            <button class="btn" onclick="document.getElementById('admin-create-user-form').style.display='none'" style="margin-left:8px;">取消</button>
+          </div>
+        </div>
+        </div>
+      </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Dedup Fullpage -->
+    <div id="page-dedup" class="page hidden">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+        <button class="btn btn-secondary btn-sm" onclick="navigate('settings')">← 返回设置</button>
+        <h2 style="font-size:16px;font-weight:600;color:var(--text-secondary);margin:0">去重检测与合并</h2>
+      </div>
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px">
+        <label style="font-size:13px;color:var(--text-secondary)">相似度阈值:</label>
+        <input type="number" id="dedup-threshold" value="0.92" min="0.5" max="1" step="0.01" style="width:80px;padding:6px 10px;font-size:13px">
+        <button class="btn btn-primary btn-sm" onclick="loadDuplicates()">扫描重复</button>
+        <button class="btn btn-secondary btn-sm" onclick="scanStale()">扫描过期</button>
+      </div>
+      <div id="stale-results" class="hidden" style="margin-bottom:24px">
+        <h4 style="font-size:14px;font-weight:600;color:var(--yellow);margin-bottom:12px">疑似过时的经验</h4>
+        <div id="stale-list" class="exp-list"></div>
+      </div>
+      <div id="dedup-results">
+        <div class="empty-state"><h3>点击"扫描重复"检测重复经验</h3></div>
       </div>
     </div>
 
     <!-- Detail Page -->
     <div id="page-detail" class="page hidden"></div>
+  </div>
+
+  <!-- Task Slideout -->
+  <div id="task-slideout-overlay" class="task-slideout-overlay" onclick="closeTaskSlideout()"></div>
+  <div id="task-slideout" class="task-slideout">
+    <div id="task-slideout-content"></div>
   </div>
 </div>
 
@@ -1747,24 +2508,10 @@ textarea {
       <!-- Manual Mode (form fields) -->
       <div id="create-mode-manual">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-          <label style="font-size:13px;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap">
-            <input type="checkbox" id="create-quick-mode" onchange="toggleCreateQuickMode()" style="accent-color:var(--accent);flex-shrink:0">
+          <label class="custom-check">
+            <input type="checkbox" id="create-quick-mode" onchange="toggleCreateQuickMode()">
             快捷模式（仅标题+问题+标签）
           </label>
-        </div>
-        <div class="form-group">
-          <label>类型</label>
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <select id="create-experience-type" onchange="onCreateTypeChange()" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);flex:1;min-width:160px">
-              <option value="general">📝 通用经验</option>
-            </select>
-            <div id="ai-type-suggest" class="hidden" style="display:none;align-items:center;gap:6px;padding:4px 10px;border-radius:8px;background:var(--bg-hover);font-size:12px;color:var(--text-secondary);animation:fadeIn 0.3s ease">
-              <span style="font-size:14px">💡</span>
-              <span id="ai-type-suggest-text"></span>
-              <button onclick="acceptTypeSuggestion()" style="background:var(--accent);color:white;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer">采纳</button>
-              <button onclick="dismissTypeSuggestion()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:13px;padding:2px">&times;</button>
-            </div>
-          </div>
         </div>
         <div class="form-group">
           <label>标题 *</label>
@@ -1777,26 +2524,39 @@ textarea {
         <div class="form-group">
           <label>标签（逗号分隔）</label>
           <input type="text" id="create-tags" placeholder="python, docker, fastapi">
+          <div id="create-tag-suggestions" class="tag-suggestions"></div>
         </div>
-        <div class="form-group">
-          <label>项目</label>
-          <input type="text" id="create-project" placeholder="默认项目">
+        <div class="compact-fields" id="create-compact-fields">
+          <div class="form-group">
+            <label>类型</label>
+            <select id="create-experience-type" onchange="onCreateTypeChange()">
+              <option value="general">📝 通用经验</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>项目</label>
+            <input type="text" id="create-project" placeholder="默认项目">
+          </div>
+          <div class="form-group" id="create-language-field">
+            <label>编程语言</label>
+            <input type="text" id="create-language" placeholder="python">
+          </div>
+          <div class="form-group" id="create-framework-field">
+            <label>框架</label>
+            <input type="text" id="create-framework" placeholder="fastapi">
+          </div>
+        </div>
+        <div id="ai-type-suggest" class="hidden" style="display:none;align-items:center;gap:6px;padding:4px 10px;border-radius:8px;background:var(--bg-input);font-size:12px;color:var(--text-secondary);margin-bottom:12px">
+          <span style="font-size:14px">💡</span>
+          <span id="ai-type-suggest-text"></span>
+          <button onclick="acceptTypeSuggestion()" style="background:var(--accent);color:white;border:none;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer">采纳</button>
+          <button onclick="dismissTypeSuggestion()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:13px;padding:2px">&times;</button>
         </div>
         <div id="create-type-specific-fields"></div>
         <div id="create-extended-fields">
           <div class="form-group">
             <label>解决方案</label>
-            <textarea id="create-solution" placeholder="如何解决的？关键步骤是什么？" style="min-height:120px"></textarea>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-            <div class="form-group">
-              <label>编程语言</label>
-              <input type="text" id="create-language" placeholder="python">
-            </div>
-            <div class="form-group">
-              <label>框架</label>
-              <input type="text" id="create-framework" placeholder="fastapi">
-            </div>
+            <textarea id="create-solution" placeholder="如何解决的？关键步骤是什么？" style="min-height:140px"></textarea>
           </div>
           <div class="form-group">
             <label>代码片段</label>
@@ -1804,18 +2564,18 @@ textarea {
           </div>
           <div class="form-group">
             <label>Git 引用（每行一个，格式: type|url|hash|描述）</label>
-            <textarea id="create-git-refs" placeholder="pr|https://github.com/...|abc123|修复说明&#10;commit|https://...|def456|提交说明" style="min-height:60px;font-family:var(--font-mono);font-size:12px"></textarea>
+            <textarea id="create-git-refs" placeholder="pr|https://github.com/...|abc123|修复说明&#10;commit|https://...|def456|提交说明" style="min-height:50px;font-family:var(--font-mono);font-size:12px"></textarea>
           </div>
           <div class="form-group">
             <label>相关链接（每行一个，格式: url 或 url|标题）</label>
-            <textarea id="create-related-links" placeholder="https://example.com/doc&#10;https://wiki...|相关文档标题" style="min-height:60px;font-family:var(--font-mono);font-size:12px"></textarea>
+            <textarea id="create-related-links" placeholder="https://example.com/doc&#10;https://wiki...|相关文档标题" style="min-height:50px;font-family:var(--font-mono);font-size:12px"></textarea>
           </div>
         </div>
       </div>
     </div>
     <div class="modal-footer" style="display:flex;align-items:center;gap:16px">
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);cursor:pointer;margin-right:auto;white-space:nowrap">
-        <input type="checkbox" id="create-draft-checkbox" style="accent-color:var(--accent);flex-shrink:0">
+      <label class="custom-check" style="margin-right:auto">
+        <input type="checkbox" id="create-draft-checkbox">
         保存为草稿
       </label>
       <button class="btn btn-secondary" onclick="closeCreateModal()">取消</button>
@@ -1834,33 +2594,42 @@ textarea {
     <div class="modal-body">
       <input type="hidden" id="edit-exp-id" value="">
       <div class="form-group">
-        <label>类型</label>
-        <select id="edit-experience-type" onchange="onEditTypeChange()" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border)">
-          <option value="general">📝 通用经验</option>
-        </select>
-      </div>
-      <div class="form-group">
         <label>标题 *</label>
         <input type="text" id="edit-title" placeholder="简洁描述这个经验...">
       </div>
       <div class="form-group">
         <label>问题描述 *</label>
-        <textarea id="edit-problem" placeholder="遇到了什么问题？上下文是什么？"></textarea>
+        <textarea id="edit-problem" placeholder="遇到了什么问题？上下文是什么？" style="min-height:100px"></textarea>
       </div>
-      <div class="form-group">
-        <label>根因分析</label>
-        <textarea id="edit-root-cause" placeholder="为什么会出现这个问题？（可选）"></textarea>
-      </div>
-      <div id="edit-type-specific-fields"></div>
       <div class="form-group">
         <label>解决方案</label>
-        <textarea id="edit-solution" placeholder="如何解决的？关键步骤是什么？" style="min-height:120px"></textarea>
+        <textarea id="edit-solution" placeholder="如何解决的？关键步骤是什么？" style="min-height:140px"></textarea>
       </div>
       <div class="form-group">
         <label>标签（逗号分隔）</label>
         <input type="text" id="edit-tags" placeholder="python, docker, fastapi">
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="compact-fields">
+        <div class="form-group">
+          <label>类型</label>
+          <select id="edit-experience-type" onchange="onEditTypeChange()">
+            <option value="general">📝 通用经验</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>可见范围</label>
+          <select id="edit-visibility">
+            <option value="project">项目内</option>
+            <option value="private">仅自己</option>
+            <option value="global">全局通用</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>所属项目</label>
+          <input type="text" id="edit-project" placeholder="default">
+        </div>
+      </div>
+      <div class="compact-fields">
         <div class="form-group">
           <label>编程语言</label>
           <input type="text" id="edit-language" placeholder="python">
@@ -1870,6 +2639,11 @@ textarea {
           <input type="text" id="edit-framework" placeholder="fastapi">
         </div>
       </div>
+      <div class="form-group">
+        <label>根因分析</label>
+        <textarea id="edit-root-cause" placeholder="为什么会出现这个问题？（可选）" style="min-height:60px"></textarea>
+      </div>
+      <div id="edit-type-specific-fields"></div>
       <div class="form-group">
         <label>代码片段</label>
         <textarea id="edit-code" placeholder="相关代码示例..." style="font-family:var(--font-mono);font-size:13px"></textarea>

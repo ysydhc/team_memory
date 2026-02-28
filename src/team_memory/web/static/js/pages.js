@@ -39,19 +39,20 @@ export function renderExpList(containerId, experiences) {
         container.innerHTML = `<div class="empty-state"><div class="icon">📚</div><h3>暂无经验记录</h3><p>点击右上角"新建经验"添加第一条</p></div>`;
         return;
     }
-    const severityClass = (s) => (s ? 'severity-badge severity-' + String(s).toLowerCase() : '');
+    const tierBadge = (v) => {
+        const tier = v.quality_tier || 'bronze';
+        const score = v.quality_score ?? 100;
+        const colors = { gold: '#FFD700', silver: '#C0C0C0', bronze: '#CD7F32', outdated: '#888' };
+        const bg = { gold: '#FFF8E1', silver: '#F5F5F5', bronze: '#FFF3E0', outdated: '#F5F5F5' };
+        return `<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:${bg[tier]||bg.bronze};color:${colors[tier]||colors.bronze};font-weight:600;margin-left:4px">${tier.charAt(0).toUpperCase()+tier.slice(1)} ${score}</span>`;
+    };
+    const pinBadge = (v) => v.pinned ? '<span style="font-size:10px;margin-left:4px" title="已置顶">📌</span>' : '';
     container.innerHTML = experiences
         .map((exp) => {
             const view = exp.parent || exp;
             const cardId = exp.group_id || view.id;
             const isStale = view.last_used_at && isStaleDate(view.last_used_at);
             const typeIcon = typeIcons[view.experience_type] || defaultTypeIcons[view.experience_type] || '📝';
-            const sevBadge = view.severity ? `<span class="${severityClass(view.severity)}">${view.severity}</span>` : '';
-            const comp = view.completeness_score != null ? view.completeness_score : null;
-            const compBar =
-                comp != null
-                    ? `<div class="completeness-bar" title="完整度 ${comp}%"><div class="completeness-bar-fill" style="width:${comp}%"></div></div>`
-                    : '';
             const matchedNodes = (exp.matched_nodes || [])
                 .slice(0, 2)
                 .map((n) => `<span class="tag" style="background:var(--accent-glow);color:var(--accent)">#${esc(n.path || '')} ${esc(n.node_title || '')}</span>`)
@@ -60,24 +61,34 @@ export function renderExpList(containerId, experiences) {
                 exp.tree_score !== undefined
                     ? `<span class="tag" style="background:var(--accent-glow);color:var(--accent)">tree ${(Number(exp.tree_score) * 100).toFixed(0)}%</span>`
                     : '';
+            const projectTag = view.project
+                ? `<span class="tag" style="background:var(--bg-input);color:var(--text-muted);font-size:11px">📁 ${esc(view.project)}</span>`
+                : '';
+            const viewCount = view.view_count || 0;
+            const useCount = view.use_count || 0;
+            const avgRating = view.avg_rating || 0;
+            const ratingDisplay = avgRating > 0 ? `★ ${avgRating.toFixed(1)}` : '★ -';
+            const metricsHtml = `<div class="card-metrics"><span>${ratingDisplay}</span><span>👁 ${viewCount}</span><span>📊 ${useCount}</span></div>`;
             return `
     <div class="exp-card" onclick="showDetail('${cardId}')">
       <div class="exp-card-header">
         <div class="exp-card-title">
-          <span class="type-icon">${typeIcon}</span>${esc(view.title)}${isStale ? '<span class="stale-badge">疑似过时</span>' : ''}${view.publish_status === 'draft' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--accent-glow);color:var(--accent);margin-left:6px">草稿</span>' : ''}${view.review_status === 'pending' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--yellow-bg);color:var(--yellow);margin-left:6px">待审核</span>' : ''} ${sevBadge}
+          <span class="type-icon">${typeIcon}</span>${esc(view.title)}${tierBadge(view)}${pinBadge(view)}${isStale ? '<span class="stale-badge">疑似过时</span>' : ''}${view.status === 'draft' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--accent-glow);color:var(--accent);margin-left:6px">草稿</span>' : ''}${view.status === 'review' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--yellow-bg);color:var(--yellow);margin-left:6px">审核中</span>' : ''}${view.status === 'rejected' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--red-bg);color:var(--red);margin-left:6px">已拒绝</span>' : ''}${view.visibility === 'private' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--green-bg,#e8f5e9);color:var(--green,#2e7d32);margin-left:6px">仅自己</span>' : ''}${view.visibility === 'global' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:#e0f2fe;color:#0369a1;margin-left:6px">全局</span>' : ''}
         </div>
         <div class="exp-card-meta">
+          ${projectTag}
           ${exp.similarity !== undefined ? `<span class="similarity-badge">${(exp.similarity * 100).toFixed(0)}%</span>` : ''}
-          ${view.avg_rating > 0 ? `<span class="rating-badge">★ ${view.avg_rating.toFixed(1)}</span>` : ''}
           <span>${timeAgo(view.created_at)}</span>
         </div>
       </div>
       <div class="exp-card-desc">${esc(view.description || '')}</div>
       ${matchedNodes || treeScore ? `<div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap">${treeScore}${matchedNodes}</div>` : ''}
-      ${compBar ? `<div style="margin-bottom:8px">${compBar}</div>` : ''}
       <div class="exp-card-footer">
-        <div class="exp-card-tags">${(view.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join('')}${view.category ? `<span class="tag" style="background:var(--bg-input);color:var(--text-muted)">${esc(view.category)}</span>` : ''}${view.project ? `<span class="tag" style="background:var(--bg-input);color:var(--text-muted)">project:${esc(view.project)}</span>` : ''}${exp.children_count > 0 || exp.total_children > 0 ? `<span class="children-badge">${exp.children_count || exp.total_children} steps</span>` : ''}</div>
-        <span style="font-size:12px;color:var(--text-muted)">${esc(view.created_by || '')}</span>
+        <div class="exp-card-tags">${view.visibility === 'global' ? '<span class="tag" style="background:#e0f2fe;color:#0369a1;font-weight:600">全局</span>' : ''}${view.visibility === 'private' ? '<span class="tag" style="background:#f3e8ff;color:#7c3aed;font-weight:600">仅自己</span>' : ''}${(view.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join('')}${view.category ? `<span class="tag" style="background:var(--bg-input);color:var(--text-muted)">${esc(view.category)}</span>` : ''}${exp.children_count > 0 || exp.total_children > 0 ? `<span class="children-badge">${exp.children_count || exp.total_children} steps</span>` : ''}</div>
+        <div style="display:flex;align-items:center;gap:12px">
+          ${metricsHtml}
+          <span style="font-size:12px;color:var(--text-muted)">${esc(view.created_by || '')}</span>
+        </div>
       </div>
     </div>
   `;
@@ -85,45 +96,26 @@ export function renderExpList(containerId, experiences) {
         .join('');
 }
 
-// ===== Dashboard =====
+// ===== Dashboard (merged into list page) =====
 export async function loadDashboard() {
-    try {
-        const project = resolveProjectInput(document.getElementById('list-project-filter')?.value);
-        const [stats, listData] = await Promise.all([
-            api('GET', '/api/v1/stats'),
-            api('GET', `/api/v1/experiences?page=1&page_size=5&project=${encodeURIComponent(project)}`),
-        ]);
+    loadList(1);
+}
 
-        document.getElementById('stat-total').textContent = stats.total_experiences || 0;
-        document.getElementById('stat-recent').textContent = stats.recent_7days || 0;
-        document.getElementById('stat-stale').textContent = stats.stale_count || 0;
-        document.getElementById('stat-pending').textContent = stats.pending_reviews || 0;
-        try {
-            const draftsData = await api('GET', '/api/v1/experiences/drafts?page=1&page_size=1');
-            document.getElementById('stat-drafts').textContent = draftsData.total || 0;
-        } catch (_) {
-            document.getElementById('stat-drafts').textContent = '—';
-        }
+// ===== List Sub-tab State =====
+let _listSubTab = 'all'; // 'all' | 'draft' | 'review'
 
-        const tags = stats.tag_distribution || {};
-        state.allTags = tags;
-        const tagCount = Object.keys(tags).length;
-        document.getElementById('stat-tags').textContent = tagCount;
-
-        const tagsBar = document.getElementById('dashboard-tags');
-        if (tagCount === 0) {
-            tagsBar.innerHTML = '<span class="tag-label">暂无标签</span>';
-        } else {
-            tagsBar.innerHTML = Object.entries(tags)
-                .sort((a, b) => b[1] - a[1])
-                .map(([tag, cnt]) => `<span class="tag" onclick="filterByTag('${tag}')">${tag} (${cnt})</span>`)
-                .join('');
-        }
-
-        renderExpList('dashboard-recent', listData.experiences);
-    } catch (e) {
-        toast('加载仪表盘失败: ' + e.message, 'error');
+export function switchListSubTab(tab) {
+    _listSubTab = tab;
+    document.querySelectorAll('#page-list .mode-tab').forEach((el) => el.classList.remove('active'));
+    const tabEl = document.getElementById(`list-tab-${tab}`);
+    if (tabEl) tabEl.classList.add('active');
+    const statusFilter = document.getElementById('list-status-filter');
+    if (statusFilter) {
+        if (tab === 'draft') statusFilter.value = 'draft';
+        else if (tab === 'review') statusFilter.value = 'review';
+        else statusFilter.value = '';
     }
+    loadList(1);
 }
 
 // ===== Experience List =====
@@ -132,30 +124,52 @@ export async function loadList(page = 1) {
     const container = document.getElementById('list-content');
     container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
+    const multiProjects = window.getSelectedProjects ? window.getSelectedProjects('list') : [];
+    const projectFilter = multiProjects.length > 0
+        ? multiProjects.join(',')
+        : (state.activeProject || state.defaultProject || 'default');
+
+    // Load stats for the top cards
+    try {
+        const stats = await api(
+            'GET',
+            `/api/v1/stats?project=${encodeURIComponent(projectFilter)}`
+        );
+        const el = (id) => document.getElementById(id);
+        if (el('stat-total')) el('stat-total').textContent = stats.total_experiences || 0;
+        if (el('stat-recent')) el('stat-recent').textContent = stats.recent_7days || 0;
+        if (el('stat-pending')) el('stat-pending').textContent = stats.pending_reviews || 0;
+        const tags = stats.tag_distribution || {};
+        if (el('stat-tags')) el('stat-tags').textContent = Object.keys(tags).length;
+    } catch (_) { /* stats load failure is non-blocking */ }
+
     try {
         const statusFilter = document.getElementById('list-status-filter')?.value || '';
         const typeFilter = document.getElementById('list-type-filter')?.value || '';
-        const severityFilter = document.getElementById('list-severity-filter')?.value || '';
-        const categoryFilter = document.getElementById('list-category-filter')?.value || '';
-        const progressFilter = document.getElementById('list-progress-filter')?.value || '';
-        const projectFilterRaw = document.getElementById('list-project-filter')?.value || '';
-        const projectFilter = resolveProjectInput(projectFilterRaw);
+        const tierFilter = document.getElementById('list-tier-filter')?.value || '';
+        const visibilityFilter = document.getElementById('list-visibility-filter')?.value || '';
         let url = `/api/v1/experiences?page=${page}&page_size=15`;
         if (projectFilter) url += `&project=${encodeURIComponent(projectFilter)}`;
+        if (visibilityFilter) url += `&visibility=${encodeURIComponent(visibilityFilter)}`;
         if (statusFilter) url += `&status=${statusFilter}`;
         if (state.selectedTag) url += `&tag=${encodeURIComponent(state.selectedTag)}`;
         if (typeFilter) url += `&experience_type=${encodeURIComponent(typeFilter)}`;
-        if (severityFilter) url += `&severity=${encodeURIComponent(severityFilter)}`;
-        if (categoryFilter) url += `&category=${encodeURIComponent(categoryFilter)}`;
-        if (progressFilter) url += `&progress_status=${encodeURIComponent(progressFilter)}`;
+        if (tierFilter) url += `&quality_tier=${encodeURIComponent(tierFilter)}`;
 
-        const data = await api('GET', url);
+        let tagUrl = `/api/v1/tags?project=${encodeURIComponent(projectFilter)}`;
+        if (visibilityFilter) tagUrl += `&visibility=${encodeURIComponent(visibilityFilter)}`;
+        const [data, tagData] = await Promise.all([
+            api('GET', url),
+            api('GET', tagUrl),
+        ]);
         renderExpList('list-content', data.experiences);
         renderPagination(data);
 
-        if (Object.keys(state.allTags).length > 0) {
-            const bar = document.getElementById('list-tags-bar');
-            const tagEntries = Object.entries(state.allTags).sort((a, b) => b[1] - a[1]);
+        const tags = tagData.tags || {};
+        state.allTags = tags;
+        const bar = document.getElementById('list-tags-bar');
+        if (Object.keys(tags).length > 0) {
+            const tagEntries = Object.entries(tags).sort((a, b) => b[1] - a[1]);
             bar.innerHTML =
                 '<span class="tag-label">标签筛选:</span>' +
                 `<span class="tag" onclick="filterByTag(null)" style="${!state.selectedTag ? 'background:var(--accent);color:#fff' : ''}">全部</span>` +
@@ -165,6 +179,8 @@ export async function loadList(page = 1) {
                             `<span class="tag" onclick="filterByTag('${tag}')" style="${state.selectedTag === tag ? 'background:var(--accent);color:#fff' : ''}">${tag} (${cnt})</span>`
                     )
                     .join('');
+        } else {
+            bar.innerHTML = '';
         }
     } catch (e) {
         container.innerHTML = `<div class="empty-state"><h3>加载失败</h3><p>${e.message}</p></div>`;
@@ -173,6 +189,7 @@ export async function loadList(page = 1) {
 
 export function filterByTag(tag) {
     state.selectedTag = tag;
+    state.listPage = 1;
     navigate('list');
 }
 
@@ -193,7 +210,11 @@ function renderPagination(data) {
 export const viewDetail = (id) => showDetail(id);
 
 export async function showDetail(id) {
+    state.detailReferrer = state.currentPage || 'list';
     state.currentPage = 'detail';
+    if (location.hash !== '#detail/' + id) {
+        history.pushState(null, '', location.pathname + '#detail/' + id);
+    }
     document.querySelectorAll('.page').forEach((p) => p.classList.add('hidden'));
     document.querySelectorAll('.topbar-nav a').forEach((a) => a.classList.remove('active'));
     const page = document.getElementById('page-detail');
@@ -203,8 +224,13 @@ export async function showDetail(id) {
     try {
         const exp = await api('GET', `/api/v1/experiences/${id}`);
         const typeIcon = typeIcons[exp.experience_type] || defaultTypeIcons[exp.experience_type] || '📝';
-        const sevClass = exp.severity ? 'severity-badge severity-' + String(exp.severity).toLowerCase() : '';
-        const typeBadges = `<span class="type-icon" style="font-size:20px">${typeIcon}</span>${exp.severity ? `<span class="${sevClass}" style="margin-left:8px">${exp.severity}</span>` : ''}${exp.category ? `<span class="tag" style="margin-left:6px;background:var(--bg-input);color:var(--text-muted)">${esc(exp.category)}</span>` : ''}${exp.progress_status ? `<span class="tag" style="margin-left:6px;background:var(--bg-input);color:var(--text-secondary)">${esc(exp.progress_status)}</span>` : ''}`;
+        const dTier = exp.quality_tier || 'bronze';
+        const dScore = exp.quality_score ?? 100;
+        const tierColors = { gold: '#FFD700', silver: '#C0C0C0', bronze: '#CD7F32', outdated: '#888' };
+        const tierBg = { gold: '#FFF8E1', silver: '#F5F5F5', bronze: '#FFF3E0', outdated: '#F5F5F5' };
+        const tierLabel = `<span style="font-size:12px;padding:2px 8px;border-radius:4px;background:${tierBg[dTier]||tierBg.bronze};color:${tierColors[dTier]||tierColors.bronze};font-weight:600;margin-left:8px">${dTier.charAt(0).toUpperCase()+dTier.slice(1)} ${dScore}</span>`;
+        const pinnedLabel = exp.pinned ? '<span style="margin-left:4px" title="已置顶，不衰减">📌</span>' : '';
+        const typeBadges = `<span class="type-icon" style="font-size:20px">${typeIcon}</span>${tierLabel}${pinnedLabel}`;
         const compBar =
             exp.completeness_score != null
                 ? `<div class="completeness-bar" style="max-width:120px" title="完整度 ${exp.completeness_score}%"><div class="completeness-bar-fill" style="width:${exp.completeness_score}%"></div></div>`
@@ -259,14 +285,21 @@ export async function showDetail(id) {
       </div>`
                 : '';
 
+        const backPage = state.detailReferrer || 'list';
+        const backLabels = { reviews: '审核队列', drafts: '草稿箱', list: '经验列表', dashboard: '仪表盘' };
+        const backLabel = backLabels[backPage] || '列表';
         page.innerHTML = `
-      <button class="back-btn" onclick="navigate('list')">← 返回列表</button>
+      <button class="back-btn" onclick="navigate('${backPage}')">← 返回${backLabel}</button>
       <div class="detail-view">
         <div class="detail-header">
           <h1>${typeBadges} ${esc(exp.title)}
-            ${exp.publish_status === 'draft' ? '<span style="font-size:13px;padding:2px 10px;border-radius:4px;background:var(--accent-glow);color:var(--accent);margin-left:12px;vertical-align:middle">草稿</span>' : ''}
-            ${exp.review_status === 'pending' ? '<span style="font-size:13px;padding:2px 10px;border-radius:4px;background:var(--yellow-bg);color:var(--yellow);margin-left:12px;vertical-align:middle">待审核</span>' : ''}
-            ${exp.publish_status === 'rejected' ? '<span style="font-size:13px;padding:2px 10px;border-radius:4px;background:var(--red-bg);color:var(--red);margin-left:12px;vertical-align:middle">已退回</span>' : ''}
+            ${exp.status === 'draft' ? '<span style="font-size:13px;padding:2px 10px;border-radius:4px;background:var(--accent-glow);color:var(--accent);margin-left:12px;vertical-align:middle">草稿</span>' : ''}
+            ${exp.status === 'review' ? '<span style="font-size:13px;padding:2px 10px;border-radius:4px;background:var(--yellow-bg);color:var(--yellow);margin-left:12px;vertical-align:middle">审核中</span>' : ''}
+            ${exp.status === 'published' ? '<span style="font-size:13px;padding:2px 10px;border-radius:4px;background:var(--green-bg,#e8f5e9);color:var(--green,#2e7d32);margin-left:12px;vertical-align:middle">已发布</span>' : ''}
+            ${exp.status === 'rejected' ? '<span style="font-size:13px;padding:2px 10px;border-radius:4px;background:var(--red-bg);color:var(--red);margin-left:12px;vertical-align:middle">已拒绝</span>' : ''}
+            ${exp.visibility === 'private' ? '<span style="font-size:11px;padding:1px 8px;border-radius:3px;background:#f3e8ff;color:#7c3aed;margin-left:6px;vertical-align:middle">仅自己</span>' : ''}
+            ${exp.visibility === 'global' ? '<span style="font-size:11px;padding:1px 8px;border-radius:3px;background:#e0f2fe;color:#0369a1;margin-left:6px;vertical-align:middle">全局</span>' : ''}
+            ${exp.visibility === 'project' ? '<span style="font-size:11px;padding:1px 8px;border-radius:3px;background:#fef3c7;color:#92400e;margin-left:6px;vertical-align:middle">项目内</span>' : ''}
           </h1>
           <div class="detail-meta" style="align-items:center">
             ${compBar ? `<span>${compBar}</span>` : ''}
@@ -351,21 +384,26 @@ export async function showDetail(id) {
             </div>
           </div>
           ` : ''}
-        </div>
-        <div class="detail-section">
-          <h3 style="cursor:pointer" onclick="toggleVersionHistory('${exp.id}')">版本历史 <span id="version-toggle-arrow" style="font-size:11px">▸</span></h3>
-          <div id="version-history-panel" class="hidden">
-            <div id="version-list" class="version-list">
-              <div class="loading"><div class="spinner"></div></div>
+          <div class="detail-section">
+            <h3 style="cursor:pointer" onclick="toggleVersionHistory('${exp.id}')">版本历史 <span id="version-toggle-arrow" style="font-size:11px">▸</span></h3>
+            <div id="version-history-panel" class="hidden">
+              <div id="version-list" class="version-list">
+                <div class="loading"><div class="spinner"></div></div>
+              </div>
             </div>
           </div>
         </div>
         <div class="detail-actions">
-          ${exp.publish_status === 'draft' ? `<button class="btn btn-sm" style="background:var(--green);color:#fff" onclick="publishDraft('${exp.id}')">发布</button>` : ''}
-          ${exp.review_status === 'pending' ? `
-            <button class="btn btn-sm" style="background:var(--green);color:#fff" onclick="reviewExperience('${exp.id}', 'approved')">批准</button>
-            <button class="btn btn-sm" style="background:var(--red-bg);color:var(--red)" onclick="reviewExperience('${exp.id}', 'rejected')">退回</button>
-          ` : ''}
+          ${exp.status === 'draft' ? `
+            <button class="btn btn-sm" style="background:var(--yellow);color:#fff" onclick="changeExpStatus('${exp.id}','review')">提交审核</button>
+            <button class="btn btn-sm" style="background:var(--green);color:#fff;margin-left:4px" onclick="changeExpStatus('${exp.id}','published')">直接发布</button>` : ''}
+          ${exp.status === 'review' ? `
+            <button class="btn btn-sm" style="background:var(--green);color:#fff" onclick="changeExpStatus('${exp.id}','published')">批准发布</button>
+            <button class="btn btn-sm" style="background:var(--red-bg);color:var(--red);margin-left:4px" onclick="changeExpStatus('${exp.id}','rejected')">拒绝</button>` : ''}
+          ${exp.status === 'rejected' ? `
+            <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="changeExpStatus('${exp.id}','draft')">退回草稿</button>` : ''}
+          ${exp.status === 'published' ? `
+            <button class="btn btn-sm" style="background:var(--accent-glow);color:var(--accent)" onclick="changeExpStatus('${exp.id}','draft')">撤回到草稿</button>` : ''}
           <button class="btn btn-primary btn-sm" onclick="openEditModal('${exp.id}')">✏️ 编辑</button>
           <button class="btn btn-primary btn-sm" onclick="openFeedbackModal('${exp.id}')">💬 提交反馈</button>
           ${!exp.summary ? `<button class="btn btn-sm" style="background:var(--accent-glow);color:var(--accent)" onclick="generateSummary('${exp.id}')">📝 生成摘要</button>` : ''}
@@ -385,7 +423,7 @@ export async function loadDrafts() {
     const container = document.getElementById('drafts-content');
     container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
     try {
-        const project = resolveProjectInput(document.getElementById('list-project-filter')?.value);
+        const project = state.activeProject || state.defaultProject || 'default';
         const data = await api('GET', `/api/v1/experiences/drafts?page=1&page_size=50&project=${encodeURIComponent(project)}`);
         if (!data.experiences || data.experiences.length === 0) {
             container.innerHTML = '<div class="empty-state"><div class="icon">📝</div><h3>暂无草稿</h3><p>创建经验时勾选"保存为草稿"即可</p></div>';
@@ -403,7 +441,7 @@ export async function loadDrafts() {
         <div class="exp-card-footer">
           <div class="exp-card-tags">${(exp.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>
           <div style="display:flex;gap:6px">
-            <button class="btn btn-sm" style="background:var(--green);color:#fff;font-size:11px;padding:2px 10px" onclick="event.stopPropagation();publishDraft('${exp.id}')">发布</button>
+            <button class="btn btn-sm" style="background:var(--green);color:#fff;font-size:11px;padding:2px 10px" onclick="event.stopPropagation();changeExpStatus('${exp.id}','published')">发布</button>
             <button class="btn btn-sm" style="background:var(--red-bg);color:var(--red);font-size:11px;padding:2px 10px" onclick="event.stopPropagation();deleteExp('${exp.id}')">删除</button>
           </div>
         </div>
@@ -416,16 +454,25 @@ export async function loadDrafts() {
     }
 }
 
-export async function publishDraft(id) {
-    if (!confirm('确定要发布这条经验吗？发布后将出现在搜索结果中。')) return;
+export async function changeExpStatus(id, newStatus, newVisibility = null) {
+    const labels = { draft: '草稿', review: '审核中', published: '已发布', rejected: '已拒绝' };
+    const label = labels[newStatus] || newStatus;
+    if (!confirm(`确定要将状态改为「${label}」吗？`)) return;
     try {
-        await api('POST', `/api/v1/experiences/${id}/publish`);
-        toast('经验已发布', 'success');
-        if (state.currentPage === 'drafts') loadDrafts();
-        else if (state.currentPage === 'dashboard') loadDashboard();
+        const body = { status: newStatus };
+        if (newVisibility) body.visibility = newVisibility;
+        const res = await api('POST', `/api/v1/experiences/${id}/status`, body);
+        toast(res.message || '操作成功', 'success');
+        showDetail(id);
     } catch (e) {
-        toast('发布失败: ' + e.message, 'error');
+        toast('状态变更失败: ' + e.message, 'error');
     }
+}
+
+export async function publishDraft(id, target = 'personal') {
+    const newStatus = target === 'team' ? 'review' : 'published';
+    const newVis = target === 'team' ? 'project' : 'private';
+    await changeExpStatus(id, newStatus, newVis);
 }
 
 // ===== Reviews =====
@@ -441,19 +488,17 @@ export async function loadReviews() {
         container.innerHTML = data.experiences
             .map(
                 (exp) => `
-      <div class="exp-card">
+      <div class="exp-card" onclick="viewDetail('${exp.id}')" style="cursor:pointer">
         <div class="exp-card-header">
-          <div class="exp-card-title" onclick="viewDetail('${exp.id}')" style="cursor:pointer">${esc(exp.title)} <span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--yellow-bg);color:var(--yellow)">待审核</span></div>
+          <div class="exp-card-title">${esc(exp.title)} <span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--yellow-bg);color:var(--yellow)">待审核</span></div>
           <div class="exp-card-meta"><span>来源: ${exp.source || 'unknown'}</span><span>${timeAgo(exp.created_at)}</span></div>
         </div>
         <div class="exp-card-desc">${esc((exp.description || '').substring(0, 200))}</div>
-        <div style="display:flex;gap:8px;margin-top:8px">
+        <div style="display:flex;gap:8px;margin-top:8px" onclick="event.stopPropagation()">
           <button class="btn btn-sm" style="background:var(--green);color:#fff;font-size:12px;padding:4px 16px"
-            onclick="reviewExperience('${exp.id}', 'approved')">批准并发布</button>
+            onclick="changeExpStatus('${exp.id}', 'published')">批准并发布</button>
           <button class="btn btn-sm" style="background:var(--red-bg);color:var(--red);font-size:12px;padding:4px 16px"
-            onclick="reviewExperience('${exp.id}', 'rejected')">退回</button>
-          <button class="btn btn-sm" style="background:var(--bg-input);color:var(--text-secondary);font-size:12px;padding:4px 16px"
-            onclick="viewDetail('${exp.id}')">查看详情</button>
+            onclick="changeExpStatus('${exp.id}', 'rejected')">退回</button>
         </div>
         <div class="exp-card-footer" style="margin-top:8px">
           <div class="exp-card-tags">${(exp.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>
@@ -469,21 +514,8 @@ export async function loadReviews() {
 }
 
 export async function reviewExperience(id, status) {
-    const action = status === 'approved' ? '批准' : '退回';
-    let note = null;
-    if (status === 'rejected') {
-        note = prompt('请输入退回原因（可选）:');
-        if (note === null) return;
-    } else {
-        if (!confirm(`确定要${action}这条经验吗？`)) return;
-    }
-    try {
-        await api('POST', `/api/v1/experiences/${id}/review`, { review_status: status, review_note: note });
-        toast(`经验已${action}`, 'success');
-        loadReviews();
-    } catch (e) {
-        toast(`${action}失败: ` + e.message, 'error');
-    }
+    const newStatus = status === 'approved' ? 'published' : 'rejected';
+    await changeExpStatus(id, newStatus);
 }
 
 // ===== Version History =====
@@ -581,6 +613,212 @@ export async function rollbackVersion(expId, versionId, verNum) {
     }
 }
 
+// ===== Usage Stats =====
+export async function loadUsageStats() {
+    const container = document.getElementById('usage-content');
+    container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    try {
+        const project = state.activeProject || state.defaultProject || 'default';
+        const results = await Promise.allSettled([
+            api('GET', '/api/v1/analytics/tool-usage/summary'),
+            api('GET', '/api/v1/analytics/tool-usage?group_by=tool'),
+            api('GET', '/api/v1/analytics/tool-usage?group_by=user'),
+            api('GET', `/api/v1/analytics/skills-rules?project=${encodeURIComponent(project)}`),
+        ]);
+        const val = (r, fallback) => r.status === 'fulfilled' ? r.value : fallback;
+        const summary = val(results[0], { top_tools: [], total_calls: 0 });
+        const byTool = val(results[1], { data: [] });
+        const byUser = val(results[2], { data: [] });
+        const skillsRules = val(results[3], { categories: {}, total_files: 0, workspace: '' });
+        const maxCount = Math.max(...(byTool.data || []).map(t => t.count), 1);
+        const toolRows = (byTool.data || []).slice(0, 15).map(t => {
+            const pct = Math.round((t.count / maxCount) * 100);
+            const typeLabel = t.tool_type === 'skill' ? '🎯' : '🔧';
+            return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                <span style="min-width:24px">${typeLabel}</span>
+                <span style="min-width:160px;font-size:13px">${esc(t.tool_name)}</span>
+                <div style="flex:1;background:var(--bg-secondary);border-radius:4px;height:20px;overflow:hidden">
+                    <div style="width:${pct}%;background:var(--accent);height:100%;border-radius:4px;transition:width .3s"></div>
+                </div>
+                <span style="min-width:60px;text-align:right;font-size:13px;font-weight:500">${t.count} 次</span>
+                <span style="min-width:80px;text-align:right;font-size:12px;color:var(--text-muted)">${t.avg_duration_ms ?? 0}ms</span>
+                ${(t.errors ?? 0) > 0 ? `<span style="color:var(--red);font-size:12px">${t.errors} 错误</span>` : ''}
+            </div>`;
+        }).join('');
+
+        const userRows = (byUser.data || []).map(u => `
+            <tr><td>${esc(u.user)}</td><td style="text-align:right">${u.count}</td><td style="text-align:right">${u.avg_duration_ms ?? 0}ms</td></tr>
+        `).join('');
+
+        const catLabels = {
+            claude_skills: { icon: '🎯', label: 'Claude Skills (项目)' },
+            cursor_rules: { icon: '📏', label: 'Cursor Rules (项目)' },
+            cursor_prompts: { icon: '💬', label: 'Cursor Prompts (项目)' },
+            cursor_skills: { icon: '🔧', label: 'Cursor Skills (项目)' },
+            user_claude_skills: { icon: '🎯', label: 'Claude Skills (用户级)' },
+            user_cursor_skills: { icon: '🔧', label: 'Cursor Skills (用户级)' },
+        };
+        const cats = skillsRules.categories || {};
+        const skillsHtml = Object.entries(cats).map(([catKey, cat]) => {
+            const meta = catLabels[catKey] || { icon: '📄', label: catKey };
+            if (cat.count === 0) return '';
+            const files = cat.files || [];
+            const visible = files.slice(0, 8);
+            const rest = files.slice(8);
+            const fileCard = (f) => {
+                const isEnabled = f.enabled !== false;
+                const attrEsc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                const fullPath = attrEsc(f.full_path);
+                const dirPath = attrEsc(f.dir_path);
+                const summary = (f.summary || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                return `<div class="sr-card${!isEnabled ? ' disabled' : ''}" data-enabled="${isEnabled}">
+                    <div class="sr-card-header">
+                        <span class="sr-card-name">${esc(f.name)}</span>
+                        <label class="sr-toggle" onclick="event.stopPropagation();toggleSkillFile('${esc(catKey)}','${esc(f.path)}',this)">
+                            <span class="sr-toggle-bg" style="background:${isEnabled ? 'var(--green)' : 'var(--border)'}"></span>
+                            <span class="sr-toggle-knob" style="${isEnabled ? 'left:18px' : 'left:2px'}"></span>
+                        </label>
+                    </div>
+                    ${summary ? `<div class="sr-card-summary" title="${summary}">${summary}</div>` : ''}
+                    <div class="sr-card-actions">
+                        <button type="button" class="sr-file-btn" title="查看内容" data-full-path="${fullPath}">👁</button>
+                        <button type="button" class="sr-file-btn" title="复制路径" data-dir-path="${dirPath}">📂</button>
+                    </div>
+                </div>`;
+            };
+            const visibleHtml = visible.map(fileCard).join('');
+            const restHtml = rest.length ? rest.map(fileCard).join('') : '';
+            return `<div class="sr-category-card">
+                <div class="sr-category-header">
+                    <span class="sr-category-icon">${meta.icon}</span>
+                    <span class="sr-category-label">${meta.label}</span>
+                    <span class="sr-category-count">${cat.count}</span>
+                </div>
+                <div class="sr-category-grid">${visibleHtml}</div>
+                ${rest.length ? `<div class="sr-category-more hidden">${restHtml}</div><button type="button" class="btn btn-secondary btn-sm sr-more-btn" data-rest-count="${rest.length}" onclick="toggleSrCategoryMore(this)">更多 (${rest.length})</button>` : ''}
+            </div>`;
+        }).join('');
+
+        container.innerHTML = `
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
+                <div class="stat-card"><div class="stat-value">${summary.total_calls || 0}</div><div class="stat-label">近30天 MCP 调用</div></div>
+                <div class="stat-card"><div class="stat-value">${(summary.top_tools || []).length}</div><div class="stat-label">活跃工具数</div></div>
+                <div class="stat-card"><div class="stat-value">${skillsRules.total_files || 0}</div><div class="stat-label">Skills / Rules 总数</div></div>
+            </div>
+
+            <div class="mode-tabs" style="margin-bottom:16px">
+                <button class="mode-tab active" onclick="switchUsageTab('skills',this)">Skills & Rules</button>
+                <button class="mode-tab" onclick="switchUsageTab('mcp',this)">MCP 工具调用</button>
+                <button class="mode-tab" onclick="switchUsageTab('team',this)">团队成员</button>
+            </div>
+
+            <div id="usage-tab-skills">
+                ${skillsHtml || '<p style="color:var(--text-muted)">未扫描到 Skills/Rules 文件</p>'}
+                <div style="font-size:11px;color:var(--text-muted);margin-top:8px">工作区: ${esc(skillsRules.workspace || '')}</div>
+            </div>
+
+            <div id="usage-tab-mcp" class="hidden">
+                ${toolRows || '<p style="color:var(--text-muted)">暂无调用数据</p>'}
+            </div>
+
+            <div id="usage-tab-team" class="hidden">
+                ${userRows ? `<table class="data-table"><thead><tr><th>用户</th><th style="text-align:right">调用次数</th><th style="text-align:right">平均耗时</th></tr></thead><tbody>${userRows}</tbody></table>` : '<p style="color:var(--text-muted)">暂无数据</p>'}
+            </div>
+        `;
+        if (!container._srDelegation) {
+            container._srDelegation = true;
+            container.addEventListener('click', (e) => {
+                const el = e.target.nodeType === 1 ? e.target : e.target.parentElement;
+                if (!el) return;
+                const fullPathBtn = el.closest('button[data-full-path]');
+                if (fullPathBtn && fullPathBtn.dataset.fullPath) {
+                    e.stopPropagation();
+                    previewSkillContent(fullPathBtn.dataset.fullPath);
+                    return;
+                }
+                const dirPathBtn = el.closest('button[data-dir-path]');
+                if (dirPathBtn && dirPathBtn.dataset.dirPath) {
+                    e.stopPropagation();
+                    copyToClipboard(dirPathBtn.dataset.dirPath);
+                }
+            });
+        }
+    } catch (e) {
+        container.innerHTML = `<div class="empty-state"><h3>加载失败</h3><p>${esc(e.message)}</p></div>`;
+    }
+}
+
+window.toggleSrCategoryMore = function(btn) {
+    const card = btn.closest('.sr-category-card');
+    const moreEl = card && card.querySelector('.sr-category-more');
+    if (!moreEl) return;
+    const isHidden = moreEl.classList.toggle('hidden');
+    const n = moreEl.querySelectorAll('.sr-card').length;
+    btn.textContent = isHidden ? `更多 (${n})` : '收起';
+};
+
+// ===== Usage Sub-tabs =====
+window.switchUsageTab = function(tab, btn) {
+    ['skills', 'mcp', 'team'].forEach(t => {
+        const el = document.getElementById('usage-tab-' + t);
+        if (el) el.classList.toggle('hidden', t !== tab);
+    });
+    if (btn) {
+        btn.closest('.mode-tabs').querySelectorAll('.mode-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    }
+};
+
+window.previewSkillContent = async function(fullPath) {
+    try {
+        const data = await api('GET', `/api/v1/analytics/skills-rules/preview?path=${encodeURIComponent(fullPath)}`);
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+        overlay.innerHTML = `<div class="modal" style="max-width:720px">
+            <div class="modal-header"><h2>${esc(data.name || 'Preview')}</h2>
+            <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button></div>
+            <div class="modal-body"><pre style="white-space:pre-wrap;word-break:break-word;font-family:var(--font-mono);font-size:12px;max-height:60vh;overflow:auto;background:var(--bg-input);padding:16px;border-radius:var(--radius);border:1px solid var(--border)">${esc(data.content || '')}</pre></div>
+        </div>`;
+        document.body.appendChild(overlay);
+    } catch (e) {
+        toast('预览失败: ' + e.message, 'error');
+    }
+};
+
+window.copyToClipboard = function(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        toast('路径已复制: ' + text, 'success');
+    }).catch(() => {
+        toast(text, 'info');
+    });
+};
+
+// ===== Skill Toggle =====
+window.toggleSkillFile = async function(category, filePath, toggleEl) {
+    const bg = toggleEl.querySelector('.sr-toggle-bg');
+    const knob = toggleEl.querySelector('.sr-toggle-knob');
+    if (!bg || !knob) return;
+    const isCurrentlyEnabled = knob.style.left === '18px';
+    const newEnabled = !isCurrentlyEnabled;
+    try {
+        const project = state.activeProject || state.defaultProject || 'default';
+        await api('POST', `/api/v1/analytics/skills-rules/toggle?project=${encodeURIComponent(project)}`, {
+            category, file_path: filePath, enabled: newEnabled,
+        });
+        bg.style.background = newEnabled ? 'var(--green)' : 'var(--border)';
+        knob.style.left = newEnabled ? '18px' : '2px';
+        const card = toggleEl.closest('.sr-card');
+        if (card) {
+            card.classList.toggle('disabled', !newEnabled);
+            card.dataset.enabled = newEnabled ? 'true' : 'false';
+        }
+        toast(newEnabled ? '已启用' : '已禁用', 'success');
+    } catch (e) {
+        toast('操作失败: ' + e.message, 'error');
+    }
+};
+
 // ===== Dedup =====
 export async function loadDuplicates() {
     const threshold = parseFloat(document.getElementById('dedup-threshold').value) || 0.92;
@@ -594,25 +832,52 @@ export async function loadDuplicates() {
         }
         container.innerHTML = data.duplicates
             .map(
-                (pair) => `
+                (pair, idx) => `
       <div class="dup-pair">
         <div class="dup-card">
           <h4>${esc(pair.exp_a.title)}</h4>
           <p>${esc((pair.exp_a.description || '').substring(0, 120))}...</p>
           <div style="margin-top:8px">${(pair.exp_a.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>
-          <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">评分: ${(pair.exp_a.avg_rating || 0).toFixed(1)} · 引用: ${pair.exp_a.use_count || 0}</div>
-          <button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="doMerge('${pair.exp_a.id}','${pair.exp_b.id}')">保留此经验</button>
+          <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">评分: ${(pair.exp_a.avg_rating || 0).toFixed(1)} · 引用: ${pair.exp_a.use_count || 0} · 查看: ${pair.exp_a.view_count || 0}</div>
+          <div style="margin-top:8px;display:flex;gap:6px">
+            <button class="btn btn-primary btn-sm" onclick="doMerge('${pair.exp_a.id}','${pair.exp_b.id}')">✓ 保留此项</button>
+            <button class="btn btn-secondary btn-sm" onclick="showDetail('${pair.exp_a.id}')">详情</button>
+          </div>
         </div>
         <div class="dup-vs">
           <div class="sim-score">${(pair.similarity * 100).toFixed(1)}%</div>
           <div style="font-size:11px;color:var(--text-muted)">相似度</div>
+          <button class="btn btn-secondary btn-sm" style="margin-top:8px;font-size:11px" onclick="toggleDupDiff(${idx})">对比差异</button>
         </div>
         <div class="dup-card">
           <h4>${esc(pair.exp_b.title)}</h4>
           <p>${esc((pair.exp_b.description || '').substring(0, 120))}...</p>
           <div style="margin-top:8px">${(pair.exp_b.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>
-          <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">评分: ${(pair.exp_b.avg_rating || 0).toFixed(1)} · 引用: ${pair.exp_b.use_count || 0}</div>
-          <button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="doMerge('${pair.exp_b.id}','${pair.exp_a.id}')">保留此经验</button>
+          <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">评分: ${(pair.exp_b.avg_rating || 0).toFixed(1)} · 引用: ${pair.exp_b.use_count || 0} · 查看: ${pair.exp_b.view_count || 0}</div>
+          <div style="margin-top:8px;display:flex;gap:6px">
+            <button class="btn btn-primary btn-sm" onclick="doMerge('${pair.exp_b.id}','${pair.exp_a.id}')">✓ 保留此项</button>
+            <button class="btn btn-secondary btn-sm" onclick="showDetail('${pair.exp_b.id}')">详情</button>
+          </div>
+        </div>
+      </div>
+      <div id="dup-diff-${idx}" class="hidden" style="margin-top:-8px;margin-bottom:16px">
+        <div class="diff-container" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+          <div class="diff-pane" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:12px;overflow:auto;max-height:400px">
+            <h4 style="margin:0 0 8px;color:var(--red,#ef4444)">A: ${esc(pair.exp_a.title)}</h4>
+            <div style="font-size:12px">${_renderDiffHighlight(pair.exp_a.description || '', pair.exp_b.description || '', 'a')}</div>
+            ${pair.exp_a.solution ? `<div style="margin-top:8px;font-size:12px"><strong>方案:</strong><br>${_renderDiffHighlight(pair.exp_a.solution, pair.exp_b.solution || '', 'a')}</div>` : ''}
+          </div>
+          <div class="diff-pane" style="background:var(--bg-secondary);border:1px solid var(--accent);border-radius:var(--radius);padding:12px;overflow:auto;max-height:400px">
+            <h4 style="margin:0 0 8px;color:var(--accent)">合并预览</h4>
+            <div id="merge-preview-${idx}" style="font-size:12px;color:var(--text-muted)">
+              <button class="btn btn-secondary btn-sm" onclick="loadMergePreview(${idx},'${pair.exp_a.id}','${pair.exp_b.id}')">生成预览</button>
+            </div>
+          </div>
+          <div class="diff-pane" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:12px;overflow:auto;max-height:400px">
+            <h4 style="margin:0 0 8px;color:var(--green,#22c55e)">B: ${esc(pair.exp_b.title)}</h4>
+            <div style="font-size:12px">${_renderDiffHighlight(pair.exp_b.description || '', pair.exp_a.description || '', 'b')}</div>
+            ${pair.exp_b.solution ? `<div style="margin-top:8px;font-size:12px"><strong>方案:</strong><br>${_renderDiffHighlight(pair.exp_b.solution, pair.exp_a.solution || '', 'b')}</div>` : ''}
+          </div>
         </div>
       </div>
     `
@@ -632,6 +897,43 @@ export async function doMerge(primaryId, secondaryId) {
         loadDuplicates();
     } catch (e) {
         toast('合并失败: ' + e.message, 'error');
+    }
+}
+
+// ===== Diff Highlight + Merge Preview =====
+function _renderDiffHighlight(text, otherText, side) {
+    const linesA = text.split('\n');
+    const linesB = new Set(otherText.split('\n').map(l => l.trim()));
+    return linesA.map(line => {
+        const trimmed = line.trim();
+        if (!trimmed) return '';
+        const isCommon = linesB.has(trimmed);
+        if (isCommon) {
+            return `<div style="background:rgba(255,213,79,0.15);padding:1px 4px;border-radius:2px">${esc(line)}</div>`;
+        }
+        const color = side === 'a' ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)';
+        return `<div style="background:${color};padding:1px 4px;border-radius:2px">${esc(line)}</div>`;
+    }).join('');
+}
+
+export async function loadMergePreview(idx, primaryId, secondaryId) {
+    const container = document.getElementById('merge-preview-' + idx);
+    if (!container) return;
+    container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    try {
+        const data = await api('POST', '/api/v1/lifecycle/merge-preview', {
+            primary_id: primaryId,
+            secondary_id: secondaryId,
+        });
+        const m = data.merged;
+        container.innerHTML = `
+            <div style="margin-bottom:8px"><strong>${esc(m.title)}</strong></div>
+            <div style="white-space:pre-wrap;margin-bottom:8px">${esc(m.description || '')}</div>
+            ${m.solution ? `<div style="margin-top:8px"><strong>方案:</strong><br><div style="white-space:pre-wrap">${esc(m.solution)}</div></div>` : ''}
+            <div style="margin-top:8px">${(m.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>
+        `;
+    } catch (e) {
+        container.innerHTML = `<p style="color:var(--red)">${esc(e.message)}</p>`;
     }
 }
 
@@ -655,6 +957,34 @@ export async function scanStale() {
 }
 
 // ===== Settings / Installables =====
+export async function toggleInstallablePreview(itemIdEncoded, sourceEncoded, btn) {
+    const container = btn.parentElement?.querySelector('.inline-preview');
+    if (container && container.innerHTML) {
+        container.innerHTML = '';
+        btn.textContent = '预览';
+        return;
+    }
+    const itemId = decodeURIComponent(itemIdEncoded || '');
+    const source = decodeURIComponent(sourceEncoded || '');
+    try {
+        const data = await api('GET', `/api/v1/installables/preview?id=${encodeURIComponent(itemId)}&source=${encodeURIComponent(source)}`);
+        const target = btn.parentElement;
+        if (!target) return;
+        let previewEl = target.querySelector('.inline-preview');
+        if (!previewEl) {
+            previewEl = document.createElement('div');
+            previewEl.className = 'inline-preview';
+            previewEl.style.cssText =
+                'margin-top:8px;padding:10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;font-size:12px;white-space:pre-wrap;max-height:300px;overflow-y:auto;font-family:var(--font-mono);width:100%;flex-basis:100%';
+            target.appendChild(previewEl);
+        }
+        previewEl.textContent = data.content || 'No content';
+        btn.textContent = '收起';
+    } catch (e) {
+        toast('预览失败: ' + e.message, 'error');
+    }
+}
+
 export function renderInstallables(items) {
     const el = document.getElementById('installables-list');
     if (!el) return;
@@ -665,7 +995,10 @@ export function renderInstallables(items) {
     const canInstall = state.currentUser && state.currentUser.role === 'admin';
     el.innerHTML = items
         .map(
-            (item) => `
+            (item) => {
+                const id = encodeURIComponent(item.id || '');
+                const src = encodeURIComponent(item.source || '');
+                return `
     <div class="exp-card" style="cursor:default">
       <div class="exp-card-header">
         <div class="exp-card-title">
@@ -678,12 +1011,13 @@ export function renderInstallables(items) {
         </div>
       </div>
       <div class="exp-card-desc">${esc(item.description || '')}</div>
-      <div class="settings-actions" style="margin-top:8px">
-        <button class="btn btn-secondary btn-sm" onclick="previewInstallable('${encodeURIComponent(item.id || '')}','${encodeURIComponent(item.source || '')}')">预览</button>
-        ${canInstall ? `<button class="btn btn-primary btn-sm" onclick="installInstallable('${encodeURIComponent(item.id || '')}','${encodeURIComponent(item.source || '')}')">安装</button>` : '<span class="hint">仅 admin 可安装</span>'}
+      <div class="installable-item-actions" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start">
+        <button class="btn btn-secondary btn-sm" onclick="toggleInstallablePreview('${id}','${src}',this)">预览</button>
+        ${canInstall ? `<button class="btn btn-primary btn-sm" onclick="installInstallable('${id}','${src}')">安装</button>` : '<span class="hint">仅 admin 可安装</span>'}
       </div>
     </div>
-  `
+  `;
+            }
         )
         .join('');
 }
@@ -711,18 +1045,7 @@ export async function loadInstallables() {
 }
 
 export async function previewInstallable(itemIdEncoded, sourceEncoded) {
-    const id = decodeURIComponent(itemIdEncoded || '');
-    const source = decodeURIComponent(sourceEncoded || '');
-    try {
-        const data = await api('GET', `/api/v1/installables/preview?id=${encodeURIComponent(id)}&source=${encodeURIComponent(source)}`);
-        const pre = document.getElementById('installables-preview');
-        if (pre) {
-            const hint = data.truncated ? '\n\n[内容过长，已截断预览]' : '';
-            pre.textContent = data.content + hint;
-        }
-    } catch (e) {
-        toast('预览失败: ' + e.message, 'error');
-    }
+    toast('请使用行内预览按钮查看内容', 'info');
 }
 
 export async function installInstallable(itemIdEncoded, sourceEncoded) {
@@ -742,8 +1065,7 @@ export async function loadAllConfig() {
     try {
         const all = await api('GET', '/api/v1/config/all');
         state.defaultProject = all.default_project || state.defaultProject || 'default';
-        const projectInput = document.getElementById('cfg-default-project');
-        if (projectInput) projectInput.value = state.defaultProject;
+        populateSettingsProjectDropdown();
         applyProjectPlaceholders();
         const r = all.retrieval || {};
         state.cachedRetrievalConfig = r;
@@ -780,7 +1102,7 @@ export async function loadAllConfig() {
         document.getElementById('cfg-cache-max-size').value = c.max_size || 100;
         document.getElementById('cfg-cache-embedding-size').value = c.embedding_cache_size || 200;
         document.getElementById('settings-save-status').textContent = '';
-        await loadInstallables();
+        await Promise.all([loadInstallables(), loadScanDirsConfig()]);
     } catch (e) {
         toast('加载配置失败: ' + e.message, 'error');
     }
@@ -822,6 +1144,72 @@ export async function saveDefaultProjectConfig() {
         state.defaultProject = result.default_project || val;
         applyProjectPlaceholders();
         toast('默认项目已保存', 'success');
+    } catch (e) {
+        toast('保存失败: ' + e.message, 'error');
+    }
+}
+
+export async function loadScanDirsConfig() {
+    try {
+        const data = await api('GET', '/api/v1/config/scan-dirs');
+        const paths = data.project_paths || {};
+        const el = document.getElementById('cfg-project-paths');
+        if (el) {
+            el.value = Object.entries(paths).map(([k, v]) => `${k}=${v}`).join('\n');
+        }
+        const extras = data.extra_scan_dirs || [];
+        const el2 = document.getElementById('cfg-extra-scan-dirs');
+        if (el2) {
+            el2.value = extras.map(d => `${d.label}=${d.path}=${d.pattern}`).join('\n');
+        }
+        const customContainer = document.getElementById('custom-scan-paths');
+        if (customContainer) {
+            customContainer.innerHTML = '';
+            for (const d of extras) {
+                const row = document.createElement('div');
+                row.className = 'scan-path-row custom';
+                row.innerHTML = `<input class="scan-path-val" type="text" value="${d.path || ''}">` +
+                    `<span class="scan-path-del" onclick="this.parentElement.remove()">✕</span>`;
+                customContainer.appendChild(row);
+            }
+        }
+    } catch (_) { /* non-blocking */ }
+}
+
+export async function saveScanDirsConfig() {
+    const pathsText = document.getElementById('cfg-project-paths')?.value || '';
+    const project_paths = {};
+    for (const line of pathsText.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.includes('=')) continue;
+        const idx = trimmed.indexOf('=');
+        const key = trimmed.slice(0, idx).trim();
+        const val = trimmed.slice(idx + 1).trim();
+        if (key && val) project_paths[key] = val;
+    }
+    const extrasText = document.getElementById('cfg-extra-scan-dirs')?.value || '';
+    const extra_scan_dirs = [];
+    for (const line of extrasText.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const parts = trimmed.split('=');
+        if (parts.length >= 2) {
+            extra_scan_dirs.push({
+                label: parts[0].trim(),
+                path: parts[1].trim(),
+                pattern: parts[2]?.trim() || '*',
+            });
+        }
+    }
+    const customPaths = typeof window.getCustomScanPaths === 'function'
+        ? window.getCustomScanPaths() : [];
+    for (const cp of customPaths) {
+        const label = cp.replace(/[/\\]/g, '_').replace(/^_+|_+$/g, '');
+        extra_scan_dirs.push({ label, path: cp, pattern: '*' });
+    }
+    try {
+        await api('PUT', '/api/v1/config/scan-dirs', { project_paths, extra_scan_dirs });
+        toast('扫描目录配置已保存', 'success');
     } catch (e) {
         toast('保存失败: ' + e.message, 'error');
     }
@@ -973,12 +1361,17 @@ export async function loadCurrentSchema() {
 // ===== Summary =====
 export async function generateSummary(id) {
     try {
-        toast('正在生成摘要...', 'info');
+        toast('正在生成摘要（需要 LLM 服务）...', 'info');
         await api('POST', `/api/v1/experiences/${id}/summarize`);
         toast('摘要已生成', 'success');
         viewDetail(id);
     } catch (e) {
-        toast('摘要生成失败: ' + e.message, 'error');
+        const msg = e.message || '';
+        if (msg.includes('summary generation failed') || msg.includes('500') || msg.includes('Connection')) {
+            toast('摘要生成失败: 请确认 LLM 服务已启动且配置了对话模型（非 embedding 模型）。可在设置 > 检索参数中配置 summary_model', 'error');
+        } else {
+            toast('摘要生成失败: ' + msg, 'error');
+        }
     }
 }
 
@@ -990,4 +1383,739 @@ export async function batchSummarize() {
     } catch (e) {
         toast('批量摘要失败: ' + e.message, 'error');
     }
+}
+
+// ===== Key / User Management (admin) =====
+
+export async function loadKeyManagement() {
+    const card = document.getElementById('settings-key-mgmt');
+    if (!card) return;
+    if (!state.currentUser || state.currentUser.role !== 'admin') {
+        card.style.display = 'none';
+        return;
+    }
+    card.style.display = 'block';
+
+    try {
+        const data = await api('GET', '/api/v1/keys');
+        const keys = data.keys || [];
+        const pending = keys.filter(k => !k.is_active && !k.has_api_key);
+        const active = keys.filter(k => k.is_active || k.has_api_key);
+
+        const pendSec = document.getElementById('keys-pending-section');
+        const pendList = document.getElementById('keys-pending-list');
+        if (pending.length > 0) {
+            pendSec.style.display = 'block';
+            pendList.innerHTML = pending.map(k => `
+                <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:var(--bg-input); border:1px solid var(--border); border-radius:var(--radius); margin-bottom:8px;">
+                    <div>
+                        <strong>${_esc(k.user_name)}</strong>
+                        <span style="color:var(--text-secondary); font-size:12px; margin-left:8px;">注册于 ${_fmtDate(k.created_at)}</span>
+                    </div>
+                    <div>
+                        <button class="btn btn-primary" onclick="approveUser(${k.id})" style="font-size:12px; padding:4px 12px; margin-right:6px;">通过</button>
+                        <button class="btn" onclick="rejectUser(${k.id})" style="font-size:12px; padding:4px 12px; color:var(--danger, #ef4444);">拒绝</button>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            pendSec.style.display = 'none';
+        }
+
+        const activeList = document.getElementById('keys-active-list');
+        if (active.length === 0) {
+            activeList.innerHTML = '<p style="color:var(--text-secondary);">暂无用户</p>';
+        } else {
+            activeList.innerHTML = `
+                <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                    <thead>
+                        <tr style="text-align:left; border-bottom:2px solid var(--border);">
+                            <th style="padding:8px 6px;">用户名</th>
+                            <th style="padding:8px 6px;">角色</th>
+                            <th style="padding:8px 6px;">状态</th>
+                            <th style="padding:8px 6px;">API Key</th>
+                            <th style="padding:8px 6px;">创建时间</th>
+                            <th style="padding:8px 6px;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${active.map(k => `
+                            <tr style="border-bottom:1px solid var(--border);">
+                                <td style="padding:8px 6px; font-weight:500;">${_esc(k.user_name)}</td>
+                                <td style="padding:8px 6px;">
+                                    <select onchange="updateUserRole(${k.id}, this.value)" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px;">
+                                        <option value="admin" ${k.role === 'admin' ? 'selected' : ''}>admin</option>
+                                        <option value="editor" ${k.role === 'editor' ? 'selected' : ''}>editor</option>
+                                        <option value="viewer" ${k.role === 'viewer' ? 'selected' : ''}>viewer</option>
+                                    </select>
+                                </td>
+                                <td style="padding:8px 6px;">
+                                    <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;${k.is_active ? 'background:#dcfce7;color:#166534;' : 'background:#fee2e2;color:#991b1b;'}">${k.is_active ? '活跃' : '停用'}</span>
+                                </td>
+                                <td style="padding:8px 6px;">
+                                    <span style="font-size:11px; color:var(--text-secondary);">${k.has_api_key ? '已分配' : '无'}</span>
+                                </td>
+                                <td style="padding:8px 6px; font-size:12px; color:var(--text-secondary);">${_fmtDate(k.created_at)}</td>
+                                <td style="padding:8px 6px;">
+                                    ${k.is_active
+                                        ? `<button class="btn" onclick="toggleUserActive(${k.id}, false)" style="font-size:11px;padding:3px 8px;color:var(--danger,#ef4444);">停用</button>`
+                                        : `<button class="btn" onclick="toggleUserActive(${k.id}, true)" style="font-size:11px;padding:3px 8px;color:#16a34a;">激活</button>`
+                                    }
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+    } catch (e) {
+        toast('加载用户列表失败: ' + e.message, 'error');
+    }
+}
+
+export async function approveUser(id) {
+    try {
+        const result = await api('PUT', `/api/v1/keys/${id}`, { is_active: true });
+        if (result.api_key) {
+            const msg = `用户 ${result.user_name} 已审批通过。\n\nAPI Key（仅显示一次，请复制保存）：\n${result.api_key}`;
+            prompt('审批成功 - 请复制 API Key 分发给用户', result.api_key);
+            toast('审批成功，API Key 已生成', 'success');
+        } else {
+            toast('审批成功', 'success');
+        }
+        loadKeyManagement();
+    } catch (e) {
+        toast('审批失败: ' + e.message, 'error');
+    }
+}
+
+export async function rejectUser(id) {
+    if (!confirm('确定要拒绝此注册申请？将删除该记录。')) return;
+    try {
+        await api('DELETE', `/api/v1/keys/${id}`);
+        toast('已拒绝', 'success');
+        loadKeyManagement();
+    } catch (e) {
+        toast('操作失败: ' + e.message, 'error');
+    }
+}
+
+export async function createUserAdmin() {
+    const username = document.getElementById('admin-new-username').value.trim();
+    const role = document.getElementById('admin-new-role').value;
+    const password = document.getElementById('admin-new-password').value;
+    if (!username) { toast('请输入用户名', 'error'); return; }
+
+    try {
+        const body = { user_name: username, role };
+        if (password) body.password = password;
+        const result = await api('POST', '/api/v1/keys', body);
+        if (result.api_key) {
+            prompt('用户创建成功 - 请复制 API Key 分发给用户', result.api_key);
+        }
+        toast('用户创建成功', 'success');
+        document.getElementById('admin-create-user-form').style.display = 'none';
+        document.getElementById('admin-new-username').value = '';
+        document.getElementById('admin-new-password').value = '';
+        loadKeyManagement();
+    } catch (e) {
+        toast('创建失败: ' + e.message, 'error');
+    }
+}
+
+export async function updateUserRole(id, newRole) {
+    try {
+        await api('PUT', `/api/v1/keys/${id}`, { role: newRole });
+        toast('角色已更新', 'success');
+    } catch (e) {
+        toast('更新失败: ' + e.message, 'error');
+        loadKeyManagement();
+    }
+}
+
+export async function toggleUserActive(id, active) {
+    const action = active ? '激活' : '停用';
+    if (!confirm(`确定要${action}此用户？`)) return;
+    try {
+        await api('PUT', `/api/v1/keys/${id}`, { is_active: active });
+        toast(`用户已${action}`, 'success');
+        loadKeyManagement();
+    } catch (e) {
+        toast(`${action}失败: ` + e.message, 'error');
+        loadKeyManagement();
+    }
+}
+
+// ===== Tasks (Kanban Board) =====
+
+const WIP_LIMIT = 5;
+const KANBAN_COLS = [
+    { status: 'wait', label: '待处理', icon: '⏳' },
+    { status: 'plan', label: '计划中', icon: '📋' },
+    { status: 'in_progress', label: '进行中', icon: '🔧' },
+    { status: 'completed', label: '已完成', icon: '✅' },
+];
+const _kanbanVisibleGroups = new Set();
+let _kanbanInitialized = false;
+const PRIORITY_COLORS = { urgent: 'priority-urgent', high: 'priority-high', medium: 'priority-medium', low: 'priority-low' };
+
+function _daysUntilDue(dueDate) {
+    if (!dueDate) return null;
+    const diff = (new Date(dueDate) - new Date()) / (1000 * 60 * 60 * 24);
+    return Math.ceil(diff);
+}
+
+function _renderTaskCard(t) {
+    const priClass = PRIORITY_COLORS[t.priority] || 'priority-medium';
+    const stars = '★'.repeat(t.importance || 3) + '☆'.repeat(5 - (t.importance || 3));
+    const days = _daysUntilDue(t.due_date);
+    const dueTag = days !== null
+        ? (days < 0 ? `<span style="color:var(--red);font-weight:600">已逾期${-days}天</span>`
+            : days <= 3 ? `<span style="color:#f59e0b">${days}天后截止</span>`
+            : `<span>${days}天后</span>`)
+        : '';
+    const labels = (t.labels || []).map(l => `<span class="tag" style="font-size:10px">${esc(l)}</span>`).join('');
+    const sediment = t.sediment_experience_id
+        ? `<a onclick="event.stopPropagation();showDetail('${t.sediment_experience_id}')" style="font-size:10px;color:var(--accent);cursor:pointer">沉淀经验</a>`
+        : '';
+    return `
+    <div class="task-card" onclick="showTaskDetail('${t.id}')">
+      <div class="task-card-title"><span class="priority-dot ${priClass}"></span> ${esc(t.title)}</div>
+      <div class="task-card-meta">
+        <span class="importance-stars">${stars}</span>
+        ${dueTag}
+        ${labels}
+        ${sediment}
+      </div>
+    </div>`;
+}
+
+export async function loadTasks() {
+    const board = document.getElementById('tasks-board');
+    const groupsContainer = document.getElementById('tasks-groups');
+    if (!board) return;
+    board.innerHTML = '<div class="loading" style="grid-column:1/-1"><div class="spinner"></div></div>';
+    try {
+        const project = state.activeProject || state.defaultProject || 'default';
+        const groupFilter = document.getElementById('tasks-group-filter')?.value || '';
+        let url = `/api/v1/tasks?project=${encodeURIComponent(project)}`;
+        if (groupFilter) url += `&group_id=${encodeURIComponent(groupFilter)}`;
+        const [taskData, groupData] = await Promise.all([
+            api('GET', url),
+            api('GET', `/api/v1/task-groups?project=${encodeURIComponent(project)}`),
+        ]);
+        const tasks = taskData.tasks || [];
+        const groups = (groupData.groups || []).filter(g => !g.archived);
+
+        // Initialize visible groups on first load only (never auto-fill if user hid all)
+        if (!_kanbanInitialized && _kanbanVisibleGroups.size === 0 && groups.length > 0) {
+            groups.forEach(g => _kanbanVisibleGroups.add(g.id));
+            _kanbanInitialized = true;
+        }
+
+        const groupSelect = document.getElementById('tasks-group-filter');
+        if (groupSelect) {
+            const cur = groupSelect.value;
+            groupSelect.innerHTML = '<option value="">全部任务</option>' +
+                groups.map(g => `<option value="${g.id}"${g.id === cur ? ' selected' : ''}>${esc(g.title)}</option>`).join('');
+        }
+
+        // Filter tasks by visible groups (only when not filtering by a specific group)
+        const filteredTasks = groupFilter ? tasks : tasks.filter(t => {
+            if (!t.group_id) return true;
+            return _kanbanVisibleGroups.has(t.group_id);
+        });
+
+        let html = '';
+        if (groupFilter) {
+            const gName = groups.find(g => g.id === groupFilter)?.title || '任务组';
+            html += `<div style="grid-column:1/-1;margin-bottom:8px">
+              <button class="back-btn" onclick="document.getElementById('tasks-group-filter').value='';loadTasks()"
+                style="font-size:13px;cursor:pointer;background:none;border:none;color:var(--accent);padding:4px 0">
+                ← 返回全部任务</button>
+              <span style="font-size:13px;color:var(--text-muted);margin-left:8px">${esc(gName)}</span>
+            </div>`;
+        }
+        for (const col of KANBAN_COLS) {
+            const colTasks = filteredTasks.filter(t => t.status === col.status);
+            const isWip = col.status === 'in_progress';
+            const wipWarn = isWip && colTasks.length >= WIP_LIMIT
+                ? `<span class="wip-warn">WIP ${colTasks.length}/${WIP_LIMIT}</span>` : '';
+            html += `<div class="kanban-col">
+              <div class="kanban-col-header">
+                <span>${col.icon} ${col.label} <span class="col-count">(${colTasks.length})</span></span>
+                ${wipWarn}
+              </div>
+              ${colTasks.length === 0 ? '<div style="text-align:center;color:var(--text-muted);font-size:12px;padding:20px 0">暂无</div>' : colTasks.map(_renderTaskCard).join('')}
+            </div>`;
+        }
+        board.innerHTML = html;
+
+        const TASK_GROUP_VISIBLE = 3;
+        if (groups.length > 0 && !groupFilter) {
+            const cardsHtml = groups.map((g) => {
+                const prog = g.progress || { total: 0, completed: 0 };
+                const pct = prog.total
+                    ? Math.round(prog.completed / prog.total * 100) : 0;
+                const archiveBtn = pct === 100
+                    ? `<button class="archive-btn" onclick="event.stopPropagation();archiveGroup('${g.id}')">📦</button>`
+                    : '';
+                const circleColor = pct === 100
+                    ? 'var(--green)' : pct >= 50
+                        ? 'var(--accent)' : 'var(--yellow)';
+                const isVisible = _kanbanVisibleGroups.has(g.id);
+                const eyeIcon = isVisible ? '👁' : '👁‍🗨';
+                const eyeCls = isVisible ? 'active' : '';
+                const subtasks = (g.tasks || []).slice(0, 5);
+                const moreCount = (g.tasks || []).length - 5;
+                const subtaskHtml = subtasks.length > 0
+                    ? `<div class="group-subtask-list">${subtasks.map(t =>
+                        `<div class="group-subtask-item"><span class="status-dot ${t.status || 'wait'}"></span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.title)}</span></div>`
+                      ).join('')}${moreCount > 0 ? `<div style="font-size:11px;color:var(--text-muted)">+${moreCount} more</div>` : ''}</div>`
+                    : '';
+                return `<div class="task-group-card task-group-collapsible" style="min-width:320px;max-width:360px;flex-shrink:0;scroll-snap-align:start"
+                  onclick="document.getElementById('tasks-group-filter').value='${g.id}';loadTasks()">
+                  <div class="task-group-header">
+                    <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
+                      <svg class="circular-progress" viewBox="0 0 36 36">
+                        <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"></path>
+                        <path class="circle-fill" style="stroke:${circleColor}" stroke-dasharray="${pct}, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"></path>
+                        <text x="18" y="21" class="pct-text">${pct}%</text>
+                      </svg>
+                      <div style="flex:1;min-width:0">
+                        <div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.title)}</div>
+                        <div style="font-size:11px;color:var(--text-muted)">${prog.completed}/${prog.total} 任务完成</div>
+                      </div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:6px">
+                      <button class="group-eye-btn ${eyeCls}" title="${isVisible ? '隐藏看板任务' : '显示看板任务'}"
+                        onclick="event.stopPropagation();toggleGroupVisibility('${g.id}')">${eyeIcon}</button>
+                      ${archiveBtn}
+                    </div>
+                  </div>
+                  ${subtaskHtml}
+                </div>`;
+            }).join('');
+            groupsContainer.innerHTML =
+                `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">` +
+                `<h3 style="font-size:14px;font-weight:600;color:var(--text-secondary);margin:0">任务组</h3>` +
+                `</div>` +
+                `<div id="task-groups-grid" class="task-groups-grid" style="display:flex;gap:16px;overflow-x:auto;padding-bottom:8px;scroll-snap-type: x mandatory">${cardsHtml}</div>`;
+        } else {
+            groupsContainer.innerHTML = '';
+        }
+    } catch (e) {
+        board.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><h3>加载任务失败</h3><p>${esc(e.message)}</p></div>`;
+    }
+}
+
+export function showTaskDetail(taskId) {
+    const overlay = document.getElementById('task-slideout-overlay');
+    const panel = document.getElementById('task-slideout');
+    const content = document.getElementById('task-slideout-content');
+    if (!content) return;
+
+    content.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    overlay?.classList.add('open');
+    panel?.classList.add('open');
+
+    const project = state.activeProject || state.defaultProject || 'default';
+    Promise.all([
+        api('GET', `/api/v1/tasks/${taskId}?with_context=true`),
+        api('GET', `/api/v1/task-groups?project=${encodeURIComponent(project)}`),
+    ]).then(([data, groupData]) => {
+        const t = data;
+        const groups = (groupData.groups || []).filter(g => !g.archived);
+        const groupOptions = groups.map(g =>
+            `<option value="${g.id}"${g.id === t.group_id ? ' selected' : ''}>${esc(g.title)}</option>`
+        ).join('');
+        const groupSection = `
+          <div class="field-group">
+            <div class="field-label">所属任务组</div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <select id="sl-group" style="flex:1">
+                <option value="">无任务组</option>
+                ${groupOptions}
+              </select>
+              <button class="btn btn-sm" style="font-size:11px;padding:4px 10px;white-space:nowrap"
+                onclick="createTaskGroupFromSlideout('${t.id}')">+ 新建</button>
+            </div>
+          </div>`;
+        content.innerHTML = `
+        <h2>任务详情</h2>
+        ${groupSection}
+        <div class="field-group">
+          <div class="field-label">标题</div>
+          <input id="sl-title" value="${esc(t.title || '')}" />
+        </div>
+        <div class="field-group">
+          <div class="field-label">描述</div>
+          <textarea id="sl-desc">${esc(t.description || '')}</textarea>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="field-group">
+            <div class="field-label">状态</div>
+            <select id="sl-status">
+              ${['wait', 'plan', 'in_progress', 'completed', 'cancelled'].map(s =>
+                `<option value="${s}"${s === t.status ? ' selected' : ''}>${s}</option>`
+              ).join('')}
+            </select>
+          </div>
+          <div class="field-group">
+            <div class="field-label">优先级</div>
+            <select id="sl-priority">
+              ${['low', 'medium', 'high', 'urgent'].map(p =>
+                `<option value="${p}"${p === t.priority ? ' selected' : ''}>${p}</option>`
+              ).join('')}
+            </select>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="field-group">
+            <div class="field-label">重要度 (1-5)</div>
+            <input id="sl-importance" type="number" min="1" max="5" value="${t.importance || 3}" />
+          </div>
+          <div class="field-group">
+            <div class="field-label">截止日期</div>
+            <input id="sl-due" type="date" value="${(t.due_date || '').slice(0, 10)}" />
+          </div>
+        </div>
+        ${t.sediment_experience_id ? `<div class="field-group"><div class="field-label">沉淀经验</div><a onclick="closeTaskSlideout();showDetail('${t.sediment_experience_id}')" style="color:var(--accent);cursor:pointer;font-size:13px">查看关联经验</a></div>` : ''}
+        <div class="slideout-actions">
+          <button class="btn btn-primary btn-sm" onclick="saveTaskFromSlideout('${t.id}')">保存</button>
+          <button class="btn btn-sm" style="background:var(--accent-glow);color:var(--accent)" onclick="generateTaskPrompt('${t.id}')">AI Prompt</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteTaskFromSlideout('${t.id}')">删除</button>
+          <div style="flex:1"></div>
+          <button class="btn btn-sm" onclick="closeTaskSlideout()">关闭</button>
+        </div>
+        <div class="msg-list" id="sl-messages">
+          <div class="field-label">消息</div>
+          <div id="sl-msg-list"><div style="color:var(--text-muted);font-size:12px">加载中...</div></div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <input id="sl-msg-input" placeholder="添加消息..." style="flex:1" />
+            <button class="btn btn-primary btn-sm" onclick="sendTaskMessage('${t.id}')">发送</button>
+          </div>
+        </div>
+        <div style="margin-top:12px;font-size:11px;color:var(--text-muted)">ID: ${t.id}</div>`;
+
+        // Load messages
+        api('GET', `/api/v1/tasks/${taskId}/messages`).then(msgData => {
+            const list = document.getElementById('sl-msg-list');
+            if (!list) return;
+            const msgs = msgData.messages || [];
+            if (msgs.length === 0) {
+                list.innerHTML = '<div style="color:var(--text-muted);font-size:12px">暂无消息</div>';
+            } else {
+                list.innerHTML = msgs.map(m => `<div class="msg-item"><div>${esc(m.content)}</div><div class="msg-meta">${esc(m.author || m.sender)} · ${_fmtDate(m.created_at)}</div></div>`).join('');
+            }
+        }).catch(() => {});
+    }).catch(e => {
+        content.innerHTML = `<div class="empty-state"><h3>加载失败</h3><p>${esc(e.message)}</p></div>`;
+    });
+}
+
+export function closeTaskSlideout() {
+    document.getElementById('task-slideout-overlay')?.classList.remove('open');
+    document.getElementById('task-slideout')?.classList.remove('open');
+}
+
+export async function saveTaskFromSlideout(taskId) {
+    const groupVal = document.getElementById('sl-group')?.value || '';
+    const body = {
+        title: document.getElementById('sl-title')?.value,
+        description: document.getElementById('sl-desc')?.value,
+        status: document.getElementById('sl-status')?.value,
+        priority: document.getElementById('sl-priority')?.value,
+        importance: parseInt(document.getElementById('sl-importance')?.value, 10) || 3,
+        due_date: document.getElementById('sl-due')?.value || null,
+        group_id: groupVal || null,
+    };
+    try {
+        await api('PUT', `/api/v1/tasks/${taskId}`, body);
+        toast('任务已保存', 'success');
+        loadTasks();
+    } catch (e) {
+        toast('保存失败: ' + e.message, 'error');
+    }
+}
+
+export async function createTaskGroupFromSlideout(taskId) {
+    const name = prompt('请输入新任务组名称:');
+    if (!name || !name.trim()) return;
+    try {
+        const project = state.activeProject || state.defaultProject || 'default';
+        const res = await api('POST', '/api/v1/task-groups', {
+            title: name.trim(),
+            project,
+        });
+        const newGroupId = res.id;
+        await api('PUT', `/api/v1/tasks/${taskId}`, { group_id: newGroupId });
+        toast('任务组已创建并关联', 'success');
+        loadTasks();
+        showTaskDetail(taskId);
+    } catch (e) {
+        toast('创建任务组失败: ' + e.message, 'error');
+    }
+}
+
+export async function deleteTaskFromSlideout(taskId) {
+    if (!confirm('确定删除此任务？')) return;
+    try {
+        await api('DELETE', `/api/v1/tasks/${taskId}`);
+        toast('任务已删除', 'success');
+        closeTaskSlideout();
+        loadTasks();
+    } catch (e) {
+        toast('删除失败: ' + e.message, 'error');
+    }
+}
+
+export async function sendTaskMessage(taskId) {
+    const input = document.getElementById('sl-msg-input');
+    const content = input?.value?.trim();
+    if (!content) return;
+    try {
+        await api('POST', `/api/v1/tasks/${taskId}/messages`, { content });
+        input.value = '';
+        showTaskDetail(taskId); // reload
+    } catch (e) {
+        toast('发送失败: ' + e.message, 'error');
+    }
+}
+
+export async function archiveGroup(groupId) {
+    if (!confirm('确定归档此任务组？归档后将不在任务列表显示。')) return;
+    try {
+        await api('PUT', `/api/v1/task-groups/${groupId}`, { archived: true });
+        toast('任务组已归档', 'success');
+        loadTasks();
+    } catch (e) {
+        toast('归档失败: ' + e.message, 'error');
+    }
+}
+
+export function toggleTaskGroups() {
+    const cards = document.querySelectorAll('.task-group-collapsible');
+    const btn = document.getElementById('toggle-task-groups-btn');
+    if (!btn) return;
+    const expanded = btn.dataset.expanded === '1';
+    cards.forEach((c, i) => {
+        if (i >= 4) c.style.display = expanded ? 'none' : '';
+    });
+    const hiddenCount = cards.length - 4;
+    if (expanded) {
+        btn.textContent = `展开全部 (${hiddenCount} 个隐藏)`;
+        btn.dataset.expanded = '0';
+    } else {
+        btn.textContent = '收起';
+        btn.dataset.expanded = '1';
+    }
+}
+
+export function toggleGroupVisibility(groupId) {
+    _kanbanInitialized = true;
+    if (_kanbanVisibleGroups.has(groupId)) {
+        _kanbanVisibleGroups.delete(groupId);
+    } else {
+        _kanbanVisibleGroups.add(groupId);
+    }
+    loadTasks();
+}
+
+async function generateTaskPrompt(taskId) {
+    try {
+        const data = await api('GET', `/api/v1/tasks/${taskId}?with_context=true`);
+        const lines = [
+            `## 任务: ${data.title}`,
+            data.description ? `\n${data.description}` : '',
+            `\n优先级: ${data.priority} | 重要度: ${data.importance}/5`,
+            data.due_date ? `截止: ${data.due_date}` : '',
+        ];
+        if (data.experience_context) {
+            lines.push(`\n### 关联经验\n${data.experience_context.title}\n${data.experience_context.solution || data.experience_context.description}`);
+        }
+        lines.push(`\n### 执行后请调用\ntm_task action=update task_id=${taskId} status=completed summary="<执行摘要>"`);
+        const prompt = lines.filter(Boolean).join('\n');
+        await navigator.clipboard.writeText(prompt);
+        toast('已复制到剪贴板，请在 Cursor 中粘贴执行', 'success');
+    } catch (e) {
+        toast('生成 prompt 失败: ' + e.message, 'error');
+    }
+}
+
+export { generateTaskPrompt };
+
+export function toggleDupDiff(idx) {
+    const el = document.getElementById('dup-diff-' + idx);
+    if (el) el.classList.toggle('hidden');
+}
+
+export function populateTagSuggestions() {
+    const container = document.getElementById('create-tag-suggestions');
+    if (!container) return;
+    const tags = state.allTags || {};
+    const topTags = Object.entries(tags).sort((a, b) => b[1] - a[1]).slice(0, 12);
+    if (topTags.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+    container.innerHTML = topTags.map(([tag]) =>
+        `<span class="tag-suggest-btn" onclick="appendTag('${esc(tag)}')">${esc(tag)}</span>`
+    ).join('');
+}
+
+export function appendTag(tag) {
+    const input = document.getElementById('create-tags');
+    if (!input) return;
+    const existing = input.value.split(',').map(t => t.trim()).filter(Boolean);
+    if (!existing.includes(tag)) {
+        existing.push(tag);
+        input.value = existing.join(', ');
+    }
+}
+
+export function populateSettingsProjectDropdown() {
+    const sel = document.getElementById('cfg-default-project');
+    if (!sel) return;
+    const projects = state.availableProjects || [];
+    const current = state.defaultProject || 'default';
+    let html = '';
+    const allProjects = new Set([current, ...projects]);
+    allProjects.forEach(p => {
+        html += `<option value="${p}"${p === current ? ' selected' : ''}>${p}</option>`;
+    });
+    sel.innerHTML = html;
+}
+
+function _esc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function _fmtDate(iso) {
+    if (!iso) return '-';
+    const d = new Date(iso);
+    return d.toLocaleDateString('zh-CN') + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+}
+
+// ===== Quality Scoring Management =====
+
+export async function loadScoringConfig() {
+    try {
+        const cfg = await api('GET', '/api/v1/config/scoring');
+        const fields = {
+            'scoring-initial': cfg.initial_score,
+            'scoring-max': cfg.max_score,
+            'scoring-protection': cfg.protection_days,
+            'scoring-decay-rate': cfg.decay_rate,
+            'scoring-slow-threshold': cfg.slow_decay_threshold,
+            'scoring-slow-rate': cfg.slow_decay_rate,
+            'scoring-ref-boost': cfg.reference_boost,
+            'scoring-rating-boost': cfg.high_rating_boost,
+            'scoring-rating-threshold': cfg.high_rating_threshold,
+            'scoring-tier-gold': (cfg.tiers || {}).gold,
+            'scoring-tier-silver': (cfg.tiers || {}).silver,
+            'scoring-tier-bronze': (cfg.tiers || {}).bronze,
+        };
+        for (const [id, val] of Object.entries(fields)) {
+            const el = document.getElementById(id);
+            if (el && val !== undefined) el.value = val;
+        }
+    } catch (_) { /* non-blocking */ }
+}
+
+export async function saveScoringConfig() {
+    const g = (id) => { const el = document.getElementById(id); return el ? Number(el.value) : undefined; };
+    const body = {
+        initial_score: g('scoring-initial'),
+        max_score: g('scoring-max'),
+        protection_days: g('scoring-protection'),
+        decay_rate: g('scoring-decay-rate'),
+        slow_decay_threshold: g('scoring-slow-threshold'),
+        slow_decay_rate: g('scoring-slow-rate'),
+        reference_boost: g('scoring-ref-boost'),
+        high_rating_boost: g('scoring-rating-boost'),
+        high_rating_threshold: g('scoring-rating-threshold'),
+        tiers: {
+            gold: g('scoring-tier-gold'),
+            silver: g('scoring-tier-silver'),
+            bronze: g('scoring-tier-bronze'),
+        },
+    };
+    try {
+        await api('PUT', '/api/v1/config/scoring', body);
+        alert('打分规则已保存');
+    } catch (e) {
+        alert('保存失败: ' + e.message);
+    }
+}
+
+export async function toggleOutdatedPanel() {
+    const panel = document.getElementById('outdated-panel');
+    if (!panel) return;
+    const isHidden = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden');
+    if (isHidden) await loadOutdatedList();
+}
+
+export async function loadOutdatedList() {
+    const list = document.getElementById('outdated-list');
+    if (!list) return;
+    list.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    try {
+        const data = await api('GET', '/api/v1/lifecycle/outdated');
+        const exps = data.experiences || [];
+        if (exps.length === 0) {
+            list.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px">没有 Outdated 经验</p>';
+            return;
+        }
+        list.innerHTML = exps.map(exp => `
+            <div style="display:flex;align-items:center;gap:12px;padding:10px;border-bottom:1px solid var(--border)">
+                <span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(exp.title)}</span>
+                <span style="font-size:12px;color:var(--text-muted)">Score: ${exp.quality_score}</span>
+                <button class="btn btn-secondary btn-sm" onclick="scoreAction('${exp.id}','restore')">恢复</button>
+                <button class="btn btn-secondary btn-sm" onclick="scoreAction('${exp.id}','pin')">📌 置顶</button>
+                <button class="btn btn-secondary btn-sm" style="color:var(--red)" onclick="if(confirm('确认删除？'))scoreAction('${exp.id}','delete')">删除</button>
+            </div>
+        `).join('');
+    } catch (e) {
+        list.innerHTML = `<p style="color:var(--red);padding:12px">${esc(e.message)}</p>`;
+    }
+}
+
+export async function scoreAction(expId, action) {
+    try {
+        await api('POST', `/api/v1/lifecycle/experiences/${expId}/score-action`, { action });
+        await loadOutdatedList();
+        await checkOutdatedCount();
+    } catch (e) {
+        alert('操作失败: ' + e.message);
+    }
+}
+
+export async function refreshScores() {
+    try {
+        const r = await api('POST', '/api/v1/lifecycle/refresh-scores');
+        alert(r.message || '已刷新');
+        await loadOutdatedList();
+        await checkOutdatedCount();
+    } catch (e) {
+        alert('刷新失败: ' + e.message);
+    }
+}
+
+export async function checkOutdatedCount() {
+    try {
+        const data = await api('GET', '/api/v1/lifecycle/outdated');
+        const count = (data.experiences || []).length;
+        const btn = document.getElementById('btn-manage-outdated');
+        const dot = document.getElementById('outdated-dot');
+        if (btn) btn.style.display = count > 0 ? 'inline-flex' : 'none';
+        if (dot) dot.style.display = count > 0 ? 'block' : 'none';
+    } catch (_) { /* ignore */ }
+}
+
+export async function checkMergeSuggestions() {
+    try {
+        const data = await api('GET', '/api/v1/lifecycle/merge-suggestions?limit=5');
+        const count = (data.suggestions || []).length;
+        const dot = document.getElementById('merge-suggestion-dot');
+        if (dot) dot.classList.toggle('active', count > 0);
+    } catch (_) { /* ignore */ }
 }

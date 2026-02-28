@@ -23,12 +23,11 @@ def get_engine(database_url: str) -> AsyncEngine:
     """Create or return the async SQLAlchemy engine."""
     global _engine
     if _engine is None:
-        _engine = create_async_engine(
-            database_url,
-            echo=False,
-            pool_size=5,
-            max_overflow=10,
-        )
+        kwargs: dict = {"echo": False}
+        if "sqlite" not in database_url:
+            kwargs["pool_size"] = 5
+            kwargs["max_overflow"] = 10
+        _engine = create_async_engine(database_url, **kwargs)
     return _engine
 
 

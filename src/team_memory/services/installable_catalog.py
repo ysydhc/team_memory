@@ -80,6 +80,7 @@ class InstallableCatalogService:
         self._local_base = self._resolve_within_workspace(config.local_base_dir)
         self._target_rules = self._resolve_within_workspace(config.target_rules_dir)
         self._target_prompts = self._resolve_within_workspace(config.target_prompts_dir)
+        self._target_skills = self._resolve_within_workspace(config.target_skills_dir)
 
     def _resolve_within_workspace(self, raw_path: str) -> Path:
         """Resolve path and ensure it stays in workspace."""
@@ -156,6 +157,109 @@ class InstallableCatalogService:
             "item": item.model_dump(),
             "target_path": str(target_path),
         }
+
+    async def generate_from_experience(
+        self,
+        experience: dict,
+        target_type: str = "rule",
+    ) -> dict:
+        """Generate a .cursor rule/prompt/skill file from an experience.
+
+        Args:
+            experience: Experience dict with title, description, solution, tags, etc.
+            target_type: 'rule', 'prompt', or 'skill'
+
+        Returns:
+            Dict with 'path', 'content', 'name' of the generated file.
+        """
+        title = experience.get("title", "untitled")
+        safe_name = re.sub(r"[^\w\-]", "-", title.lower().strip())[:60].strip("-")
+
+        if target_type == "rule":
+            base = self._target_rules
+            ext = ".mdc"
+            content = self._format_as_rule(experience)
+        elif target_type == "prompt":
+            base = self._target_prompts
+            ext = ".md"
+            content = self._format_as_prompt(experience)
+        elif target_type == "skill":
+            base = self._target_skills
+            ext = ""  # skills use SKILL.md in a directory
+            content = self._format_as_skill(experience)
+        else:
+            raise ValueError(f"Unsupported target_type: {target_type}")
+
+        if target_type == "skill":
+            dest = base / safe_name / "SKILL.md"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            dest = base / f"{safe_name}{ext}"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+
+        if not self._is_within(base, dest):
+            raise InstallableCatalogError("Target path escapes allowlist directory")
+
+        dest.write_text(content, encoding="utf-8")
+        return {
+            "name": safe_name,
+            "path": str(dest),
+            "content_preview": content[:500],
+            "target_type": target_type,
+        }
+
+    @staticmethod
+    def _format_as_rule(exp: dict) -> str:
+        """Format experience as a .cursor/rules .mdc file."""
+        title = exp.get("title", "")
+        desc = exp.get("description", "")
+        solution = exp.get("solution", "")
+        tags = exp.get("tags", [])
+
+        lines = [f"# {title}", ""]
+        if desc:
+            lines.extend([desc, ""])
+        if solution:
+            lines.extend(["## 解决方案", "", solution, ""])
+        if tags:
+            lines.extend([f"Tags: {', '.join(tags)}", ""])
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_as_prompt(exp: dict) -> str:
+        """Format experience as a .cursor/prompts .md file."""
+        title = exp.get("title", "")
+        desc = exp.get("description", "")
+        solution = exp.get("solution", "")
+
+        lines = [f"# {title}", ""]
+        if desc:
+            lines.extend(["## 问题", "", desc, ""])
+        if solution:
+            lines.extend(["## 指导", "", solution, ""])
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_as_skill(exp: dict) -> str:
+        """Format experience as a SKILL.md file."""
+        title = exp.get("title", "")
+        desc = exp.get("description", "")
+        solution = exp.get("solution", "")
+        tags = exp.get("tags", [])
+
+        lines = [
+            f"# {title}",
+            "",
+            f"Use this skill when: {desc[:200]}" if desc else "",
+            "",
+            "## Instructions",
+            "",
+        ]
+        if solution:
+            lines.extend([solution, ""])
+        if tags:
+            lines.extend(["", f"Related tags: {', '.join(tags)}"])
+        return "\n".join(lines)
 
     async def _find_item(self, *, item_id: str, source: str | None = None) -> CatalogItem:
         items = await self.list_items(source=source)

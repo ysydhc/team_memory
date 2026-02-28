@@ -44,6 +44,7 @@ jobs:
           --health-retries 5
     env:
       TEAM_MEMORY_DATABASE__URL: "postgresql+asyncpg://developer:devpass@localhost:5432/team_memory"
+      TEAM_MEMORY_API_KEY: "dev-key"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -55,6 +56,16 @@ jobs:
         run: alembic upgrade head
       - name: Run tests
         run: pytest -v --tb=short
+      - name: Web smoke (health + stats)
+        run: |
+          python -m team_memory.web.app >/tmp/tm-web-ci.log 2>&1 &
+          WEB_PID=$!
+          trap "kill $WEB_PID 2>/dev/null || true" EXIT
+          for i in {1..20}; do
+            curl -fsS http://localhost:9111/health >/dev/null && break
+            sleep 1
+          done
+          TEAM_MEMORY_API_KEY="$TEAM_MEMORY_API_KEY" python scripts/smoke_web_dashboard.py --api-key "$TEAM_MEMORY_API_KEY" --port 9111
       - name: Coverage
         run: pytest --cov=team_memory --cov-report=xml
       - name: Upload coverage

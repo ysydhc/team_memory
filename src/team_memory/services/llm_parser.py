@@ -31,12 +31,27 @@ logger = logging.getLogger("team_memory.llm_parser")
 _BUILTIN_PARSE_SINGLE = """你是一个技术文档分析助手。用户会提供一段技术文档
 （可能是 Markdown 或纯文本），你需要从中提取结构化的开发经验信息。
 
-请严格以 JSON 格式返回以下字段（不要包含其他内容，不要用 markdown 代码块包裹）:
+请严格按照以下 5 个维度深度提取知识，然后以 JSON 格式返回
+（不要包含其他内容，不要用 markdown 代码块包裹）:
+
+**提取维度**:
+1. decisions — 决策点：做了什么选择、有哪些备选方案、为什么选择当前方案
+2. pitfalls — 陷阱与问题：意外发生的问题、根因分析、修复方案
+3. patterns — 可复用模式：架构模式、代码模板、最佳实践
+4. verification — 验证清单：如何验证方案正确性、测试步骤、通过标准
+5. constraints — 约束条件：环境依赖、版本要求、配置前提
+
+JSON 格式:
 {
   "title": "简洁的经验标题（一句话概括）",
   "problem": "问题描述（遇到了什么问题，上下文是什么）",
   "root_cause": "根因分析（为什么会出现这个问题，没有则为 null）",
   "solution": "解决方案（如何解决的，关键步骤，还没有解决则为 null）",
+  "decisions": "决策说明：选了什么方案、备选有哪些、选择理由（没有则为 null）",
+  "pitfalls": "遇到的陷阱或意外问题，以及如何修复（没有则为 null）",
+  "patterns": "可复用的模式或最佳实践（没有则为 null）",
+  "verification": "验证步骤和通过标准（没有则为 null）",
+  "constraints": "环境/依赖/版本约束（没有则为 null）",
   "tags": ["标签1", "标签2", "标签3"],
   "language": "编程语言（如 python/javascript/go 等，没有则为 null）",
   "framework": "框架名称（如 fastapi/react/spring 等，没有则为 null）",
@@ -68,6 +83,7 @@ git_refs: 从文档中提取的 git 引用，格式为
 - problem 和 solution 要详细，保留关键技术细节
 - solution 可以为 null（例如问题已确认但尚未解决）
 - root_cause 分析问题的根本原因
+- decisions/pitfalls/patterns/verification/constraints 五个维度尽量填写，是评估经验质量的关键
 - tags 提取 3-8 个相关的技术关键词，小写英文
 - code_snippets 只保留最关键的代码
 - structured_data 中只填入能从文档中确认的字段，没有的填 null
@@ -108,6 +124,32 @@ _BUILTIN_PARSE_GROUP = """你是一个技术文档分析助手。用户会提供
 - tags 用小写英文
 - 如果内容不适合拆分为多步骤，返回 children 为空数组 []
 """
+
+def compute_quality_score(parsed: dict) -> int:
+    """Compute quality score (0-5) from parsed experience fields.
+
+    Scoring dimensions:
+    - Has code_snippets: +1
+    - Has decision rationale (not just conclusion): +1
+    - Has problem-solution pair: +1
+    - Has reusable pattern: +1
+    - Has verification steps: +1
+    """
+    score = 0
+    if parsed.get("code_snippets"):
+        score += 1
+    decisions = parsed.get("decisions") or parsed.get("root_cause")
+    if decisions and len(str(decisions)) > 20:
+        score += 1
+    if parsed.get("problem") and parsed.get("solution"):
+        if len(str(parsed["problem"])) > 10 and len(str(parsed["solution"])) > 10:
+            score += 1
+    if parsed.get("patterns"):
+        score += 1
+    if parsed.get("verification"):
+        score += 1
+    return min(score, 5)
+
 
 _BUILTIN_SUGGEST_TYPE = """你是一个经验分类助手。根据以下内容，判断最适合的经验类型。
 

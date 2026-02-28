@@ -18,12 +18,15 @@ export const state = {
     cachedSchema: null,
     editOriginalExp: null,
     defaultProject: 'default',
+    activeProject: 'default',
     cachedRetrievalConfig: null,
     cachedInstallables: [],
     webhookRows: [],
     createMode: 'manual',
     importFile: null,
     generatedSchemaData: null,
+    detailReferrer: 'list',
+    availableProjects: [],
 };
 
 export const defaultTypeIcons = {

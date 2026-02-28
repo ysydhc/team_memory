@@ -75,16 +75,30 @@ def _get_db_url() -> str:
     return get_context().db_url
 
 
+def _normalize_project_name(project: str | None) -> str:
+    """Normalize legacy project aliases to a canonical project name."""
+    if not project:
+        return ""
+    value = project.strip()
+    alias_map = {
+        "team-memory": "team_memory",
+        "team_doc": "team_memory",
+    }
+    return alias_map.get(value, value)
+
+
 def _resolve_project(project: str | None) -> str:
     """Resolve project from request > env > config default."""
-    if project and project.strip():
-        return project.strip()
-    env_project = os.environ.get("TEAM_MEMORY_PROJECT", "").strip()
+    normalized = _normalize_project_name(project)
+    if normalized:
+        return normalized
+    env_project = _normalize_project_name(os.environ.get("TEAM_MEMORY_PROJECT", ""))
     if env_project:
         return env_project
     settings = _settings or get_context().settings
-    if settings.default_project.strip():
-        return settings.default_project.strip()
+    default_project = _normalize_project_name(settings.default_project)
+    if default_project:
+        return default_project
     return "default"
 
 
@@ -209,7 +223,7 @@ async def health_check():
     """Health check endpoint — no authentication required.
 
     Returns overall status: healthy / degraded / unhealthy.
-    Checks: database, ollama, cache.
+    Checks: database, ollama, cache, embedding, migration.
     """
     db_check, ollama_check, cache_check, dashboard_check = await asyncio.gather(
         _check_database(),
@@ -218,7 +232,6 @@ async def health_check():
         _check_dashboard_stats(),
     )
 
-    # Event bus stats
     event_bus_info = {}
     if _service and _service._event_bus:
         event_bus_info = _service._event_bus.stats()
@@ -231,17 +244,26 @@ async def health_check():
         "event_bus": {"status": "up", **event_bus_info},
     }
 
-    # Embedding queue stats (D2)
     if _service and _service._embedding_queue:
         checks["embedding_queue"] = {
             "status": "up",
             **_service._embedding_queue.status,
         }
 
-    # Determine overall status
+    # Enhanced: Embedding provider test
+    embed_check = await _check_embedding_provider()
+    checks["embedding_provider"] = embed_check
+
+    # Enhanced: Migration status
+    migration_check = await _check_migration_status()
+    checks["migration"] = migration_check
+
     if db_check["status"] == "down":
         status = "unhealthy"
-    elif ollama_check["status"] == "down" or dashboard_check.get("status") == "down":
+    elif any(
+        checks[k].get("status") == "down"
+        for k in ["ollama", "dashboard_stats", "embedding_provider"]
+    ):
         status = "degraded"
     else:
         status = "healthy"
@@ -256,6 +278,54 @@ async def health_check():
             "checks": checks,
         },
     )
+
+
+async def _check_embedding_provider() -> dict:
+    """Test embedding by encoding a short text."""
+    try:
+        from team_memory.bootstrap import get_context
+        ctx = get_context()
+        provider_name = ctx.settings.embedding.provider
+        vec = await ctx.embedding.encode_single("health check")
+        return {
+            "status": "up",
+            "provider": provider_name,
+            "dimension": len(vec),
+        }
+    except RuntimeError:
+        return {"status": "down", "reason": "not bootstrapped"}
+    except Exception as e:
+        return {"status": "down", "error": str(e)[:100]}
+
+
+async def _check_migration_status() -> dict:
+    """Check if alembic migrations are up to date."""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["alembic", "current", "--verbose"],
+            capture_output=True, text=True, timeout=10,
+            cwd=os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.dirname(__file__)
+            ))),
+        )
+        current = result.stdout.strip() if result.returncode == 0 else "unknown"
+        result2 = subprocess.run(
+            ["alembic", "heads", "--verbose"],
+            capture_output=True, text=True, timeout=10,
+            cwd=os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.dirname(__file__)
+            ))),
+        )
+        heads = result2.stdout.strip() if result2.returncode == 0 else "unknown"
+        is_current = "head" in current.lower() or current == heads
+        return {
+            "status": "up" if is_current else "warning",
+            "current": current[:80],
+            "heads": heads[:80],
+        }
+    except Exception as e:
+        return {"status": "unknown", "error": str(e)[:100]}
 
 
 @app.get("/ready")
@@ -320,15 +390,17 @@ def _encode_api_key_cookie(api_key: str) -> str:
 
 
 async def get_current_user(request: Request) -> User:
-    """Extract and validate API key from Authorization header or cookie.
+    """Extract and validate credentials from header or cookie.
 
-    Raises 401 if not authenticated. Also stores user in request.state
-    for downstream permission checks.
+    Supports both API Key and password-based cookie (pwd:user:pass).
+    Raises 401 if not authenticated.
     """
-    # Check if already authenticated (cached in request.state)
     cached = getattr(request.state, "user", None)
     if cached is not None:
         return cached
+
+    if not _auth:
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
     auth_header = request.headers.get("Authorization", "")
     api_key = ""
@@ -339,25 +411,27 @@ async def get_current_user(request: Request) -> User:
         from team_memory.web.middleware import _decode_api_key_cookie
         api_key = _decode_api_key_cookie(request.cookies.get("api_key", ""))
 
-    if not api_key or not _auth:
+    if not api_key:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    user = await _auth.authenticate({"api_key": api_key})
-    if user is None:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    if api_key.startswith("pwd:"):
+        parts = api_key.split(":", 2)
+        if len(parts) == 3:
+            user = await _auth.authenticate({"username": parts[1], "password": parts[2]})
+        else:
+            user = None
+    else:
+        user = await _auth.authenticate({"api_key": api_key})
 
-    # Cache in request state for permission middleware
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
     request.state.user = user
     return user
 
 
 async def get_optional_user(request: Request) -> User | None:
-    """Try to authenticate, but return None instead of raising 401.
-
-    Used for anonymous read-only access to search and browse endpoints.
-    If auth.allow_anonymous_search is True in config, search endpoints
-    are accessible without authentication.
-    """
+    """Try to authenticate, return None instead of raising 401."""
     auth_header = request.headers.get("Authorization", "")
     api_key = ""
     if auth_header.startswith("Bearer "):
@@ -368,9 +442,14 @@ async def get_optional_user(request: Request) -> User | None:
         api_key = _decode_api_key_cookie(request.cookies.get("api_key", ""))
 
     if not api_key or not _auth:
-        # Check if anonymous search is allowed (P3-3)
         if _settings and _settings.auth.allow_anonymous_search:
             return User(name="anonymous", role="viewer")
+        return None
+
+    if api_key.startswith("pwd:"):
+        parts = api_key.split(":", 2)
+        if len(parts) == 3:
+            return await _auth.authenticate({"username": parts[1], "password": parts[2]})
         return None
 
     return await _auth.authenticate({"api_key": api_key})
@@ -380,7 +459,14 @@ async def get_optional_user(request: Request) -> User | None:
 # Request/Response Models
 # ============================================================
 class LoginRequest(BaseModel):
-    api_key: str
+    api_key: str | None = None
+    username: str | None = None
+    password: str | None = None
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
 
 
 class LoginResponse(BaseModel):
@@ -388,6 +474,11 @@ class LoginResponse(BaseModel):
     user: str = ""
     role: str = ""
     message: str = ""
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
 
 
 class ExperienceCreate(BaseModel):
@@ -436,6 +527,9 @@ class ExperienceUpdate(BaseModel):
     git_refs: list | None = None
     related_links: list | None = None
     publish_status: str | None = None
+    # New status model
+    visibility: str | None = None
+    project: str | None = None
     # Legacy append mode
     solution_addendum: str | None = None
 
@@ -602,9 +696,9 @@ def _extract_text_from_html(html: str) -> str:
 # API Key Management Routes (admin only)
 # ============================================================
 class ApiKeyCreateRequest(BaseModel):
-    api_key: str
     user_name: str
     role: str = "editor"
+    password: str | None = None
 
     @field_validator("role")
     @classmethod
@@ -856,6 +950,17 @@ async def prometheus_metrics():
 STATIC_DIR = Path(__file__).parent / "static"
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.middleware("http")
+async def no_cache_static(request: Request, call_next):
+    """Prevent browser caching of static JS/CSS during development."""
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 
 @app.get("/", response_class=HTMLResponse)

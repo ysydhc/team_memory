@@ -24,8 +24,13 @@ from tests.conftest import MockEmbeddingProvider
 # Skip all tests if DB is not available
 DB_URL = os.environ.get(
     "TEAM_MEMORY_TEST_DB_URL",
-    "postgresql+asyncpg://developer:devpass@localhost:5432/team_memory",
+    "postgresql+asyncpg://developer:devpass@localhost:5432/team_memory_test",
 )
+if DB_URL.endswith("/team_memory"):
+    raise RuntimeError(
+        "Refusing to run integration tests on non-test database 'team_memory'. "
+        "Set TEAM_MEMORY_TEST_DB_URL to a dedicated test DB."
+    )
 
 _db_available = None
 
@@ -293,6 +298,7 @@ class TestServiceIntegration:
         return ExperienceService(
             embedding_provider=mock_embed,
             auth_provider=NoAuth(),
+            db_url=DB_URL,
         )
 
     @pytest.mark.asyncio
@@ -313,7 +319,6 @@ class TestServiceIntegration:
 
         # Search
         results = await service.search(
-            session=session,
             query="PostgreSQL connection timeout issue",
             min_similarity=0.0,
         )

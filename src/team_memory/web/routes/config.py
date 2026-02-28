@@ -26,6 +26,7 @@ from team_memory.web.app import (
     _pageindex_lite_config_dict,
     _retrieval_config_dict,
     get_current_user,
+    get_optional_user,
 )
 
 router = APIRouter(tags=["config"])
@@ -40,7 +41,7 @@ def _svc():
 
 
 @router.get("/config/retrieval")
-async def get_retrieval_config(user: User = Depends(get_current_user)):
+async def get_retrieval_config(user: User | None = Depends(get_optional_user)):
     """Get current retrieval configuration (requires auth)."""
     from team_memory.config import RetrievalConfig
 
@@ -78,7 +79,7 @@ async def update_retrieval_config(
 
 
 @router.get("/config/pageindex-lite")
-async def get_pageindex_lite_config(user: User = Depends(get_current_user)):
+async def get_pageindex_lite_config(user: User | None = Depends(get_optional_user)):
     """Get current PageIndex-Lite configuration."""
     from team_memory.config import PageIndexLiteConfig
 
@@ -112,7 +113,7 @@ async def update_pageindex_lite_config(
 
 
 @router.get("/config/project")
-async def get_default_project_config(user: User = Depends(get_current_user)):
+async def get_default_project_config(user: User | None = Depends(get_optional_user)):
     """Get current default project config."""
     if not _cfg():
         return {"default_project": "default"}
@@ -140,7 +141,7 @@ async def update_default_project_config(
 
 
 @router.get("/config/all")
-async def get_all_config(user: User = Depends(get_current_user)):
+async def get_all_config(user: User | None = Depends(get_optional_user)):
     """Get all pipeline-related configuration sections."""
     return _all_config_dict()
 
@@ -201,7 +202,7 @@ async def update_reranker_config(
 
 
 @router.get("/config/webhooks")
-async def get_webhook_config(user: User = Depends(get_current_user)):
+async def get_webhook_config(user: User | None = Depends(get_optional_user)):
     """Get current webhook configuration."""
     if not _cfg():
         return []
@@ -266,11 +267,18 @@ async def test_webhook(
 
 
 @router.get("/embedding-queue/status")
-async def embedding_queue_status(user: User = Depends(get_current_user)):
+async def embedding_queue_status(user: User | None = Depends(get_optional_user)):
     """Get embedding queue status (D2)."""
     if _svc() and _svc()._embedding_queue:
         return _svc()._embedding_queue.status
     return {"running": False, "message": "Embedding queue not configured"}
+
+
+@router.get("/llm/usage")
+async def llm_usage_stats(user: User | None = Depends(get_optional_user)):
+    """Get LLM usage statistics for cost monitoring."""
+    from team_memory.services.llm_provider import get_usage_stats
+    return get_usage_stats()
 
 
 @router.post("/cache/clear")
@@ -282,7 +290,7 @@ async def clear_cache(user: User = Depends(get_current_user)):
 
 
 @router.get("/config/lifecycle")
-async def get_lifecycle_config(user: User = Depends(get_current_user)):
+async def get_lifecycle_config(user: User | None = Depends(get_optional_user)):
     """Get lifecycle configuration."""
     if not _cfg():
         return {}
@@ -314,7 +322,7 @@ async def update_lifecycle_config(
 
 
 @router.get("/config/review")
-async def get_review_config(user: User = Depends(get_current_user)):
+async def get_review_config(user: User | None = Depends(get_optional_user)):
     """Get review workflow configuration."""
     if not _cfg():
         return {}
@@ -344,7 +352,7 @@ async def update_review_config(
 
 
 @router.get("/config/memory")
-async def get_memory_config(user: User = Depends(get_current_user)):
+async def get_memory_config(user: User | None = Depends(get_optional_user)):
     """Get memory/summary configuration."""
     if not _cfg():
         return {}
@@ -373,3 +381,36 @@ async def update_memory_config(
     if _svc():
         _svc()._memory_config = s.memory
     return {"message": "Memory config updated"}
+
+
+# ── Scoring config ──────────────────────────────────────────────────
+
+@router.get("/config/scoring")
+async def get_scoring_config_endpoint(
+    user: User | None = Depends(get_optional_user),
+):
+    """Return current quality scoring configuration."""
+    from team_memory.services.scoring import get_scoring_config
+    return get_scoring_config()
+
+
+@router.put("/config/scoring")
+async def update_scoring_config(
+    req: dict,
+    user: User = Depends(require_role("admin")),
+):
+    """Update quality scoring rules."""
+    from team_memory.services.scoring import get_scoring_config, save_scoring_config
+    current = get_scoring_config()
+    for key in (
+        "initial_score", "max_score", "protection_days",
+        "decay_rate", "slow_decay_threshold", "slow_decay_rate",
+        "reference_boost", "high_rating_boost", "high_rating_threshold",
+        "outdated_threshold",
+    ):
+        if key in req:
+            current[key] = req[key]
+    if "tiers" in req and isinstance(req["tiers"], dict):
+        current["tiers"].update(req["tiers"])
+    save_scoring_config(current)
+    return {"message": "打分规则已更新", "config": current}

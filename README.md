@@ -87,6 +87,40 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 - **Token 预算控制**：自动裁剪输出长度，避免经验库增大后撑爆 AI 上下文
 - **PageIndex-Lite**：长文档自动分块建立节点索引，支持节点级精准检索
 
+### 任务管理
+
+面向 Agent（AI 优先、人工辅助）的任务协作能力：
+
+- **Kanban 看板**：五列流转（等待/计划/进行中/已完成/已取消），WIP 限制，任务卡片
+- **任务组与归档**：100% 完成的任务组可归档，从主视图隐藏
+- **AI 执行**：Web 生成 Prompt、MCP execute_task、resume_project 三种方式
+- **任务依赖**：blocks/related/discovered_from 类型，`tm_ready` 查询就绪任务
+
+### 三层作用域
+
+- **global**：全局共享知识
+- **team**：团队/项目级经验
+- **personal**：个人笔记与草稿
+
+### 经验类型自动分类
+
+保存时可根据内容自动推荐经验类型（general/feature/bugfix/tech_design/incident/best_practice/learning），减少手动选择。
+
+### 任务预检机制
+
+创建任务或 Plan 前调用 `tm_preflight`，根据任务复杂度返回搜索深度建议（skip/light/full），避免重复工作。
+
+### 经验质量打分系统
+
+自动评估经验的活跃度和价值，让高质量经验脱颖而出：
+
+- **阶梯衰减**：新经验 100 分起步，10 天保护期后未被引用每天 -1 分（低于 50 分后 -0.5/天）
+- **引用加分**：每次被 `tm_search`/`tm_solve` 命中 +2 分，获 4 星以上评价 +1 分
+- **质量等级**：Gold (≥120) / Silver (≥60) / Bronze (≥20) / Outdated (≤0)
+- **置顶免衰**：手动置顶的经验永不衰减（年度发布流程等长期有效经验）
+- **Outdated 管理**：分值归零的经验仍可搜索到，但在管理面板提示处理（恢复/删除/置顶）
+- **规则可配**：初始分值、衰减速率、加分幅度、等级阈值均可在设置页调整
+
 ### 结构化管理
 
 不是随意堆放的笔记，而是有类型、有层级、有评分的经验体系：
@@ -104,6 +138,7 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 - **反馈评分**：1-5 星评分影响搜索排序，低分经验自动降权
 - **版本历史**：就地编辑 + 版本快照，支持回滚
 - **去重检测**：保存前自动检测相似经验，避免重复录入
+- **合并建议**：设置页标记建议合并的相似经验对，三栏 Git-Conflict 风格 diff 对比 + 合并预览
 - **多项目隔离**：通过 `project` 参数隔离不同项目的经验，避免跨项目污染
 
 ### 无缝集成
@@ -153,7 +188,57 @@ make setup
 
 **2. 改一处配置**
 
-打开 `config.minimal.yaml`，把 `auth.api_key` 改成你自己的密钥（例如 `openssl rand -hex 16` 生成）。
+最简配置：
+
+设置环境变量作为管理员引导密钥（首次部署必须）：
+
+```bash
+export TEAM_MEMORY_API_KEY=$(openssl rand -hex 16)
+echo "你的管理员 API Key: $TEAM_MEMORY_API_KEY"
+```
+
+**首次登录**
+
+- 打开 http://localhost:9111
+- 点击「使用 API Key 登录」
+- 将上面的 TEAM_MEMORY_API_KEY 粘贴到输入框，点击「登录」
+- 登录成功后即为 admin，右上角显示当前用户名（默认来自 TEAM_MEMORY_USER，未设置时为 admin）
+
+该 Key 仅在内存中生效（与 config 中的 auth.api_key 一样），重启服务后仍使用同一环境变量即可再次用该 Key 登录。若希望用「用户名 + 密码」登录并长期使用，见下文「可选：为自己创建持久 Admin 账户」。
+
+### 方式二：配置文件
+
+在 config.yaml 或 config.minimal.yaml 中设置：
+```
+auth:
+  type: db_api_key
+  api_key: "${TEAM_MEMORY_API_KEY}"   # 从环境变量读取
+  user: admin
+```
+
+或直接写明文（仅限本地/测试，勿提交到 Git）：
+```
+auth:
+  type: db_api_key
+  api_key: "你的引导Key"
+  user: admin
+```
+启动服务后，用该 api_key 在 Web 登录页选择「使用 API Key 登录」即可获得 admin。
+
+### 可选：为自己创建持久 Admin 账户
+若希望用「用户名 + 密码」登录、且不依赖引导 Key：
+1. 已用引导 Key 以 admin 身份登录 Web。
+2. 进入 设置 → 用户管理，点击「添加用户」。
+3. 填写：
+    - 用户名：如 admin 或你的英文名
+    - 角色：admin
+    - 初始密码：设置一个强密码（用于 Web 登录）
+4. 点击「创建」。系统会生成并展示一条 API Key（用于 MCP 客户端），请复制保存。
+5. 之后可：
+    - Web：用刚设置的用户名 + 密码登录。
+    - MCP：在 Cursor/Claude 的 mcp.json 中使用刚生成的 API Key 作为 TEAM_MEMORY_API_KEY。
+引导 Key（环境变量或 config 中的 key）与数据库中的用户彼此独立：引导 Key 仅用于首次拿到 admin 权限；后续日常可使用数据库里的 admin 账号（用户名+密码 + 自己的 API Key）。
+
 若使用默认 Docker 数据库，`database.url` 无需改；否则改为你的 PostgreSQL 连接串。
 
 **3. 拉取 Embedding 模型（仅首次）**
@@ -162,13 +247,23 @@ make setup
 ollama pull nomic-embed-text
 ```
 
+
+
 **4. 启动 Web**
 
 ```bash
 make web
 ```
 
-浏览器打开 **http://localhost:9111**，用上一步设置的 API Key 登录。在 Web「设置」中可查看/管理 API Key，**把要用的 API Key 发给需要接入 MCP 的同事**。
+浏览器打开 **http://localhost:9111**。
+
+**首次登录**：切换到「使用 API Key 登录」，输入上一步的 `TEAM_MEMORY_API_KEY`，即以 admin 身份进入。
+
+**多人使用**：
+- 团队成员在登录页点击「注册」，填写用户名和密码
+- Admin 在「设置 > 用户管理」中审批注册申请，系统自动生成 API Key
+- Admin 将 API Key 分发给成员，用于 MCP 客户端（Cursor/Claude Desktop）接入
+- 成员后续 Web 登录使用用户名 + 密码，MCP 使用 API Key
 
 **5. 可选：健康检查**
 
@@ -225,9 +320,9 @@ pip install team_memory
 {
   "mcpServers": {
     "team_memory": {
-      "command": "/path/to/team_doc/.venv/bin/python",
+      "command": "/path/to/team_memory/.venv/bin/python",
       "args": ["-m", "team_memory.server"],
-      "cwd": "/path/to/team_doc",
+      "cwd": "/path/to/team_memory",
       "env": {
         "TEAM_MEMORY_API_KEY": "你的API密钥",
         "TEAM_MEMORY_USER": "你的名字"
@@ -270,7 +365,7 @@ pip install team_memory
 }
 ```
 
-**从源码目录运行**（使用项目 venv 与 config）：将 `command` 改为 `/path/to/team_doc/.venv/bin/python`，增加 `"cwd": "/path/to/team_doc"`，`env` 中至少保留 `TEAM_MEMORY_API_KEY` 与 `TEAM_MEMORY_USER`（数据库由项目内 config 提供）。
+**从源码目录运行**（使用项目 venv 与 config）：将 `command` 改为 `/path/to/team_memory/.venv/bin/python`，增加 `"cwd": "/path/to/team_memory"`，`env` 中至少保留 `TEAM_MEMORY_API_KEY` 与 `TEAM_MEMORY_USER`（数据库由项目内 config 提供）。
 
 **Claude Desktop**：在 MCP 设置中添加同名 `team_memory` 条目，`command` / `args` / `env` 与上一致即可。
 
@@ -334,6 +429,12 @@ AI 的行为（主动推荐）：
 | `tm_update` | 更新经验 | 经验 ID + 字段 | 追加方案或标签 |
 | `tm_config` | 查看配置 | 无 | 查看运行时配置快照 |
 | `tm_status` | 系统状态 | 无 | 查看健康状态和 Pipeline 信息 |
+| `tm_preflight` | 任务预检 | 任务描述、当前文件 | 分析复杂度并返回搜索建议 |
+| `tm_task_claim` | 认领任务 | 任务 ID | 原子认领/释放，防并发冲突 |
+| `tm_ready` | 就绪任务 | project（可选） | 查询依赖已满足的可执行任务 |
+| `tm_message` | 任务消息 | 任务 ID | 发送/查看任务消息线程 |
+| `tm_dependency` | 任务依赖 | 任务 ID、依赖类型 | 管理任务间 blocks/related 依赖 |
+| `tm_doc_sync` | 文档同步 | .debug 文档路径 | 将文档幂等同步到经验库 |
 
 ### MCP 资源
 
@@ -364,6 +465,8 @@ AI 的行为（主动推荐）：
 | 草稿箱 | 查看 AI 自动提取的待审核草稿 |
 | 审核队列 | 审核团队成员提交的经验 |
 | 去重检测 | 发现和合并相似经验 |
+| 任务 Kanban | 五列看板、任务组、任务侧边面板、AI Prompt、消息线程 |
+| 归档管理 | 归档任务组、设置页折叠、取消归档 |
 | 系统设置 | 检索参数、搜索配置、缓存、Webhook、Schema 配置 |
 
 创建经验支持三种模式：
@@ -424,13 +527,33 @@ embedding:
 ### 常用命令
 
 ```bash
-make setup     # 首次安装
-make dev       # 启动全部服务
-make health    # 一键健康检查
-make backup    # 备份数据库
-make test      # 运行测试
-make lint      # 代码检查（ruff）
+make setup         # 首次安装
+make dev           # 启动全部服务
+make web           # 仅启动 Web（9111）
+make health        # 一键健康检查
+make backup        # 备份数据库
+make test          # 运行测试
+make lint          # 代码检查（ruff）
+make hooks-install # 安装 Git hooks（commit 含 [TM-xxx] 时自动更新任务）
 ```
+
+### Make 命令说明（等价手动命令）
+
+便于问题定位和手动分步启动时参考：
+
+| 命令 | 含义 | 等价手动步骤 |
+|------|------|----------------|
+| `make help` | 列出所有 make 目标 | `grep -E '^[a-zA-Z_-]+:.*?## ' Makefile \| awk ...` |
+| `make release-9111` | 释放 9111 端口 | 停掉占用 9111 的 Docker 容器（如 `team-memory-web`）和本机进程：<br>`docker compose stop team-memory-web`<br>`docker ps -q --filter "publish=9111" \| xargs docker stop`<br>`lsof -i :9111 -t \| xargs kill -9` |
+| `make setup` | 首次安装 | `docker compose up -d` → 等 PG 就绪 → 建库（若无）→ 按需启动 Ollama 容器 → `pip install -e ".[dev]"` → `alembic upgrade head` |
+| `make dev` | 启动全部服务 | 先执行 `make release-9111`（避免 9111 被占）→ `docker compose up -d postgres redis` → 若 11434 未被占用则 `docker compose --profile ollama up -d` → 前台运行 `python -m team_memory.web.app` |
+| `make web` | 仅启动 Web | 先执行 `make release-9111` → 前台运行 `python -m team_memory.web.app`（默认 http://0.0.0.0:9111） |
+| `make mcp` | 仅启动 MCP 服务 | `python -m team_memory.server`（stdio，供 Cursor/Claude Desktop 调用） |
+| `make health` | 健康检查 | `./scripts/healthcheck.sh`（检测 DB、Web、Ollama 等） |
+| `make migrate` | 数据库迁移 | `alembic upgrade head` |
+| `make hooks-install` | 安装 Git hooks | 复制 `scripts/post-commit-hook.sh` 到 `.git/hooks/post-commit`，commit 含 [TM-xxx] 时自动更新任务 |
+
+**说明**：`make dev` 与 `make web` 会在启动前自动释放 9111 端口（停止占用该端口的 Docker 容器或本机进程），因此可重复执行而不会出现「address already in use」。
 
 ### 仪表盘报「加载仪表盘失败」时
 

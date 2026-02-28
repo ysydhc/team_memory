@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import func as sa_func
 from sqlalchemy import or_, select
@@ -51,16 +51,67 @@ async def list_experiences(
     project: str | None = None,
     status: str | None = None,
     scope: str | None = None,
+    visibility: str | None = None,
     experience_type: str | None = None,
     severity: str | None = None,
     category: str | None = None,
     progress_status: str | None = None,
+    quality_tier: str | None = None,
     user: User | None = Depends(get_optional_user),
 ):
-    """List experiences with pagination and multi-dimensional filters."""
+    """List experiences with pagination, multi-dimensional filters, and visibility."""
     db_url = _get_db_url()
-    resolved_project = _resolve_project(project)
-    include_all = status in ("all", "draft")
+    # Support comma-separated multi-project parameter
+    project_list = (
+        [p.strip() for p in project.split(",") if p.strip()]
+        if project and "," in project
+        else None
+    )
+    resolved_project = _resolve_project(project.split(",")[0] if project else project)
+    effective_visibility = visibility or scope
+    include_all = status in ("all", "draft", "review", "rejected")
+    current_user = user.name if user else None
+
+    def _project_filter(q):
+        """Filter by project(s)."""
+        if project_list:
+            return q.where(
+                or_(
+                    Experience.project.in_(project_list),
+                    Experience.visibility == "global",
+                )
+            )
+        return q.where(
+            or_(
+                Experience.project == resolved_project,
+                Experience.visibility == "global",
+            )
+        )
+
+    def _vis_where(q):
+        """Apply visibility-aware project filter."""
+        vis = effective_visibility
+        if vis and vis != "all":
+            vis_map = {"personal": "private", "team": "project", "global": "global"}
+            vis_val = vis_map.get(vis, vis)
+            q = q.where(Experience.visibility == vis_val)
+            if vis_val == "private" and current_user:
+                q = q.where(Experience.created_by == current_user)
+            if vis_val != "global":
+                q = _project_filter(q)
+        else:
+            q = _project_filter(q)
+            if current_user:
+                q = q.where(
+                    or_(
+                        Experience.visibility != "private",
+                        Experience.created_by == current_user,
+                    )
+                )
+            else:
+                q = q.where(Experience.visibility != "private")
+        return q
+
     async with app_module.get_session(db_url) as session:
         repo = app_module.ExperienceRepository(session)
 
@@ -69,27 +120,39 @@ async def list_experiences(
                 limit=page_size,
                 offset=(page - 1) * page_size,
                 project=resolved_project,
+                created_by=current_user,
             )
-            total = await repo.count_drafts(project=resolved_project)
-        elif tag or experience_type or severity or category or progress_status:
+            total = await repo.count_drafts(
+                project=resolved_project, created_by=current_user
+            )
+        elif status == "review":
+            experiences = await repo.list_pending_review(limit=page_size)
+            total = len(experiences)
+        elif (
+            tag or experience_type or severity or category
+            or progress_status or status or quality_tier
+        ):
             offset = (page - 1) * page_size
             base_q = (
                 select(Experience)
                 .where(Experience.parent_id.is_(None))
                 .where(Experience.is_deleted == False)  # noqa: E712
-                .where(Experience.project == resolved_project)
                 .options(selectinload(Experience.children))
             )
+            base_q = _vis_where(base_q)
             count_q = (
                 select(sa_func.count())
                 .select_from(Experience)
                 .where(Experience.parent_id.is_(None))
                 .where(Experience.is_deleted == False)  # noqa: E712
-                .where(Experience.project == resolved_project)
             )
-            if not include_all:
-                base_q = base_q.where(Experience.publish_status == "published")
-                count_q = count_q.where(Experience.publish_status == "published")
+            count_q = _vis_where(count_q)
+            if status and status not in ("all",):
+                base_q = base_q.where(Experience.exp_status == status)
+                count_q = count_q.where(Experience.exp_status == status)
+            elif not include_all:
+                base_q = base_q.where(Experience.exp_status == "published")
+                count_q = count_q.where(Experience.exp_status == "published")
             if tag:
                 base_q = base_q.where(Experience.tags.overlap([tag]))
                 count_q = count_q.where(Experience.tags.overlap([tag]))
@@ -105,6 +168,20 @@ async def list_experiences(
             if progress_status:
                 base_q = base_q.where(Experience.progress_status == progress_status)
                 count_q = count_q.where(Experience.progress_status == progress_status)
+            if quality_tier:
+                tier_ranges = {
+                    "gold": (120, None),
+                    "silver": (60, 120),
+                    "bronze": (20, 60),
+                    "outdated": (None, 1),
+                }
+                lo, hi = tier_ranges.get(quality_tier, (None, None))
+                if lo is not None:
+                    base_q = base_q.where(Experience.quality_score >= lo)
+                    count_q = count_q.where(Experience.quality_score >= lo)
+                if hi is not None:
+                    base_q = base_q.where(Experience.quality_score < hi)
+                    count_q = count_q.where(Experience.quality_score < hi)
 
             base_q = (
                 base_q.order_by(Experience.created_at.desc())
@@ -117,15 +194,26 @@ async def list_experiences(
             total = total_result.scalar() or 0
         else:
             if not include_all:
-                total = await repo.count(project=resolved_project)
+                total = await repo.count(
+                    project=resolved_project,
+                    scope=effective_visibility,
+                    current_user=current_user,
+                )
             else:
-                total = await repo.count(include_deleted=False, project=resolved_project)
+                total = await repo.count(
+                    include_deleted=False,
+                    project=resolved_project,
+                    scope=effective_visibility,
+                    current_user=current_user,
+                )
             offset = (page - 1) * page_size
             experiences = await repo.list_recent(
                 limit=page_size,
                 offset=offset,
                 include_all_statuses=include_all,
                 project=resolved_project,
+                scope=effective_visibility,
+                current_user=current_user,
             )
 
         exp_list = []
@@ -350,6 +438,10 @@ async def update_experience_route(
         kwargs["publish_status"] = raw["publish_status"]
     if "solution_addendum" in raw:
         kwargs["solution_addendum"] = raw["solution_addendum"]
+    if "visibility" in raw:
+        kwargs["visibility"] = raw["visibility"]
+    if "project" in raw:
+        kwargs["project"] = raw["project"]
 
     result = await _svc().update(
         experience_id=experience_id,
@@ -595,19 +687,114 @@ async def review_experience(
     return result
 
 
+@router.post("/experiences/{experience_id}/status")
+async def change_experience_status(
+    experience_id: str,
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    """Change experience status (new unified endpoint).
+
+    Body: { "status": "review"|"published"|"draft"|"rejected",
+            "visibility": "private"|"project"|"global" }
+    """
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    new_status = body.get("status")
+    new_visibility = body.get("visibility")
+
+    if not new_status and not new_visibility:
+        raise HTTPException(status_code=400, detail="Must provide status or visibility")
+
+    db_url = _get_db_url()
+    async with app_module.get_session(db_url) as session:
+        repo = app_module.ExperienceRepository(session)
+        exp_uuid = uuid.UUID(experience_id)
+
+        if new_status:
+            is_admin = user.role == "admin"
+            try:
+                result = await repo.change_status(
+                    experience_id=exp_uuid,
+                    new_status=new_status,
+                    visibility=new_visibility,
+                    changed_by=user.name,
+                    is_admin=is_admin,
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+        else:
+            result = await repo.update(exp_uuid, visibility=new_visibility)
+
+        if result is None:
+            raise HTTPException(status_code=404, detail="Experience not found")
+
+        status_messages = {
+            "draft": "已退回草稿",
+            "review": "已提交审核",
+            "published": "已发布",
+            "rejected": "已拒绝",
+        }
+        msg = status_messages.get(new_status, "状态已更新")
+        if new_visibility:
+            vis_labels = {"private": "仅自己", "project": "项目内", "global": "全局"}
+            msg += f"，可见范围：{vis_labels.get(new_visibility, new_visibility)}"
+
+        return {"message": msg, "experience": result.to_dict()}
+
+
 @router.post("/experiences/{experience_id}/publish")
 async def publish_experience(
     experience_id: str,
+    request: Request,
     user: User = Depends(get_current_user),
 ):
-    """Publish a draft experience (set publish_status='published')."""
-    result = await _svc().publish_experience(
-        experience_id=experience_id,
-        user=user.name,
-    )
+    """Legacy publish endpoint — delegates to change_status."""
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    target = body.get("target", "personal")
+
+    db_url = _get_db_url()
+    async with app_module.get_session(db_url) as session:
+        repo = app_module.ExperienceRepository(session)
+        exp_uuid = uuid.UUID(experience_id)
+        is_admin = user.role == "admin"
+
+        if target == "team":
+            try:
+                result = await repo.change_status(
+                    experience_id=exp_uuid,
+                    new_status="published" if is_admin else "review",
+                    visibility="project",
+                    changed_by=user.name,
+                    is_admin=is_admin,
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            msg = "已发布到团队" if is_admin else "已提交团队审批"
+        else:
+            try:
+                result = await repo.change_status(
+                    experience_id=exp_uuid,
+                    new_status="published",
+                    visibility="private",
+                    changed_by=user.name,
+                    is_admin=True,  # personal publish always allowed
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            msg = "已设为个人可见"
+
     if result is None:
         raise HTTPException(status_code=404, detail="Experience not found")
-    return {"message": "Experience published", "experience": result}
+    return {"message": msg, "experience": result.to_dict()}
 
 
 @router.post("/experiences/{experience_id}/summarize")

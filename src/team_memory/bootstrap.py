@@ -50,38 +50,98 @@ _instance: AppContext | None = None
 
 
 def _create_embedding_provider(settings: Settings) -> EmbeddingProvider:
+    """Create the configured embedding provider with automatic degradation.
+
+    Priority: configured provider → Ollama → OpenAI → generic → local.
+    """
     cfg = settings.embedding
-    if cfg.provider == "ollama":
-        from team_memory.embedding.ollama_provider import OllamaEmbedding
+    provider = cfg.provider
 
-        return OllamaEmbedding(
-            model=cfg.ollama.model,
-            dim=cfg.ollama.dimension,
-            base_url=cfg.ollama.base_url,
-        )
-    elif cfg.provider == "openai":
-        from team_memory.embedding.openai_provider import OpenAIEmbedding
+    def _try_ollama() -> EmbeddingProvider | None:
+        try:
+            import httpx
 
+            resp = httpx.get(f"{cfg.ollama.base_url}/api/tags", timeout=3)
+            if resp.status_code == 200:
+                from team_memory.embedding.ollama_provider import OllamaEmbedding
+
+                return OllamaEmbedding(
+                    model=cfg.ollama.model,
+                    dim=cfg.ollama.dimension,
+                    base_url=cfg.ollama.base_url,
+                )
+        except Exception:
+            pass
+        return None
+
+    def _try_openai() -> EmbeddingProvider | None:
         api_key = cfg.openai.api_key or os.environ.get("OPENAI_API_KEY", "")
-        return OpenAIEmbedding(
-            api_key=api_key,
-            model=cfg.openai.model,
-            dim=cfg.openai.dimension,
-        )
-    else:
-        from team_memory.embedding.local_provider import LocalEmbedding
+        if api_key:
+            from team_memory.embedding.openai_provider import OpenAIEmbedding
 
-        return LocalEmbedding(
-            model_name=cfg.local.model_name,
-            device=cfg.local.device,
-            dim=cfg.local.dimension,
-        )
+            return OpenAIEmbedding(
+                api_key=api_key, model=cfg.openai.model, dim=cfg.openai.dimension,
+            )
+        return None
+
+    def _try_generic() -> EmbeddingProvider | None:
+        api_key = cfg.generic.api_key or os.environ.get("EMBEDDING_API_KEY", "")
+        if api_key or cfg.generic.base_url != "http://localhost:8080/v1":
+            from team_memory.embedding.generic_provider import GenericEmbedding
+
+            return GenericEmbedding(
+                base_url=cfg.generic.base_url,
+                api_key=api_key,
+                model=cfg.generic.model,
+                dim=cfg.generic.dimension,
+            )
+        return None
+
+    def _try_local() -> EmbeddingProvider | None:
+        try:
+            from team_memory.embedding.local_provider import LocalEmbedding
+
+            return LocalEmbedding(
+                model_name=cfg.local.model_name,
+                device=cfg.local.device,
+                dim=cfg.local.dimension,
+            )
+        except Exception:
+            return None
+
+    factories = {
+        "ollama": _try_ollama,
+        "openai": _try_openai,
+        "generic": _try_generic,
+        "local": _try_local,
+    }
+
+    result = factories.get(provider, _try_ollama)()
+    if result is not None:
+        logger.info("Embedding provider: %s (configured)", provider)
+        return result
+
+    logger.warning("Configured embedding provider '%s' unavailable, trying fallbacks…", provider)
+    fallback_order = ["ollama", "openai", "generic", "local"]
+    for fb in fallback_order:
+        if fb == provider:
+            continue
+        result = factories[fb]()
+        if result is not None:
+            logger.warning("Embedding provider degraded to: %s", fb)
+            return result
+
+    raise RuntimeError(
+        "No embedding provider available. Install sentence-transformers, "
+        "start Ollama, or set OPENAI_API_KEY."
+    )
 
 
 def _configure_auth(settings: Settings) -> AuthProvider:
     from team_memory.auth.provider import ApiKeyAuth
 
-    auth = create_auth_provider(settings.auth.type)
+    db_url = _resolve_db_url(settings) if settings.auth.type == "db_api_key" else None
+    auth = create_auth_provider(settings.auth.type, db_url=db_url)
     if isinstance(auth, ApiKeyAuth):
         if settings.auth.api_key:
             auth.register_key(settings.auth.api_key, settings.auth.user, "admin")

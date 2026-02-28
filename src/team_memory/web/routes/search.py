@@ -26,7 +26,6 @@ async def search_experiences_api(
     """Semantic search for experiences. Supports anonymous access."""
     _service = app_module._service
     _settings = app_module._settings
-    db_url = _get_db_url()
     user_name = user.name if user else "anonymous"
 
     retrieval_cfg = _settings.retrieval if _settings else None
@@ -43,27 +42,25 @@ async def search_experiences_api(
         min_avg_rating = 0.0
     rating_weight = retrieval_cfg.rating_weight if retrieval_cfg else 0.3
 
-    async with get_session(db_url) as session:
-        results = await _service.search(
-            session=session,
-            query=req.query,
-            tags=req.tags,
-            max_results=max_results,
-            min_similarity=req.min_similarity,
-            user_name=user_name,
-            source="web",
-            grouped=req.grouped,
-            top_k_children=top_k_children,
-            min_avg_rating=min_avg_rating,
-            rating_weight=rating_weight,
-            use_pageindex_lite=req.use_pageindex_lite,
-            project=resolved_project,
-        )
-        return {
-            "results": results,
-            "total": len(results),
-            "project": resolved_project,
-        }
+    results = await _service.search(
+        query=req.query,
+        tags=req.tags,
+        max_results=max_results,
+        min_similarity=req.min_similarity,
+        user_name=user_name,
+        source="web",
+        grouped=req.grouped,
+        top_k_children=top_k_children,
+        min_avg_rating=min_avg_rating,
+        rating_weight=rating_weight,
+        use_pageindex_lite=req.use_pageindex_lite,
+        project=resolved_project,
+    )
+    return {
+        "results": results,
+        "total": len(results),
+        "project": resolved_project,
+    }
 
 
 @router.post("/search/debug")

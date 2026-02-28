@@ -45,13 +45,23 @@ class LocalEmbeddingConfig(BaseModel):
     dimension: int = 1024
 
 
+class GenericEmbeddingConfig(BaseModel):
+    """Generic OpenAI-compatible embedding endpoint configuration."""
+
+    base_url: str = "http://localhost:8080/v1"
+    api_key: str = ""
+    model: str = "text-embedding-3-small"
+    dimension: int = 1536
+
+
 class EmbeddingConfig(BaseModel):
     """Embedding service configuration."""
 
-    provider: Literal["ollama", "openai", "local"] = "ollama"
+    provider: Literal["ollama", "openai", "local", "generic"] = "ollama"
     ollama: OllamaEmbeddingConfig = Field(default_factory=OllamaEmbeddingConfig)
     openai: OpenAIEmbeddingConfig = Field(default_factory=OpenAIEmbeddingConfig)
     local: LocalEmbeddingConfig = Field(default_factory=LocalEmbeddingConfig)
+    generic: GenericEmbeddingConfig = Field(default_factory=GenericEmbeddingConfig)
 
     @property
     def dimension(self) -> int:
@@ -60,15 +70,20 @@ class EmbeddingConfig(BaseModel):
             return self.ollama.dimension
         if self.provider == "openai":
             return self.openai.dimension
+        if self.provider == "generic":
+            return self.generic.dimension
         return self.local.dimension
 
 
 class LLMConfig(BaseModel):
     """LLM configuration for document parsing and other AI tasks."""
 
+    provider: str = "ollama"  # ollama | openai | generic
     model: str = "gpt-oss:20b-cloud"
     base_url: str = "http://localhost:11434"
-    prompt_dir: str | None = None  # Directory for custom prompt templates (None = built-in)
+    api_key: str = ""  # For OpenAI/generic providers
+    prompt_dir: str | None = None  # Custom prompt template directory
+    monthly_budget: float = 0.0  # Monthly budget in USD (0 = unlimited)
 
 
 class RetrievalConfig(BaseModel):
@@ -192,12 +207,19 @@ class VectorConfig(BaseModel):
 
 
 class AuthConfig(BaseModel):
-    """Authentication configuration."""
+    """Authentication configuration.
 
-    type: Literal["api_key", "none"] = "api_key"
+    Supported types:
+      - "db_api_key": Database-backed multi-user auth (recommended).
+        Supports password login on Web and API Key for MCP.
+      - "api_key": In-memory single/dual key auth (legacy).
+      - "none": No auth (development only).
+    """
+
+    type: Literal["api_key", "db_api_key", "none"] = "db_api_key"
     api_key: str | None = None
     user: str = "admin"
-    allow_anonymous_search: bool = False  # P3-3
+    allow_anonymous_search: bool = False
 
 
 class WebConfig(BaseModel):
@@ -215,6 +237,7 @@ class InstallableCatalogConfig(BaseModel):
     registry_manifest_url: str = ""
     target_rules_dir: str = ".cursor/rules"
     target_prompts_dir: str = ".cursor/prompts"
+    target_skills_dir: str = ".cursor/skills"
     request_timeout_seconds: int = 8
 
 

@@ -38,6 +38,7 @@ class SearchRequest:
     min_similarity: float = 0.6
     tags: list[str] | None = None
     user_name: str = "anonymous"
+    current_user: str | None = None
     source: str = "mcp"
     # Grouped search params
     grouped: bool = False
@@ -394,6 +395,7 @@ class SearchPipeline:
                 min_avg_rating=request.min_avg_rating,
                 rating_weight=request.rating_weight,
                 project=request.project,
+                current_user=request.current_user,
             )
             # Grouped results have a different structure
             items = []
@@ -414,6 +416,7 @@ class SearchPipeline:
             min_similarity=request.min_similarity,
             tags=request.tags,
             project=request.project,
+            current_user=request.current_user,
         )
         items = []
         for r in raw:
@@ -440,6 +443,7 @@ class SearchPipeline:
             max_results=limit,
             tags=request.tags,
             project=request.project,
+            current_user=request.current_user,
         )
         items = []
         for r in raw:
@@ -513,32 +517,34 @@ class SearchPipeline:
     def _apply_adaptive_filter(
         self, candidates: list[SearchResultItem]
     ) -> list[SearchResultItem]:
-        """Apply adaptive score filtering.
+        """Apply adaptive score filtering using similarity scores.
+
+        Uses the original similarity score (not RRF) for filtering, since
+        RRF scores are inherently low (~0.01-0.02 with k=60) and make
+        percentage-based thresholds too aggressive.
 
         Two strategies:
-        1. Dynamic threshold: filter results below min_confidence_ratio * top-1 score.
-        2. Elbow detection: cut when score gap exceeds threshold.
+        1. Dynamic threshold: filter results below min_confidence_ratio * top-1 similarity.
+        2. Elbow detection: cut when similarity gap exceeds threshold.
         """
         if not candidates:
             return candidates
 
-        top_score = candidates[0].score
+        top_sim = candidates[0].similarity if candidates[0].similarity > 0 else 1.0
         min_ratio = self._search_config.min_confidence_ratio
         gap_threshold = self._search_config.score_gap_threshold
-        threshold = top_score * min_ratio
+        threshold = top_sim * min_ratio
 
-        filtered = [candidates[0]]  # Always keep top-1
+        filtered = [candidates[0]]
 
         for i in range(1, len(candidates)):
             curr = candidates[i]
 
-            # Dynamic threshold filter
-            if curr.score < threshold:
+            if curr.similarity < threshold:
                 break
 
-            # Elbow detection: large gap from previous result
-            prev_score = candidates[i - 1].score
-            if prev_score > 0 and (prev_score - curr.score) / prev_score > gap_threshold:
+            prev_sim = candidates[i - 1].similarity
+            if prev_sim > 0 and (prev_sim - curr.similarity) / prev_sim > gap_threshold:
                 break
 
             filtered.append(curr)

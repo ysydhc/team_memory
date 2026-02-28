@@ -16,6 +16,7 @@ import {
     editGitRefsToText,
     editRelatedLinksToText,
 } from './schema.js';
+import { populateTagSuggestions } from './pages.js';
 
 function api(...args) {
     return window.__api(...args);
@@ -104,11 +105,12 @@ export function openCreateModal() {
     document.getElementById('create-quick-mode').checked = false;
     toggleCreateQuickMode();
     if (!document.getElementById('create-project').value) {
-        document.getElementById('create-project').value = state.defaultProject || 'default';
+        document.getElementById('create-project').value = state.activeProject || state.defaultProject || 'default';
     }
     if (!document.getElementById('group-parent-project').value) {
-        document.getElementById('group-parent-project').value = state.defaultProject || 'default';
+        document.getElementById('group-parent-project').value = state.activeProject || state.defaultProject || 'default';
     }
+    populateTagSuggestions();
     document.getElementById('create-title').focus();
 }
 
@@ -135,7 +137,20 @@ export function toggleCreateQuickMode() {
     if (typeSpecific) typeSpecific.classList.toggle('hidden', quick);
 }
 
-export function closeCreateModal() {
+export function closeCreateModal(force = false) {
+    if (!force) {
+        const title = document.getElementById('create-title')?.value?.trim();
+        const problem = document.getElementById('create-problem')?.value?.trim();
+        const solution = document.getElementById('create-solution')?.value?.trim();
+        const gTitle = document.getElementById('group-parent-title')?.value?.trim();
+        const gProblem = document.getElementById('group-parent-problem')?.value?.trim();
+        const gSolution = document.getElementById('group-parent-solution')?.value?.trim();
+        const parseContent = document.getElementById('parse-content')?.value?.trim();
+        const parseUrl = document.getElementById('parse-url')?.value?.trim();
+        if (title || problem || solution || gTitle || gProblem || gSolution || parseContent || parseUrl) {
+            if (!confirm('当前内容尚未保存，确定关闭？')) return;
+        }
+    }
     document.getElementById('create-modal').classList.add('hidden');
     ['create-title', 'create-problem', 'create-solution', 'create-tags', 'create-language', 'create-framework', 'create-code', 'create-git-refs', 'create-related-links', 'create-project'].forEach((id) => {
         const el = document.getElementById(id);
@@ -155,6 +170,15 @@ export function closeCreateModal() {
     });
     switchCreateMode('manual');
 }
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const modal = document.getElementById('create-modal');
+        if (modal && !modal.classList.contains('hidden')) {
+            closeCreateModal();
+        }
+    }
+});
 
 export function addGroupChild() {
     const id = 'gc-' + Date.now();
@@ -303,8 +327,7 @@ export async function doCreate() {
                 children,
             });
             toast('经验组保存成功', 'success');
-            closeCreateModal();
-            loadDashboard();
+            closeCreateModal(true);
             if (state.currentPage === 'list') loadList(state.listPage);
         } catch (e) {
             toast('保存失败: ' + e.message, 'error');
@@ -411,20 +434,16 @@ export async function doCreate() {
                 if (relatedLinks) retryBody.related_links = relatedLinks;
                 await api('POST', '/api/v1/experiences', retryBody);
                 toast(saveAsDraft ? '经验已保存为草稿' : '经验保存成功', 'success');
-                closeCreateModal();
-                loadDashboard();
+                closeCreateModal(true);
                 if (state.currentPage === 'list') loadList(state.listPage);
-                if (state.currentPage === 'drafts') loadDrafts();
             }
             return;
         }
 
         if (!resp.ok) throw new Error(data.detail || '保存失败');
         toast(saveAsDraft ? '经验已保存为草稿' : '经验保存成功', 'success');
-        closeCreateModal();
-        loadDashboard();
+        closeCreateModal(true);
         if (state.currentPage === 'list') loadList(state.listPage);
-        if (state.currentPage === 'drafts') loadDrafts();
     } catch (e) {
         toast('保存失败: ' + e.message, 'error');
     }
@@ -494,6 +513,8 @@ export async function openEditModal(expId) {
         document.getElementById('edit-framework').value = exp.framework || '';
         document.getElementById('edit-code').value = exp.code_snippets || '';
         document.getElementById('edit-experience-type').value = exp.experience_type || 'general';
+        document.getElementById('edit-visibility').value = exp.visibility || 'project';
+        document.getElementById('edit-project').value = exp.project || '';
         document.getElementById('edit-git-refs').value = editGitRefsToText(exp.git_refs);
         document.getElementById('edit-related-links').value = editRelatedLinksToText(exp.related_links);
 
@@ -587,6 +608,8 @@ export async function submitEdit() {
     const language = document.getElementById('edit-language').value.trim() || null;
     const framework = document.getElementById('edit-framework').value.trim() || null;
     const experience_type = document.getElementById('edit-experience-type')?.value || 'general';
+    const visibility = document.getElementById('edit-visibility')?.value || 'project';
+    const project = document.getElementById('edit-project')?.value?.trim() || null;
     const severity = document.getElementById('edit-severity')?.value || null;
     const category = document.getElementById('edit-category')?.value || null;
     const progress_status = document.getElementById('edit-progress-status')?.value || null;
@@ -641,6 +664,8 @@ export async function submitEdit() {
     if (language !== (orig?.programming_language || '')) body.language = language;
     if (framework !== (orig?.framework || '')) body.framework = framework;
     if (experience_type !== (orig?.experience_type || 'general')) body.experience_type = experience_type;
+    if (visibility !== (orig?.visibility || 'project')) body.visibility = visibility;
+    if (project !== (orig?.project || null)) body.project = project;
     if (severity !== (orig?.severity || '')) body.severity = severity;
     if (category !== (orig?.category || '')) body.category = category;
     if (progress_status !== (orig?.progress_status || '')) body.progress_status = progress_status;
@@ -793,7 +818,6 @@ export async function doImport() {
         toast(`导入完成: ${data.imported}/${data.total} 条成功${data.errors && data.errors.length > 0 ? ', ' + data.errors.length + ' 条失败' : ''}`, 'success');
         closeImportModal();
         if (state.currentPage === 'list') loadList(state.listPage);
-        if (state.currentPage === 'dashboard') loadDashboard();
     } catch (e) {
         toast('导入失败: ' + e.message, 'error');
     } finally {

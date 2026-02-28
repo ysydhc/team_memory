@@ -254,3 +254,150 @@ class TestExperienceServiceUnit:
         # In-place update: tags are replaced, not merged
         assert new_tags == ["docker", "linux"]
         assert "python" not in new_tags
+
+
+class TestPhase2Fixes:
+    """Regression tests for phase-2 reliability fixes.
+
+    Covers:
+    - personal publish_status not overridden to draft
+    - feedback() callable without external session
+    - update() callable without external session
+    """
+
+    @pytest.fixture
+    def service_with_review(self, mock_embedding, no_auth):
+        """Service with require_review_for_ai=True (the risky config)."""
+        from team_memory.config import ReviewConfig
+        review_cfg = ReviewConfig(
+            enabled=True,
+            require_review_for_ai=True,
+            auto_publish_threshold=0.0,
+        )
+        return ExperienceService(
+            embedding_provider=mock_embedding,
+            auth_provider=no_auth,
+            review_config=review_cfg,
+            db_url="sqlite+aiosqlite://",
+        )
+
+    @pytest.mark.asyncio
+    async def test_personal_status_preserved_with_ai_review(self, service_with_review):
+        """publish_status='personal' must NOT be overridden to 'draft' even when
+        require_review_for_ai=True and source='auto_extract'."""
+        mock_session = AsyncMock()
+        mock_repo_instance = MagicMock()
+        mock_experience = MagicMock()
+        mock_experience.to_dict.return_value = {
+            "id": str(uuid.uuid4()),
+            "title": "Test",
+            "publish_status": "personal",
+            "created_at": "2026-01-01T00:00:00",
+        }
+        mock_repo_instance.create = AsyncMock(return_value=mock_experience)
+
+        @asynccontextmanager
+        async def mock_get_session(_db_url):
+            yield mock_session
+
+        with patch("team_memory.storage.database.get_session", mock_get_session), \
+             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
+            mock_repo.return_value = mock_repo_instance
+            await service_with_review.save(
+                title="Personal experience",
+                problem="Should stay personal",
+                created_by="user",
+                source="auto_extract",
+                publish_status="personal",
+            )
+
+        call_kwargs = mock_repo_instance.create.call_args
+        assert call_kwargs.kwargs["publish_status"] == "personal", \
+            "personal status must not be overridden to draft"
+
+    @pytest.mark.asyncio
+    async def test_published_status_becomes_draft_with_ai_review(self, service_with_review):
+        """publish_status='published' SHOULD be overridden to 'draft' when
+        require_review_for_ai=True and source='auto_extract'."""
+        mock_session = AsyncMock()
+        mock_repo_instance = MagicMock()
+        mock_experience = MagicMock()
+        mock_experience.to_dict.return_value = {
+            "id": str(uuid.uuid4()),
+            "title": "Test",
+            "publish_status": "draft",
+            "created_at": "2026-01-01T00:00:00",
+        }
+        mock_repo_instance.create = AsyncMock(return_value=mock_experience)
+
+        @asynccontextmanager
+        async def mock_get_session(_db_url):
+            yield mock_session
+
+        with patch("team_memory.storage.database.get_session", mock_get_session), \
+             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
+            mock_repo.return_value = mock_repo_instance
+            await service_with_review.save(
+                title="Published experience",
+                problem="Should become draft for review",
+                created_by="user",
+                source="auto_extract",
+                publish_status="published",
+            )
+
+        call_kwargs = mock_repo_instance.create.call_args
+        assert call_kwargs.kwargs["publish_status"] == "draft", \
+            "published status should be overridden to draft for AI review"
+
+    @pytest.mark.asyncio
+    async def test_feedback_without_session(self, service_with_review):
+        """feedback() must work without passing session= (it manages its own)."""
+        mock_session = AsyncMock()
+        mock_repo_instance = MagicMock()
+        mock_experience = MagicMock()
+        mock_repo_instance.get_by_id = AsyncMock(return_value=mock_experience)
+        mock_repo_instance.add_feedback = AsyncMock()
+
+        @asynccontextmanager
+        async def mock_get_session(_db_url):
+            yield mock_session
+
+        with patch("team_memory.storage.database.get_session", mock_get_session), \
+             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
+            mock_repo.return_value = mock_repo_instance
+            result = await service_with_review.feedback(
+                experience_id=str(uuid.uuid4()),
+                rating=4,
+                feedback_by="reviewer",
+            )
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_update_without_session(self, service_with_review):
+        """update() must work without passing session= (it manages its own)."""
+        mock_session = AsyncMock()
+        mock_repo_instance = MagicMock()
+        mock_experience = MagicMock()
+        mock_experience.solution = "Original"
+        mock_experience.title = "Test"
+        mock_experience.description = "Desc"
+        mock_experience.tags = []
+        mock_experience.code_snippets = None
+        mock_experience.to_dict.return_value = {"id": "test", "solution": "Original + Addendum"}
+        mock_repo_instance.get_by_id = AsyncMock(return_value=mock_experience)
+        mock_repo_instance.update = AsyncMock(return_value=mock_experience)
+
+        @asynccontextmanager
+        async def mock_get_session(_db_url):
+            yield mock_session
+
+        with patch("team_memory.storage.database.get_session", mock_get_session), \
+             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
+            mock_repo.return_value = mock_repo_instance
+            result = await service_with_review.update(
+                experience_id=str(uuid.uuid4()),
+                solution_addendum="Addendum",
+            )
+
+        assert result is not None

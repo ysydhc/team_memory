@@ -1,0 +1,53 @@
+name: Weekly TeamMemory Review Trigger
+
+on:
+  schedule:
+    # Every Friday 02:00 UTC (weekly)
+    - cron: "0 2 * * 5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  create-review-issue:
+    name: Create Weekly Review Task
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create weekly benchmark/review issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const now = new Date();
+            const next = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+            const fmt = (d) => d.toISOString().slice(0, 10);
+            const title = `Weekly TeamMemory Benchmark Review - ${fmt(now)}`;
+
+            const body = [
+              "## Weekly Review Checklist",
+              "",
+              `- Triggered at: ${fmt(now)}`,
+              `- Next review target: ${fmt(next)}`,
+              "",
+              "### Required Comparison",
+              "- [ ] Compare open-source alternatives (memory/context products).",
+              "- [ ] Compare enterprise/commercial solutions.",
+              "- [ ] Record key deltas: capability, cost, latency, maintenance risk.",
+              "- [ ] Write conclusions back to TeamMemory (`team_memory_project`).",
+              "",
+              "### Governance Checks",
+              "- [ ] Confirm Chinese-only policy for dialogue/document outputs.",
+              "- [ ] For high-impact changes (architecture/migration/permission/process/major tech choices), perform multi-role review.",
+              "- [ ] Ensure closure gate was followed (`ruff`, `format`, `pytest`, migration check when needed, `make health`).",
+            ].join(\"\\n\");
+
+            const { data: issue } = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ["team-memory-review", "automation", "weekly"],
+            });
+
+            core.info(`Created issue #${issue.number}`);
