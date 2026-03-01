@@ -431,6 +431,7 @@ window.saveTaskFromSlideout = pages.saveTaskFromSlideout;
 window.deleteTaskFromSlideout = pages.deleteTaskFromSlideout;
 window.createTaskGroupFromSlideout = pages.createTaskGroupFromSlideout;
 window.sendTaskMessage = pages.sendTaskMessage;
+window.sedimentTaskGroup = pages.sedimentTaskGroup;
 window.archiveGroup = pages.archiveGroup;
 window.toggleTaskGroups = pages.toggleTaskGroups;
 window.toggleGroupVisibility = pages.toggleGroupVisibility;

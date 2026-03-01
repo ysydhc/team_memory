@@ -12,6 +12,7 @@ from team_memory.auth.provider import User
 from team_memory.storage.database import get_session
 from team_memory.storage.models import PersonalTask
 from team_memory.storage.repository import ExperienceRepository, TaskRepository
+from team_memory.web import app as app_module
 from team_memory.web.app import (
     _get_db_url,
     _resolve_project,
@@ -284,7 +285,20 @@ async def list_task_groups(
         )
         await session.commit()
 
-    return {"groups": [g.to_dict(include_tasks=True) for g in groups]}
+    out = []
+    for g in groups:
+        d = g.to_dict(include_tasks=True)
+        tasks_list = getattr(g, "tasks", None) or []
+        d["group_completed"] = (
+            all(
+                t.status in ("completed", "cancelled")
+                for t in tasks_list
+            )
+            if tasks_list
+            else False
+        )
+        out.append(d)
+    return {"groups": out}
 
 
 @router.post("/task-groups")
@@ -359,7 +373,118 @@ async def get_task_group(
             raise HTTPException(status_code=404, detail="Task group not found")
         await session.commit()
 
-    return group.to_dict(include_tasks=True)
+    d = group.to_dict(include_tasks=True)
+    tasks_list = getattr(group, "tasks", None) or []
+    d["group_completed"] = (
+        all(
+            t.status in ("completed", "cancelled")
+            for t in tasks_list
+        )
+        if tasks_list
+        else False
+    )
+    return d
+
+
+@router.post("/task-groups/{group_id}/sediment")
+async def sediment_task_group(
+    group_id: str,
+    user: User = Depends(get_current_user),
+):
+    """Create a group experience from a completed task group (idempotent).
+    When all tasks are completed/cancelled, builds parent from group and
+    children from completed tasks' sediment experiences or task title/description.
+    """
+    db_url = _get_db_url()
+    resolved_project = _resolve_project(None)
+    gid = uuid.UUID(group_id)
+    if app_module._service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Service not ready (bootstrap may not have run)",
+        )
+    service = app_module._service
+
+    async with get_session(db_url) as session:
+        task_repo = TaskRepository(session)
+        exp_repo = ExperienceRepository(session)
+        group = await task_repo.get_group(gid)
+        if not group:
+            raise HTTPException(status_code=404, detail="Task group not found")
+
+        existing = await exp_repo.get_root_by_source_context(
+            resolved_project, f"task_group:{group_id}"
+        )
+        if existing:
+            full = await exp_repo.get_with_children(existing.id)
+            return {
+                "already_exists": True,
+                "message": "该任务组已有组级经验，未重复写入",
+                "group": full.to_dict(include_children=True),
+                "experience_id": str(existing.id),
+            }
+
+        tasks_list = getattr(group, "tasks", None) or []
+        all_done = all(
+            t.status in ("completed", "cancelled") for t in tasks_list
+        )
+        if not tasks_list or not all_done:
+            raise HTTPException(
+                status_code=400,
+                detail="任务组未全部完成或取消，无法沉淀",
+            )
+
+        parent_data = {
+            "title": group.title or "任务组复盘",
+            "problem": group.description or "",
+            "solution": "",
+            "tags": [],
+            "source": "web",
+            "project": resolved_project,
+            "source_context": f"task_group:{group_id}",
+        }
+
+        children_data = []
+        for t in tasks_list:
+            if t.status != "completed":
+                continue
+            if getattr(t, "sediment_experience_id", None):
+                exp = await exp_repo.get_by_id(t.sediment_experience_id)
+                if exp:
+                    children_data.append({
+                        "title": exp.title or t.title,
+                        "problem": exp.description or "",
+                        "solution": exp.solution or "",
+                        "tags": exp.tags or [],
+                        "source": "web",
+                        "project": resolved_project,
+                    })
+                    continue
+            children_data.append({
+                "title": t.title or "任务",
+                "problem": t.description or "",
+                "solution": "",
+                "tags": [],
+                "source": "web",
+                "project": resolved_project,
+            })
+
+        if not children_data:
+            raise HTTPException(
+                status_code=400,
+                detail="没有已完成任务可沉淀为子经验",
+            )
+
+        result = await service.save_group(
+            session=session,
+            parent=parent_data,
+            children=children_data,
+            created_by=user.name,
+            project=resolved_project,
+        )
+        await session.commit()
+
+    return result
 
 
 # ---------- Task Dependencies ----------

@@ -1667,6 +1667,10 @@ export async function loadTasks() {
                 const prog = g.progress || { total: 0, completed: 0 };
                 const pct = prog.total
                     ? Math.round(prog.completed / prog.total * 100) : 0;
+                const groupCompleted = g.group_completed === true;
+                const sedimentBtn = groupCompleted
+                    ? `<button class="sediment-btn" title="保存为组经验" onclick="event.stopPropagation();sedimentTaskGroup('${g.id}')">沉淀</button>`
+                    : '';
                 const archiveBtn = pct === 100
                     ? `<button class="archive-btn" onclick="event.stopPropagation();archiveGroup('${g.id}')">📦</button>`
                     : '';
@@ -1698,6 +1702,7 @@ export async function loadTasks() {
                       </div>
                     </div>
                     <div style="display:flex;align-items:center;gap:6px">
+                      ${sedimentBtn}
                       <button class="group-eye-btn ${eyeCls}" title="${isVisible ? '隐藏看板任务' : '显示看板任务'}"
                         onclick="event.stopPropagation();toggleGroupVisibility('${g.id}')">${eyeIcon}</button>
                       ${archiveBtn}
@@ -1890,6 +1895,29 @@ export async function sendTaskMessage(taskId) {
         showTaskDetail(taskId); // reload
     } catch (e) {
         toast('发送失败: ' + e.message, 'error');
+    }
+}
+
+export async function sedimentTaskGroup(groupId) {
+    try {
+        const res = await api('POST', `/api/v1/task-groups/${groupId}/sediment`);
+        if (res.already_exists) {
+            toast(res.message || '该任务组已有组级经验', 'info');
+            if (res.experience_id) {
+                closeTaskSlideout();
+                showDetail(res.experience_id);
+            }
+        } else {
+            toast('组经验已沉淀', 'success');
+            const expId = res.id || res.experience_id;
+            if (expId) {
+                closeTaskSlideout();
+                showDetail(expId);
+            }
+            loadTasks();
+        }
+    } catch (e) {
+        toast('沉淀失败: ' + (e.message || e.detail || '未知错误'), 'error');
     }
 }
 
