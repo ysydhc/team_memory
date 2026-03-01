@@ -1251,17 +1251,20 @@ async def tm_save_group(
     category: str | None = None,
     project: str | None = None,
     group_id: str | None = None,
+    force_single_group: bool = False,
+    group_by: str | None = None,
 ) -> str:
     """Save a group of experiences (parent with children).
 
-    When group_id is provided, only one group experience is allowed per group
-    (idempotent: second call returns existing group without creating a duplicate).
+    When group_id is provided, only one group experience per group (idempotent).
+    Use force_single_group=True for 总-分 (no type grouping); otherwise 总-分-分
+    with grouped_children by group_by (default experience_type).
 
     Args:
         parent_title: Title for the parent experience.
         parent_problem: Problem description for the parent.
         children: List of dicts, each with keys: title, problem, solution,
-                  and optionally: tags, code_snippets, root_cause.
+                  and optionally: tags, code_snippets, root_cause, experience_type, category.
         parent_solution: Overall solution summary (optional).
         parent_tags: Tags for the parent.
         parent_root_cause: Root cause for the parent.
@@ -1272,6 +1275,8 @@ async def tm_save_group(
         category: Category classification.
         group_id: Optional task group id; when set, at most one group experience
                   per group_id is stored (idempotent).
+        force_single_group: If True, do not write grouped_children (总-分).
+        group_by: Key for grouping: "experience_type" or "category"; default experience_type.
 
     Returns:
         JSON string with the created or existing group.
@@ -1294,6 +1299,9 @@ async def tm_save_group(
     }
     if group_id:
         parent_data["source_context"] = f"task_group:{group_id}"
+    parent_data["force_single_group"] = force_single_group
+    if group_by is not None:
+        parent_data["group_by"] = group_by
 
     children_data = []
     for child in children:
@@ -1306,6 +1314,8 @@ async def tm_save_group(
             "root_cause": child.get("root_cause"),
             "source": "auto_extract",
             "project": resolved_project,
+            "experience_type": child.get("experience_type", "general"),
+            "category": child.get("category"),
         })
 
     async with get_session(db_url) as session:

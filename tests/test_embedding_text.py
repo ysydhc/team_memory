@@ -274,3 +274,113 @@ class TestSaveGroupEmbedText:
         mock_repo.update.assert_called_once()
         call_kw = mock_repo.update.call_args.kwargs
         assert call_kw["structured_data"]["grouped_children"] == gc
+
+    @pytest.mark.asyncio
+    async def test_save_group_force_single_group_skips_grouped_children(self):
+        """force_single_group=True -> no grouped_children (总-分)."""
+        import uuid
+
+        embedding_mock = AsyncMock()
+        embedding_mock.encode_single = AsyncMock(return_value=[0.1] * 768)
+        service = _make_service(embedding_mock)
+
+        parent_id = uuid.uuid4()
+        mock_parent = MagicMock()
+        mock_parent.id = parent_id
+        mock_parent.structured_data = None
+        mock_c1 = MagicMock()
+        mock_c1.id = uuid.uuid4()
+        mock_c1.experience_type = "bugfix"
+        mock_parent.children = [mock_c1]
+        mock_parent.to_dict = lambda include_children=False: {
+            "id": str(mock_parent.id),
+            "structured_data": mock_parent.structured_data,
+            "title": "Parent",
+        }
+        mock_repo = MagicMock()
+        mock_repo.create_group = AsyncMock(return_value=mock_parent)
+        mock_repo.update = AsyncMock()
+
+        parent = {
+            "title": "P",
+            "problem": "P",
+            "solution": "S",
+            "force_single_group": True,
+        }
+        children = [
+            {"title": "C1", "problem": "P1", "solution": "S1", "experience_type": "bugfix"},
+        ]
+
+        with patch(
+            "team_memory.services.experience.ExperienceRepository",
+            return_value=mock_repo,
+        ):
+            await service.save_group(
+                parent=parent,
+                children=children,
+                created_by="test",
+                session=AsyncMock(),
+            )
+
+        mock_repo.update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_save_group_group_by_category(self):
+        """group_by=category -> grouped_children keyed by category."""
+        import uuid
+
+        embedding_mock = AsyncMock()
+        embedding_mock.encode_single = AsyncMock(return_value=[0.1] * 768)
+        service = _make_service(embedding_mock)
+
+        c1_id, c2_id = uuid.uuid4(), uuid.uuid4()
+        mock_parent = MagicMock()
+        mock_parent.id = uuid.uuid4()
+        mock_parent.structured_data = None
+        mock_c1 = MagicMock()
+        mock_c1.id = c1_id
+        mock_c1.experience_type = "bugfix"
+        mock_c1.category = "backend"
+        mock_c2 = MagicMock()
+        mock_c2.id = c2_id
+        mock_c2.experience_type = "feature"
+        mock_c2.category = "frontend"
+        mock_parent.children = [mock_c1, mock_c2]
+
+        def to_dict(include_children=False):
+            d = {
+                "id": str(mock_parent.id),
+                "structured_data": mock_parent.structured_data,
+                "title": "Parent",
+            }
+            if include_children:
+                d["children"] = []
+            return d
+
+        mock_parent.to_dict = to_dict
+        mock_repo = MagicMock()
+        mock_repo.create_group = AsyncMock(return_value=mock_parent)
+        mock_repo.update = AsyncMock()
+
+        parent = {"title": "P", "problem": "P", "solution": "S", "group_by": "category"}
+        children = [
+            {"title": "C1", "problem": "P1", "solution": "S1", "category": "backend"},
+            {"title": "C2", "problem": "P2", "solution": "S2", "category": "frontend"},
+        ]
+
+        with patch(
+            "team_memory.services.experience.ExperienceRepository",
+            return_value=mock_repo,
+        ):
+            result = await service.save_group(
+                parent=parent,
+                children=children,
+                created_by="test",
+                session=AsyncMock(),
+            )
+
+        assert result.get("structured_data", {}).get("grouped_children") == {
+            "backend": [str(c1_id)],
+            "frontend": [str(c2_id)],
+        }
+        mock_repo.update.assert_called_once()
