@@ -222,6 +222,22 @@ class ExperienceRepository:
         result = await self._session.execute(query)
         return result.scalar_one_or_none()
 
+    async def get_root_by_source_context(
+        self, project: str | None, source_context: str
+    ) -> Experience | None:
+        """Find root experience by source_context (e.g. task_group:{group_id})."""
+        if not source_context or not source_context.strip():
+            return None
+        query = (
+            select(Experience)
+            .where(Experience.parent_id.is_(None))
+            .where(Experience.source_context == source_context.strip())
+            .where(Experience.project == self._project_value(project))
+            .where(Experience.is_deleted == False)  # noqa: E712
+        )
+        result = await self._session.execute(query)
+        return result.scalar_one_or_none()
+
     async def get_children(
         self, parent_id: uuid.UUID, include_deleted: bool = False
     ) -> list[Experience]:

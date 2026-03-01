@@ -334,6 +334,8 @@ class ExperienceService:
             }
             if parent.get("experience_type"):
                 parent_data["experience_type"] = parent["experience_type"]
+            if parent.get("source_context") is not None:
+                parent_data["source_context"] = parent["source_context"]
 
             # Generate embeddings for children
             children_data = []

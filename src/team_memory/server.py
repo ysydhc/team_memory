@@ -1250,8 +1250,12 @@ async def tm_save_group(
     severity: str | None = None,
     category: str | None = None,
     project: str | None = None,
+    group_id: str | None = None,
 ) -> str:
     """Save a group of experiences (parent with children).
+
+    When group_id is provided, only one group experience is allowed per group
+    (idempotent: second call returns existing group without creating a duplicate).
 
     Args:
         parent_title: Title for the parent experience.
@@ -1266,9 +1270,11 @@ async def tm_save_group(
         experience_type: Type for the group (default "general").
         severity: Severity for bugfix/incident groups.
         category: Category classification.
+        group_id: Optional task group id; when set, at most one group experience
+                  per group_id is stored (idempotent).
 
     Returns:
-        JSON string with the created group.
+        JSON string with the created or existing group.
     """
     service = _get_service()
     db_url = _get_db_url()
@@ -1286,6 +1292,8 @@ async def tm_save_group(
         "source": "auto_extract",
         "project": resolved_project,
     }
+    if group_id:
+        parent_data["source_context"] = f"task_group:{group_id}"
 
     children_data = []
     for child in children:
@@ -1301,6 +1309,22 @@ async def tm_save_group(
         })
 
     async with get_session(db_url) as session:
+        if group_id:
+            from team_memory.storage.repository import ExperienceRepository
+            repo = ExperienceRepository(session)
+            existing = await repo.get_root_by_source_context(
+                resolved_project, f"task_group:{group_id}"
+            )
+            if existing:
+                full = await repo.get_with_children(existing.id)
+                return json.dumps(
+                    {
+                        "message": "该任务组已有组级经验，未重复写入",
+                        "already_exists": True,
+                        "group": full.to_dict(include_children=True),
+                    },
+                    ensure_ascii=False,
+                )
         result = await service.save_group(
             session=session,
             parent=parent_data,
