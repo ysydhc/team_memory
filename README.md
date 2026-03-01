@@ -663,3 +663,9 @@ ruff check src/ --fix
 ### CI/CD
 
 推送至 `main` / `develop` 或向 `main` 提 PR 时，GitHub Actions 会执行 lint、测试与 Docker 构建。触发条件与各 job 说明见 [.debug/25-CI/CD 流水线](.debug/25-ci-cd.md)。
+
+### 文档与 .debug 同步约定
+
+- **功能或代码变更后**，须同步更新 **README** 与 **.debug/** 下对应文档（若有）；文档不同步不得视为任务完成。
+- **根 README**：面向用户与贡献者，介绍安装、功能概览、配置、运维与开发入口；涉及具体运维步骤或设计细节时，可链接到 `.debug/xx-主题.md`。
+- **.debug/**：本地运维与设计文档目录（已被 `.gitignore` 忽略），索引见 [.debug/README.md](.debug/README.md)。新增或修改 .debug 文档时，请同步在 `.debug/README.md` 的目录中登记或更新链接。
