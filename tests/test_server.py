@@ -470,6 +470,8 @@ class TestTdLearn:
 
         with patch("team_memory.server._get_service") as mock_get_service, \
              patch("team_memory.server._get_settings") as mock_get_settings, \
+             patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
+             patch("team_memory.server._resolve_project", return_value="default"), \
              patch("team_memory.server.get_session") as mock_get_session, \
              patch("team_memory.services.llm_parser.parse_content", new_callable=AsyncMock, return_value=parsed):
 
@@ -479,6 +481,7 @@ class TestTdLearn:
 
             mock_settings_obj = MagicMock()
             mock_settings_obj.llm = MagicMock()
+            mock_settings_obj.extraction = MagicMock(quality_gate=2, max_retries=1)
             mock_get_settings.return_value = mock_settings_obj
 
             mock_session = AsyncMock()
@@ -505,6 +508,8 @@ class TestTdLearn:
 
         with patch("team_memory.server._get_service") as mock_get_service, \
              patch("team_memory.server._get_settings") as mock_get_settings, \
+             patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
+             patch("team_memory.server._resolve_project", return_value="default"), \
              patch("team_memory.services.llm_parser.parse_content", new_callable=AsyncMock,
                    side_effect=LLMParseError("Connection refused")):
 
@@ -513,6 +518,7 @@ class TestTdLearn:
 
             mock_settings_obj = MagicMock()
             mock_settings_obj.llm = MagicMock()
+            mock_settings_obj.extraction = MagicMock(quality_gate=2, max_retries=1)
             mock_get_settings.return_value = mock_settings_obj
 
             tools = await mcp.get_tools()

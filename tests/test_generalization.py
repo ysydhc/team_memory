@@ -623,8 +623,8 @@ class TestWebSchemaEndpoints:
 
     @pytest.fixture
     def client(self):
-        """Create a test client with auth."""
-        from unittest.mock import AsyncMock, MagicMock
+        """Create a test client with auth; use context manager so lifespan runs and routes are registered."""
+        from unittest.mock import AsyncMock, MagicMock, patch
 
         from fastapi.testclient import TestClient
 
@@ -647,9 +647,18 @@ class TestWebSchemaEndpoints:
         app_module._auth = mock_auth
         app_module._service = None
 
-        client = TestClient(app, raise_server_exceptions=False)
-        client.headers["Authorization"] = "Bearer test-key-123"
-        yield client
+        mock_ctx = MagicMock()
+        mock_ctx.settings = settings
+        mock_ctx.service = None
+        mock_ctx.auth = mock_auth
+        with patch("team_memory.web.app.bootstrap", return_value=mock_ctx), patch(
+            "team_memory.web.app.start_background_tasks", new_callable=AsyncMock
+        ), patch(
+            "team_memory.web.app.stop_background_tasks", new_callable=AsyncMock
+        ):
+            with TestClient(app, raise_server_exceptions=False) as c:
+                c.headers["Authorization"] = "Bearer test-key-123"
+                yield c
 
         app_module._settings = None
         app_module._auth = None

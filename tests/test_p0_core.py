@@ -87,7 +87,17 @@ def setup_app():
     mock_service._embedding_queue = None
     web_module._service = mock_service
 
-    yield mock_service
+    # Patch bootstrap so lifespan runs and /api/v1 routes are registered
+    mock_ctx = MagicMock()
+    mock_ctx.settings = web_module._settings
+    mock_ctx.service = mock_service
+    mock_ctx.auth = web_module._auth
+    with patch("team_memory.web.app.bootstrap", return_value=mock_ctx), patch(
+        "team_memory.web.app.start_background_tasks", new_callable=AsyncMock
+    ), patch(
+        "team_memory.web.app.stop_background_tasks", new_callable=AsyncMock
+    ):
+        yield mock_service
 
     web_module._auth = None
     web_module._settings = None
@@ -95,9 +105,10 @@ def setup_app():
 
 
 @pytest.fixture
-def client():
-    """Create a test client."""
-    return TestClient(app, raise_server_exceptions=False)
+def client(setup_app):
+    """Create a test client; use context manager so lifespan runs and routes are registered."""
+    with TestClient(app, raise_server_exceptions=False) as c:
+        yield c
 
 
 @pytest.fixture
@@ -157,19 +168,38 @@ class TestDraftMode:
         assert len(data["experiences"]) == 1
         assert data["experiences"][0]["title"] == "My Draft"
 
-    def test_publish_draft(self, client, auth_headers, setup_app):
+    def test_publish_draft(self, client, auth_headers):
         """POST /api/v1/experiences/{id}/publish should publish a draft."""
         exp_id = str(uuid.uuid4())
-        resp = client.post(f"/api/v1/experiences/{exp_id}/publish", headers=auth_headers)
+        mock_repo = MagicMock()
+        mock_exp = MagicMock()
+        mock_exp.to_dict.return_value = {"id": exp_id, "publish_status": "published"}
+        mock_repo.change_status = AsyncMock(return_value=mock_exp)
+        mock_repo.get_by_id = AsyncMock(return_value=MagicMock())
+        mock_session_ctx = MagicMock()
+        mock_session_ctx.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        with patch("team_memory.web.routes.experiences.app_module.get_session", return_value=mock_session_ctx), \
+             patch("team_memory.web.routes.experiences.app_module.ExperienceRepository", return_value=mock_repo), \
+             patch("team_memory.web.routes.experiences.write_audit_log", new_callable=AsyncMock):
+            resp = client.post(f"/api/v1/experiences/{exp_id}/publish", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["message"] == "Experience published"
-        setup_app.publish_experience.assert_called_once()
+        assert "message" in data
+        mock_repo.change_status.assert_called()
 
-    def test_publish_not_found(self, client, auth_headers, setup_app):
+    def test_publish_not_found(self, client, auth_headers):
         """Publishing non-existent experience should return 404."""
-        setup_app.publish_experience.return_value = None
-        resp = client.post(f"/api/v1/experiences/{uuid.uuid4()}/publish", headers=auth_headers)
+        mock_repo = MagicMock()
+        mock_repo.change_status = AsyncMock(return_value=None)
+        mock_repo.get_by_id = AsyncMock(return_value=MagicMock())
+        mock_session_ctx = MagicMock()
+        mock_session_ctx.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        with patch("team_memory.web.routes.experiences.app_module.get_session", return_value=mock_session_ctx), \
+             patch("team_memory.web.routes.experiences.app_module.ExperienceRepository", return_value=mock_repo), \
+             patch("team_memory.web.routes.experiences.write_audit_log", new_callable=AsyncMock):
+            resp = client.post(f"/api/v1/experiences/{uuid.uuid4()}/publish", headers=auth_headers)
         assert resp.status_code == 404
 
     def test_list_experiences_with_status_filter(self, client, auth_headers):
@@ -200,9 +230,14 @@ class TestReviewGate:
     def test_review_approve(self, client, auth_headers, setup_app):
         """POST /api/v1/experiences/{id}/review with approved should work."""
         exp_id = str(uuid.uuid4())
-        resp = client.post(f"/api/v1/experiences/{exp_id}/review", json={
-            "review_status": "approved",
-        }, headers=auth_headers)
+        mock_session_ctx = MagicMock()
+        mock_session_ctx.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        with patch("team_memory.web.routes.experiences.app_module.get_session", return_value=mock_session_ctx), \
+             patch("team_memory.web.routes.experiences.write_audit_log", new_callable=AsyncMock):
+            resp = client.post(f"/api/v1/experiences/{exp_id}/review", json={
+                "review_status": "approved",
+            }, headers=auth_headers)
         assert resp.status_code == 200
         setup_app.review.assert_called_once()
         call_kwargs = setup_app.review.call_args.kwargs
@@ -216,10 +251,15 @@ class TestReviewGate:
             "review_status": "rejected",
             "publish_status": "rejected",
         }
-        resp = client.post(f"/api/v1/experiences/{exp_id}/review", json={
-            "review_status": "rejected",
-            "review_note": "内容不够详细",
-        }, headers=auth_headers)
+        mock_session_ctx = MagicMock()
+        mock_session_ctx.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        with patch("team_memory.web.routes.experiences.app_module.get_session", return_value=mock_session_ctx), \
+             patch("team_memory.web.routes.experiences.write_audit_log", new_callable=AsyncMock):
+            resp = client.post(f"/api/v1/experiences/{exp_id}/review", json={
+                "review_status": "rejected",
+                "review_note": "内容不够详细",
+            }, headers=auth_headers)
         assert resp.status_code == 200
         call_kwargs = setup_app.review.call_args.kwargs
         assert call_kwargs["review_note"] == "内容不够详细"

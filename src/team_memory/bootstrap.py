@@ -242,6 +242,15 @@ def bootstrap(
     if enable_background:
         _register_cache_invalidation(event_bus, service)
 
+    # Register hook registry with usage tracking so MCP tool calls are written to tool_usage_logs
+    from team_memory.services.hooks import init_hook_registry
+    from team_memory.storage.database import get_session_factory
+
+    init_hook_registry(
+        session_factory=get_session_factory(db_url),
+        project=getattr(settings, "default_project", None) or "default",
+    )
+
     _instance = AppContext(
         settings=settings,
         db_url=db_url,

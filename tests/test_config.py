@@ -53,7 +53,7 @@ class TestSettings:
 
     def test_default_auth_type(self):
         settings = Settings()
-        assert settings.auth.type == "api_key"
+        assert settings.auth.type == "db_api_key"
 
 
 class TestLoadSettings:
