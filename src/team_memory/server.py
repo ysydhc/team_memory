@@ -2742,12 +2742,18 @@ def execute_task(task_id: str | None = None, group_id: str | None = None) -> str
 3. Execute the task according to the description and acceptance criteria.
 4. When done, call `tm_task` with action="update", task_id=<id>, status="completed",
    summary="<brief summary of what you did and the outcome>"
-5. The summary will be automatically saved as a reusable experience.
+5. Check the update response: if it contains group_completed: true and group_id, the task
+   group is fully done. Then call tm_task(action="list", group_id=<that group_id>) to get
+   tasks and group_progress, and call tm_save_group(..., group_id=<that group_id>) to create
+   the group experience (总-分 or 总-分-分). Optionally tm_message to record "组级复盘已完成".
+6. The summary is automatically saved as a reusable experience; group completion creates
+   a group experience.
 
 Important:
 - If you encounter issues, update status to "in_progress" with a description of the blocker.
 - Reference related experiences from team_memory when applicable.
-- Keep your summary concise but include key decisions and outcomes."""
+- Keep your summary concise but include key decisions and outcomes.
+- After claiming a task, check its description; if empty, do a cold start (fill description)."""
 
 
 @mcp.prompt(
