@@ -72,9 +72,9 @@ AI 自动提取经验 ──→ TeamMemory（动态积累）
 
 AI 从对话和文档中自动提取结构化经验，无需手动录入：
 
-- **对话提取**（`tm_learn`）：LLM 自动从开发对话中识别问题、方案、标签，提取为结构化经验
+- **对话提取**（`tm_learn`）：LLM 自动从开发对话中识别问题、方案、标签，提取为结构化经验；prompt 含 few-shot 示例与质量门控（score&lt;2 重试）
 - **文档解析**：上传文档或输入 URL，AI 自动解析为标题、问题描述、解决方案、标签
-- **经验组**（`tm_save_group`）：将一次完整的问题解决过程（从发现到排查到修复）作为父子经验组保存
+- **经验组**（`tm_save_group`）：将一次完整的问题解决过程（从发现到排查到修复）作为父子经验组保存；三阶段管道方案见 `.debug/10-extraction-pipeline.md`
 - **默认草稿模式**：AI 提取的内容默认为草稿，经人工审核后发布，保证质量
 
 ### 智能检索
@@ -83,6 +83,7 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 
 - **语义搜索**：基于向量嵌入（Ollama / OpenAI / 本地模型），理解查询意图
 - **混合检索**：向量搜索 + 全文检索 + RRF 融合排序
+- **查询优化**：同义词扩展（`config.tag_synonyms`）、短查询自动降低 min_similarity（0.45）；FTS 使用 simple 分词器并支持 jieba 中文分词
 - **Reranker**：支持服务端 LLM 精排，或客户端 AI 自行判断结果相关性
 - **Token 预算控制**：自动裁剪输出长度，避免经验库增大后撑爆 AI 上下文
 - **PageIndex-Lite**：长文档自动分块建立节点索引，支持节点级精准检索
@@ -551,6 +552,7 @@ make hooks-install # 安装 Git hooks（commit 含 [TM-xxx] 时自动更新任�
 | `make mcp` | 仅启动 MCP 服务 | `python -m team_memory.server`（stdio，供 Cursor/Claude Desktop 调用） |
 | `make health` | 健康检查 | `./scripts/healthcheck.sh`（检测 DB、Web、Ollama 等） |
 | `make migrate` | 数据库迁移 | `alembic upgrade head` |
+| `make migrate-fts` | 补齐经验表 FTS 字段（存量迁移） | `python scripts/migrate_fts.py`；可用 `--dry-run` 预览待更新条数 |
 | `make hooks-install` | 安装 Git hooks | 复制 `scripts/post-commit-hook.sh` 到 `.git/hooks/post-commit`，commit 含 [TM-xxx] 时自动更新任务 |
 
 **说明**：`make dev` 与 `make web` 会在启动前自动释放 9111 端口（停止占用该端口的 Docker 容器或本机进程），因此可重复执行而不会出现「address already in use」。
@@ -624,6 +626,10 @@ A: 这正是 TeamMemory 的设计重点。`tm_learn` 工具让 AI 自动从开�
 
 A: 需要重新生成所有 embedding。使用 `scripts/migrate_embeddings.py`。
 
+**Q: 存量数据如何支持全文检索（FTS）？**
+
+A: 若经验表存在 `fts` 为空的记录，可执行 `make migrate-fts` 或 `python scripts/migrate_fts.py` 回填；先用 `--dry-run` 可预览待更新条数。
+
 **Q: 没有 Ollama 可以使用吗？**
 
 A: 可以。将 `embedding.provider` 改为 `openai` 并配置 API Key，或使用 `local` 加载本地 sentence-transformers 模型。
@@ -653,3 +659,7 @@ ruff check src/
 # 自动修复
 ruff check src/ --fix
 ```
+
+### CI/CD
+
+推送至 `main` / `develop` 或向 `main` 提 PR 时，GitHub Actions 会执行 lint、测试与 Docker 构建。触发条件与各 job 说明见 [.debug/25-CI/CD 流水线](.debug/25-ci-cd.md)。
