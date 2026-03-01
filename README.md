@@ -580,6 +580,8 @@ make backup
 ./scripts/restore.sh backups/team_memory_20260209_120000.sql.gz
 ```
 
+更多手动恢复与修复流程（FTS 迁移、Alembic 多 head、Embedding 重算、常见问题排查）见 [.debug/README 的手动恢复与修复流程](.debug/README.md#手动恢复与修复流程)。
+
 ### Docker 部署
 
 ```bash
