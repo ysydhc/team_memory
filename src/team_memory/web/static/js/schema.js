@@ -65,6 +65,19 @@ export function onCreateTypeChange() {
     const type = typeEl ? typeEl.value : 'general';
     const tpl =
         (state.cachedTemplates || []).find((t) => (t.experience_type || t.id) === type) || {};
+    const hints = tpl.hints || {};
+    const titleEl = document.getElementById('create-title');
+    const problemEl = document.getElementById('create-problem');
+    const solutionEl = document.getElementById('create-solution');
+    const tagsEl = document.getElementById('create-tags');
+    if (titleEl) titleEl.placeholder = hints.title || '简要描述这个经验...';
+    if (problemEl) problemEl.placeholder = hints.problem || '遇到了什么问题？上下文是什么？';
+    if (solutionEl) solutionEl.placeholder = hints.solution || '如何解决的？关键步骤是什么？';
+    if (tagsEl && Array.isArray(tpl.suggested_tags) && tpl.suggested_tags.length > 0) {
+        if (!tagsEl.value.trim()) tagsEl.placeholder = tpl.suggested_tags.join(', ');
+    } else if (tagsEl) {
+        tagsEl.placeholder = 'python, docker, fastapi';
+    }
     const container = document.getElementById('create-type-specific-fields');
     if (!container) return;
     let html = '';

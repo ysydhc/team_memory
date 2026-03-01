@@ -327,6 +327,8 @@ class ExperienceService:
                 "source": parent.get("source", "manual"),
                 "project": project or parent.get("project"),
             }
+            if parent.get("experience_type"):
+                parent_data["experience_type"] = parent["experience_type"]
 
             # Generate embeddings for children
             children_data = []

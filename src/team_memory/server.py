@@ -14,8 +14,9 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
+import yaml
 from fastmcp import FastMCP
 
 from team_memory.bootstrap import bootstrap, get_context
@@ -489,18 +490,22 @@ async def tm_learn(
     as_group: bool = False,
     save_as_draft: bool = True,
     project: str | None = None,
+    template: str | None = None,
 ) -> str:
     """Extract and save an experience from conversation/document text.
 
     Uses an LLM to parse free-form text into structured fields
     (title, problem, solution, tags, etc.) then saves automatically.
     AI-extracted content defaults to draft mode for review.
+    When template is provided (e.g. bugfix, feature, tech_design), applies
+    that template's experience_type and suggested_tags.
 
     Args:
         conversation: The conversation or document text to learn from (required).
         tags: Additional tags to merge with LLM-extracted tags.
         as_group: If True, extract as parent + children experience group.
         save_as_draft: If True (default), save as draft requiring review.
+        template: Optional template id to apply (experience_type + suggested_tags).
     """
     from team_memory.services.llm_parser import (
         LLMParseError,
@@ -529,12 +534,25 @@ async def tm_learn(
             ensure_ascii=False,
         )
 
-    # Merge user-provided tags
+    # Apply template: experience_type + suggested_tags
+    tpl_type: str | None = None
+    tpl_tags: list[str] = []
+    if template:
+        tpl = _get_template_by_id(template.strip())
+        if tpl:
+            tpl_type = tpl.get("experience_type") or tpl.get("id")
+            tpl_tags = list(tpl.get("suggested_tags") or [])
+
+    # Merge user-provided tags (and template suggested_tags)
     if as_group:
         parent_tags = parsed["parent"].get("tags", [])
+        if tpl_tags:
+            parent_tags = list(set(parent_tags + [t.lower() for t in tpl_tags]))
         if tags:
             parent_tags = list(set(parent_tags + [t.lower() for t in tags]))
         parsed["parent"]["tags"] = parent_tags
+        if tpl_type and not parsed["parent"].get("experience_type"):
+            parsed["parent"]["experience_type"] = tpl_type
 
         async with get_session(db_url) as session:
             result = await service.save_group(
@@ -564,8 +582,11 @@ async def tm_learn(
         )
     else:
         extracted_tags = parsed.get("tags", [])
+        if tpl_tags:
+            extracted_tags = list(set(extracted_tags + [t.lower() for t in tpl_tags]))
         if tags:
             extracted_tags = list(set(extracted_tags + [t.lower() for t in tags]))
+        experience_type = parsed.get("experience_type") or tpl_type or "general"
 
         q_score = compute_quality_score(parsed)
 
@@ -583,7 +604,7 @@ async def tm_learn(
                 root_cause=parsed.get("root_cause"),
                 source="auto_extract",
                 publish_status=publish_status,
-                experience_type=parsed.get("experience_type", "general"),
+                experience_type=experience_type,
                 severity=parsed.get("severity"),
                 category=parsed.get("category"),
                 structured_data=parsed.get("structured_data"),
