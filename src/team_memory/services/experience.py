@@ -367,6 +367,7 @@ class ExperienceService:
                     "embedding": child_embedding,
                     "source": child.get("source", "manual"),
                     "project": project or child.get("project"),
+                    "experience_type": child.get("experience_type", "general"),
                 })
 
             parent_exp = await repo.create_group(
@@ -398,6 +399,17 @@ class ExperienceService:
                     )
             except Exception:
                 logger.warning("Failed to build PageIndex-Lite nodes for group", exc_info=True)
+
+            # Total-sub-sub: write parent structured_data.grouped_children by experience_type
+            if parent_exp.children:
+                grouped_children: dict[str, list[str]] = {}
+                for c in parent_exp.children:
+                    key = (c.experience_type or "general").strip() or "general"
+                    grouped_children.setdefault(key, []).append(str(c.id))
+                new_sd = dict(parent_exp.structured_data or {})
+                new_sd["grouped_children"] = grouped_children
+                await repo.update(parent_exp.id, structured_data=new_sd)
+                parent_exp.structured_data = new_sd
 
             await self._event_bus.emit(Events.EXPERIENCE_CREATED, {
                 "experience_id": str(parent_exp.id),

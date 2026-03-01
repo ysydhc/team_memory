@@ -174,6 +174,7 @@ class TestSaveGroupEmbedText:
         mock_parent.children = [mock_child]
         mock_parent.to_dict.return_value = {"id": "parent-id"}
         mock_repo.create_group = AsyncMock(return_value=mock_parent)
+        mock_repo.update = AsyncMock()
 
         mock_session = AsyncMock()
 
@@ -202,3 +203,74 @@ class TestSaveGroupEmbedText:
         child_embed_call = embedding_mock.encode_single.call_args_list[1][0][0]
         assert "python" in child_embed_call
         assert "bugfix" in child_embed_call
+
+    @pytest.mark.asyncio
+    async def test_save_group_writes_structured_data_grouped_children(self):
+        """Parent gets structured_data.grouped_children by experience_type (总-分-分)."""
+        import uuid
+
+        embedding_mock = AsyncMock()
+        embedding_mock.encode_single = AsyncMock(return_value=[0.1] * 768)
+        service = _make_service(embedding_mock)
+
+        parent_id = uuid.uuid4()
+        c1_id, c2_id = uuid.uuid4(), uuid.uuid4()
+        mock_parent = MagicMock()
+        mock_parent.id = parent_id
+        mock_parent.structured_data = None
+        mock_c1 = MagicMock()
+        mock_c1.id = c1_id
+        mock_c1.experience_type = "bugfix"
+        mock_c2 = MagicMock()
+        mock_c2.id = c2_id
+        mock_c2.experience_type = "feature"
+        mock_parent.children = [mock_c1, mock_c2]
+
+        def to_dict(include_children=False):
+            d = {
+                "id": str(mock_parent.id),
+                "structured_data": mock_parent.structured_data,
+                "title": "Parent",
+            }
+            if include_children:
+                d["children"] = [
+                    {"id": str(mock_c1.id), "experience_type": "bugfix"},
+                    {"id": str(mock_c2.id), "experience_type": "feature"},
+                ]
+            return d
+
+        mock_parent.to_dict = to_dict
+        mock_repo = MagicMock()
+        mock_repo.create_group = AsyncMock(return_value=mock_parent)
+        mock_repo.update = AsyncMock()
+
+        mock_session = AsyncMock()
+
+        parent = {"title": "Group", "problem": "P", "solution": "S"}
+        children = [
+            {"title": "C1", "problem": "P1", "solution": "S1", "experience_type": "bugfix"},
+            {"title": "C2", "problem": "P2", "solution": "S2", "experience_type": "feature"},
+        ]
+
+        with patch(
+            "team_memory.services.experience.ExperienceRepository",
+            return_value=mock_repo,
+        ):
+            result = await service.save_group(
+                parent=parent,
+                children=children,
+                created_by="test",
+                session=mock_session,
+            )
+
+        assert "structured_data" in result
+        assert result["structured_data"] is not None
+        assert "grouped_children" in result["structured_data"]
+        gc = result["structured_data"]["grouped_children"]
+        assert "bugfix" in gc
+        assert "feature" in gc
+        assert gc["bugfix"] == [str(c1_id)]
+        assert gc["feature"] == [str(c2_id)]
+        mock_repo.update.assert_called_once()
+        call_kw = mock_repo.update.call_args.kwargs
+        assert call_kw["structured_data"]["grouped_children"] == gc
