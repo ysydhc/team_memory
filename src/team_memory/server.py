@@ -2735,7 +2735,23 @@ async def tm_preflight(
 def execute_task(task_id: str | None = None, group_id: str | None = None) -> str:
     """Generate a prompt for executing a task."""
     target = f"task_id={task_id}" if task_id else f"group_id={group_id}"
-    return f"""You are executing a TeamMemory task.
+    short_id = (task_id or "")[:8] if task_id else ""
+    current_task_line = ""
+    if task_id:
+        current_task_line = (
+            f'\n**Current task:** At the start of your reply, state: '
+            f'当前认领任务：TM-{short_id}（<title>）. Get the title from the '
+            'tm_task(action="get", task_id=...) response.\n'
+        )
+    progress_line = ""
+    if group_id:
+        progress_line = (
+            '\n**My progress (我的进度):** When the user asks or at key steps, '
+            'call tm_task(action="list", group_id=...) and summarize e.g. '
+            '本组已完成 x/y，当前任务：TM-xxx（标题）. Optionally combine with '
+            'workflow state from .cursor/plans/workflows/task-execution-workflow_state.md.\n'
+        )
+    return f"""You are executing a TeamMemory task.{current_task_line}{progress_line}
 
 1. First, call `tm_task` with action="get", {target}, with_context=true
 2. Read the task description and any linked experience context carefully.
