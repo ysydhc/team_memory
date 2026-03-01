@@ -850,6 +850,10 @@ class ToolUsageLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
     )
+    # P3-7: optional API key identifier for per-key usage analytics
+    api_key_name: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, index=True
+    )
 
     def to_dict(self) -> dict:
         return {
@@ -864,4 +868,5 @@ class ToolUsageLog(Base):
             "session_id": self.session_id,
             "metadata": self.metadata_extra,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "api_key_name": self.api_key_name,
         }

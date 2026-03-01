@@ -43,6 +43,8 @@ class HookContext:
     user: str | None = None
     project: str | None = None
     metadata: dict = field(default_factory=dict)
+    # P3-7: optional API key label for usage analytics (e.g. from TEAM_MEMORY_API_KEY_NAME)
+    api_key_name: str | None = None
 
 
 @dataclass
@@ -159,6 +161,7 @@ class UsageTrackingHandler:
                         error_message=error_msg,
                         session_id=context.session_id,
                         metadata_extra=context.metadata,
+                        api_key_name=context.api_key_name,
                     )
                     session.add(log)
                     await session.commit()

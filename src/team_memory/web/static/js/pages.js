@@ -623,13 +623,15 @@ export async function loadUsageStats() {
             api('GET', '/api/v1/analytics/tool-usage/summary'),
             api('GET', '/api/v1/analytics/tool-usage?group_by=tool'),
             api('GET', '/api/v1/analytics/tool-usage?group_by=user'),
+            api('GET', '/api/v1/analytics/tool-usage?group_by=api_key'),
             api('GET', `/api/v1/analytics/skills-rules?project=${encodeURIComponent(project)}`),
         ]);
         const val = (r, fallback) => r.status === 'fulfilled' ? r.value : fallback;
         const summary = val(results[0], { top_tools: [], total_calls: 0 });
         const byTool = val(results[1], { data: [] });
         const byUser = val(results[2], { data: [] });
-        const skillsRules = val(results[3], { categories: {}, total_files: 0, workspace: '' });
+        const byApiKey = val(results[3], { data: [] });
+        const skillsRules = val(results[4], { categories: {}, total_files: 0, workspace: '' });
         const maxCount = Math.max(...(byTool.data || []).map(t => t.count), 1);
         const toolRows = (byTool.data || []).slice(0, 15).map(t => {
             const pct = Math.round((t.count / maxCount) * 100);
@@ -648,6 +650,10 @@ export async function loadUsageStats() {
 
         const userRows = (byUser.data || []).map(u => `
             <tr><td>${esc(u.user)}</td><td style="text-align:right">${u.count}</td><td style="text-align:right">${u.avg_duration_ms ?? 0}ms</td></tr>
+        `).join('');
+
+        const apiKeyRows = (byApiKey.data || []).map(k => `
+            <tr><td>${esc(k.api_key_name)}</td><td style="text-align:right">${k.count}</td><td style="text-align:right">${k.avg_duration_ms ?? 0}ms</td><td style="text-align:right">${k.errors ?? 0}</td></tr>
         `).join('');
 
         const catLabels = {
@@ -710,6 +716,7 @@ export async function loadUsageStats() {
                 <button class="mode-tab active" onclick="switchUsageTab('skills',this)">Skills & Rules</button>
                 <button class="mode-tab" onclick="switchUsageTab('mcp',this)">MCP 工具调用</button>
                 <button class="mode-tab" onclick="switchUsageTab('team',this)">团队成员</button>
+                <button class="mode-tab" onclick="switchUsageTab('apikey',this)">按 API Key</button>
             </div>
 
             <div id="usage-tab-skills">
@@ -723,6 +730,9 @@ export async function loadUsageStats() {
 
             <div id="usage-tab-team" class="hidden">
                 ${userRows ? `<table class="data-table"><thead><tr><th>用户</th><th style="text-align:right">调用次数</th><th style="text-align:right">平均耗时</th></tr></thead><tbody>${userRows}</tbody></table>` : '<p style="color:var(--text-muted)">暂无数据</p>'}
+            </div>
+            <div id="usage-tab-apikey" class="hidden">
+                ${apiKeyRows ? `<table class="data-table"><thead><tr><th>API Key</th><th style="text-align:right">调用次数</th><th style="text-align:right">平均耗时</th><th style="text-align:right">错误数</th></tr></thead><tbody>${apiKeyRows}</tbody></table>` : '<p style="color:var(--text-muted)">暂无数据（MCP 调用时可设置 TEAM_MEMORY_API_KEY_NAME 关联到 Key）</p>'}
             </div>
         `;
         if (!container._srDelegation) {
@@ -759,7 +769,7 @@ window.toggleSrCategoryMore = function(btn) {
 
 // ===== Usage Sub-tabs =====
 window.switchUsageTab = function(tab, btn) {
-    ['skills', 'mcp', 'team'].forEach(t => {
+    ['skills', 'mcp', 'team', 'apikey'].forEach(t => {
         const el = document.getElementById('usage-tab-' + t);
         if (el) el.classList.toggle('hidden', t !== tab);
     });

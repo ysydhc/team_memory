@@ -43,12 +43,14 @@ def track_usage(func):
             user = _get_current_user()
         except Exception:
             pass
+        api_key_name = os.environ.get("TEAM_MEMORY_API_KEY_NAME") or None
 
         pre_ctx = HookContext(
             event=HookEvent.PRE_TOOL_CALL,
             tool_name=tool_name,
             user=user,
             timestamp=datetime.now(timezone.utc),
+            api_key_name=api_key_name,
         )
         await registry.fire(pre_ctx)
 
@@ -68,6 +70,7 @@ def track_usage(func):
                 user=user,
                 timestamp=datetime.now(timezone.utc),
                 metadata={"success": success, "error_message": error_msg},
+                api_key_name=api_key_name,
             )
             try:
                 await registry.fire(post_ctx)
@@ -1621,6 +1624,7 @@ async def tm_track(
     session_id: str | None = None,
     error_message: str | None = None,
     metadata: dict | None = None,
+    api_key_name: str | None = None,
 ) -> str:
     """Report external MCP/skill usage for analytics tracking."""
     from team_memory.storage.models import ToolUsageLog
@@ -1638,6 +1642,7 @@ async def tm_track(
             error_message=error_message,
             session_id=session_id,
             metadata_extra=metadata or {},
+            api_key_name=api_key_name or os.environ.get("TEAM_MEMORY_API_KEY_NAME"),
         )
         session.add(log)
         await session.commit()

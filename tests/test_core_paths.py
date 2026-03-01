@@ -287,11 +287,13 @@ class TestToolUsageLog:
             duration_ms=200,
             success=False,
             error_message="timeout",
+            api_key_name="cursor-key",
         )
         d = log.to_dict()
         assert d["tool_type"] == "skill"
         assert d["success"] is False
         assert d["error_message"] == "timeout"
+        assert d["api_key_name"] == "cursor-key"
 
 
 class TestSearchPipelineRequest:
