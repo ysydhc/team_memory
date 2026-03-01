@@ -7,9 +7,10 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import Integer, func, select
+from sqlalchemy import Integer, and_, func, select
 from sqlalchemy import text as sa_text
 
 from team_memory.auth.provider import User
@@ -156,16 +157,22 @@ async def analytics_overview(
 @router.get("/analytics/tool-usage")
 async def get_tool_usage(
     days: int = 30,
-    group_by: str = "tool",  # tool, user, day
+    group_by: str = "tool",  # tool, user, day, api_key
+    api_key_name: str | None = None,
     user: User = Depends(get_current_user),
 ):
-    """Get tool usage analytics."""
+    """Get tool usage analytics. P3-7: supports group_by=api_key and filter by api_key_name."""
     try:
         db_url = _get_db_url()
         async with get_session(db_url) as session:
             from team_memory.storage.models import ToolUsageLog
 
             cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            base_filter = ToolUsageLog.created_at >= cutoff
+            if api_key_name is not None:
+                base_filter = and_(
+                    base_filter, ToolUsageLog.api_key_name == api_key_name
+                )
 
             if group_by == "user":
                 query = (
@@ -174,7 +181,7 @@ async def get_tool_usage(
                         func.count().label("count"),
                         func.avg(ToolUsageLog.duration_ms).label("avg_duration"),
                     )
-                    .where(ToolUsageLog.created_at >= cutoff)
+                    .where(base_filter)
                     .group_by(ToolUsageLog.user)
                     .order_by(func.count().desc())
                 )
@@ -184,9 +191,27 @@ async def get_tool_usage(
                         func.date_trunc("day", ToolUsageLog.created_at).label("day"),
                         func.count().label("count"),
                     )
-                    .where(ToolUsageLog.created_at >= cutoff)
+                    .where(base_filter)
                     .group_by(func.date_trunc("day", ToolUsageLog.created_at))
                     .order_by(func.date_trunc("day", ToolUsageLog.created_at))
+                )
+            elif group_by == "api_key":
+                # P3-7: group by api_key_name (null -> "(未关联)")
+                key_label = func.coalesce(
+                    ToolUsageLog.api_key_name, "(未关联)"
+                ).label("api_key_name")
+                query = (
+                    select(
+                        key_label,
+                        func.count().label("count"),
+                        func.avg(ToolUsageLog.duration_ms).label("avg_duration"),
+                        func.sum(
+                            func.cast(~ToolUsageLog.success, Integer)
+                        ).label("errors"),
+                    )
+                    .where(base_filter)
+                    .group_by(ToolUsageLog.api_key_name)
+                    .order_by(func.count().desc())
                 )
             else:  # group_by == "tool"
                 query = (
@@ -199,7 +224,7 @@ async def get_tool_usage(
                             func.cast(~ToolUsageLog.success, Integer)
                         ).label("errors"),
                     )
-                    .where(ToolUsageLog.created_at >= cutoff)
+                    .where(base_filter)
                     .group_by(ToolUsageLog.tool_name, ToolUsageLog.tool_type)
                     .order_by(func.count().desc())
                 )
@@ -219,6 +244,16 @@ async def get_tool_usage(
             elif group_by == "day":
                 data = [
                     {"day": r[0].isoformat() if r[0] else None, "count": r[1]}
+                    for r in rows
+                ]
+            elif group_by == "api_key":
+                data = [
+                    {
+                        "api_key_name": r[0],
+                        "count": r[1],
+                        "avg_duration_ms": round(float(r[2] or 0)),
+                        "errors": r[3] or 0,
+                    }
                     for r in rows
                 ]
             else:
@@ -280,6 +315,60 @@ async def get_tool_usage_summary(
         return {"top_tools": [], "total_calls": 0}
 
 
+def _extract_summary_from_content(raw: str, max_len: int = 200) -> str:
+    """Extract a meaningful summary from skill/rule file content.
+    Prefer YAML frontmatter 'description'; else first heading + first paragraph.
+    """
+    if not raw or not raw.strip():
+        return ""
+    text = raw.strip()
+    # Step 1: try frontmatter description
+    if text.startswith("---"):
+        parts = text.split("---", 2)
+        if len(parts) >= 2 and parts[1].strip():
+            try:
+                fm = yaml.safe_load(parts[1])
+                if isinstance(fm, dict):
+                    desc = fm.get("description")
+                    if isinstance(desc, str) and desc.strip():
+                        s = desc.strip().replace("\n", " ")[:max_len]
+                        return s + "…" if len(desc.strip()) > max_len else s
+            except Exception:
+                pass
+        # body is after second ---
+        body = parts[2].strip() if len(parts) > 2 else ""
+    else:
+        body = text
+    # Step 2: fallback — first # heading and/or first paragraph
+    lines = [ln.strip() for ln in body.splitlines()]
+    first_heading = ""
+    first_para: list[str] = []
+    in_para = False
+    for ln in lines:
+        if not ln:
+            if in_para:
+                break
+            continue
+        if ln.startswith("#"):
+            if in_para:
+                break
+            head = ln.lstrip("#").strip()
+            if head and not first_heading:
+                first_heading = head
+            continue
+        in_para = True
+        first_para.append(ln)
+    para_text = " ".join(first_para).replace("**", "").replace("`", "").strip()
+    combined = first_heading
+    if para_text and combined:
+        combined = combined + " — " + para_text
+    elif para_text:
+        combined = para_text
+    if len(combined) > max_len:
+        combined = combined[: max_len - 1] + "…"
+    return combined.strip() or ""
+
+
 def _scan_directory(base: Path, pattern: str = "*") -> list[dict]:
     """Scan a directory for matching files and return metadata."""
     items: list[dict] = []
@@ -301,10 +390,7 @@ def _scan_directory(base: Path, pattern: str = "*") -> list[dict]:
             if size > 0 and size < 51200:
                 try:
                     raw = p.read_text("utf-8", errors="ignore")
-                    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()][:2]
-                    summary = " ".join(lines)[:150]
-                    if len(" ".join(lines)) > 150:
-                        summary += "…"
+                    summary = _extract_summary_from_content(raw, max_len=200)
                 except Exception:
                     pass
             items.append({
