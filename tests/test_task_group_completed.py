@@ -1,4 +1,4 @@
-"""Tests for task group completion: group_completed / group_id / hint in tm_task update."""
+"""Tests for task group completion and list group_progress in tm_task."""
 
 from __future__ import annotations
 
@@ -260,3 +260,104 @@ class TestTmTaskUpdateGroupCompleted:
         data = json.loads(result)
         assert data.get("group_completed") is not True
         assert "sediment_experience_id" in data
+
+
+# ---------- tm_task list: group_progress when group_id given ----------
+
+
+class TestTmTaskListGroupProgress:
+    """tm_task action=list with group_id returns group_progress."""
+
+    @pytest.mark.asyncio
+    async def test_list_without_group_id_no_group_progress(self):
+        """list without group_id -> response has no group_progress."""
+        with (
+            patch("team_memory.server.get_session") as mock_get_session,
+            patch(
+                "team_memory.server._get_db_url",
+                return_value="sqlite+aiosqlite:///:memory:",
+            ),
+            patch("team_memory.server._resolve_project", return_value="default"),
+            patch("team_memory.server._get_current_user", return_value="alice"),
+            patch(
+                "team_memory.storage.repository.TaskRepository",
+                return_value=MagicMock(list_tasks=AsyncMock(return_value=[])),
+            ),
+        ):
+            mock_session = MagicMock()
+            mock_session.commit = AsyncMock()
+            mock_get_session.return_value.__aenter__ = AsyncMock(
+                return_value=mock_session
+            )
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+            tools = await mcp.get_tools()
+            fn = tools["tm_task"].fn
+            result = await fn(action="list")
+        data = json.loads(result)
+        assert "group_progress" not in data
+        assert data["total"] == 0
+
+    @pytest.mark.asyncio
+    async def test_list_with_group_id_returns_group_progress(self):
+        """list with group_id -> response has group_progress total and completed."""
+        gid = str(uuid.uuid4())
+        t1, t2 = MagicMock(), MagicMock()
+        t1.status, t2.status = "completed", "wait"
+        t1.to_dict.return_value = {"id": str(uuid.uuid4()), "status": "completed"}
+        t2.to_dict.return_value = {"id": str(uuid.uuid4()), "status": "wait"}
+        mock_repo = MagicMock()
+        mock_repo.list_tasks = AsyncMock(return_value=[t1, t2])
+        with (
+            patch("team_memory.server.get_session") as mock_get_session,
+            patch(
+                "team_memory.server._get_db_url",
+                return_value="sqlite+aiosqlite:///:memory:",
+            ),
+            patch("team_memory.server._resolve_project", return_value="default"),
+            patch("team_memory.server._get_current_user", return_value="alice"),
+            patch(
+                "team_memory.storage.repository.TaskRepository",
+                return_value=mock_repo,
+            ),
+        ):
+            mock_session = MagicMock()
+            mock_get_session.return_value.__aenter__ = AsyncMock(
+                return_value=mock_session
+            )
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+            tools = await mcp.get_tools()
+            fn = tools["tm_task"].fn
+            result = await fn(action="list", group_id=gid)
+        data = json.loads(result)
+        assert "group_progress" in data
+        assert data["group_progress"]["total"] == 2
+        assert data["group_progress"]["completed"] == 1
+
+    @pytest.mark.asyncio
+    async def test_list_with_group_id_empty_tasks_returns_zero_progress(self):
+        """list with group_id and no tasks -> group_progress 0/0."""
+        gid = str(uuid.uuid4())
+        mock_repo = MagicMock()
+        mock_repo.list_tasks = AsyncMock(return_value=[])
+        with (
+            patch("team_memory.server.get_session") as mock_get_session,
+            patch(
+                "team_memory.server._get_db_url",
+                return_value="sqlite+aiosqlite:///:memory:",
+            ),
+            patch("team_memory.server._resolve_project", return_value="default"),
+            patch("team_memory.server._get_current_user", return_value="alice"),
+            patch(
+                "team_memory.storage.repository.TaskRepository",
+                return_value=mock_repo,
+            ),
+        ):
+            mock_get_session.return_value.__aenter__ = AsyncMock(
+                return_value=MagicMock()
+            )
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+            tools = await mcp.get_tools()
+            fn = tools["tm_task"].fn
+            result = await fn(action="list", group_id=gid)
+        data = json.loads(result)
+        assert data["group_progress"] == {"total": 0, "completed": 0}

@@ -2279,10 +2279,16 @@ async def tm_task(
                 status=status,
                 group_id=_uuid.UUID(group_id) if group_id else None,
             )
-        return json.dumps({
+        result = {
             "tasks": [t.to_dict() for t in tasks],
             "total": len(tasks),
-        })
+        }
+        if group_id is not None:
+            completed = sum(
+                1 for t in tasks if t.status in ("completed", "cancelled")
+            )
+            result["group_progress"] = {"total": len(tasks), "completed": completed}
+        return json.dumps(result)
 
     elif action == "get":
         if not task_id and not group_id:
