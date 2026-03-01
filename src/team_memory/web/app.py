@@ -9,6 +9,7 @@ Authentication is via API Key (same keys used for MCP access).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -51,6 +52,16 @@ from team_memory.storage.database import get_session
 from team_memory.storage.repository import ExperienceRepository  # noqa: F401
 
 logger = logging.getLogger("team_memory.web")
+request_logger = logging.getLogger("team_memory.web.request")
+
+# Ensure request JSON logs reach console (uvicorn may not attach handlers to this logger)
+if not request_logger.handlers:
+    _req_handler = logging.StreamHandler()
+    _req_handler.setLevel(logging.INFO)
+    _req_handler.setFormatter(logging.Formatter("%(message)s"))
+    request_logger.addHandler(_req_handler)
+    request_logger.setLevel(logging.INFO)
+    request_logger.propagate = False
 
 # ============================================================
 # Global state — backed by bootstrap.AppContext singleton
@@ -346,9 +357,52 @@ async def readiness_check():
 # ============================================================
 # Backward-compatible middleware: /api/xxx → /api/v1/xxx (D3)
 # ============================================================
+from team_memory.web import metrics as metrics_module  # noqa: E402
 from team_memory.web.middleware import api_version_compat  # noqa: E402
 
 app.middleware("http")(api_version_compat)
+
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    """Record request count and latency for /metrics and analytics."""
+    start = time.monotonic()
+    response = await call_next(request)
+    duration = time.monotonic() - start
+    path = request.scope.get("path", "")
+    if path != "/metrics":  # skip recording scrape requests to avoid feedback
+        endpoint = metrics_module.normalize_endpoint(path)
+        method = request.scope.get("method", "GET")
+        status = response.status_code
+        metrics_module.record_request(method, endpoint, status, duration)
+    return response
+
+
+@app.middleware("http")
+async def request_log_middleware(request: Request, call_next):
+    """Structured JSON request log (P2-3): path, method, status, duration_ms, ip, user."""
+    path = request.scope.get("path", "")
+    if path in ("/health", "/metrics"):
+        return await call_next(request)
+    start = time.monotonic()
+    response = await call_next(request)
+    duration_ms = int((time.monotonic() - start) * 1000)
+    ip = request.client.host if request.client else None
+    if not ip and request.headers.get("x-forwarded-for"):
+        ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    user = getattr(request.state, "user", None)
+    user_name = user.name if user and hasattr(user, "name") else None
+    payload = {
+        "event": "request",
+        "path": path,
+        "method": request.scope.get("method", "GET"),
+        "status": response.status_code,
+        "duration_ms": duration_ms,
+        "ip": ip or "",
+        "user": user_name or "",
+    }
+    request_logger.info("%s", json.dumps(payload, ensure_ascii=False))
+    return response
 
 
 # ============================================================
@@ -660,8 +714,16 @@ async def _llm_parse_content(content: str) -> dict:
     from team_memory.services.llm_parser import LLMParseError, parse_content
 
     llm_config = _settings.llm if _settings else None
+    ext = getattr(_settings, "extraction", None) if _settings else None
+    quality_min = ext.quality_gate if ext is not None else 2
+    retry_once = (ext.max_retries > 0) if ext is not None else True
     try:
-        return await parse_content(content, llm_config=llm_config)
+        return await parse_content(
+            content,
+            llm_config=llm_config,
+            quality_min_score=quality_min,
+            quality_retry_once=retry_once,
+        )
     except LLMParseError as e:
         detail = str(e)
         if "Cannot connect" in detail:
@@ -928,15 +990,34 @@ class BatchActionRequest(BaseModel):
 # ============================================================
 @app.get("/metrics")
 async def prometheus_metrics():
-    """Prometheus /metrics endpoint (optional, requires prometheus-client)."""
-    from team_memory.web.metrics import get_prometheus_metrics, is_prometheus_available
-    if not is_prometheus_available():
-        return JSONResponse(
-            status_code=501,
-            content={"detail": "prometheus-client not installed. pip install prometheus-client"},
-        )
-    data, content_type = get_prometheus_metrics()
+    """Prometheus /metrics endpoint. Returns 200 with Prometheus text or fallback."""
     from fastapi.responses import Response
+
+    from team_memory.web.metrics import (
+        get_metrics_text_fallback,
+        get_prometheus_metrics,
+        is_prometheus_available,
+        set_scrape_gauges,
+    )
+
+    experience_total = 0
+    queue_pending = 0
+    if _service:
+        try:
+            stats = await _service.get_stats()
+            experience_total = int(stats.get("total_experiences", 0))
+        except Exception:
+            pass
+        if getattr(_service, "_embedding_queue", None) is not None:
+            st = _service._embedding_queue.status
+            queue_pending = int(st.get("pending", 0))
+
+    set_scrape_gauges(experience_total=experience_total, embedding_queue_pending=queue_pending)
+
+    if is_prometheus_available():
+        data, content_type = get_prometheus_metrics()
+        return Response(content=data, media_type=content_type)
+    data, content_type = get_metrics_text_fallback()
     return Response(content=data, media_type=content_type)
 
 

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, update
 
 from team_memory.auth.permissions import require_role
 from team_memory.auth.provider import DbApiKeyAuth, User
+from team_memory.storage.audit import write_audit_log
 from team_memory.storage.database import get_session
 from team_memory.storage.models import ApiKey
 from team_memory.web import app as app_module
@@ -182,6 +183,7 @@ async def list_api_keys(user: User = Depends(require_role("admin"))):
 
 @router.post("/keys")
 async def create_api_key(
+    request: Request,
     req: ApiKeyCreateRequest,
     user: User = Depends(require_role("admin")),
 ):
@@ -199,6 +201,16 @@ async def create_api_key(
                 role=req.role,
                 password=req.password,
             )
+            ip = request.client.host if request.client else None
+            await write_audit_log(
+                session,
+                user_name=user.name,
+                action="create",
+                target_type="api_key",
+                target_id=req.user_name,
+                detail={"role": req.role},
+                ip_address=ip,
+            )
             return result
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
@@ -206,6 +218,7 @@ async def create_api_key(
 
 @router.delete("/keys/{key_id}")
 async def delete_or_deactivate_key(
+    request: Request,
     key_id: int,
     user: User = Depends(require_role("admin")),
 ):
@@ -223,14 +236,37 @@ async def delete_or_deactivate_key(
 
         if not db_key.is_active and db_key.key_hash is None:
             ok = await _auth.delete_key_db(session, key_id)
+            if ok:
+                ip = request.client.host if request.client else None
+                await write_audit_log(
+                    session,
+                    user_name=user.name,
+                    action="delete",
+                    target_type="api_key",
+                    target_id=str(key_id),
+                    detail={"user_name": getattr(db_key, "user_name", None)},
+                    ip_address=ip,
+                )
             return {"message": "待审批用户已拒绝并删除" if ok else "删除失败"}
         else:
             ok = await _auth.deactivate_key_db(session, key_id)
+            if ok:
+                ip = request.client.host if request.client else None
+                await write_audit_log(
+                    session,
+                    user_name=user.name,
+                    action="deactivate",
+                    target_type="api_key",
+                    target_id=str(key_id),
+                    detail={"user_name": getattr(db_key, "user_name", None)},
+                    ip_address=ip,
+                )
             return {"message": "用户已停用" if ok else "停用失败"}
 
 
 @router.put("/keys/{key_id}")
 async def update_api_key(
+    request: Request,
     key_id: int,
     req: ApiKeyUpdateRequest,
     user: User = Depends(require_role("admin")),
@@ -260,6 +296,16 @@ async def update_api_key(
                     update(ApiKey).where(ApiKey.id == key_id).values(role=req.role)
                 )
                 result["role"] = req.role
+            ip = request.client.host if request.client else None
+            await write_audit_log(
+                session,
+                user_name=user.name,
+                action="approve",
+                target_type="api_key",
+                target_id=str(key_id),
+                detail={"role": req.role or db_key.role},
+                ip_address=ip,
+            )
             return result
 
         values = {}
@@ -282,4 +328,14 @@ async def update_api_key(
             self_keys = getattr(_auth, "_keys", {})
             self_keys.pop(db_key.key_hash, None)
 
+        ip = request.client.host if request.client else None
+        await write_audit_log(
+            session,
+            user_name=user.name,
+            action="update",
+            target_type="api_key",
+            target_id=str(key_id),
+            detail=values,
+            ip_address=ip,
+        )
         return {"message": "用户信息已更新"}

@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from team_memory.auth.permissions import require_role
 from team_memory.auth.provider import User
+from team_memory.storage.audit import write_audit_log
 from team_memory.storage.models import Experience, ExperienceLink, ReviewHistory
 from team_memory.web import app as app_module
 from team_memory.web.app import (
@@ -455,6 +456,7 @@ async def update_experience_route(
 
 @router.delete("/experiences/{experience_id}")
 async def delete_experience(
+    request: Request,
     experience_id: str,
     hard: bool = False,
     user: User = Depends(require_role("delete")),
@@ -469,6 +471,15 @@ async def delete_experience(
             deleted = await _svc().soft_delete(experience_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="Experience not found")
+        ip = request.client.host if request.client else None
+        await write_audit_log(
+            session,
+            user_name=user.name,
+            action="delete",
+            target_type="experience",
+            target_id=experience_id,
+            ip_address=ip,
+        )
         return {"message": "Experience deleted"}
 
 
@@ -667,6 +678,7 @@ async def list_pending_reviews(
 
 @router.post("/experiences/{experience_id}/review")
 async def review_experience(
+    request: Request,
     experience_id: str,
     req: ReviewRequest,
     user: User = Depends(require_role("review")),
@@ -684,6 +696,18 @@ async def review_experience(
     )
     if result is None:
         raise HTTPException(status_code=404, detail="Experience not found")
+    db_url = _get_db_url()
+    async with app_module.get_session(db_url) as session:
+        ip = request.client.host if request.client else None
+        await write_audit_log(
+            session,
+            user_name=user.name,
+            action="review",
+            target_type="experience",
+            target_id=experience_id,
+            detail={"review_status": req.review_status},
+            ip_address=ip,
+        )
     return result
 
 
@@ -733,6 +757,16 @@ async def change_experience_status(
         if result is None:
             raise HTTPException(status_code=404, detail="Experience not found")
 
+        ip = request.client.host if request.client else None
+        await write_audit_log(
+            session,
+            user_name=user.name,
+            action="change_status",
+            target_type="experience",
+            target_id=experience_id,
+            detail={"status": new_status, "visibility": new_visibility},
+            ip_address=ip,
+        )
         status_messages = {
             "draft": "已退回草稿",
             "review": "已提交审核",
@@ -794,6 +828,18 @@ async def publish_experience(
 
     if result is None:
         raise HTTPException(status_code=404, detail="Experience not found")
+    db_url = _get_db_url()
+    async with app_module.get_session(db_url) as session:
+        ip = request.client.host if request.client else None
+        await write_audit_log(
+            session,
+            user_name=user.name,
+            action="publish",
+            target_type="experience",
+            target_id=experience_id,
+            detail={"target": target},
+            ip_address=ip,
+        )
     return {"message": msg, "experience": result.to_dict()}
 
 

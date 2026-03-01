@@ -594,9 +594,16 @@ class ExperienceRepository:
                 continue
 
             # Strategy A: apply rating weight to score
+            # When avg_rating=0 (no feedback), skip weighting to avoid penalizing
+            # unrated experiences
             similarity = group_data["score"]
             avg_rating = root_exp.avg_rating or 0.0
-            final_score = similarity * (1.0 - rating_weight + rating_weight * avg_rating / 5.0)
+            if avg_rating > 0:
+                final_score = similarity * (
+                    1.0 - rating_weight + rating_weight * avg_rating / 5.0
+                )
+            else:
+                final_score = similarity
 
             # Get top-K children
             children = root_exp.children or []
@@ -811,9 +818,13 @@ class ExperienceRepository:
     ) -> list[dict]:
         """Full-text search using PostgreSQL tsvector/tsquery.
 
-        This serves as a fallback when embedding service is unavailable.
+        Uses jieba tokenizer for Chinese text when available, falling back
+        to the 'simple' PG configuration.
         """
-        ts_query = func.plainto_tsquery("english", query_text)
+        from team_memory.services.tokenizer import tokenize
+
+        tokenized_query = tokenize(query_text)
+        ts_query = func.plainto_tsquery("simple", tokenized_query)
         rank_expr = func.ts_rank(Experience.fts, ts_query).label("rank")
 
         query = (
