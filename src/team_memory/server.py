@@ -2234,6 +2234,24 @@ async def tm_task(
                 except Exception as e:
                     logger.warning("Auto-reflection failed: %s", e)
 
+            # Group completion check: when completing a task in a group, see if group is done
+            group_completed = False
+            group_id_str = None
+            group_completed_hint = None
+            if (
+                status == "completed"
+                and summary
+                and task.group_id is not None
+            ):
+                if await repo.group_all_completed_or_cancelled(
+                    task.project, task.group_id
+                ):
+                    group_completed = True
+                    group_id_str = str(task.group_id)
+                    group_completed_hint = (
+                        "建议调用 tm_save_group 做组级复盘"
+                    )
+
             await session.commit()
         result = {
             "task": updated.to_dict() if updated else {},
@@ -2246,6 +2264,10 @@ async def tm_task(
             result["reflection_id"] = reflection_id
         if warning:
             result["warning"] = warning
+        if group_completed and group_id_str and group_completed_hint:
+            result["group_completed"] = True
+            result["group_id"] = group_id_str
+            result["group_completed_hint"] = group_completed_hint
         return json.dumps(result)
 
     elif action == "list":

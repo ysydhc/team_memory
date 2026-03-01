@@ -1722,6 +1722,19 @@ class TaskRepository:
         result = await self._session.execute(q)
         return list(result.scalars().all())
 
+    async def group_all_completed_or_cancelled(
+        self, project: str, group_id: uuid.UUID
+    ) -> bool:
+        """Return True iff all tasks in the group have status completed or cancelled."""
+        tasks = await self.list_tasks(
+            project=project, group_id=group_id
+        )
+        if not tasks:
+            return False
+        return all(
+            t.status in ("completed", "cancelled") for t in tasks
+        )
+
     async def count_in_progress(self, project: str, user_id: str) -> int:
         result = await self._session.execute(
             select(func.count())
