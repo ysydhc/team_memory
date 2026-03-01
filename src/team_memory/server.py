@@ -309,26 +309,22 @@ def _guard_output(result_json: str, max_tokens: int | None = None) -> str:
 mcp = FastMCP(
     "team_memory",
     instructions=(
-        "team_memory is a team experience database. All tools use the tm_ prefix.\n"
-        "Available tools:\n"
-        "- tm_solve: Smart problem solving — search + format best solution + mark used\n"
-        "- tm_search: General-purpose semantic search across all experiences\n"
-        "- tm_suggest: Context-based recommendations from file/language/framework\n"
-        "- tm_learn: Extract and save experience from conversation/document text\n"
-        "- tm_save: Quick-save a simple experience (title + problem, solution optional)\n"
-        "- tm_save_typed: Save a typed experience with full fields (type, severity, git_refs...)\n"
-        "- tm_save_group: Save a parent + children experience group\n"
-        "- tm_feedback: Rate an experience (1-5) to improve future search\n"
-        "- tm_update: Update fields on an existing experience\n"
-        "- tm_analyze_patterns: Analyze conversation patterns, extract user instruction styles\n\n"
-        "- tm_config: Read current retrieval/runtime configuration snapshot\n"
-        "- tm_status: Read runtime health and pipeline status\n\n"
-        "Experience types: general, feature, bugfix, tech_design, "
-        "incident, best_practice, learning\n"
-        "Recommended workflow:\n"
-        "1. Before solving a problem: call tm_solve or tm_search\n"
-        "2. After solving: call tm_learn or tm_save / tm_save_typed to share knowledge\n"
-        "3. If a solution helped: call tm_feedback with rating"
+        "team_memory is a team experience database. All tools use the tm_ prefix.\n\n"
+        "**Mandatory**: At task start, call tm_preflight(task_description=..., current_files=...). "
+        "Use search_depth (skip/light/full) to decide if tm_search/tm_solve is needed.\n\n"
+        "**When to use which tool:**\n"
+        "- tm_solve(problem=...): First for concrete technical problems. "
+        "Returns best solution and marks used; add file_path/language/framework for recall.\n"
+        "- tm_search(query=..., tags=..., max_results=5): Exploratory or more results. "
+        "Short queries get lower min_similarity automatically.\n"
+        "- tm_learn(conversation=..., as_group=...): User pastes long doc or chat. "
+        "LLM extracts experience; as_group=True for multi-step.\n"
+        "- tm_save(title=..., problem=..., solution=...): Quick-save. "
+        "Use tm_save_typed for experience_type, severity, git_refs.\n"
+        "- tm_feedback(experience_id=..., rating=1..5): After a result helped; improves ranking.\n"
+        "- tm_task(action=...): create/list/get/update; completed+summary → experience.\n\n"
+        "Types: general, feature, bugfix, tech_design, incident, best_practice, learning. "
+        "Prefer specific over 'general'. Use project= in multi-project setups."
     ),
 )
 
@@ -459,6 +455,11 @@ async def tm_solve(
         if parent.get("summary"):
             result["_has_summary"] = True
 
+    best_id = results[0].get("group_id") or results[0].get("id", "")
+    feedback_hint = (
+        f"如果此方案有帮助，请调用 tm_feedback(experience_id='{best_id}', rating=5) 进行评分"
+    )
+
     output = json.dumps(
         {
             "message": (
@@ -467,20 +468,38 @@ async def tm_solve(
                 "If helpful, call tm_feedback with the experience ID."
             ),
             "results": results,
+            "feedback_hint": feedback_hint,
         },
         ensure_ascii=False,
     )
     return _guard_output(output)
 
 
+def _get_template_by_id(template_id: str) -> dict | None:
+    """Load workflow template by id from config/templates/templates.yaml."""
+    try:
+        base = Path(__file__).resolve().parent.parent.parent
+        path = base / "config" / "templates" / "templates.yaml"
+        if not path.exists():
+            return None
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+        for t in data.get("templates", []):
+            if (t.get("id") or t.get("experience_type")) == template_id:
+                return t
+    except Exception:
+        pass
+    return None
+
+
 @mcp.tool(
     name="tm_learn",
     description=(
-        "Learn from a conversation or document: extract structured experience "
-        "using LLM and auto-save to the knowledge base. "
-        "Call this after solving a problem to capture the knowledge. "
-        "By default saves as draft (requires review before publishing). "
-        "Returns ~200-500 tokens."
+        "Extract and save experience from long conversation or document text. "
+        "Use when the user pastes a doc, chat log, or incident report. "
+        "Parameters: conversation (required), as_group=True for multi-step content, "
+        "tags to add, template=bugfix|feature|tech_design|... to apply workflow template, "
+        "save_as_draft=True for review. Returns ~200-500 tokens."
     ),
 )
 @track_usage
@@ -521,12 +540,17 @@ async def tm_learn(
 
     publish_status = "draft" if save_as_draft else "published"
 
-    # Parse content with LLM
+    # Parse content with LLM (quality gate and retry from extraction config)
+    ext = getattr(settings, "extraction", None)
+    quality_min = ext.quality_gate if ext is not None else 2
+    retry_once = (ext.max_retries > 0) if ext is not None else True
     try:
         parsed = await parse_content(
             content=conversation,
             llm_config=settings.llm,
             as_group=as_group,
+            quality_min_score=quality_min,
+            quality_retry_once=retry_once,
         )
     except LLMParseError as e:
         return json.dumps(
@@ -968,10 +992,33 @@ async def tm_search(
             ensure_ascii=False,
         )
 
+    # Auto-increment use_count on top-1 result (mirrors tm_solve behavior)
+    best = results[0]
+    best_id = best.get("group_id") or best.get("id")
+    if best_id:
+        try:
+            import uuid as _uuid
+
+            from team_memory.storage.repository import ExperienceRepository
+
+            db_url = _get_db_url()
+            async with get_session(db_url) as session:
+                repo = ExperienceRepository(session)
+                await repo.increment_use_count(_uuid.UUID(best_id))
+        except Exception:
+            logger.debug("tm_search: failed to increment use_count", exc_info=True)
+
+    feedback_hint = (
+        f"如果搜索结果有帮助，请调用 tm_feedback(experience_id='{best_id}', rating=5) 进行评分"
+        if best_id
+        else ""
+    )
+
     output = json.dumps(
         {
             "message": f"Found {len(results)} matching experience(s).",
             "results": results,
+            "feedback_hint": feedback_hint,
         },
         ensure_ascii=False,
     )
@@ -1366,9 +1413,10 @@ async def tm_notify(
 @mcp.tool(
     name="tm_feedback",
     description=(
-        "Provide feedback on a searched experience — "
-        "rate 1-5 (5=best) and optionally score fitness (1-5). "
-        "This improves future search results. Returns ~50 tokens."
+        "Rate an experience after using it (e.g. from tm_search/tm_solve). "
+        "Required: experience_id (from search result), rating 1-5 (5=very helpful). "
+        "Optional: comment, fitness_score 1-5. Call this when a result helped — "
+        "it improves future ranking and completes the feedback loop. Returns ~50 tokens."
     ),
 )
 @track_usage
@@ -1377,6 +1425,7 @@ async def tm_feedback(
     rating: int,
     fitness_score: int | None = None,
     comment: str | None = None,
+    session: object = None,  # MCP context may inject; ignored, not passed to service
 ) -> str:
     """Submit feedback for an experience.
 
@@ -1385,6 +1434,7 @@ async def tm_feedback(
         rating: Rating from 1 to 5 (5 = most helpful).
         fitness_score: Post-use fitness score 1-5 (how well it matched your need).
         comment: Optional feedback comment.
+        session: Ignored (MCP context); not passed to service.
 
     Returns:
         JSON string with the result.
@@ -1995,9 +2045,11 @@ Keep the response compact and reference section paths whenever available."""
 @mcp.tool(
     name="tm_task",
     description=(
-        "Unified task CRUD — create, update, list, or get personal tasks. "
-        "Completing a task auto-generates an experience (sediment). "
-        "Returns ~200 tokens."
+        "Task management: action='create'|'list'|'get'|'update'. "
+        "create: title required, optional description/project/status. "
+        "update: task_id + status='completed' + summary → auto-saves as experience. "
+        "list: filter by project, status (wait/in_progress/completed). "
+        "Use tm_task_claim to claim before starting; complete with summary. Returns ~200 tokens."
     ),
 )
 @track_usage
