@@ -300,7 +300,7 @@ class ExperienceService:
             """
             repo = ExperienceRepository(session)
 
-            # Generate embedding for parent
+            # Generate embedding for parent (include children titles for wider coverage)
             parent_embed_text = "\n".join([
                 parent.get("title", ""),
                 parent.get("problem", ""),
@@ -308,6 +308,11 @@ class ExperienceService:
             ])
             if parent.get("root_cause"):
                 parent_embed_text += f"\n{parent['root_cause']}"
+            if parent.get("tags"):
+                parent_embed_text += f"\n{' '.join(parent['tags'])}"
+            children_titles = [c.get("title", "") for c in children if c.get("title")]
+            if children_titles:
+                parent_embed_text += f"\n{' '.join(children_titles)}"
             try:
                 parent_embedding = await self._embedding.encode_single(parent_embed_text)
             except Exception:
@@ -340,6 +345,8 @@ class ExperienceService:
                 ])
                 if child.get("root_cause"):
                     child_embed_text += f"\n{child['root_cause']}"
+                if child.get("tags"):
+                    child_embed_text += f"\n{' '.join(child['tags'])}"
                 try:
                     child_embedding = await self._embedding.encode_single(child_embed_text)
                 except Exception:
@@ -464,12 +471,14 @@ class ExperienceService:
                     experience_type, has_solution=bool(solution)
                 )
 
-            # Build text for embedding
+            # Build text for embedding (include tags for better semantic matching)
             embed_text = f"{title}\n{problem}\n{solution or ''}"
             if root_cause:
                 embed_text += f"\n{root_cause}"
             if code_snippets:
                 embed_text += f"\n{code_snippets}"
+            if tags:
+                embed_text += f"\n{' '.join(tags)}"
 
             # Decide: sync or async embedding
             embedding = None
@@ -663,6 +672,7 @@ class ExperienceService:
         fitness_score: int | None = None,
         *,
         session=None,  # noqa: ANN001
+        **kwargs: object,  # absorb MCP/context extras (e.g. session from tool layer)
     ) -> bool:
         async with self._session_or(session) as session:
             """Submit feedback for an experience. rating: 1-5, 5=best."""
