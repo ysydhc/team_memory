@@ -86,6 +86,7 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 - **查询优化**：同义词扩展（`config.tag_synonyms`）、短查询自动降低 min_similarity（0.45）；FTS 使用 simple 分词器并支持 jieba 中文分词
 - **Reranker**：支持服务端 LLM 精排，或客户端 AI 自行判断结果相关性
 - **Token 预算控制**：自动裁剪输出长度，避免经验库增大后撑爆 AI 上下文
+- **记忆压缩与摘要**：经验支持 `summary` 字段，LLM 可生成简短摘要；单条（POST `/experiences/{id}/summarize`）与批量（POST `/experiences/batch-summarize`）生成；MCP 搜索结果中每条经验可包含 `summary`，便于节省 Token
 - **PageIndex-Lite**：长文档自动分块建立节点索引，支持节点级精准检索
 
 ### 任务管理
