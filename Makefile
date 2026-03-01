@@ -4,7 +4,7 @@
 # ============================================================
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp test lint lint-fix verify verify-web backup health clean migrate install-knowledge release-9111 hooks-install
+.PHONY: help setup dev web mcp test lint lint-fix verify verify-web backup health clean migrate migrate-fts install-knowledge release-9111 hooks-install
 
 help:           ## 显示所有可用命令
 	@echo ""
@@ -90,6 +90,9 @@ verify-web:     ## Web 验收：lint + web测试 + health/stats smoke
 
 migrate:        ## 运行数据库迁移
 	alembic upgrade head
+
+migrate-fts:    ## 补齐经验表 FTS 字段（存量迁移）；可用 --dry-run 预览
+	python scripts/migrate_fts.py
 
 backup:         ## 备份数据库
 	./scripts/backup.sh
