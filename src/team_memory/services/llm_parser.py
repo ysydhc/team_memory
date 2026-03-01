@@ -79,14 +79,29 @@ git_refs: 从文档中提取的 git 引用，格式为
 [{"type": "commit"|"pr"|"branch", "hash": "...", "url": "...", "description": "..."}]
 
 注意:
-- title 要简洁，不超过 50 个字
-- problem 和 solution 要详细，保留关键技术细节
+- title 要简洁，不超过 50 个字，且只描述一个主题（不要将多个不相关主题混在一个 title 里）
+- problem 和 solution 要详细，保留关键技术细节，且一一对应
 - solution 可以为 null（例如问题已确认但尚未解决）
 - root_cause 分析问题的根本原因
 - decisions/pitfalls/patterns/verification/constraints 五个维度尽量填写，是评估经验质量的关键
 - tags 提取 3-8 个相关的技术关键词，小写英文
 - code_snippets 只保留最关键的代码
 - structured_data 中只填入能从文档中确认的字段，没有的填 null
+
+**示例 (Few-shot)**:
+
+示例1 — 故障修复类:
+输入: "生产环境 API 返回 502，排查发现是 Nginx 超时 60s，后端处理耗时 2 分钟。"
+      "把 proxy_read_timeout 调到 300 解决。"
+输出要点: title 只写故障与修复；problem 含现象与上下文；solution 含配置；tags 含 nginx, timeout。
+
+示例2 — 方案决策类:
+输入: "选型用 PostgreSQL 存审计日志，对比过 MySQL 和 MongoDB，选 PG 因 JSONB 和分区表好用。"
+输出要点: title 概括选型结论；decisions 写备选与理由；problem 写需求；tags 含 postgresql, audit。
+
+示例3 — 多主题必须拆分:
+若文档同时包含「UI 按钮样式修改」和「API Key 存储方式」，应拆成两条经验分别提取，
+不要合并到一个 title 或一条经验里。
 """
 
 _BUILTIN_PARSE_GROUP = """你是一个技术文档分析助手。用户会提供一段较长的技术文档或对话记录，
@@ -118,12 +133,14 @@ _BUILTIN_PARSE_GROUP = """你是一个技术文档分析助手。用户会提供
 }
 
 注意:
-- parent.title 概括全局，children 各自描述一个独立步骤
-- 子经验数量不要超过 5 个，合并关系紧密的步骤
-- 每个子经验都应有独立的 problem + solution
-- tags 用小写英文
-- 如果内容不适合拆分为多步骤，返回 children 为空数组 []
+- 仅当文档明确包含多个连续步骤、或「先 A 再 B 再 C」的流程时，才拆成 parent + children；
+  否则用单条经验（返回 children: []）。
+- parent.title 概括全局，children 各自描述一个独立步骤；每个子经验都应有独立的 problem + solution。
+- 子经验数量不要超过 5 个，合并关系紧密的步骤。
+- tags 用小写英文。
+- 若内容只是单点问题或单一主题，返回 children 为空数组 []，parent 中填完整 problem/solution。
 """
+
 
 def compute_quality_score(parsed: dict) -> int:
     """Compute quality score (0-5) from parsed experience fields.
@@ -244,6 +261,7 @@ def load_prompt(
     if ai_behavior is None:
         try:
             from team_memory.config import get_settings
+
             settings = get_settings()
             ai_behavior = settings.ai_behavior
         except Exception:
@@ -261,6 +279,7 @@ def _substitute_variables(prompt_text: str) -> str:
     """Replace ``{{variable}}`` placeholders with SchemaRegistry values."""
     try:
         from team_memory.schemas import get_schema_registry
+
         registry = get_schema_registry()
     except Exception:
         return prompt_text
@@ -281,10 +300,15 @@ def _build_behavior_block(ai_behavior: "AIBehaviorConfig") -> str:
     lines.append("## 团队定制要求")
 
     lang_map = {
-        "zh-CN": "中文", "en": "English", "ja": "日本語",
-        "ko": "한국어", "zh-TW": "繁體中文",
+        "zh-CN": "中文",
+        "en": "English",
+        "ja": "日本語",
+        "ko": "한국어",
+        "zh-TW": "繁體中文",
     }
-    lang_display = lang_map.get(ai_behavior.output_language, ai_behavior.output_language)
+    lang_display = lang_map.get(
+        ai_behavior.output_language, ai_behavior.output_language
+    )
     lines.append(f"- 输出语言：{lang_display}")
 
     detail_map = {"detailed": "详细", "concise": "简洁"}
@@ -293,9 +317,12 @@ def _build_behavior_block(ai_behavior: "AIBehaviorConfig") -> str:
 
     if ai_behavior.focus_areas:
         focus_map = {
-            "root_cause": "根因分析", "solution": "解决方案",
-            "code_snippets": "关键代码", "reproduction_steps": "复现步骤",
-            "performance": "性能数据", "architecture": "架构设计",
+            "root_cause": "根因分析",
+            "solution": "解决方案",
+            "code_snippets": "关键代码",
+            "reproduction_steps": "复现步骤",
+            "performance": "性能数据",
+            "architecture": "架构设计",
         }
         focus_labels = [focus_map.get(f, f) for f in ai_behavior.focus_areas]
         lines.append(f"- 重点关注：{'、'.join(focus_labels)}")
@@ -322,6 +349,8 @@ async def parse_content(
     llm_config: "LLMConfig | None" = None,
     as_group: bool = False,
     max_input_chars: int = 8000,
+    quality_min_score: int = 2,
+    quality_retry_once: bool = True,
 ) -> dict:
     """Parse text content into structured experience fields using an LLM.
 
@@ -330,6 +359,8 @@ async def parse_content(
         llm_config: LLM configuration. If None, uses default Ollama config.
         as_group: If True, parse as parent + children group.
         max_input_chars: Maximum input characters sent to LLM.
+        quality_min_score: Minimum quality score (0-5); below this may retry.
+        quality_retry_once: If True, retry once when quality score < quality_min_score.
 
     Returns:
         For as_group=False: dict with title, problem, solution, tags, etc.
@@ -338,7 +369,7 @@ async def parse_content(
     Raises:
         LLMParseError: If LLM connection fails or response is unparseable.
     """
-    llm_model = "gpt-oss:20b-cloud"
+    llm_model = "gpt-oss:120b-cloud"
     llm_base_url = "http://localhost:11434"
     if llm_config is not None:
         llm_model = llm_config.model
@@ -346,42 +377,64 @@ async def parse_content(
 
     prompt_name = "parse_group" if as_group else "parse_single"
     system_prompt = load_prompt(prompt_name, llm_config=llm_config)
+    user_content = content[:max_input_chars]
+    retried = False
 
-    try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                f"{llm_base_url.rstrip('/')}/api/chat",
-                json={
-                    "model": llm_model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": content[:max_input_chars]},
-                    ],
-                    "stream": False,
-                    "options": {"temperature": 0.3},
-                },
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ]
+                resp = await client.post(
+                    f"{llm_base_url.rstrip('/')}/api/chat",
+                    json={
+                        "model": llm_model,
+                        "messages": messages,
+                        "stream": False,
+                        "options": {"temperature": 0.3},
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.ConnectError:
+            raise LLMParseError(
+                f"Cannot connect to Ollama at {llm_base_url}. "
+                "Make sure Ollama is running."
             )
-            resp.raise_for_status()
-            data = resp.json()
-    except httpx.ConnectError:
-        raise LLMParseError(
-            f"Cannot connect to Ollama at {llm_base_url}. Make sure Ollama is running."
-        )
-    except httpx.HTTPStatusError as e:
-        raise LLMParseError(f"Ollama API error: {e.response.text[:200]}")
+        except httpx.HTTPStatusError as e:
+            raise LLMParseError(f"Ollama API error: {e.response.text[:200]}")
 
-    # Extract the LLM response text
-    llm_text = data.get("message", {}).get("content", "")
-    if not llm_text:
-        raise LLMParseError("LLM returned empty response")
+        llm_text = data.get("message", {}).get("content", "")
+        if not llm_text:
+            raise LLMParseError("LLM returned empty response")
 
-    # Parse JSON from LLM response
-    parsed = _extract_json(llm_text)
+        parsed = _extract_json(llm_text)
 
-    if as_group:
-        return _normalize_group(parsed)
-    else:
-        return _normalize_single(parsed)
+        if as_group:
+            result = _normalize_group(parsed)
+            break
+        else:
+            result = _normalize_single(parsed)
+            # Use raw parsed for score (has decisions/patterns/verification)
+            score = compute_quality_score(parsed)
+            if score >= quality_min_score or not quality_retry_once or retried:
+                break
+            retried = True
+            user_content = (
+                user_content
+                + "\n\n[质量不足请重试] 请重新提取并确保：1) title 只描述一个主题；"
+                "2) problem 与 solution 对应且具体；3) 填写 decisions / patterns / "
+                "verification 中至少一项。"
+            )
+            logger.info(
+                "Parse quality score %s < %s, retrying once",
+                score,
+                quality_min_score,
+            )
+
+    return result
 
 
 def _extract_json(llm_text: str) -> dict:
@@ -436,6 +489,7 @@ def _normalize_single(parsed: dict) -> dict:
 
     # Validate experience_type via SchemaRegistry (dynamic)
     from team_memory.schemas import get_schema_registry
+
     registry = get_schema_registry()
     if not registry.is_valid_type(result["experience_type"]):
         result["experience_type"] = "general"
@@ -452,6 +506,7 @@ def _normalize_single(parsed: dict) -> dict:
     # Validate structured_data
     if result["structured_data"] and isinstance(result["structured_data"], dict):
         from team_memory.schemas import validate_structured_data
+
         try:
             result["structured_data"] = validate_structured_data(
                 result["experience_type"], result["structured_data"]
@@ -462,6 +517,7 @@ def _normalize_single(parsed: dict) -> dict:
     # Validate git_refs
     if result["git_refs"] and isinstance(result["git_refs"], list):
         from team_memory.schemas import validate_git_refs
+
         try:
             result["git_refs"] = validate_git_refs(result["git_refs"])
         except Exception:
@@ -507,7 +563,7 @@ async def suggest_experience_type(
     Returns:
         Dict with suggested_type, confidence, reason, fallback_types.
     """
-    llm_model = "gpt-oss:20b-cloud"
+    llm_model = "gpt-oss:120b-cloud"
     llm_base_url = "http://localhost:11434"
     if llm_config is not None:
         llm_model = llm_config.model
@@ -526,7 +582,9 @@ async def suggest_experience_type(
                     "messages": [
                         {
                             "role": "system",
-                            "content": load_prompt("suggest_type", llm_config=llm_config),
+                            "content": load_prompt(
+                                "suggest_type", llm_config=llm_config
+                            ),
                         },
                         {"role": "user", "content": user_content[:2000]},
                     ],
@@ -566,6 +624,7 @@ async def suggest_experience_type(
 
     # Validate and normalize via SchemaRegistry
     from team_memory.schemas import get_schema_registry
+
     registry = get_schema_registry()
     suggested = str(parsed.get("type", "general")).strip()
     if not registry.is_valid_type(suggested):
@@ -579,8 +638,7 @@ async def suggest_experience_type(
     if not isinstance(fallbacks, list):
         fallbacks = []
     fallbacks = [
-        str(f).strip() for f in fallbacks
-        if registry.is_valid_type(str(f).strip())
+        str(f).strip() for f in fallbacks if registry.is_valid_type(str(f).strip())
     ][:2]
 
     return {
@@ -617,7 +675,7 @@ async def generate_summary(
     Raises:
         LLMParseError: If LLM connection fails.
     """
-    llm_model = "gpt-oss:20b-cloud"
+    llm_model = "gpt-oss:120b-cloud"
     llm_base_url = "http://localhost:11434"
     if llm_config is not None:
         if hasattr(llm_config, "model"):

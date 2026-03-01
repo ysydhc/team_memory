@@ -12,7 +12,11 @@ from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 
 class DatabaseConfig(BaseModel):
@@ -79,11 +83,19 @@ class LLMConfig(BaseModel):
     """LLM configuration for document parsing and other AI tasks."""
 
     provider: str = "ollama"  # ollama | openai | generic
-    model: str = "gpt-oss:20b-cloud"
+    model: str = "gpt-oss:120b-cloud"
     base_url: str = "http://localhost:11434"
     api_key: str = ""  # For OpenAI/generic providers
     prompt_dir: str | None = None  # Custom prompt template directory
     monthly_budget: float = 0.0  # Monthly budget in USD (0 = unlimited)
+
+
+class ExtractionConfig(BaseModel):
+    """Experience extraction quality gate and retry configuration."""
+
+    quality_gate: int = 2  # Minimum quality score (0-5); below this triggers retry
+    max_retries: int = 1  # Max retries when quality score < quality_gate (0 = no retry)
+    few_shot_examples: str | None = None  # Custom few-shot path (null = built-in)
 
 
 class RetrievalConfig(BaseModel):
@@ -154,9 +166,7 @@ class RerankerConfig(BaseModel):
     """
 
     provider: Literal["none", "ollama_llm", "cross_encoder", "jina"] = "none"
-    ollama_llm: OllamaLLMRerankerConfig = Field(
-        default_factory=OllamaLLMRerankerConfig
-    )
+    ollama_llm: OllamaLLMRerankerConfig = Field(default_factory=OllamaLLMRerankerConfig)
     cross_encoder: CrossEncoderRerankerConfig = Field(
         default_factory=CrossEncoderRerankerConfig
     )
@@ -176,6 +186,12 @@ class SearchConfig(BaseModel):
     adaptive_filter: bool = True  # Enable adaptive score filtering
     score_gap_threshold: float = 0.15  # Gap threshold for elbow detection
     min_confidence_ratio: float = 0.6  # Min ratio vs top-1 for dynamic threshold
+    # Short-query relaxation (better recall for 1–2 word queries)
+    short_query_max_chars: int = 20  # Treat query as "short" when len <= this
+    min_similarity_short: float = 0.45  # Lower min_similarity for short queries
+    # LLM query expansion (P1-5): expand query for recall; fallback on timeout/failure
+    query_expansion_enabled: bool = False
+    query_expansion_timeout_seconds: float = 3.0
 
 
 # ====================== Cache Configuration ======================
@@ -232,7 +248,9 @@ class WebConfig(BaseModel):
 class InstallableCatalogConfig(BaseModel):
     """Installable rules/prompts catalog configuration."""
 
-    sources: list[Literal["local", "registry"]] = Field(default_factory=lambda: ["local"])
+    sources: list[Literal["local", "registry"]] = Field(
+        default_factory=lambda: ["local"]
+    )
     local_base_dir: str = ".debug/knowledge-pack"
     registry_manifest_url: str = ""
     target_rules_dir: str = ".cursor/rules"
@@ -245,7 +263,9 @@ class ReviewConfig(BaseModel):
     """Experience review workflow configuration."""
 
     enabled: bool = True  # Enable review workflow
-    auto_publish_threshold: float = 0.0  # Auto-publish if avg_rating >= this (0 = disabled)
+    auto_publish_threshold: float = (
+        0.0  # Auto-publish if avg_rating >= this (0 = disabled)
+    )
     require_review_for_ai: bool = True  # AI-created experiences require review
 
 
@@ -254,7 +274,9 @@ class MemoryConfig(BaseModel):
 
     auto_summarize: bool = True  # Auto-generate summary for long experiences
     summary_threshold_tokens: int = 500  # Token threshold to trigger summarization
-    summary_model: str = ""  # LLM model override for summarization (empty = use default)
+    summary_model: str = (
+        ""  # LLM model override for summarization (empty = use default)
+    )
     batch_size: int = 10  # Batch size for bulk summarization
 
 
@@ -320,7 +342,9 @@ class CustomSchemaConfig(BaseModel):
     preset: str = "software-dev"  # software-dev / data-engineering / devops / general
     experience_types: list[ExperienceTypeDef] = Field(default_factory=list)
     categories: list[CategoryDef] = Field(default_factory=list)
-    severity_levels: list[str] = Field(default_factory=list)  # empty = inherit from preset
+    severity_levels: list[str] = Field(
+        default_factory=list
+    )  # empty = inherit from preset
 
 
 # ====================== AI Behavior Configuration ======================
@@ -362,6 +386,7 @@ class Settings(BaseSettings):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     default_project: str = "default"
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)

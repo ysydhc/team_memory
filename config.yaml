@@ -37,10 +37,18 @@ embedding:
 # ║  [可选] LLM 配置 — 用于文档解析、摘要生成等 AI 功能       ║
 # ╚══════════════════════════════════════════════════════════╝
 llm:
-  model: gpt-oss:20b-cloud        # Ollama LLM model for document parsing
+  model: gpt-oss:120b-cloud        # Ollama LLM model for document parsing
   base_url: http://localhost:11434
   prompt_dir: null                 # Custom prompt template directory (null = built-in)
                                    # Example: "prompts/" to load from prompts/*.md
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║  [可选] 经验提取 — 质量门控与重试                         ║
+# ╚══════════════════════════════════════════════════════════╝
+extraction:
+  quality_gate: 2         # Minimum quality score (0-5); below triggers retry
+  max_retries: 1          # Max retries when quality < quality_gate (0 = no retry)
+  few_shot_examples: null # Custom few-shot path (null = built-in)
 
 # ╔══════════════════════════════════════════════════════════╗
 # ║  [必改] 认证配置                                          ║
@@ -133,6 +141,8 @@ search:
   adaptive_filter: true     # Enable adaptive score filtering
   score_gap_threshold: 0.15 # Gap threshold for elbow detection
   min_confidence_ratio: 0.6 # Min ratio vs top-1 score for dynamic threshold
+  query_expansion_enabled: false   # P1-5: LLM expands query for better recall; fallback to synonym/original on timeout
+  query_expansion_timeout_seconds: 3
 
 # ╔══════════════════════════════════════════════════════════╗
 # ║  [可选] 缓存配置 — 默认使用内存缓存，无需额外依赖         ║

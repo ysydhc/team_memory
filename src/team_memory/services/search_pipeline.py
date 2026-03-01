@@ -78,6 +78,57 @@ class SearchPipelineResult:
     stage_metrics: dict[str, int] = field(default_factory=dict)
 
 
+def _expand_query_synonyms(query: str, tag_synonyms: dict[str, str]) -> str:
+    """Expand query with synonym terms from tag_synonyms (key<->value) for better recall.
+
+    Cache key must remain the original query; only retrieval uses expanded query.
+    """
+    if not query or not tag_synonyms:
+        return query.strip()
+    q = query.strip()
+    added: list[str] = []
+    for key, value in tag_synonyms.items():
+        if key and value and key != value:
+            if key in q and value not in q:
+                added.append(value)
+            if value in q and key not in q:
+                added.append(key)
+    if not added:
+        return q
+    return q + " " + " ".join(dict.fromkeys(added))
+
+
+async def _llm_expand_query(
+    query: str,
+    llm_config,
+    timeout_seconds: float,
+) -> str | None:
+    """Call LLM to expand search query with extra keywords. Returns None on any failure."""
+    if not query or not query.strip() or not llm_config:
+        return None
+    try:
+        from team_memory.services.llm_client import LLMClient
+
+        client = LLMClient.from_config(llm_config)
+        system = (
+            "You are a search keyword expansion assistant. Given the user's search intent, "
+            "output a single line of space-separated expanded search keywords only, "
+            "no explanation, no newlines. Example: 'database connection timeout' -> "
+            "'database connection timeout pool connect'. Output only the keyword line."
+        )
+        text = await asyncio.wait_for(
+            client.chat(system, query.strip(), temperature=0.2, timeout=timeout_seconds),
+            timeout=timeout_seconds + 1.0,
+        )
+        if not text:
+            return None
+        line = text.strip().split("\n")[0].strip()
+        return line if line else None
+    except (asyncio.TimeoutError, Exception) as e:
+        logger.debug("LLM query expansion failed (fallback to original): %s", e)
+        return None
+
+
 class SearchPipeline:
     """Orchestrates the complete search pipeline.
 
@@ -98,12 +149,15 @@ class SearchPipeline:
         cache_config: CacheConfig,
         pageindex_lite_config: PageIndexLiteConfig | None = None,
         llm_config=None,
+        tag_synonyms: dict[str, str] | None = None,
     ):
         self._embedding = embedding_provider
         self._reranker = reranker_provider
         self._search_config = search_config
         self._retrieval_config = retrieval_config
         self._pageindex_lite_config = pageindex_lite_config
+        self._llm_config = llm_config
+        self._tag_synonyms = tag_synonyms or {}
         self._cache = SearchCache(
             max_size=cache_config.max_size,
             ttl_seconds=cache_config.ttl_seconds,
@@ -142,12 +196,42 @@ class SearchPipeline:
                 cached.duration_ms = duration_ms
                 return cached
 
+        # Query expansion (synonyms) for retrieval only; cache key stays request.query
+        retrieval_query = _expand_query_synonyms(
+            request.query, self._tag_synonyms
+        )
+        # Optional LLM query expansion (P1-5): merge LLM keywords; fallback on timeout/failure
+        if getattr(self._search_config, "query_expansion_enabled", False) and self._llm_config:
+            timeout_s = getattr(
+                self._search_config, "query_expansion_timeout_seconds", 3.0
+            )
+            expanded = await _llm_expand_query(
+                request.query, self._llm_config, timeout_s
+            )
+            if expanded and expanded.strip():
+                retrieval_query = (
+                    request.query.strip() + " " + expanded.strip()
+                ).strip()[:2000]
+
+        # Lower min_similarity for short queries to improve recall
+        short_threshold = getattr(
+            self._search_config, "short_query_max_chars", 20
+        )
+        min_sim_short = getattr(
+            self._search_config, "min_similarity_short", 0.45
+        )
+        effective_min_similarity = (
+            min_sim_short
+            if len(request.query.strip()) <= short_threshold
+            else request.min_similarity
+        )
+
         # Stage 2: Embedding
         stage_begin = time.monotonic()
         query_embedding = None
         try:
             query_embedding = await self._cache.get_or_compute_embedding(
-                request.query, self._embedding
+                retrieval_query, self._embedding
             )
         except Exception as e:
             logger.warning("Embedding failed, will use FTS only: %s", e)
@@ -160,7 +244,12 @@ class SearchPipeline:
             mode = "fts"  # Force FTS if embedding unavailable
 
         candidates = await self._retrieve_and_fuse(
-            repo, request, query_embedding, mode
+            repo,
+            request,
+            query_embedding,
+            mode,
+            retrieval_query=retrieval_query,
+            effective_min_similarity=effective_min_similarity,
         )
         stage_metrics["retrieve_fuse_ms"] = int((time.monotonic() - stage_begin) * 1000)
 
@@ -337,30 +426,39 @@ class SearchPipeline:
         request: SearchRequest,
         query_embedding: list[float] | None,
         mode: str,
+        retrieval_query: str | None = None,
+        effective_min_similarity: float | None = None,
     ) -> list[SearchResultItem]:
-        """Execute retrieval and RRF fusion."""
+        """Execute retrieval and RRF fusion.
+
+        retrieval_query: query used for retrieval (may be synonym-expanded);
+        defaults to request.query if not provided.
+        effective_min_similarity: override for short-query lower threshold.
+        """
+        q = (retrieval_query or request.query).strip()
         over_fetch = request.max_results * 3  # Over-fetch for filtering
+        min_sim = (
+            effective_min_similarity
+            if effective_min_similarity is not None
+            else request.min_similarity
+        )
 
         if mode == "vector" and query_embedding:
             return await self._vector_search(
-                repo, query_embedding, over_fetch, request
+                repo, query_embedding, over_fetch, request, min_similarity=min_sim
             )
 
         if mode == "fts":
-            return await self._fts_search(repo, request.query, over_fetch, request)
+            return await self._fts_search(repo, q, over_fetch, request)
 
         # Hybrid mode: parallel vector + FTS
         if query_embedding is None:
-            return await self._fts_search(
-                repo, request.query, over_fetch, request
-            )
+            return await self._fts_search(repo, q, over_fetch, request)
 
         vector_task = self._vector_search(
-            repo, query_embedding, over_fetch, request
+            repo, query_embedding, over_fetch, request, min_similarity=min_sim
         )
-        fts_task = self._fts_search(
-            repo, request.query, over_fetch, request
-        )
+        fts_task = self._fts_search(repo, q, over_fetch, request)
 
         vector_results, fts_results = await asyncio.gather(
             vector_task, fts_task, return_exceptions=True
@@ -383,13 +481,15 @@ class SearchPipeline:
         query_embedding: list[float],
         limit: int,
         request: SearchRequest,
+        min_similarity: float | None = None,
     ) -> list[SearchResultItem]:
         """Execute vector similarity search."""
+        min_sim = min_similarity if min_similarity is not None else request.min_similarity
         if request.grouped:
             raw = await repo.search_by_vector_grouped(
                 query_embedding=query_embedding,
                 max_results=limit,
-                min_similarity=request.min_similarity,
+                min_similarity=min_sim,
                 tags=request.tags,
                 top_k_children=request.top_k_children,
                 min_avg_rating=request.min_avg_rating,
@@ -413,7 +513,7 @@ class SearchPipeline:
         raw = await repo.search_by_vector(
             query_embedding=query_embedding,
             max_results=limit,
-            min_similarity=request.min_similarity,
+            min_similarity=min_sim,
             tags=request.tags,
             project=request.project,
             current_user=request.current_user,
@@ -519,18 +619,22 @@ class SearchPipeline:
     ) -> list[SearchResultItem]:
         """Apply adaptive score filtering using similarity scores.
 
-        Uses the original similarity score (not RRF) for filtering, since
-        RRF scores are inherently low (~0.01-0.02 with k=60) and make
-        percentage-based thresholds too aggressive.
+        Uses the primary score for filtering: similarity when set (e.g. from vector
+        search), otherwise score (e.g. from RRF or tests). RRF scores are low
+        (~0.01-0.02 with k=60) so pipeline callers pass similarity; tests may pass
+        only score.
 
         Two strategies:
-        1. Dynamic threshold: filter results below min_confidence_ratio * top-1 similarity.
-        2. Elbow detection: cut when similarity gap exceeds threshold.
+        1. Dynamic threshold: filter results below min_confidence_ratio * top-1.
+        2. Elbow detection: cut when score gap (relative to previous) exceeds threshold.
         """
         if not candidates:
             return candidates
 
-        top_sim = candidates[0].similarity if candidates[0].similarity > 0 else 1.0
+        def _score(item: SearchResultItem) -> float:
+            return item.similarity if item.similarity > 0 else item.score
+
+        top_sim = _score(candidates[0]) or 1.0
         min_ratio = self._search_config.min_confidence_ratio
         gap_threshold = self._search_config.score_gap_threshold
         threshold = top_sim * min_ratio
@@ -539,12 +643,13 @@ class SearchPipeline:
 
         for i in range(1, len(candidates)):
             curr = candidates[i]
+            curr_s = _score(curr)
 
-            if curr.similarity < threshold:
+            if curr_s < threshold:
                 break
 
-            prev_sim = candidates[i - 1].similarity
-            if prev_sim > 0 and (prev_sim - curr.similarity) / prev_sim > gap_threshold:
+            prev_s = _score(candidates[i - 1])
+            if prev_s > 0 and (prev_s - curr_s) / prev_s > gap_threshold:
                 break
 
             filtered.append(curr)
