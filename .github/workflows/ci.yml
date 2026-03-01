@@ -24,6 +24,14 @@ jobs:
         run: ruff check src/ tests/
       - name: Ruff format check
         run: ruff format --check src/ tests/
+      - name: Secrets check (lightweight)
+        run: |
+          if grep -rE '(aws_secret_access_key|AKIA[0-9A-Z]{16}|password\s*=\s*["\'][^"\']{12,}["\'])' \
+            --include='*.py' --include='*.yaml' --include='*.yml' src/ config.yaml 2>/dev/null; then
+            echo "::warning::Possible secret pattern found; fix or add to allowlist. Set continue-on-error to false to enforce."
+            exit 1
+          fi
+        continue-on-error: true
 
   test:
     name: Tests
@@ -86,4 +94,7 @@ jobs:
       - name: Build Docker image
         run: |
           docker build -t team_memory:${{ github.sha }} .
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            docker tag team_memory:${{ github.sha }} team_memory:latest
+          fi
           echo "Docker image built successfully"
