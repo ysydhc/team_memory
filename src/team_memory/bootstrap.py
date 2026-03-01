@@ -187,6 +187,7 @@ def bootstrap(
         cache_config=settings.cache,
         pageindex_lite_config=settings.pageindex_lite,
         llm_config=settings.llm,
+        tag_synonyms=getattr(settings, "tag_synonyms", None) or {},
     )
 
     event_bus = EventBus()

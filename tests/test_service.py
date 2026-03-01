@@ -374,6 +374,30 @@ class TestPhase2Fixes:
         assert result is True
 
     @pytest.mark.asyncio
+    async def test_feedback_accepts_extra_kwargs(self, service_with_review):
+        """feedback() must accept MCP-injected session and extras via **kwargs without raising."""
+        mock_session = AsyncMock()
+        mock_repo_instance = MagicMock()
+        mock_repo_instance.get_by_id = AsyncMock(return_value=None)  # not found
+
+        @asynccontextmanager
+        async def mock_get_session(_db_url):
+            yield mock_session
+
+        with patch("team_memory.storage.database.get_session", mock_get_session), \
+             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
+            mock_repo.return_value = mock_repo_instance
+            result = await service_with_review.feedback(
+                experience_id=str(uuid.uuid4()),
+                rating=4,
+                feedback_by="reviewer",
+                session=object(),  # MCP may inject
+                foo="bar",  # arbitrary extra
+            )
+
+        assert result is False  # experience not found
+
+    @pytest.mark.asyncio
     async def test_update_without_session(self, service_with_review):
         """update() must work without passing session= (it manages its own)."""
         mock_session = AsyncMock()

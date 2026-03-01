@@ -41,8 +41,10 @@ def create_reranker(
 
         cfg = reranker_config.ollama_llm
         # Fall back to global LLM config if not specified
-        model = cfg.model or (llm_config.model if llm_config else "gpt-oss:20b-cloud")
-        base_url = cfg.base_url or (llm_config.base_url if llm_config else "http://localhost:11434")
+        model = cfg.model or (llm_config.model if llm_config else "gpt-oss:120b-cloud")
+        base_url = cfg.base_url or (
+            llm_config.base_url if llm_config else "http://localhost:11434"
+        )
 
         logger.info(
             "Reranker: ollama_llm (model=%s, base_url=%s, top_k=%d)",

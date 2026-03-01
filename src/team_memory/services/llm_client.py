@@ -32,7 +32,7 @@ class LLMClient:
     @classmethod
     def from_config(cls, llm_config: LLMConfig | None) -> LLMClient:
         base_url = "http://localhost:11434"
-        model = "gpt-oss:20b-cloud"
+        model = "gpt-oss:120b-cloud"
         if llm_config:
             base_url = llm_config.base_url
             model = llm_config.model
@@ -89,9 +89,7 @@ class LLMClient:
         timeout: float = 120.0,
     ) -> dict:
         """``chat()`` followed by JSON extraction."""
-        text = await self.chat(
-            system, user, temperature=temperature, timeout=timeout
-        )
+        text = await self.chat(system, user, temperature=temperature, timeout=timeout)
         return extract_json(text)
 
 

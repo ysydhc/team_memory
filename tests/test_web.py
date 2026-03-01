@@ -21,7 +21,12 @@ from team_memory.web.app import app
 
 @pytest.fixture(autouse=True)
 def setup_app():
-    """Set up app globals with mock service and real auth for each test."""
+    """Set up app globals with mock service and real auth for each test.
+
+    Patches bootstrap/start_background_tasks/stop_background_tasks so that
+    when TestClient runs the app lifespan, routes get registered without
+    requiring a real DB or embedding service.
+    """
     auth = ApiKeyAuth()
     auth.register_key("test-key-123", "test_admin", "admin")
     auth.register_key("member-key", "test_member", "member")
@@ -79,6 +84,11 @@ def setup_app():
         target_prompts_dir=".cursor/prompts",
         request_timeout_seconds=8,
     )
+    web_module._settings.extraction = MagicMock(
+        quality_gate=2,
+        max_retries=1,
+        few_shot_examples=None,
+    )
 
     mock_service = MagicMock()
     mock_service.search = AsyncMock(return_value=[])
@@ -117,7 +127,18 @@ def setup_app():
     })
     web_module._service = mock_service
 
-    yield mock_service
+    # Patch bootstrap so lifespan can complete without real DB/embedding;
+    # routes are registered inside lifespan, so tests would get 404 without this.
+    mock_ctx = MagicMock()
+    mock_ctx.settings = web_module._settings
+    mock_ctx.service = mock_service
+    mock_ctx.auth = web_module._auth
+    with patch("team_memory.web.app.bootstrap", return_value=mock_ctx), patch(
+        "team_memory.web.app.start_background_tasks", new_callable=AsyncMock
+    ), patch(
+        "team_memory.web.app.stop_background_tasks", new_callable=AsyncMock
+    ):
+        yield mock_service
 
     # Clean up
     web_module._auth = None
@@ -126,8 +147,10 @@ def setup_app():
 
 
 @pytest.fixture
-def client():
-    return TestClient(app, raise_server_exceptions=False)
+def client(setup_app):
+    """Use TestClient as context manager so lifespan runs and /api/v1 routes are registered."""
+    with TestClient(app, raise_server_exceptions=False) as c:
+        yield c
 
 
 @pytest.fixture
@@ -899,5 +922,5 @@ class TestSPA:
     def test_index_html_served(self, client):
         resp = client.get("/")
         assert resp.status_code == 200
-        assert "team_memory" in resp.text
+        assert "TeamMemory" in resp.text
         assert "<!DOCTYPE html>" in resp.text
