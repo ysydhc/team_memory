@@ -19,6 +19,7 @@ from team_memory.web.app import (
     get_current_user,
     get_optional_user,
 )
+from team_memory.workflow_oracle import parse_workflow_steps_from_messages
 
 router = APIRouter(tags=["tasks"])
 
@@ -278,26 +279,31 @@ async def list_task_groups(
 
     async with get_session(db_url) as session:
         repo = TaskRepository(session)
+        exp_repo = ExperienceRepository(session)
         groups = await repo.list_groups(
             project=resolved_project,
             user_id=filter_user_id,
             include_archived=include_archived,
         )
+        out = []
+        for g in groups:
+            d = g.to_dict(include_tasks=True)
+            tasks_list = getattr(g, "tasks", None) or []
+            d["group_completed"] = (
+                all(
+                    t.status in ("completed", "cancelled")
+                    for t in tasks_list
+                )
+                if tasks_list
+                else False
+            )
+            existing = await exp_repo.get_root_by_source_context(
+                resolved_project, f"task_group:{g.id}"
+            )
+            d["has_sediment"] = existing is not None
+            out.append(d)
         await session.commit()
 
-    out = []
-    for g in groups:
-        d = g.to_dict(include_tasks=True)
-        tasks_list = getattr(g, "tasks", None) or []
-        d["group_completed"] = (
-            all(
-                t.status in ("completed", "cancelled")
-                for t in tasks_list
-            )
-            if tasks_list
-            else False
-        )
-        out.append(d)
     return {"groups": out}
 
 
@@ -365,25 +371,76 @@ async def get_task_group(
 ):
     """Get a task group with its tasks."""
     db_url = _get_db_url()
+    resolved_project = _resolve_project(None)
 
+    async with get_session(db_url) as session:
+        repo = TaskRepository(session)
+        exp_repo = ExperienceRepository(session)
+        group = await repo.get_group(uuid.UUID(group_id))
+        if not group:
+            raise HTTPException(status_code=404, detail="Task group not found")
+
+        d = group.to_dict(include_tasks=True)
+        tasks_list = getattr(group, "tasks", None) or []
+        d["group_completed"] = (
+            all(
+                t.status in ("completed", "cancelled")
+                for t in tasks_list
+            )
+            if tasks_list
+            else False
+        )
+        existing = await exp_repo.get_root_by_source_context(
+            resolved_project, f"task_group:{group_id}"
+        )
+        d["has_sediment"] = existing is not None
+        await session.commit()
+
+    return d
+
+
+@router.get("/task-groups/{group_id}/workflow-progress")
+async def get_task_group_workflow_progress(
+    group_id: str,
+    workflow_id: str = "task-execution-workflow",
+    user: User | None = Depends(get_optional_user),
+):
+    """Get workflow progress for all tasks in a group (current_step_id per task, x/y completed)."""
+    db_url = _get_db_url()
     async with get_session(db_url) as session:
         repo = TaskRepository(session)
         group = await repo.get_group(uuid.UUID(group_id))
         if not group:
             raise HTTPException(status_code=404, detail="Task group not found")
+        tasks_list = getattr(group, "tasks", None) or []
+
+        task_rows = []
+        for t in tasks_list:
+            msgs = await repo.list_messages(t.id)
+            if len(msgs) > WORKFLOW_STEPS_MESSAGE_LIMIT:
+                msgs = msgs[-WORKFLOW_STEPS_MESSAGE_LIMIT:]
+            msg_list = [{"content": m.content, "created_at": m.created_at} for m in msgs]
+            steps = parse_workflow_steps_from_messages(msg_list, workflow_id)
+            current_step_id = steps[-1]["step_id"] if steps else None
+            last_step_at = steps[-1].get("last_at") if steps else None
+            task_rows.append({
+                "task_id": str(t.id),
+                "title": t.title,
+                "status": t.status,
+                "current_step_id": current_step_id,
+                "last_step_at": last_step_at,
+            })
+
+        completed = sum(1 for t in tasks_list if t.status in ("completed", "cancelled"))
+        total = len(tasks_list)
         await session.commit()
 
-    d = group.to_dict(include_tasks=True)
-    tasks_list = getattr(group, "tasks", None) or []
-    d["group_completed"] = (
-        all(
-            t.status in ("completed", "cancelled")
-            for t in tasks_list
-        )
-        if tasks_list
-        else False
-    )
-    return d
+    return {
+        "workflow_id": workflow_id,
+        "tasks": task_rows,
+        "completed": completed,
+        "total": total,
+    }
 
 
 @router.post("/task-groups/{group_id}/sediment")
@@ -627,6 +684,35 @@ async def list_messages(
         msgs = await repo.list_messages(uuid.UUID(task_id))
         await session.commit()
     return {"messages": [m.to_dict() for m in msgs]}
+
+
+# Max messages to scan for workflow steps (avoid heavy parsing)
+WORKFLOW_STEPS_MESSAGE_LIMIT = 300
+
+
+@router.get("/tasks/{task_id}/workflow-steps")
+async def get_task_workflow_steps(
+    task_id: str,
+    workflow_id: str = "task-execution-workflow",
+    user: User | None = Depends(get_optional_user),
+):
+    """Get workflow steps parsed from task messages (aggregated by step)."""
+    db_url = _get_db_url()
+    async with get_session(db_url) as session:
+        repo = TaskRepository(session)
+        task = await repo.get_task(uuid.UUID(task_id))
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        msgs = await repo.list_messages(uuid.UUID(task_id))
+        await session.commit()
+
+    # Use last K messages (most recent at end)
+    if len(msgs) > WORKFLOW_STEPS_MESSAGE_LIMIT:
+        msgs = msgs[-WORKFLOW_STEPS_MESSAGE_LIMIT:]
+    # Convert to dict-like for parser (content, created_at)
+    msg_list = [{"content": m.content, "created_at": m.created_at} for m in msgs]
+    steps = parse_workflow_steps_from_messages(msg_list, workflow_id)
+    return {"workflow_id": workflow_id, "steps": steps}
 
 
 @router.post("/tasks/{task_id}/messages")

@@ -1876,6 +1876,16 @@ export async function loadTasks() {
         const tasks = taskData.tasks || [];
         const groups = (groupData.groups || []).filter(g => !g.archived);
 
+        // Fetch workflow progress per group (4.2 group progress)
+        await Promise.all(groups.map(async (g) => {
+            try {
+                const d = await api('GET', `/api/v1/task-groups/${g.id}/workflow-progress`);
+                g.workflowProgress = d;
+            } catch {
+                g.workflowProgress = null;
+            }
+        }));
+
         // Initialize visible groups on first load only (never auto-fill if user hid all)
         if (!_kanbanInitialized && _kanbanVisibleGroups.size === 0 && groups.length > 0) {
             groups.forEach(g => _kanbanVisibleGroups.add(g.id));
@@ -1923,12 +1933,15 @@ export async function loadTasks() {
         const TASK_GROUP_VISIBLE = 3;
         if (groups.length > 0 && !groupFilter) {
             const cardsHtml = groups.map((g) => {
-                const prog = g.progress || { total: 0, completed: 0 };
+                const wp = g.workflowProgress;
+                const prog = wp ? { total: wp.total, completed: wp.completed } : (g.progress || { total: (g.tasks || []).length, completed: (g.tasks || []).filter(t => t.status === 'completed' || t.status === 'cancelled').length });
                 const pct = prog.total
                     ? Math.round(prog.completed / prog.total * 100) : 0;
                 const groupCompleted = g.group_completed === true;
+                const hasSediment = g.has_sediment === true;
+                const needsRetro = groupCompleted && !hasSediment;
                 const sedimentBtn = groupCompleted
-                    ? `<button class="sediment-btn" title="保存为组经验" onclick="event.stopPropagation();sedimentTaskGroup('${g.id}')">沉淀</button>`
+                    ? `<button class="sediment-btn" title="保存为组经验" onclick="event.stopPropagation();sedimentTaskGroup('${g.id}')">${needsRetro ? '组复盘' : '沉淀'}</button>`
                     : '';
                 const archiveBtn = pct === 100
                     ? `<button class="archive-btn" onclick="event.stopPropagation();archiveGroup('${g.id}')">📦</button>`
@@ -1939,12 +1952,33 @@ export async function loadTasks() {
                 const isVisible = _kanbanVisibleGroups.has(g.id);
                 const eyeIcon = isVisible ? '👁' : '👁‍🗨';
                 const eyeCls = isVisible ? 'active' : '';
+                const stepSummary = (() => {
+                    if (!wp || !wp.tasks || wp.tasks.length === 0) return '';
+                    const byStep = {};
+                    wp.tasks.filter(t => t.status !== 'completed' && t.status !== 'cancelled').forEach(t => {
+                        const sid = t.current_step_id || 'unknown';
+                        byStep[sid] = (byStep[sid] || 0) + 1;
+                    });
+                    const parts = Object.entries(byStep).map(([sid, n]) => `${WORKFLOW_STEP_LABELS[sid] || sid} ${n}`).filter(Boolean);
+                    return parts.length > 0 ? `<div class="group-step-summary">${parts.join('，')}</div>` : '';
+                })();
+                const taskStepMap = wp && wp.tasks ? Object.fromEntries(wp.tasks.map(t => [t.task_id, t.current_step_id])) : {};
                 const subtasks = (g.tasks || []).slice(0, 5);
                 const moreCount = (g.tasks || []).length - 5;
                 const subtaskHtml = subtasks.length > 0
-                    ? `<div class="group-subtask-list">${subtasks.map(t =>
-                        `<div class="group-subtask-item"><span class="status-dot ${t.status || 'wait'}"></span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.title)}</span></div>`
-                      ).join('')}${moreCount > 0 ? `<div style="font-size:11px;color:var(--text-muted)">+${moreCount} more</div>` : ''}</div>`
+                    ? `<div class="group-subtask-list">${subtasks.map(t => {
+                        const stepLabel = taskStepMap[t.id] ? (WORKFLOW_STEP_LABELS[taskStepMap[t.id]] || taskStepMap[t.id]) : '';
+                        return `<div class="group-subtask-item"><span class="status-dot ${t.status || 'wait'}"></span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.title)}</span>${stepLabel ? `<span class="group-subtask-step">${esc(stepLabel)}</span>` : ''}</div>`;
+                      }).join('')}${moreCount > 0 ? `<div style="font-size:11px;color:var(--text-muted)">+${moreCount} more</div>` : ''}</div>`
+                    : '';
+                const retroBadge = needsRetro
+                    ? `<span class="group-retro-badge" title="本组全部完成，待执行组复盘">待复盘</span>`
+                    : '';
+                const retroBlock = needsRetro
+                    ? `<div class="group-retro-prompt" onclick="event.stopPropagation()">
+                        <div class="group-retro-prompt-text">待执行组复盘：本组任务已全部完成，请执行 tm_save_group 完成组级经验沉淀（总-分或总-分-分），再选活下一任务。</div>
+                        <button class="btn btn-primary btn-sm group-retro-btn" onclick="event.stopPropagation();sedimentTaskGroup('${g.id}')">组复盘 / 保存为组经验</button>
+                       </div>`
                     : '';
                 return `<div class="task-group-card task-group-collapsible" style="min-width:320px;max-width:360px;flex-shrink:0;scroll-snap-align:start"
                   onclick="document.getElementById('tasks-group-filter').value='${g.id}';loadTasks()">
@@ -1956,8 +1990,12 @@ export async function loadTasks() {
                         <text x="18" y="21" class="pct-text">${pct}%</text>
                       </svg>
                       <div style="flex:1;min-width:0">
-                        <div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.title)}</div>
+                        <div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:6px">
+                          ${esc(g.title)}
+                          ${retroBadge}
+                        </div>
                         <div style="font-size:11px;color:var(--text-muted)">${prog.completed}/${prog.total} 任务完成</div>
+                        ${stepSummary}
                       </div>
                     </div>
                     <div style="display:flex;align-items:center;gap:6px">
@@ -1967,6 +2005,7 @@ export async function loadTasks() {
                       ${archiveBtn}
                     </div>
                   </div>
+                  ${retroBlock}
                   ${subtaskHtml}
                 </div>`;
             }).join('');
@@ -1981,6 +2020,31 @@ export async function loadTasks() {
     } catch (e) {
         board.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><h3>加载任务失败</h3><p>${esc(e.message)}</p></div>`;
     }
+}
+
+// Step id -> display label for task-execution-workflow (UX: 中文映射)
+const WORKFLOW_STEP_LABELS = {
+    'step-coldstart': '冷启动',
+    'step-claim': '认领',
+    'step-execute': '执行',
+    'step-complete': '完成并沉淀',
+    'step-verify': '验收',
+    'step-retro': '组级复盘',
+};
+
+function renderWorkflowSteps(steps) {
+    return steps.map(s => {
+        const label = WORKFLOW_STEP_LABELS[s.step_id] || s.step_id;
+        const isCurrent = s.status === 'current';
+        const statusIcon = isCurrent ? '<span class="workflow-step-current">进行中</span>' : '<span class="workflow-step-done">✓</span>';
+        const summary = (s.last_summary || '').trim();
+        const timeStr = s.last_at ? timeAgo(s.last_at) : '';
+        return `<div class="workflow-step-item ${isCurrent ? 'current' : ''}">
+          <div class="workflow-step-head">${statusIcon} <span class="workflow-step-label">${esc(label)}</span></div>
+          ${summary ? `<div class="workflow-step-summary">${esc(summary)}</div>` : ''}
+          ${timeStr ? `<div class="workflow-step-time">${esc(timeStr)}</div>` : ''}
+        </div>`;
+    }).join('');
 }
 
 export function showTaskDetail(taskId) {
@@ -2062,6 +2126,10 @@ export function showTaskDetail(taskId) {
           <div style="flex:1"></div>
           <button class="btn btn-sm" onclick="closeTaskSlideout()">关闭</button>
         </div>
+        <div class="field-group workflow-progress-block" id="sl-workflow-progress-block">
+          <div class="field-label">工作流进度</div>
+          <div id="sl-workflow-steps"><div class="workflow-steps-loading">加载中...</div></div>
+        </div>
         <div class="msg-list" id="sl-messages">
           <div class="field-label">消息</div>
           <div id="sl-msg-list"><div style="color:var(--text-muted);font-size:12px">加载中...</div></div>
@@ -2083,6 +2151,23 @@ export function showTaskDetail(taskId) {
                 list.innerHTML = msgs.map(m => `<div class="msg-item"><div>${esc(m.content)}</div><div class="msg-meta">${esc(m.author || m.sender)} · ${_fmtDate(m.created_at)}</div></div>`).join('');
             }
         }).catch(() => {});
+
+        // Load workflow steps (task-execution-workflow)
+        const workflowStepsEl = document.getElementById('sl-workflow-steps');
+        if (workflowStepsEl) {
+            api('GET', `/api/v1/tasks/${taskId}/workflow-steps?workflow_id=task-execution-workflow`)
+                .then(data => {
+                    const steps = data.steps || [];
+                    if (steps.length === 0) {
+                        workflowStepsEl.innerHTML = '<div class="workflow-steps-empty">暂无工作流进度</div><div class="workflow-steps-empty-hint">按任务工作流执行后将在此展示</div>';
+                    } else {
+                        workflowStepsEl.innerHTML = renderWorkflowSteps(steps);
+                    }
+                })
+                .catch(() => {
+                    workflowStepsEl.innerHTML = '<div class="workflow-steps-empty">加载失败</div>';
+                });
+        }
     }).catch(e => {
         content.innerHTML = `<div class="empty-state"><h3>加载失败</h3><p>${esc(e.message)}</p></div>`;
     });

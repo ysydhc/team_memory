@@ -1623,6 +1623,57 @@
       border-radius: 2px;
     }
 
+    .group-retro-badge {
+      flex-shrink: 0;
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--orange, #f59e0b);
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid var(--orange, #f59e0b);
+      border-radius: 4px;
+      padding: 2px 6px;
+      white-space: nowrap;
+    }
+
+    .group-retro-prompt {
+      margin-top: 12px;
+      padding: 12px;
+      background: rgba(245, 158, 11, 0.08);
+      border: 1px solid var(--orange, #f59e0b);
+      border-radius: 6px;
+      font-size: 12px;
+      color: var(--text-primary);
+    }
+    .group-retro-prompt-text {
+      margin-bottom: 10px;
+      line-height: 1.45;
+    }
+    .group-retro-prompt .group-retro-btn {
+      width: 100%;
+      justify-content: center;
+    }
+
+    .group-step-summary {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    @media (max-width: 480px) {
+      .group-step-summary {
+        white-space: normal;
+        word-break: break-all;
+      }
+    }
+    .group-subtask-step {
+      font-size: 10px;
+      color: var(--accent);
+      flex-shrink: 0;
+      margin-left: 4px;
+    }
+
     .toggle-groups-btn {
       background: none;
       border: 1px solid var(--border);
@@ -1758,6 +1809,60 @@
       gap: 8px;
       margin-top: 16px;
       flex-wrap: wrap;
+    }
+
+    .workflow-progress-block {
+      margin-top: 16px;
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+    }
+    .workflow-steps-loading,
+    .workflow-steps-empty {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .workflow-steps-empty-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    .workflow-step-item {
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .workflow-step-item.current {
+      border-left: 3px solid var(--accent);
+      padding-left: 8px;
+      margin-left: -8px;
+    }
+    .workflow-step-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .workflow-step-done {
+      color: var(--green, #22c55e);
+      font-weight: 600;
+    }
+    .workflow-step-current {
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .workflow-step-label {
+      font-weight: 500;
+    }
+    .workflow-step-summary {
+      margin-top: 4px;
+      color: var(--text-secondary);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .workflow-step-time {
+      margin-top: 2px;
+      font-size: 11px;
+      color: var(--text-muted);
     }
 
     .task-slideout .msg-list {
