@@ -2455,6 +2455,73 @@ async def tm_message(
 
 
 @mcp.tool(
+    name="tm_workflow_next_step",
+    description=(
+        "Step oracle: given a workflow id (e.g. task-execution-workflow) and optional "
+        "task_id, returns the next step (id, name, action, acceptance_criteria). "
+        "If task_id is provided, infers current step from the task's tm_message history. "
+        "Use group_completed=true when step-complete just returned group_completed. ~300 tokens."
+    ),
+)
+async def tm_workflow_next_step(
+    workflow_id: str,
+    task_id: str | None = None,
+    group_completed: bool = False,
+) -> str:
+    """Return the next workflow step for execution.
+
+    Args:
+        workflow_id: Workflow id (e.g. task-execution-workflow, workflow-optimization-workflow).
+        task_id: Optional. If set, last step is inferred from task messages matching
+            [workflow] <workflow_id> step-<id> (e.g. step-coldstart, step-claim).
+        group_completed: When true, steps with when(group_completed) use the group_completed branch.
+    """
+    import uuid as _uuid
+    from pathlib import Path
+
+    from team_memory.workflow_oracle import get_next_step, get_next_step_for_task
+
+    workspace_root = Path.cwd()
+    try:
+        if task_id:
+            db_url = _get_db_url()
+            from team_memory.storage.repository import TaskRepository
+
+            async with get_session(db_url) as session:
+                repo = TaskRepository(session)
+                task = await repo.get_task(_uuid.UUID(task_id))
+                if not task:
+                    return json.dumps({
+                        "error": True,
+                        "message": "Task not found",
+                    })
+                messages = await repo.list_messages(_uuid.UUID(task_id))
+            msg_list = [
+                {"content": getattr(m, "content", "")}
+                for m in messages
+            ]
+            result = get_next_step_for_task(
+                workflow_id=workflow_id,
+                task_id=task_id,
+                messages=msg_list,
+                workspace_root=workspace_root,
+                group_completed=group_completed,
+            )
+        else:
+            result = get_next_step(
+                workflow_id=workflow_id,
+                workspace_root=workspace_root,
+                current_step_id=None,
+                group_completed=group_completed,
+            )
+        return json.dumps(result, ensure_ascii=False)
+    except FileNotFoundError as e:
+        return json.dumps({"error": True, "message": str(e)})
+    except ValueError as e:
+        return json.dumps({"error": True, "message": str(e)})
+
+
+@mcp.tool(
     name="tm_dependency",
     description=(
         "Manage task dependencies — add or remove blocking/related relationships. "
