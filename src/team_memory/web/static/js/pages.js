@@ -138,6 +138,20 @@ function getCopyDropdownHtml(copyAttrs) {
     </div>`;
 }
 
+/** Copy dropdown HTML for detail page (uses state.currentDetail, no data-exp-*). */
+function getCopyDropdownDetailHtml() {
+    const svg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    return `<div class="exp-copy-dropdown exp-copy-dropdown-detail">
+      <button type="button" class="exp-copy-btn" title="复制" aria-haspopup="true" aria-expanded="false"><span class="exp-copy-icon" aria-hidden="true">${svg}</span></button>
+      <div class="exp-copy-dropdown-menu" role="menu">
+        <button type="button" role="menuitem" data-copy-option="id">复制经验ID</button>
+        <button type="button" role="menuitem" data-copy-option="title">复制经验名称</button>
+        <button type="button" role="menuitem" data-copy-option="basic">复制基础信息</button>
+        <button type="button" role="menuitem" data-copy-option="full">复制全部信息</button>
+      </div>
+    </div>`;
+}
+
 /** Handle copy option from dropdown (card: dropdown has data-exp-*; detail: use state.currentDetail). */
 async function copyExpOption(option, dropdownEl) {
     const isDetail = dropdownEl.classList.contains('exp-copy-dropdown-detail');
@@ -413,6 +427,7 @@ export async function showDetail(id) {
 
     try {
         const exp = await api('GET', `/api/v1/experiences/${id}`);
+        state.currentDetail = exp;
         const typeIcon = typeIcons[exp.experience_type] || defaultTypeIcons[exp.experience_type] || '📝';
         const dTier = exp.quality_tier || 'bronze';
         const dScore = exp.quality_score ?? 100;
@@ -500,6 +515,7 @@ export async function showDetail(id) {
             ${exp.avg_rating > 0 ? `<span>★ ${exp.avg_rating.toFixed(1)} 评分</span>` : ''}
             ${exp.programming_language ? `<span>🔧 ${esc(exp.programming_language)}</span>` : ''}
             ${exp.framework ? `<span>📦 ${esc(exp.framework)}</span>` : ''}
+            ${getCopyDropdownDetailHtml()}
           </div>
           <div style="margin-top:12px">${(exp.tags || []).map((t) => `<span class="tag" onclick="filterByTag('${esc(t)}')">${esc(t)}</span>`).join('')}</div>
         </div>
@@ -603,6 +619,7 @@ export async function showDetail(id) {
         </div>
       </div>
     `;
+        bindCopyDropdowns(page);
     } catch (e) {
         page.innerHTML = `<div class="empty-state"><h3>加载失败</h3><p>${e.message}</p></div>`;
     }
