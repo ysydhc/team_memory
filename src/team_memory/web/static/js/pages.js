@@ -283,7 +283,7 @@ export function renderExpList(containerId, experiences) {
   `;
         })
         .join('');
-    bindCopyButtons(container);
+    bindCopyDropdowns(container);
 }
 
 // ===== Dashboard (merged into list page) =====
@@ -643,7 +643,7 @@ export async function loadDrafts() {
                 }
             )
             .join('');
-        bindCopyButtons(container);
+        bindCopyDropdowns(container);
     } catch (e) {
         container.innerHTML = `<div class="empty-state"><h3>加载草稿失败</h3><p>${esc(e.message)}</p></div>`;
     }
@@ -689,7 +689,7 @@ export async function loadReviews() {
       <div class="exp-card" onclick="viewDetail('${exp.id}')" style="cursor:pointer">
         <div class="exp-card-header">
           <div class="exp-card-title">${esc(exp.title)} <span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--yellow-bg);color:var(--yellow)">待审核</span></div>
-          <div class="exp-card-meta"><span>来源: ${exp.source || 'unknown'}</span><span>${timeAgo(exp.created_at)}</span><button type="button" class="exp-copy-btn" title="复制经验信息" ${copyAttrs}><span class="exp-copy-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span></button></div>
+          <div class="exp-card-meta"><span>来源: ${exp.source || 'unknown'}</span><span>${timeAgo(exp.created_at)}</span>${getCopyDropdownHtml(copyAttrs)}</div>
         </div>
         <div class="exp-card-desc">${esc((exp.description || '').substring(0, 200))}</div>
         <div style="display:flex;gap:8px;margin-top:8px" onclick="event.stopPropagation()">
@@ -707,7 +707,7 @@ export async function loadReviews() {
                 }
             )
             .join('');
-        bindCopyButtons(container);
+        bindCopyDropdowns(container);
     } catch (e) {
         container.innerHTML = `<div class="empty-state"><h3>加载审核队列失败</h3><p>${esc(e.message)}</p></div>`;
     }
