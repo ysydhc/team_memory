@@ -32,6 +32,191 @@ const typeIcons = {
     incident: '🔥', best_practice: '✨', learning: '📚',
 };
 
+/** Copy text to clipboard; works in non-secure context (no HTTPS) via execCommand fallback. */
+function copyTextToClipboard(text) {
+    if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        return navigator.clipboard.writeText(text).then(() => true).catch(() => false);
+    }
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try {
+        ok = document.execCommand('copy');
+    } finally {
+        document.body.removeChild(ta);
+    }
+    return Promise.resolve(ok);
+}
+
+/** Build basic info text from data attributes (ID, title, tags, type, project, createdBy, created). */
+function getExpBasicText(attrs) {
+    const id = attrs.expId ?? '';
+    const title = attrs.expTitle ?? '';
+    const tags = attrs.expTags ?? '';
+    const created = attrs.expCreated ?? '';
+    const createdBy = attrs.expCreatedBy ?? '';
+    const type = attrs.expType ?? '';
+    const project = attrs.expProject ?? '';
+    const lines = [
+        `ID: ${id}`,
+        `标题: ${title}`,
+        ...(tags ? [`标签: ${tags}`] : []),
+        ...(type ? [`类型: ${type}`] : []),
+        ...(project ? [`项目: ${project}`] : []),
+        ...(createdBy ? [`创建者: ${createdBy}`] : []),
+        ...(created ? [`创建时间: ${created}`] : []),
+    ];
+    return lines.filter(Boolean).join('\n');
+}
+
+/** Build full experience text (problem, solution, code, etc.) from API experience object. */
+function formatExpFullText(exp) {
+    const parts = [];
+    parts.push(`# ${exp.title || ''}`);
+    parts.push(`ID: ${exp.id}`);
+    if (exp.tags && exp.tags.length) parts.push(`标签: ${exp.tags.join(', ')}`);
+    if (exp.experience_type) parts.push(`类型: ${exp.experience_type}`);
+    if (exp.project) parts.push(`项目: ${exp.project}`);
+    if (exp.created_by) parts.push(`创建者: ${exp.created_by}`);
+    if (exp.created_at) parts.push(`创建时间: ${exp.created_at}`);
+    parts.push('');
+    parts.push('## 问题描述');
+    parts.push(exp.description || '');
+    if (exp.solution) {
+        parts.push('');
+        parts.push('## 解决方案');
+        parts.push(exp.solution);
+    }
+    if (exp.summary) {
+        parts.push('');
+        parts.push('## 摘要');
+        parts.push(exp.summary);
+    }
+    if (exp.code_snippets) {
+        parts.push('');
+        parts.push('## 代码示例');
+        parts.push(exp.code_snippets);
+    }
+    const sd = exp.structured_data || {};
+    const sdKeys = Object.keys(sd).filter((k) => sd[k] !== null && sd[k] !== undefined && sd[k] !== '');
+    if (sdKeys.length) {
+        parts.push('');
+        parts.push('## 结构化数据');
+        sdKeys.forEach((k) => {
+            const v = sd[k];
+            parts.push(`${k}: ${Array.isArray(v) ? v.join(', ') : String(v)}`);
+        });
+    }
+    if (exp.children && exp.children.length) {
+        parts.push('');
+        parts.push('## 子经验');
+        exp.children.forEach((child, i) => {
+            parts.push(`### ${i + 1}. ${child.title || ''}`);
+            if (child.description) parts.push(child.description);
+            if (child.solution) parts.push(child.solution);
+        });
+    }
+    return parts.join('\n');
+}
+
+/** Copy dropdown HTML (for list/draft/review cards). Pass copyAttrs string to put on the wrapper div. */
+function getCopyDropdownHtml(copyAttrs) {
+    const svg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    return `<div class="exp-copy-dropdown" ${copyAttrs}>
+      <button type="button" class="exp-copy-btn" title="复制" aria-haspopup="true" aria-expanded="false"><span class="exp-copy-icon" aria-hidden="true">${svg}</span></button>
+      <div class="exp-copy-dropdown-menu" role="menu">
+        <button type="button" role="menuitem" data-copy-option="id">复制经验ID</button>
+        <button type="button" role="menuitem" data-copy-option="title">复制经验名称</button>
+        <button type="button" role="menuitem" data-copy-option="basic">复制基础信息</button>
+        <button type="button" role="menuitem" data-copy-option="full">复制全部信息</button>
+      </div>
+    </div>`;
+}
+
+/** Handle copy option from dropdown (card: dropdown has data-exp-*; detail: use state.currentDetail). */
+async function copyExpOption(option, dropdownEl) {
+    const isDetail = dropdownEl.classList.contains('exp-copy-dropdown-detail');
+    let text = '';
+    if (option === 'id') {
+        text = isDetail ? String(state.currentDetail?.id ?? '') : (dropdownEl.dataset.expId ?? '');
+    } else if (option === 'title') {
+        text = isDetail ? (state.currentDetail?.title ?? '') : (dropdownEl.dataset.expTitle ?? '');
+    } else if (option === 'basic') {
+        const attrs = isDetail
+            ? {
+                expId: state.currentDetail?.id,
+                expTitle: state.currentDetail?.title,
+                expTags: (state.currentDetail?.tags || []).join(', '),
+                expType: state.currentDetail?.experience_type,
+                expProject: state.currentDetail?.project,
+                expCreatedBy: state.currentDetail?.created_by,
+                expCreated: state.currentDetail?.created_at,
+            }
+            : dropdownEl.dataset;
+        text = getExpBasicText(attrs);
+    } else if (option === 'full') {
+        if (isDetail && state.currentDetail) {
+            text = formatExpFullText(state.currentDetail);
+        } else {
+            const id = dropdownEl.dataset.expId;
+            if (!id) {
+                toast('无法获取经验ID', 'error');
+                return;
+            }
+            try {
+                const exp = await api('GET', `/api/v1/experiences/${id}`);
+                text = formatExpFullText(exp);
+            } catch (e) {
+                toast('获取经验失败: ' + e.message, 'error');
+                return;
+            }
+        }
+    }
+    const ok = await copyTextToClipboard(text);
+    if (ok) toast('已复制', 'success');
+    else toast('复制失败', 'error');
+}
+
+/** Close all copy dropdowns. */
+function closeAllCopyDropdowns() {
+    document.querySelectorAll('.exp-copy-dropdown.open').forEach((el) => el.classList.remove('open'));
+}
+
+/** Bind copy dropdown: toggle on trigger, option click copies and closes, click outside closes. */
+function bindCopyDropdowns(container) {
+    if (!container) return;
+    container.querySelectorAll('.exp-copy-dropdown').forEach((dropdown) => {
+        const trigger = dropdown.querySelector('.exp-copy-btn');
+        const menu = dropdown.querySelector('.exp-copy-dropdown-menu');
+        if (!trigger || !menu) return;
+        trigger.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const isOpen = dropdown.classList.toggle('open');
+            trigger.setAttribute('aria-expanded', isOpen);
+        });
+        menu.querySelectorAll('[data-copy-option]').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const option = btn.dataset.copyOption;
+                copyExpOption(option, dropdown);
+                dropdown.classList.remove('open');
+                trigger.setAttribute('aria-expanded', 'false');
+            });
+        });
+    });
+    if (!container._copyDropdownOutside) {
+        container._copyDropdownOutside = true;
+        document.addEventListener('click', () => closeAllCopyDropdowns());
+    }
+}
+
 // ===== Render Experience Cards =====
 export function renderExpList(containerId, experiences) {
     const container = document.getElementById(containerId);
@@ -50,7 +235,7 @@ export function renderExpList(containerId, experiences) {
     container.innerHTML = experiences
         .map((exp) => {
             const view = exp.parent || exp;
-            const cardId = exp.group_id || view.id;
+            const cardId = exp.group_id || view.id || exp.id || '';
             const isStale = view.last_used_at && isStaleDate(view.last_used_at);
             const typeIcon = typeIcons[view.experience_type] || defaultTypeIcons[view.experience_type] || '📝';
             const matchedNodes = (exp.matched_nodes || [])
@@ -69,6 +254,9 @@ export function renderExpList(containerId, experiences) {
             const avgRating = view.avg_rating || 0;
             const ratingDisplay = avgRating > 0 ? `★ ${avgRating.toFixed(1)}` : '★ -';
             const metricsHtml = `<div class="card-metrics"><span>${ratingDisplay}</span><span>👁 ${viewCount}</span><span>📊 ${useCount}</span></div>`;
+            const tagsStr = (view.tags || []).join(', ');
+            const copyId = String(cardId ?? '');
+            const copyAttrs = `data-exp-id="${esc(copyId)}" data-exp-title="${esc(view.title || '')}" data-exp-tags="${esc(tagsStr)}" data-exp-created="${esc(view.created_at || '')}" data-exp-created-by="${esc(view.created_by || '')}" data-exp-type="${esc(view.experience_type || 'general')}" data-exp-project="${esc(view.project || '')}"`;
             return `
     <div class="exp-card" onclick="showDetail('${cardId}')">
       <div class="exp-card-header">
@@ -79,6 +267,7 @@ export function renderExpList(containerId, experiences) {
           ${projectTag}
           ${exp.similarity !== undefined ? `<span class="similarity-badge">${(exp.similarity * 100).toFixed(0)}%</span>` : ''}
           <span>${timeAgo(view.created_at)}</span>
+          ${getCopyDropdownHtml(copyAttrs)}
         </div>
       </div>
       <div class="exp-card-desc">${esc(view.description || '')}</div>
@@ -94,6 +283,7 @@ export function renderExpList(containerId, experiences) {
   `;
         })
         .join('');
+    bindCopyButtons(container);
 }
 
 // ===== Dashboard (merged into list page) =====
@@ -431,11 +621,14 @@ export async function loadDrafts() {
         }
         container.innerHTML = data.experiences
             .map(
-                (exp) => `
+                (exp) => {
+                    const tagsStr = (exp.tags || []).join(', ');
+                    const copyAttrs = `data-exp-id="${esc(exp.id)}" data-exp-title="${esc(exp.title)}" data-exp-tags="${esc(tagsStr)}" data-exp-created="${esc(exp.created_at || '')}" data-exp-created-by="${esc(exp.created_by || '')}" data-exp-type="${esc(exp.experience_type || 'general')}" data-exp-project="${esc(exp.project || '')}"`;
+                    return `
       <div class="exp-card" onclick="viewDetail('${exp.id}')">
         <div class="exp-card-header">
           <div class="exp-card-title">${esc(exp.title)} <span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--accent-glow);color:var(--accent)">草稿</span></div>
-          <div class="exp-card-meta"><span>${timeAgo(exp.created_at)}</span></div>
+          <div class="exp-card-meta"><span>${timeAgo(exp.created_at)}</span>${getCopyDropdownHtml(copyAttrs)}</div>
         </div>
         <div class="exp-card-desc">${esc((exp.description || '').substring(0, 120))}${(exp.description || '').length > 120 ? '...' : ''}</div>
         <div class="exp-card-footer">
@@ -446,9 +639,11 @@ export async function loadDrafts() {
           </div>
         </div>
       </div>
-    `
+    `;
+                }
             )
             .join('');
+        bindCopyButtons(container);
     } catch (e) {
         container.innerHTML = `<div class="empty-state"><h3>加载草稿失败</h3><p>${esc(e.message)}</p></div>`;
     }
@@ -487,11 +682,14 @@ export async function loadReviews() {
         }
         container.innerHTML = data.experiences
             .map(
-                (exp) => `
+                (exp) => {
+                    const tagsStr = (exp.tags || []).join(', ');
+                    const copyAttrs = `data-exp-id="${esc(exp.id)}" data-exp-title="${esc(exp.title)}" data-exp-tags="${esc(tagsStr)}" data-exp-created="${esc(exp.created_at || '')}" data-exp-created-by="${esc(exp.created_by || '')}" data-exp-type="${esc(exp.experience_type || 'general')}" data-exp-project="${esc(exp.project || '')}"`;
+                    return `
       <div class="exp-card" onclick="viewDetail('${exp.id}')" style="cursor:pointer">
         <div class="exp-card-header">
           <div class="exp-card-title">${esc(exp.title)} <span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--yellow-bg);color:var(--yellow)">待审核</span></div>
-          <div class="exp-card-meta"><span>来源: ${exp.source || 'unknown'}</span><span>${timeAgo(exp.created_at)}</span></div>
+          <div class="exp-card-meta"><span>来源: ${exp.source || 'unknown'}</span><span>${timeAgo(exp.created_at)}</span><button type="button" class="exp-copy-btn" title="复制经验信息" ${copyAttrs}><span class="exp-copy-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span></button></div>
         </div>
         <div class="exp-card-desc">${esc((exp.description || '').substring(0, 200))}</div>
         <div style="display:flex;gap:8px;margin-top:8px" onclick="event.stopPropagation()">
@@ -505,9 +703,11 @@ export async function loadReviews() {
           <span style="font-size:12px;color:var(--text-muted)">${esc(exp.created_by || '')}</span>
         </div>
       </div>
-    `
+    `;
+                }
             )
             .join('');
+        bindCopyButtons(container);
     } catch (e) {
         container.innerHTML = `<div class="empty-state"><h3>加载审核队列失败</h3><p>${esc(e.message)}</p></div>`;
     }
@@ -797,10 +997,36 @@ window.previewSkillContent = async function(fullPath) {
 };
 
 window.copyToClipboard = function(text) {
-    navigator.clipboard.writeText(text).then(() => {
-        toast('路径已复制: ' + text, 'success');
-    }).catch(() => {
-        toast(text, 'info');
+    copyTextToClipboard(text).then((ok) => {
+        if (ok) toast('路径已复制: ' + text, 'success');
+        else toast(text, 'info');
+    });
+};
+
+/** Copy experience ID, title, tags, etc. from a list card (called by exp-copy-btn). */
+window.copyExpInfoFromCard = function(btn) {
+    const card = btn.closest('.exp-card');
+    if (!card) return;
+    const id = btn.dataset.expId || '';
+    const title = btn.dataset.expTitle || '';
+    const tags = btn.dataset.expTags || '';
+    const created = btn.dataset.expCreated || '';
+    const createdBy = btn.dataset.expCreatedBy || '';
+    const type = btn.dataset.expType || '';
+    const project = btn.dataset.expProject || '';
+    const lines = [
+        `ID: ${id}`,
+        `标题: ${title}`,
+        ...(tags ? [`标签: ${tags}`] : []),
+        ...(type ? [`类型: ${type}`] : []),
+        ...(project ? [`项目: ${project}`] : []),
+        ...(createdBy ? [`创建者: ${createdBy}`] : []),
+        ...(created ? [`创建时间: ${created}`] : []),
+    ];
+    const text = lines.filter(Boolean).join('\n');
+    copyTextToClipboard(text).then((ok) => {
+        if (ok) toast('已复制经验信息', 'success');
+        else toast('复制失败', 'error');
     });
 };
 
@@ -1974,8 +2200,9 @@ async function generateTaskPrompt(taskId) {
         }
         lines.push(`\n### 执行后请调用\ntm_task action=update task_id=${taskId} status=completed summary="<执行摘要>"`);
         const prompt = lines.filter(Boolean).join('\n');
-        await navigator.clipboard.writeText(prompt);
-        toast('已复制到剪贴板，请在 Cursor 中粘贴执行', 'success');
+        const ok = await copyTextToClipboard(prompt);
+        if (ok) toast('已复制到剪贴板，请在 Cursor 中粘贴执行', 'success');
+        else toast('复制失败', 'error');
     } catch (e) {
         toast('生成 prompt 失败: ' + e.message, 'error');
     }
