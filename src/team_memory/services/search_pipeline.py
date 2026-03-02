@@ -225,6 +225,11 @@ class SearchPipeline:
             if len(request.query.strip()) <= short_threshold
             else request.min_similarity
         )
+        # Relax threshold when searching by workflow tag for stable recall
+        if request.tags:
+            tags_lower = [t.lower() for t in request.tags if isinstance(t, str)]
+            if "workflow" in tags_lower:
+                effective_min_similarity = min(effective_min_similarity, 0.5)
 
         # Stage 2: Embedding
         stage_begin = time.monotonic()
