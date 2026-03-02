@@ -377,6 +377,34 @@ class WebhookItemConfig(BaseModel):
     active: bool = True
 
 
+# ====================== Architecture (Code Graph) Configuration ======================
+
+
+class ArchitectureGitnexusConfig(BaseModel):
+    """GitNexus bridge or MCP connection for architecture data."""
+
+    bridge_url: str = ""  # e.g. http://127.0.0.1:9321; empty = unavailable
+
+
+class ArchitectureBuiltinConfig(BaseModel):
+    """Built-in (self-hosted) architecture index configuration."""
+
+    repo_path: str | None = None  # None = use workspace root
+    index_command: str = "make index-architecture"
+
+
+class ArchitectureConfig(BaseModel):
+    """Architecture visualization — provider switch and provider-specific config."""
+
+    provider: Literal["gitnexus", "builtin"] = "gitnexus"
+    gitnexus: ArchitectureGitnexusConfig = Field(
+        default_factory=ArchitectureGitnexusConfig
+    )
+    builtin: ArchitectureBuiltinConfig = Field(
+        default_factory=ArchitectureBuiltinConfig
+    )
+
+
 class Settings(BaseSettings):
     """Application settings.
 
@@ -407,6 +435,7 @@ class Settings(BaseSettings):
     ai_behavior: AIBehaviorConfig = Field(default_factory=AIBehaviorConfig)
     webhooks: list[WebhookItemConfig] = Field(default_factory=list)
     tag_synonyms: dict[str, str] = Field(default_factory=dict)  # P2-7: PG -> PostgreSQL
+    architecture: ArchitectureConfig = Field(default_factory=ArchitectureConfig)
 
     model_config = SettingsConfigDict(
         env_prefix="TEAM_MEMORY_",
