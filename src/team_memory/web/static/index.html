@@ -3434,11 +3434,12 @@
           <button class="btn btn-secondary btn-sm" onclick="navigate('settings')">← 返回设置</button>
           <h2 style="font-size:16px;font-weight:600;color:var(--text-secondary);margin:0">去重检测与合并</h2>
         </div>
-        <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px">
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
           <label style="font-size:13px;color:var(--text-secondary)">相似度阈值:</label>
           <input type="number" id="dedup-threshold" value="0.92" min="0.5" max="1" step="0.01"
             style="width:80px;padding:6px 10px;font-size:13px">
           <button class="btn btn-primary btn-sm" onclick="loadDuplicates()">扫描重复</button>
+          <button class="btn btn-secondary btn-sm" onclick="reembedGroups()" title="重算所有经验组（父+子）的向量，修正“问题描述相同但子经验不同”被误判为重复">刷新经验组向量</button>
           <button class="btn btn-secondary btn-sm" onclick="scanStale()">扫描过期</button>
         </div>
         <div id="stale-results" class="hidden" style="margin-bottom:24px">

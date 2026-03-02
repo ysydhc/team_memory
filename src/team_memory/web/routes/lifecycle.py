@@ -70,6 +70,26 @@ async def find_duplicates(
     return {"duplicates": pairs, "total": len(pairs), "threshold": threshold}
 
 
+@router.post("/lifecycle/reembed-groups")
+async def reembed_experience_groups(
+    project: str | None = None,
+    user: User | None = Depends(get_optional_user),
+):
+    """Recompute embeddings for all experience groups (roots with children).
+
+    Use this after deploying the 'parent embedding includes children' change
+    so that existing groups get correct vectors and duplicate detection
+    no longer flags same-description-but-different-children as duplicates.
+    """
+    _service = app_module._service
+    result = await _service.reembed_experience_groups(project=project)
+    return {
+        "message": f"已重算 {result['updated']} 个经验组的向量",
+        "updated": result["updated"],
+        "errors": result["errors"],
+    }
+
+
 @router.post("/lifecycle/merge")
 async def merge_experiences(
     req: MergeRequest,

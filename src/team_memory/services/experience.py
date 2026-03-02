@@ -85,6 +85,49 @@ class ExperienceService:
             async with self._session() as s:
                 yield s
 
+    _CHILD_EMBED_TRUNCATE = 300
+
+    def _build_parent_embed_text(
+        self,
+        title: str,
+        description: str,
+        solution: str = "",
+        *,
+        root_cause: str | None = None,
+        code_snippets: str | None = None,
+        tags: list[str] | None = None,
+        children: list | None = None,
+    ) -> str:
+        """Build text for parent experience embedding; includes children when provided.
+
+        children: list of Experience (from repo.get_children) or list of dict
+        (from save_group/import) with title, description/problem, solution.
+        Child description/solution are truncated to _CHILD_EMBED_TRUNCATE chars.
+        """
+        parts = [title, description, solution or ""]
+        text = "\n".join(parts)
+        if root_cause:
+            text += f"\n{root_cause}"
+        if code_snippets:
+            text += f"\n{code_snippets}"
+        if tags:
+            text += f"\n{' '.join(tags)}"
+        if not children:
+            return text
+        for c in children:
+            if hasattr(c, "title"):
+                c_title = c.title or ""
+                c_desc = (c.description or "")[: self._CHILD_EMBED_TRUNCATE]
+                c_sol = (c.solution or "")[: self._CHILD_EMBED_TRUNCATE]
+            else:
+                c_title = c.get("title", "")
+                c_desc = (
+                    c.get("description") or c.get("problem") or ""
+                )[: self._CHILD_EMBED_TRUNCATE]
+                c_sol = (c.get("solution") or "")[: self._CHILD_EMBED_TRUNCATE]
+            text += f"\n{c_title}\n{c_desc}\n{c_sol}"
+        return text
+
     async def authenticate(self, credentials: dict) -> User | None:
         """Authenticate a user."""
         return await self._auth.authenticate(credentials)
@@ -300,19 +343,16 @@ class ExperienceService:
             """
             repo = ExperienceRepository(session)
 
-            # Generate embedding for parent (include children titles for wider coverage)
-            parent_embed_text = "\n".join([
+            # Generate embedding for parent (include children for dedup consistency)
+            parent_embed_text = self._build_parent_embed_text(
                 parent.get("title", ""),
                 parent.get("problem", ""),
                 parent.get("solution", ""),
-            ])
-            if parent.get("root_cause"):
-                parent_embed_text += f"\n{parent['root_cause']}"
-            if parent.get("tags"):
-                parent_embed_text += f"\n{' '.join(parent['tags'])}"
-            children_titles = [c.get("title", "") for c in children if c.get("title")]
-            if children_titles:
-                parent_embed_text += f"\n{' '.join(children_titles)}"
+                root_cause=parent.get("root_cause"),
+                code_snippets=parent.get("code_snippets"),
+                tags=parent.get("tags"),
+                children=children if children else None,
+            )
             try:
                 parent_embedding = await self._embedding.encode_single(parent_embed_text)
             except Exception:
@@ -852,18 +892,24 @@ class ExperienceService:
             if not updates:
                 return experience.to_dict()
 
-            # Re-generate embedding if content fields changed
+            # Re-generate embedding if content fields changed (include children for groups)
             if need_reembed:
                 final_title = updates.get("title", experience.title)
                 final_desc = updates.get("description", experience.description)
                 final_sol = updates.get("solution", experience.solution) or ""
-                embed_text = f"{final_title}\n{final_desc}\n{final_sol}"
                 final_rc = updates.get("root_cause", experience.root_cause)
-                if final_rc:
-                    embed_text += f"\n{final_rc}"
                 final_cs = updates.get("code_snippets", experience.code_snippets)
-                if final_cs:
-                    embed_text += f"\n{final_cs}"
+                final_tags = updates.get("tags", experience.tags)
+                children = await repo.get_children(exp_uuid)
+                embed_text = self._build_parent_embed_text(
+                    final_title,
+                    final_desc,
+                    final_sol,
+                    root_cause=final_rc,
+                    code_snippets=final_cs,
+                    tags=final_tags,
+                    children=children if children else None,
+                )
                 try:
                     embedding = await self._embedding.encode_single(embed_text)
                     updates["embedding"] = embedding
@@ -1162,14 +1208,17 @@ class ExperienceService:
                 if field in snapshot:
                     updates[field] = snapshot[field]
 
-            # Re-generate embedding
-            embed_text = "\n".join([
+            # Re-generate embedding (include children when this is a parent)
+            children = await repo.get_children(exp_uuid)
+            embed_text = self._build_parent_embed_text(
                 snapshot.get("title", ""),
                 snapshot.get("description", ""),
                 snapshot.get("solution", ""),
-            ])
-            if snapshot.get("root_cause"):
-                embed_text += f"\n{snapshot['root_cause']}"
+                root_cause=snapshot.get("root_cause"),
+                code_snippets=snapshot.get("code_snippets"),
+                tags=snapshot.get("tags"),
+                children=children if children else None,
+            )
             try:
                 embedding = await self._embedding.encode_single(embed_text)
                 updates["embedding"] = embedding
@@ -1287,6 +1336,41 @@ class ExperienceService:
 
     # ======================== DEDUPLICATION (B2) ========================
 
+    async def reembed_experience_groups(
+        self, project: str | None = None
+    ) -> dict:
+        """Recompute embeddings for all root experiences that have children.
+
+        Uses parent + children content (same as update_experience) so that
+        duplicate detection no longer treats same-description-but-different-children
+        groups as identical. Returns {"updated": N, "errors": [...]}.
+        """
+        updated = 0
+        errors: list[str] = []
+        async with self._session() as session:
+            repo = ExperienceRepository(session)
+            root_ids = await repo.list_root_ids_with_children(project=project)
+            for root_id in root_ids:
+                try:
+                    root = await repo.get_with_children(root_id)
+                    if not root or not root.children:
+                        continue
+                    embed_text = self._build_parent_embed_text(
+                        root.title,
+                        root.description,
+                        root.solution or "",
+                        root_cause=root.root_cause,
+                        code_snippets=root.code_snippets,
+                        tags=root.tags,
+                        children=root.children,
+                    )
+                    embedding = await self._embedding.encode_single(embed_text)
+                    await repo.update(root_id, embedding=embedding)
+                    updated += 1
+                except Exception as e:
+                    errors.append(f"{root_id}: {e!s}")
+        return {"updated": updated, "errors": errors}
+
     async def find_duplicates(
         self,
         threshold: float = 0.92,
@@ -1379,21 +1463,24 @@ class ExperienceService:
                     if isinstance(tags, str):
                         tags = [t.strip() for t in tags.split(";") if t.strip()]
 
-                    # Generate embedding
-                    desc = raw.get("description", raw.get("problem", ""))
-                    embed_text = "\n".join([
-                        raw.get("title", ""),
-                        desc,
-                        raw.get("solution", ""),
-                    ])
-                    try:
-                        embedding = await self._embedding.encode_single(embed_text)
-                    except Exception:
-                        embedding = None
-
                     children_raw = raw.get("children")
                     if children_raw:
-                        # Import as group
+                        # Import as group: parent embedding includes children for dedup
+                        parent_embed_text = self._build_parent_embed_text(
+                            raw.get("title", ""),
+                            raw.get("description", raw.get("problem", "")),
+                            raw.get("solution", ""),
+                            root_cause=raw.get("root_cause"),
+                            code_snippets=raw.get("code_snippets"),
+                            tags=tags,
+                            children=children_raw,
+                        )
+                        try:
+                            parent_embedding = await self._embedding.encode_single(
+                                parent_embed_text
+                            )
+                        except Exception:
+                            parent_embedding = None
                         parent_data = {
                             "title": raw.get("title", ""),
                             "description": raw.get("description", raw.get("problem", "")),
@@ -1405,7 +1492,7 @@ class ExperienceService:
                             "framework": raw.get("framework"),
                             "code_snippets": raw.get("code_snippets"),
                             "root_cause": raw.get("root_cause"),
-                            "embedding": embedding,
+                            "embedding": parent_embedding,
                             "source": raw.get("source", "import"),
                         }
                         children_data = []
@@ -1472,6 +1559,21 @@ class ExperienceService:
                             )
                     else:
                         # Import as single
+                        single_embed_text = self._build_parent_embed_text(
+                            raw.get("title", ""),
+                            raw.get("description", raw.get("problem", "")),
+                            raw.get("solution", ""),
+                            root_cause=raw.get("root_cause"),
+                            code_snippets=raw.get("code_snippets"),
+                            tags=tags,
+                            children=None,
+                        )
+                        try:
+                            single_embedding = await self._embedding.encode_single(
+                                single_embed_text
+                            )
+                        except Exception:
+                            single_embedding = None
                         exp = await repo.create(
                             title=raw.get("title", ""),
                             description=raw.get("description", raw.get("problem", "")),
@@ -1483,7 +1585,7 @@ class ExperienceService:
                             ),
                             framework=raw.get("framework"),
                             code_snippets=raw.get("code_snippets"),
-                            embedding=embedding,
+                            embedding=single_embedding,
                             source=raw.get("source", "import"),
                             root_cause=raw.get("root_cause"),
                         )

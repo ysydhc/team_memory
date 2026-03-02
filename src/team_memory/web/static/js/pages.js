@@ -1073,6 +1073,22 @@ window.toggleSkillFile = async function(category, filePath, toggleEl) {
 };
 
 // ===== Dedup =====
+export async function reembedGroups() {
+    try {
+        const data = await api('POST', '/api/v1/lifecycle/reembed-groups');
+        const n = data.updated ?? 0;
+        const errs = data.errors ?? [];
+        if (errs.length) {
+            toast(`已重算 ${n} 个经验组向量，${errs.length} 个失败`, 'info');
+        } else {
+            toast(`已重算 ${n} 个经验组向量`, 'success');
+        }
+        loadDuplicates();
+    } catch (e) {
+        toast('刷新失败: ' + e.message, 'error');
+    }
+}
+
 export async function loadDuplicates() {
     const threshold = parseFloat(document.getElementById('dedup-threshold').value) || 0.92;
     const container = document.getElementById('dedup-results');

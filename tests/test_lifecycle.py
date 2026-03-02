@@ -222,6 +222,7 @@ class TestVersionHistory:
             repo_inst = mock_repo.return_value
             repo_inst.get_by_id = AsyncMock(return_value=exp)
             repo_inst.get_version_detail = AsyncMock(return_value=ver)
+            repo_inst.get_children = AsyncMock(return_value=[])
             repo_inst.save_version = AsyncMock(return_value=_mock_version(version_number=2))
             repo_inst.update = AsyncMock(return_value=updated_exp)
 

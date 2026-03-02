@@ -442,6 +442,7 @@ window.publishDraft = pages.publishDraft;
 window.loadReviews = pages.loadReviews;
 window.reviewExperience = pages.reviewExperience;
 window.loadDuplicates = pages.loadDuplicates;
+window.reembedGroups = pages.reembedGroups;
 window.doMerge = pages.doMerge;
 window.toggleDupDiff = pages.toggleDupDiff;
 window.scanStale = pages.scanStale;

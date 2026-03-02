@@ -193,9 +193,11 @@ class TestExperienceServiceUnit:
         mock_experience.title = "Test"
         mock_experience.description = "Test desc"
         mock_experience.tags = ["python"]
+        mock_experience.root_cause = None
         mock_experience.code_snippets = None
         mock_experience.to_dict.return_value = {"id": "test", "solution": "updated"}
         mock_repo_instance.get_by_id = AsyncMock(return_value=mock_experience)
+        mock_repo_instance.get_children = AsyncMock(return_value=[])
         mock_repo_instance.update = AsyncMock(return_value=mock_experience)
 
         exp_id = str(uuid.uuid4())
@@ -407,9 +409,11 @@ class TestPhase2Fixes:
         mock_experience.title = "Test"
         mock_experience.description = "Desc"
         mock_experience.tags = []
+        mock_experience.root_cause = None
         mock_experience.code_snippets = None
         mock_experience.to_dict.return_value = {"id": "test", "solution": "Original + Addendum"}
         mock_repo_instance.get_by_id = AsyncMock(return_value=mock_experience)
+        mock_repo_instance.get_children = AsyncMock(return_value=[])
         mock_repo_instance.update = AsyncMock(return_value=mock_experience)
 
         @asynccontextmanager

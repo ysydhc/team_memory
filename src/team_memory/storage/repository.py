@@ -265,6 +265,26 @@ class ExperienceRepository:
             current_id = exp.parent_id
         return current_id
 
+    async def list_root_ids_with_children(
+        self, project: str | None = None
+    ) -> list[uuid.UUID]:
+        """Return root experience IDs that have at least one non-deleted child."""
+        subq = (
+            select(Experience.parent_id)
+            .where(Experience.parent_id.isnot(None))
+            .where(Experience.is_deleted == False)  # noqa: E712
+            .distinct()
+        )
+        query = (
+            select(Experience.id)
+            .where(Experience.parent_id.is_(None))
+            .where(Experience.id.in_(subq))
+            .where(Experience.is_deleted == False)  # noqa: E712
+            .where(Experience.project == self._project_value(project))
+        )
+        result = await self._session.execute(query)
+        return [row[0] for row in result.all()]
+
     # ======================== PAGEINDEX-LITE TREE NODES ========================
 
     async def replace_tree_nodes(
