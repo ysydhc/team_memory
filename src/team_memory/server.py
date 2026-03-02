@@ -2107,6 +2107,7 @@ async def tm_task(
     experience_id: str | None = None,
     summary: str | None = None,
     with_context: bool = False,
+    sediment_experience_id: str | None = None,
 ) -> str:
     """Manage personal tasks.
 
@@ -2125,6 +2126,8 @@ async def tm_task(
         experience_id: Link to an existing experience.
         summary: Required when completing (status=completed) for auto-sediment.
         with_context: If True and action=get, include linked experience content.
+        sediment_experience_id: When completing, if provided, use this experience as
+            task sediment and skip auto-sediment from summary (e.g. from subagent extraction).
     """
     import uuid as _uuid
     from datetime import datetime as _dt
@@ -2220,6 +2223,18 @@ async def tm_task(
             if labels is not None:
                 kwargs["labels"] = labels
 
+            # When completing with pre-extracted experience, attach it as sediment
+            if (
+                status == "completed"
+                and sediment_experience_id
+            ):
+                try:
+                    kwargs["sediment_experience_id"] = _uuid.UUID(
+                        sediment_experience_id
+                    )
+                except ValueError:
+                    pass
+
             warning = None
             if status == "in_progress" and task.status != "in_progress":
                 ok, cnt = await repo.check_wip(task.project, task.user_id)
@@ -2228,33 +2243,38 @@ async def tm_task(
 
             updated = await repo.update_task(task.id, **kwargs)
 
-            # Auto-sediment on completion
+            # Auto-sediment on completion (skip when sediment_experience_id provided)
             sediment_id = None
             reflection_id = None
             if status == "completed" and summary:
-                try:
-                    from team_memory.services.llm_parser import compute_quality_score
-                    service = _get_service()
-                    q_score = compute_quality_score({
-                        "problem": summary,
-                        "solution": summary,
-                    })
-                    learned = await service.save(
-                        session=session,
-                        title=f"[任务沉淀] {task.title}",
-                        problem=summary,
-                        tags=task.labels or ["task-sediment"],
-                        created_by=user,
-                        project=task.project,
-                        source="task_sediment",
-                        quality_score=q_score,
-                    )
-                    if learned and hasattr(learned, "id"):
-                        sediment_id = str(learned.id)
-                        if updated:
-                            updated.sediment_experience_id = learned.id
-                except Exception as e:
-                    logger.warning("Auto-sediment failed: %s", e)
+                if sediment_experience_id:
+                    sediment_id = sediment_experience_id.strip()
+                else:
+                    try:
+                        from team_memory.services.llm_parser import (
+                            compute_quality_score,
+                        )
+                        service = _get_service()
+                        q_score = compute_quality_score({
+                            "problem": summary,
+                            "solution": summary,
+                        })
+                        learned = await service.save(
+                            session=session,
+                            title=f"[任务沉淀] {task.title}",
+                            problem=summary,
+                            tags=task.labels or ["task-sediment"],
+                            created_by=user,
+                            project=task.project,
+                            source="task_sediment",
+                            quality_score=q_score,
+                        )
+                        if learned and hasattr(learned, "id"):
+                            sediment_id = str(learned.id)
+                            if updated:
+                                updated.sediment_experience_id = learned.id
+                    except Exception as e:
+                        logger.warning("Auto-sediment failed: %s", e)
 
                 # P2.C: Auto-reflection on task completion
                 try:
