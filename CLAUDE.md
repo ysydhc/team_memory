@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus MCP
 
-This project is indexed by GitNexus as **team_memory** (1607 symbols, 4718 relationships, 134 execution flows).
+This project is indexed by GitNexus as **team_doc** (2066 symbols, 6085 relationships, 172 execution flows).
 
 GitNexus provides a knowledge graph over this codebase — call chains, blast radius, execution flows, and semantic search.
 
