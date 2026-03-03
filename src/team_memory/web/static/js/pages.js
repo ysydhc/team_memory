@@ -1825,6 +1825,30 @@ const KANBAN_COLS = [
     { status: 'completed', label: '已完成', icon: '✅' },
 ];
 const UNGROUPED_ID = '__ungrouped__';
+const VISIBLE_STORAGE_PREFIX = 'tm_tasks_visible_';
+
+function _visibleStorageKey() {
+  const proj = (state.activeProject || state.defaultProject || 'default').replace(/[^a-zA-Z0-9_-]/g, '_');
+  return VISIBLE_STORAGE_PREFIX + (_tasksShowArchived ? 'archived_' : '') + proj;
+}
+
+function _loadVisibleGroupsFromStorage() {
+  try {
+    const raw = localStorage.getItem(_visibleStorageKey());
+    if (!raw) return null;
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? new Set(arr) : null;
+  } catch {
+    return null;
+  }
+}
+
+function _saveVisibleGroupsToStorage() {
+  try {
+    localStorage.setItem(_visibleStorageKey(), JSON.stringify(Array.from(_kanbanVisibleGroups)));
+  } catch {}
+}
+
 const _kanbanVisibleGroups = new Set();
 let _kanbanInitialized = false;
 let _tasksShowArchived = false;
@@ -1918,8 +1942,17 @@ export async function loadTasks() {
             }
         }));
 
+        // Restore visible groups from localStorage when available
+        const stored = _loadVisibleGroupsFromStorage();
+        if (stored && stored.size > 0) {
+            _kanbanVisibleGroups.clear();
+            stored.forEach(id => _kanbanVisibleGroups.add(id));
+            _kanbanInitialized = true;
+        }
+
         // Initialize visible groups on first load (active mode only); archived mode defaults to all closed
-        if (!_tasksShowArchived && !_kanbanInitialized && _kanbanVisibleGroups.size === 0 && groups.length > 0) {
+        // Only run when no stored preference exists
+        if (stored === null && !_tasksShowArchived && !_kanbanInitialized && _kanbanVisibleGroups.size === 0 && groups.length > 0) {
             groups.forEach(g => _kanbanVisibleGroups.add(g.id));
             _kanbanInitialized = true;
         }
@@ -2431,6 +2464,7 @@ export function toggleGroupVisibility(groupId) {
     } else {
         _kanbanVisibleGroups.add(groupId);
     }
+    _saveVisibleGroupsToStorage();
     loadTasks();
 }
 
