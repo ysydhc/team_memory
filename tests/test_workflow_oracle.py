@@ -158,6 +158,33 @@ steps:
     assert r2.get("timeout_hint") is None  # step-b has no such field
 
 
+def test_step_with_actions_ref_resolved(tmp_path):
+    """Step with actions $ref gets resolved and merged into action text."""
+    (tmp_path / "actions").mkdir()
+    (tmp_path / "actions" / "run_ruff.yaml").write_text("""
+id: run_ruff
+name: 运行 Ruff 检查
+command: ruff check src/
+description: 代码风格与静态检查
+""")
+    (tmp_path / "main.yaml").write_text("""
+meta:
+  id: test-wf
+steps:
+  - id: step-x
+    name: X
+    action: Do main work
+    actions:
+      - $ref: actions/run_ruff.yaml
+    allowed_next: []
+""")
+    data = _load_workflow(tmp_path / "main.yaml")
+    s = data["steps"][0]
+    assert "Do main work" in (s.get("action") or "")
+    assert "代码风格与静态检查" in (s.get("action") or "")
+    assert "ruff check src/" in (s.get("action") or "")
+
+
 def test_load_workflow_step_with_optional_metadata(tmp_path):
     """Step with timeout_hint, retry_hint, idempotent is loaded."""
     (tmp_path / "w.yaml").write_text("""

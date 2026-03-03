@@ -17,6 +17,41 @@ def _workflow_path(workflow_id: str, workspace_root: Path) -> Path:
     return workspace_root / ".cursor" / "plans" / "workflows" / f"{workflow_id}.yaml"
 
 
+def _resolve_action_ref(item: Any, base_dir: Path) -> dict[str, Any]:
+    """Resolve action $ref to full action dict; return item unchanged if no $ref."""
+    if isinstance(item, dict) and set(item.keys()) == {"$ref"}:
+        ref_path = base_dir / item["$ref"]
+        if not ref_path.exists():
+            raise FileNotFoundError(f"Action ref not found: {ref_path}")
+        ref_raw = ref_path.read_text(encoding="utf-8")
+        resolved = yaml.safe_load(ref_raw)
+        if not resolved or not isinstance(resolved, dict):
+            raise ValueError(f"Invalid action file: {ref_path}")
+        return resolved
+    return item if isinstance(item, dict) else {"description": str(item)}
+
+
+def _merge_actions_into_step(step: dict[str, Any], base_dir: Path) -> dict[str, Any]:
+    """If step has actions list, resolve $refs and append to action text. Mutates step."""
+    actions = step.get("actions")
+    if not actions or not isinstance(actions, list):
+        return step
+    parts: list[str] = []
+    for item in actions:
+        resolved = _resolve_action_ref(item, base_dir)
+        desc = resolved.get("description") or resolved.get("name") or ""
+        cmd = resolved.get("command") or ""
+        if desc or cmd:
+            parts.append(f"  - {desc}" + (f" | 命令: {cmd}" if cmd else ""))
+    if not parts:
+        return step
+    append_text = "\n".join(parts)
+    existing = step.get("action") or ""
+    suffix = f"\n\n原子动作:\n{append_text}"
+    step["action"] = f"{existing}{suffix}" if existing else f"原子动作:\n{append_text}"
+    return step
+
+
 def _resolve_step_ref(step: dict[str, Any], base_dir: Path) -> dict[str, Any]:
     """Resolve step $ref to full step dict; return step unchanged if no $ref."""
     if set(step.keys()) == {"$ref"}:
@@ -43,7 +78,9 @@ def _load_workflow(path: Path) -> dict[str, Any]:
     resolved_steps: list[dict[str, Any]] = []
     for step in data["steps"]:
         if isinstance(step, dict):
-            resolved_steps.append(_resolve_step_ref(step, base_dir))
+            resolved = _resolve_step_ref(step, base_dir)
+            resolved = _merge_actions_into_step(resolved, base_dir)
+            resolved_steps.append(resolved)
         else:
             resolved_steps.append(step)
     data["steps"] = resolved_steps
