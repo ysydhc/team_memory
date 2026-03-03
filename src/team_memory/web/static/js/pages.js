@@ -2116,7 +2116,8 @@ export async function loadTasks() {
                         <button class="btn btn-primary btn-sm group-retro-btn" onclick="event.stopPropagation();sedimentTaskGroup('${g.id}')">组复盘 / 保存为组经验</button>
                        </div>`
                     : '';
-                return `<div class="task-group-card task-group-collapsible${isArchived ? ' archived' : ''}${g.isVirtual ? ' ungrouped' : ''}" style="min-width:320px;max-width:360px;flex-shrink:0;scroll-snap-align:start;position:relative"
+                const dragAttrs = !g.isVirtual ? ` draggable="true" data-group-id="${g.id}"` : ` data-group-id="${g.id}"`;
+                return `<div class="task-group-card task-group-collapsible${isArchived ? ' archived' : ''}${g.isVirtual ? ' ungrouped' : ''}"${dragAttrs} style="min-width:320px;max-width:360px;flex-shrink:0;scroll-snap-align:start;position:relative"
                   onclick="document.getElementById('tasks-group-filter').value='${g.id}';loadTasks()">
                   ${archiveBadge}
                   <div class="task-group-header">
@@ -2155,6 +2156,53 @@ export async function loadTasks() {
                 `<div style="display:flex;gap:6px">${showAllBtn}${hideAllBtn}</div>` +
                 `</div>` +
                 `<div id="task-groups-grid" class="task-groups-grid" style="display:flex;gap:16px;overflow-x:auto;padding-bottom:8px;scroll-snap-type: x mandatory">${cardsHtml}</div>`;
+
+            const grid = document.getElementById('task-groups-grid');
+            if (grid) {
+                const findCard = (el) => el?.closest?.('.task-group-card') || null;
+                const clearDragOver = () => grid.querySelectorAll('.task-group-card.drag-over').forEach((c) => c.classList.remove('drag-over'));
+
+                grid.addEventListener('dragstart', (e) => {
+                    const card = findCard(e.target);
+                    if (card && card.dataset.groupId && !card.classList.contains('ungrouped')) {
+                        e.dataTransfer?.setData?.('text/plain', card.dataset.groupId);
+                        e.dataTransfer.effectAllowed = 'move';
+                    }
+                });
+                grid.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    const card = findCard(e.target);
+                    if (card && card.dataset.groupId) {
+                        clearDragOver();
+                        card.classList.add('drag-over');
+                    }
+                });
+                grid.addEventListener('dragleave', (e) => {
+                    const card = findCard(e.target);
+                    if (card && e.relatedTarget && !card.contains(e.relatedTarget)) card.classList.remove('drag-over');
+                });
+                grid.addEventListener('drop', async (e) => {
+                    e.preventDefault();
+                    clearDragOver();
+                    const card = findCard(e.target);
+                    const targetGroupId = card?.dataset?.groupId;
+                    const draggedId = e.dataTransfer?.getData?.('text/plain');
+                    if (!draggedId || !targetGroupId) return;
+
+                    const currentGroups = window.__tasksCurrentGroups || [];
+                    const realGroups = currentGroups.filter((g) => !g.isVirtual);
+                    const fromIdx = realGroups.findIndex((g) => g.id === draggedId);
+                    const toIdx = targetGroupId === UNGROUPED_ID ? 0 : realGroups.findIndex((g) => g.id === targetGroupId);
+                    if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
+
+                    const arr = [...realGroups];
+                    const [moved] = arr.splice(fromIdx, 1);
+                    arr.splice(toIdx, 0, moved);
+                    await reorderTaskGroups(arr.map((g) => g.id));
+                });
+                grid.addEventListener('dragend', clearDragOver);
+            }
         } else {
             groupsContainer.innerHTML = _tasksShowArchived
                 ? `<div class="empty-state" style="padding:32px;text-align:center;color:var(--text-muted)">
@@ -2425,6 +2473,11 @@ export async function sedimentTaskGroup(groupId) {
     } catch (e) {
         toast('沉淀失败: ' + (e.message || e.detail || '未知错误'), 'error');
     }
+}
+
+async function reorderTaskGroups(newOrder) {
+    await api('PUT', '/api/v1/task-groups/reorder', { order: newOrder });
+    loadTasks();
 }
 
 export async function archiveGroup(groupId) {
