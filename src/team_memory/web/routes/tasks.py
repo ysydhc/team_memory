@@ -339,6 +339,28 @@ async def create_task_group(
     return group.to_dict()
 
 
+@router.put("/task-groups/reorder")
+async def reorder_task_groups(
+    body: dict = Body(...),
+    user: User | None = Depends(get_optional_user),
+):
+    """Batch update sort_order. Body: { "order": [group_id1, group_id2, ...] }"""
+    order = body.get("order")
+    if not isinstance(order, list) or len(order) == 0:
+        raise HTTPException(status_code=400, detail="order must be non-empty array")
+    db_url = _get_db_url()
+    async with get_session(db_url) as session:
+        repo = TaskRepository(session)
+        for idx, gid in enumerate(order):
+            try:
+                uid = uuid.UUID(gid)
+            except (ValueError, TypeError):
+                continue
+            await repo.update_group(uid, sort_order=idx)
+        await session.commit()
+    return {"message": "Reordered", "count": len(order)}
+
+
 @router.put("/task-groups/{group_id}")
 async def update_task_group(
     group_id: str,
