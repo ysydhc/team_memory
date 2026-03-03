@@ -1,11 +1,10 @@
 """Unit tests for workflow_oracle (parse_workflow_steps_from_messages, _last_step_from_messages)."""
 
-import pytest
 from datetime import datetime, timezone
 
 from team_memory.workflow_oracle import (
-    parse_workflow_steps_from_messages,
     _last_step_from_messages,
+    parse_workflow_steps_from_messages,
 )
 
 
@@ -29,9 +28,9 @@ def test_parse_workflow_steps_single_step():
 
 def test_parse_workflow_steps_aggregated():
     msgs = [
-        {"content": "[workflow] task-execution-workflow step-coldstart: 冷启动完成", "created_at": "2025-03-02T10:00:00Z"},
-        {"content": "[workflow] task-execution-workflow step-claim: 认领", "created_at": "2025-03-02T10:01:00Z"},
-        {"content": "[workflow] task-execution-workflow step-execute: 执行中", "created_at": "2025-03-02T10:02:00Z"},
+        {"content": "[workflow] task-execution-workflow step-coldstart: 冷启动完成", "created_at": "2025-03-02T10:00:00Z"},  # noqa: E501
+        {"content": "[workflow] task-execution-workflow step-claim: 认领", "created_at": "2025-03-02T10:01:00Z"},  # noqa: E501
+        {"content": "[workflow] task-execution-workflow step-execute: 执行中", "created_at": "2025-03-02T10:02:00Z"},  # noqa: E501
     ]
     steps = parse_workflow_steps_from_messages(msgs, "task-execution-workflow")
     assert len(steps) == 3
@@ -54,3 +53,29 @@ def test_last_step_from_messages():
 
 def test_last_step_from_messages_empty():
     assert _last_step_from_messages([], "task-execution-workflow") is None
+
+
+def test_parse_workflow_steps_first_line_only_empty_content():
+    """Empty content: no match, message does not produce a step."""
+    msgs = [{"content": "", "created_at": None}]
+    steps = parse_workflow_steps_from_messages(msgs, "task-execution-workflow")
+    assert steps == []
+
+
+def test_parse_workflow_steps_first_line_only_newline_content():
+    """Content is only newline: first line is empty, no match."""
+    msgs = [{"content": "\n", "created_at": None}]
+    steps = parse_workflow_steps_from_messages(msgs, "task-execution-workflow")
+    assert steps == []
+
+
+def test_parse_workflow_steps_first_line_non_audit_second_line_audit():
+    """First line non-audit, second line is audit: only first line is matched, so no match."""
+    msgs = [
+        {
+            "content": "some other text\n[workflow] task-execution-workflow step-claim: 认领",
+            "created_at": "2025-03-02T10:00:00Z",
+        },
+    ]
+    steps = parse_workflow_steps_from_messages(msgs, "task-execution-workflow")
+    assert steps == []

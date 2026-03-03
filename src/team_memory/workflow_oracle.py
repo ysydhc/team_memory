@@ -80,11 +80,13 @@ def parse_workflow_steps_from_messages(
         re.IGNORECASE | re.DOTALL,
     )
     # step_id -> { step_id, last_summary, last_at }
+    # Only first line of each message is used for matching (phase 5: avoid summary pollution).
     by_step: dict[str, dict[str, Any]] = {}
     for m in messages:
         content = (m.get("content") or "") if isinstance(m, dict) else getattr(m, "content", "")
+        first_line = content.split("\n")[0] if content else ""
         created = m.get("created_at") if isinstance(m, dict) else getattr(m, "created_at", None)
-        match = pattern.search(content)
+        match = pattern.search(first_line)
         if match:
             step_id = match.group(1)
             summary = (match.group(2) or "").strip() if match.lastindex >= 2 else ""
@@ -97,11 +99,12 @@ def parse_workflow_steps_from_messages(
                     else str(created) if created else None
                 ),
             }
-    # Preserve order of first appearance
+    # Preserve order of first appearance (same first-line rule)
     seen_order: list[str] = []
     for m in messages:
         content = (m.get("content") or "") if isinstance(m, dict) else getattr(m, "content", "")
-        match = pattern.search(content)
+        first_line = content.split("\n")[0] if content else ""
+        match = pattern.search(first_line)
         if match:
             sid = match.group(1)
             if sid not in seen_order:
