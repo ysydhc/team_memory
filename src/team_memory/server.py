@@ -2108,6 +2108,8 @@ async def tm_task(
     summary: str | None = None,
     with_context: bool = False,
     sediment_experience_id: str | None = None,
+    acceptance_criteria: str | None = None,
+    acceptance_met: bool | None = None,
 ) -> str:
     """Manage personal tasks.
 
@@ -2128,6 +2130,8 @@ async def tm_task(
         with_context: If True and action=get, include linked experience content.
         sediment_experience_id: When completing, if provided, use this experience as
             task sediment and skip auto-sediment from summary (e.g. from subagent extraction).
+        acceptance_criteria: Task-level acceptance criteria (links to workflow step).
+        acceptance_met: Whether acceptance has been met (True/False/None).
     """
     import uuid as _uuid
     from datetime import datetime as _dt
@@ -2222,6 +2226,10 @@ async def tm_task(
                     pass
             if labels is not None:
                 kwargs["labels"] = labels
+            if acceptance_criteria is not None:
+                kwargs["acceptance_criteria"] = acceptance_criteria
+            if acceptance_met is not None:
+                kwargs["acceptance_met"] = acceptance_met
 
             # When completing with pre-extracted experience, attach it as sediment
             if (
