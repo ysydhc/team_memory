@@ -1122,12 +1122,19 @@
     }
 
     /* ===== Settings Page ===== */
+    #page-settings {
+      max-width: 720px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
     .settings-card {
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
       padding: 28px;
-      max-width: 720px;
+      width: 100%;
+      box-sizing: border-box;
     }
 
     .settings-card h2 {
@@ -2480,6 +2487,8 @@
       gap: 14px;
       padding: 14px 18px;
       margin-top: 16px;
+      width: 100%;
+      box-sizing: border-box;
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: var(--radius);
@@ -2507,6 +2516,7 @@
     .settings-nav-body {
       flex: 1;
       min-width: 0;
+      overflow: visible;
     }
 
     .settings-nav-title {
@@ -2522,6 +2532,9 @@
       font-size: 12px;
       color: var(--text-muted);
       margin-top: 2px;
+      overflow-wrap: break-word;
+      word-break: break-word;
+      line-height: 1.4;
     }
 
     .settings-nav-arrow {
@@ -2572,6 +2585,10 @@
 
     .scan-path-row.custom .scan-path-del:hover {
       opacity: 1;
+    }
+
+    .settings-group-advanced {
+      margin-top: 40px;
     }
 
     .settings-group-advanced .settings-group-body {
@@ -3204,65 +3221,6 @@
           </div>
         </div>
 
-        <div class="settings-card collapsed" style="margin-top:20px"
-          onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
-          <h2>经验质量打分规则</h2>
-          <div class="settings-card-body" style="max-height:2000px">
-            <p class="settings-desc">配置经验质量评分的衰减、加分和等级阈值。</p>
-            <div class="settings-grid">
-              <div class="form-group">
-                <label>初始分值 <span class="hint">(新经验起始分)</span></label>
-                <input type="number" id="scoring-initial" placeholder="100" min="1" step="1">
-              </div>
-              <div class="form-group">
-                <label>分值上限 <span class="hint">(max_score)</span></label>
-                <input type="number" id="scoring-max" placeholder="300" min="100" step="10">
-              </div>
-              <div class="form-group">
-                <label>保护期天数 <span class="hint">(前N天不衰减)</span></label>
-                <input type="number" id="scoring-protection" placeholder="10" min="0" step="1">
-              </div>
-              <div class="form-group">
-                <label>衰减速率 <span class="hint">(每天扣分)</span></label>
-                <input type="number" id="scoring-decay-rate" placeholder="1.0" min="0" step="0.1">
-              </div>
-              <div class="form-group">
-                <label>慢衰减阈值 <span class="hint">(低于此值减速)</span></label>
-                <input type="number" id="scoring-slow-threshold" placeholder="50" min="0" step="1">
-              </div>
-              <div class="form-group">
-                <label>慢衰减速率 <span class="hint">(低分衰减速度)</span></label>
-                <input type="number" id="scoring-slow-rate" placeholder="0.5" min="0" step="0.1">
-              </div>
-              <div class="form-group">
-                <label>引用加分 <span class="hint">(每次被引用)</span></label>
-                <input type="number" id="scoring-ref-boost" placeholder="2" min="0" step="1">
-              </div>
-              <div class="form-group">
-                <label>好评加分 <span class="hint">(rating >= 阈值时)</span></label>
-                <input type="number" id="scoring-rating-boost" placeholder="1" min="0" step="1">
-              </div>
-              <div class="form-group">
-                <label>好评阈值 <span class="hint">(rating >= N 才算好评)</span></label>
-                <input type="number" id="scoring-rating-threshold" placeholder="4" min="1" max="5" step="1">
-              </div>
-              <div class="form-group">
-                <label>Gold 阈值 <span class="hint">(score >= N)</span></label>
-                <input type="number" id="scoring-tier-gold" placeholder="120" min="1" step="1">
-              </div>
-              <div class="form-group">
-                <label>Silver 阈值 <span class="hint">(score >= N)</span></label>
-                <input type="number" id="scoring-tier-silver" placeholder="60" min="1" step="1">
-              </div>
-              <div class="form-group">
-                <label>Bronze 阈值 <span class="hint">(score >= N)</span></label>
-                <input type="number" id="scoring-tier-bronze" placeholder="20" min="0" step="1">
-              </div>
-            </div>
-            <button class="btn btn-primary" onclick="saveScoringConfig()" style="margin-top:12px">保存打分规则</button>
-          </div>
-        </div>
-
         <div class="settings-card"
           onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
           <h2>检索参数配置</h2>
@@ -3309,6 +3267,130 @@
           </div>
         </div>
 
+        <div class="settings-card collapsed" style="margin-top:20px"
+          onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
+          <h2>搜索管线配置</h2>
+          <div class="settings-card-body" style="max-height:2000px">
+            <p class="settings-desc">配置混合检索模式、RRF 融合参数和自适应过滤。</p>
+            <div class="settings-grid">
+              <div class="form-group">
+                <label>search mode <span class="hint">(搜索模式)</span></label>
+                <select id="cfg-search-mode">
+                  <option value="hybrid">hybrid — 向量 + 全文混合检索</option>
+                  <option value="vector">vector — 仅向量搜索</option>
+                  <option value="fts">fts — 仅全文搜索</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>rrf_k <span class="hint">(RRF 常数，通常不需修改)</span></label>
+                <input type="number" id="cfg-rrf-k" placeholder="60" min="1" step="1">
+              </div>
+              <div class="form-group">
+                <label>vector_weight <span class="hint">(向量搜索权重)</span></label>
+                <input type="number" id="cfg-vector-weight" placeholder="0.7" min="0" max="1" step="0.05">
+              </div>
+              <div class="form-group">
+                <label>fts_weight <span class="hint">(全文搜索权重)</span></label>
+                <input type="number" id="cfg-fts-weight" placeholder="0.3" min="0" max="1" step="0.05">
+              </div>
+              <div class="form-group">
+                <label>adaptive_filter <span class="hint">(自适应过滤)</span></label>
+                <select id="cfg-adaptive-filter">
+                  <option value="true">启用 — 自动过滤低分结果</option>
+                  <option value="false">禁用</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>score_gap_threshold <span class="hint">(分数间隙阈值)</span></label>
+                <input type="number" id="cfg-score-gap" placeholder="0.15" min="0" max="1" step="0.05">
+              </div>
+              <div class="form-group">
+                <label>min_confidence_ratio <span class="hint">(最低置信度比率)</span></label>
+                <input type="number" id="cfg-min-confidence" placeholder="0.6" min="0" max="1" step="0.05">
+              </div>
+            </div>
+            <div class="settings-actions">
+              <button class="btn btn-primary" onclick="saveSearchConfig()">保存搜索配置</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-card collapsed" style="margin-top:20px"
+          onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
+          <h2>Reranker 精排配置</h2>
+          <div class="settings-card-body" style="max-height:2000px">
+            <p class="settings-desc">配置服务端精排。provider=none 时不启用精排，由客户端 LLM 通过 confidence 字段自行判断。更改 provider 需重启服务生效。
+            </p>
+            <div class="settings-grid">
+              <div class="form-group full-width">
+                <label>provider <span class="hint">(精排模式)</span></label>
+                <select id="cfg-reranker-provider">
+                  <option value="none">none — 不启用服务端精排（客户端自行判断）</option>
+                  <option value="ollama_llm">ollama_llm — 使用 Ollama LLM 打分精排</option>
+                  <option value="cross_encoder">cross_encoder — 使用本地 cross-encoder 模型</option>
+                  <option value="jina">jina — 使用 Jina Reranker API</option>
+                </select>
+              </div>
+            </div>
+            <div class="settings-actions">
+              <button class="btn btn-primary" onclick="saveRerankerConfig()">保存 Reranker 配置</button>
+              <span class="hint" style="margin-left:10px">更改 provider 后需重启服务</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="settings-key-mgmt" class="settings-card collapsed" style="margin-top:20px; display:none;"
+          onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
+          <h2>用户管理</h2>
+          <div class="settings-card-body" style="max-height:2000px">
+            <p class="settings-desc">管理团队成员账号、审批注册申请、分配角色和 API Key。</p>
+
+            <!-- Pending approvals -->
+            <div id="keys-pending-section" style="margin-bottom:20px; display:none;">
+              <h3 style="margin-bottom:8px; color:var(--warning, #f59e0b);">待审批用户</h3>
+              <div id="keys-pending-list"></div>
+            </div>
+
+            <!-- Active users -->
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <h3 style="margin:0;">已有用户</h3>
+              <button class="btn btn-primary" onclick="openAdminCreateUser()"
+                style="font-size:13px; padding:5px 14px;">+ 添加用户</button>
+            </div>
+            <div id="keys-active-list"></div>
+
+            <!-- Admin create user form (hidden by default) -->
+            <div id="admin-create-user-form"
+              style="display:none; margin-top:16px; padding:16px; background:var(--bg-input); border:1px solid var(--border); border-radius:var(--radius);">
+              <h3 style="margin-top:0; margin-bottom:12px;">添加新用户</h3>
+              <div class="settings-grid" style="gap:10px;">
+                <div class="form-group">
+                  <label>用户名</label>
+                  <input type="text" id="admin-new-username" placeholder="用户名">
+                </div>
+                <div class="form-group">
+                  <label>角色</label>
+                  <select id="admin-new-role"
+                    style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius);padding:6px 10px;">
+                    <option value="editor">editor</option>
+                    <option value="viewer">viewer</option>
+                    <option value="admin">admin</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>初始密码 <span class="hint">(可选，用于 Web 登录)</span></label>
+                  <input type="password" id="admin-new-password" placeholder="留空则只能用 API Key">
+                </div>
+              </div>
+              <div style="margin-top:12px;">
+                <button class="btn btn-primary" onclick="createUserAdmin()">创建</button>
+                <button class="btn" onclick="document.getElementById('admin-create-user-form').style.display='none'"
+                  style="margin-left:8px;">取消</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="settings-nav-card" onclick="navigate('dedup')">
           <div class="settings-nav-icon">🔍</div>
           <div class="settings-nav-body">
@@ -3326,75 +3408,60 @@
 
             <div class="settings-card collapsed" style="margin-top:20px"
               onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
-              <h2>搜索管线配置</h2>
+              <h2>经验质量打分规则</h2>
               <div class="settings-card-body" style="max-height:2000px">
-                <p class="settings-desc">配置混合检索模式、RRF 融合参数和自适应过滤。</p>
+                <p class="settings-desc">配置经验质量评分的衰减、加分和等级阈值。</p>
                 <div class="settings-grid">
                   <div class="form-group">
-                    <label>search mode <span class="hint">(搜索模式)</span></label>
-                    <select id="cfg-search-mode">
-                      <option value="hybrid">hybrid — 向量 + 全文混合检索</option>
-                      <option value="vector">vector — 仅向量搜索</option>
-                      <option value="fts">fts — 仅全文搜索</option>
-                    </select>
+                    <label>初始分值 <span class="hint">(新经验起始分)</span></label>
+                    <input type="number" id="scoring-initial" placeholder="100" min="1" step="1">
                   </div>
                   <div class="form-group">
-                    <label>rrf_k <span class="hint">(RRF 常数，通常不需修改)</span></label>
-                    <input type="number" id="cfg-rrf-k" placeholder="60" min="1" step="1">
+                    <label>分值上限 <span class="hint">(max_score)</span></label>
+                    <input type="number" id="scoring-max" placeholder="300" min="100" step="10">
                   </div>
                   <div class="form-group">
-                    <label>vector_weight <span class="hint">(向量搜索权重)</span></label>
-                    <input type="number" id="cfg-vector-weight" placeholder="0.7" min="0" max="1" step="0.05">
+                    <label>保护期天数 <span class="hint">(前N天不衰减)</span></label>
+                    <input type="number" id="scoring-protection" placeholder="10" min="0" step="1">
                   </div>
                   <div class="form-group">
-                    <label>fts_weight <span class="hint">(全文搜索权重)</span></label>
-                    <input type="number" id="cfg-fts-weight" placeholder="0.3" min="0" max="1" step="0.05">
+                    <label>衰减速率 <span class="hint">(每天扣分)</span></label>
+                    <input type="number" id="scoring-decay-rate" placeholder="1.0" min="0" step="0.1">
                   </div>
                   <div class="form-group">
-                    <label>adaptive_filter <span class="hint">(自适应过滤)</span></label>
-                    <select id="cfg-adaptive-filter">
-                      <option value="true">启用 — 自动过滤低分结果</option>
-                      <option value="false">禁用</option>
-                    </select>
+                    <label>慢衰减阈值 <span class="hint">(低于此值减速)</span></label>
+                    <input type="number" id="scoring-slow-threshold" placeholder="50" min="0" step="1">
                   </div>
                   <div class="form-group">
-                    <label>score_gap_threshold <span class="hint">(分数间隙阈值)</span></label>
-                    <input type="number" id="cfg-score-gap" placeholder="0.15" min="0" max="1" step="0.05">
+                    <label>慢衰减速率 <span class="hint">(低分衰减速度)</span></label>
+                    <input type="number" id="scoring-slow-rate" placeholder="0.5" min="0" step="0.1">
                   </div>
                   <div class="form-group">
-                    <label>min_confidence_ratio <span class="hint">(最低置信度比率)</span></label>
-                    <input type="number" id="cfg-min-confidence" placeholder="0.6" min="0" max="1" step="0.05">
+                    <label>引用加分 <span class="hint">(每次被引用)</span></label>
+                    <input type="number" id="scoring-ref-boost" placeholder="2" min="0" step="1">
+                  </div>
+                  <div class="form-group">
+                    <label>好评加分 <span class="hint">(rating >= 阈值时)</span></label>
+                    <input type="number" id="scoring-rating-boost" placeholder="1" min="0" step="1">
+                  </div>
+                  <div class="form-group">
+                    <label>好评阈值 <span class="hint">(rating >= N 才算好评)</span></label>
+                    <input type="number" id="scoring-rating-threshold" placeholder="4" min="1" max="5" step="1">
+                  </div>
+                  <div class="form-group">
+                    <label>Gold 阈值 <span class="hint">(score >= N)</span></label>
+                    <input type="number" id="scoring-tier-gold" placeholder="120" min="1" step="1">
+                  </div>
+                  <div class="form-group">
+                    <label>Silver 阈值 <span class="hint">(score >= N)</span></label>
+                    <input type="number" id="scoring-tier-silver" placeholder="60" min="1" step="1">
+                  </div>
+                  <div class="form-group">
+                    <label>Bronze 阈值 <span class="hint">(score >= N)</span></label>
+                    <input type="number" id="scoring-tier-bronze" placeholder="20" min="0" step="1">
                   </div>
                 </div>
-                <div class="settings-actions">
-                  <button class="btn btn-primary" onclick="saveSearchConfig()">保存搜索配置</button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Reranker Config -->
-
-            <div class="settings-card collapsed" style="margin-top:20px"
-              onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
-              <h2>Reranker 精排配置</h2>
-              <div class="settings-card-body" style="max-height:2000px">
-                <p class="settings-desc">配置服务端精排。provider=none 时不启用精排，由客户端 LLM 通过 confidence 字段自行判断。更改 provider 需重启服务生效。
-                </p>
-                <div class="settings-grid">
-                  <div class="form-group full-width">
-                    <label>provider <span class="hint">(精排模式)</span></label>
-                    <select id="cfg-reranker-provider">
-                      <option value="none">none — 不启用服务端精排（客户端自行判断）</option>
-                      <option value="ollama_llm">ollama_llm — 使用 Ollama LLM 打分精排</option>
-                      <option value="cross_encoder">cross_encoder — 使用本地 cross-encoder 模型</option>
-                      <option value="jina">jina — 使用 Jina Reranker API</option>
-                    </select>
-                  </div>
-                </div>
-                <div class="settings-actions">
-                  <button class="btn btn-primary" onclick="saveRerankerConfig()">保存 Reranker 配置</button>
-                  <span class="hint" style="margin-left:10px">更改 provider 后需重启服务</span>
-                </div>
+                <button class="btn btn-primary" onclick="saveScoringConfig()" style="margin-top:12px">保存打分规则</button>
               </div>
             </div>
 
@@ -3537,58 +3604,6 @@
                 <div class="settings-actions">
                   <button class="btn btn-primary" onclick="addWebhookRow()">添加 Webhook</button>
                   <button class="btn btn-primary" onclick="saveWebhookConfig()" style="margin-left:10px">保存配置</button>
-                </div>
-              </div>
-            </div>
-
-            <div id="settings-key-mgmt" class="settings-card collapsed" style="margin-top:20px; display:none;"
-              onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
-              <h2>用户管理</h2>
-              <div class="settings-card-body" style="max-height:2000px">
-                <p class="settings-desc">管理团队成员账号、审批注册申请、分配角色和 API Key。</p>
-
-                <!-- Pending approvals -->
-                <div id="keys-pending-section" style="margin-bottom:20px; display:none;">
-                  <h3 style="margin-bottom:8px; color:var(--warning, #f59e0b);">待审批用户</h3>
-                  <div id="keys-pending-list"></div>
-                </div>
-
-                <!-- Active users -->
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                  <h3 style="margin:0;">已有用户</h3>
-                  <button class="btn btn-primary" onclick="openAdminCreateUser()"
-                    style="font-size:13px; padding:5px 14px;">+ 添加用户</button>
-                </div>
-                <div id="keys-active-list"></div>
-
-                <!-- Admin create user form (hidden by default) -->
-                <div id="admin-create-user-form"
-                  style="display:none; margin-top:16px; padding:16px; background:var(--bg-input); border:1px solid var(--border); border-radius:var(--radius);">
-                  <h3 style="margin-top:0; margin-bottom:12px;">添加新用户</h3>
-                  <div class="settings-grid" style="gap:10px;">
-                    <div class="form-group">
-                      <label>用户名</label>
-                      <input type="text" id="admin-new-username" placeholder="用户名">
-                    </div>
-                    <div class="form-group">
-                      <label>角色</label>
-                      <select id="admin-new-role"
-                        style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius);padding:6px 10px;">
-                        <option value="editor">editor</option>
-                        <option value="viewer">viewer</option>
-                        <option value="admin">admin</option>
-                      </select>
-                    </div>
-                    <div class="form-group">
-                      <label>初始密码 <span class="hint">(可选，用于 Web 登录)</span></label>
-                      <input type="password" id="admin-new-password" placeholder="留空则只能用 API Key">
-                    </div>
-                  </div>
-                  <div style="margin-top:12px;">
-                    <button class="btn btn-primary" onclick="createUserAdmin()">创建</button>
-                    <button class="btn" onclick="document.getElementById('admin-create-user-form').style.display='none'"
-                      style="margin-left:8px;">取消</button>
-                  </div>
                 </div>
               </div>
             </div>
