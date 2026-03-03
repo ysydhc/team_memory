@@ -1828,25 +1828,27 @@ const UNGROUPED_ID = '__ungrouped__';
 const VISIBLE_STORAGE_PREFIX = 'tm_tasks_visible_';
 
 function _visibleStorageKey() {
-  const proj = (state.activeProject || state.defaultProject || 'default').replace(/[^a-zA-Z0-9_-]/g, '_');
-  return VISIBLE_STORAGE_PREFIX + (_tasksShowArchived ? 'archived_' : '') + proj;
+    const proj = (state.activeProject || state.defaultProject || 'default').replace(/[^a-zA-Z0-9_-]/g, '_');
+    return VISIBLE_STORAGE_PREFIX + (_tasksShowArchived ? 'archived_' : '') + proj;
 }
 
 function _loadVisibleGroupsFromStorage() {
-  try {
-    const raw = localStorage.getItem(_visibleStorageKey());
-    if (!raw) return null;
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? new Set(arr) : null;
-  } catch {
-    return null;
-  }
+    try {
+        const raw = localStorage.getItem(_visibleStorageKey());
+        if (!raw) return null;
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? new Set(arr) : null;
+    } catch {
+        return null;
+    }
 }
 
 function _saveVisibleGroupsToStorage() {
-  try {
-    localStorage.setItem(_visibleStorageKey(), JSON.stringify(Array.from(_kanbanVisibleGroups)));
-  } catch {}
+    try {
+        localStorage.setItem(_visibleStorageKey(), JSON.stringify(Array.from(_kanbanVisibleGroups)));
+    } catch (e) {
+        if (typeof console !== 'undefined' && console.warn) console.warn('Failed to persist visible groups:', e);
+    }
 }
 
 const _kanbanVisibleGroups = new Set();
@@ -1942,11 +1944,14 @@ export async function loadTasks() {
             }
         }));
 
-        // Restore visible groups from localStorage when available
+        // Restore visible groups from localStorage when available (filter stale IDs)
+        const groupIds = new Set(groups.map((g) => g.id));
         const stored = _loadVisibleGroupsFromStorage();
         if (stored && stored.size > 0) {
             _kanbanVisibleGroups.clear();
-            stored.forEach(id => _kanbanVisibleGroups.add(id));
+            stored.forEach((id) => {
+                if (groupIds.has(id)) _kanbanVisibleGroups.add(id);
+            });
             _kanbanInitialized = true;
         }
 
@@ -1965,7 +1970,6 @@ export async function loadTasks() {
         }
 
         // Filter tasks by visible groups (only when not filtering by a specific group)
-        const groupIds = new Set(groups.map(g => g.id));
         const filteredTasks = groupFilter
             ? (groupFilter === UNGROUPED_ID ? tasks.filter(t => !t.group_id) : tasks)
             : _tasksShowArchived
