@@ -139,6 +139,15 @@ def parse_workflow_steps_from_messages(
     return result
 
 
+def _step_optional_metadata(step: dict[str, Any]) -> dict[str, Any]:
+    """Extract optional metadata (timeout_hint, retry_hint, idempotent) from step."""
+    extra: dict[str, Any] = {}
+    for k in ("timeout_hint", "retry_hint", "idempotent"):
+        if k in step:
+            extra[k] = step[k]
+    return extra
+
+
 def get_next_step(
     workflow_id: str,
     workspace_root: Path | None = None,
@@ -151,7 +160,8 @@ def get_next_step(
     (with group_completed) to determine next.
 
     Returns:
-        dict with keys: next_step_id, name, action, acceptance_criteria, workflow_id.
+        dict with keys: next_step_id, name, action, acceptance_criteria, workflow_id,
+        plus optional timeout_hint, retry_hint, idempotent when present in step.
         If workflow not found or no next step, raises or returns error dict.
     """
     root = workspace_root or Path.cwd()
@@ -179,6 +189,7 @@ def get_next_step(
             "action": first.get("action"),
             "acceptance_criteria": first.get("acceptance_criteria"),
             "workflow_id": resolved_id,
+            **_step_optional_metadata(first),
         }
 
     current = _step_by_id(steps, current_step_id)
@@ -220,6 +231,7 @@ def get_next_step(
         "action": next_step.get("action"),
         "acceptance_criteria": next_step.get("acceptance_criteria"),
         "workflow_id": resolved_id,
+        **_step_optional_metadata(next_step),
     }
 
 

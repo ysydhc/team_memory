@@ -127,6 +127,37 @@ def test_get_next_step_resolves_task_execution_workflow():
     assert "tm_task" in action or "冷启动" in action
 
 
+def test_get_next_step_returns_optional_metadata(tmp_path):
+    """get_next_step includes timeout_hint, retry_hint, idempotent when present."""
+    (tmp_path / ".cursor" / "plans" / "workflows").mkdir(parents=True)
+    wf = tmp_path / ".cursor" / "plans" / "workflows" / "test-wf.yaml"
+    wf.write_text("""
+meta:
+  id: test-wf
+steps:
+  - id: step-a
+    name: A
+    action: Do A
+    timeout_hint: 5min
+    retry_hint: retry 2
+    idempotent: true
+    allowed_next: [step-b]
+  - id: step-b
+    name: B
+    action: Do B
+    allowed_next: []
+""")
+    r = get_next_step("test-wf", workspace_root=tmp_path, current_step_id=None)
+    assert r.get("next_step_id") == "step-a"
+    assert r.get("timeout_hint") == "5min"
+    assert r.get("retry_hint") == "retry 2"
+    assert r.get("idempotent") is True
+
+    r2 = get_next_step("test-wf", workspace_root=tmp_path, current_step_id="step-a")
+    assert r2.get("next_step_id") == "step-b"
+    assert r2.get("timeout_hint") is None  # step-b has no such field
+
+
 def test_load_workflow_step_with_optional_metadata(tmp_path):
     """Step with timeout_hint, retry_hint, idempotent is loaded."""
     (tmp_path / "w.yaml").write_text("""
