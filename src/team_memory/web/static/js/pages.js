@@ -2118,6 +2118,18 @@ export function showTaskDetail(taskId) {
             <input id="sl-due" type="date" value="${(t.due_date || '').slice(0, 10)}" />
           </div>
         </div>
+        <div class="field-group">
+          <div class="field-label">验收标准</div>
+          <textarea id="sl-acceptance-criteria" placeholder="与当前 step 的 acceptance_criteria 关联">${esc(t.acceptance_criteria || '')}</textarea>
+        </div>
+        <div class="field-group">
+          <div class="field-label">已验收</div>
+          <select id="sl-acceptance-met">
+            <option value="">未设置</option>
+            <option value="true"${t.acceptance_met === true ? ' selected' : ''}>是</option>
+            <option value="false"${t.acceptance_met === false ? ' selected' : ''}>否</option>
+          </select>
+        </div>
         ${t.sediment_experience_id ? `<div class="field-group"><div class="field-label">沉淀经验</div><a onclick="closeTaskSlideout();showDetail('${t.sediment_experience_id}')" style="color:var(--accent);cursor:pointer;font-size:13px">查看关联经验</a></div>` : ''}
         <div class="slideout-actions">
           <button class="btn btn-primary btn-sm" onclick="saveTaskFromSlideout('${t.id}')">保存</button>
@@ -2180,6 +2192,7 @@ export function closeTaskSlideout() {
 
 export async function saveTaskFromSlideout(taskId) {
     const groupVal = document.getElementById('sl-group')?.value || '';
+    const acceptanceMetVal = document.getElementById('sl-acceptance-met')?.value;
     const body = {
         title: document.getElementById('sl-title')?.value,
         description: document.getElementById('sl-desc')?.value,
@@ -2188,6 +2201,8 @@ export async function saveTaskFromSlideout(taskId) {
         importance: parseInt(document.getElementById('sl-importance')?.value, 10) || 3,
         due_date: document.getElementById('sl-due')?.value || null,
         group_id: groupVal || null,
+        acceptance_criteria: document.getElementById('sl-acceptance-criteria')?.value || null,
+        acceptance_met: acceptanceMetVal === '' ? null : acceptanceMetVal === 'true',
     };
     try {
         await api('PUT', `/api/v1/tasks/${taskId}`, body);
