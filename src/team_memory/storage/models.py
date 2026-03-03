@@ -495,6 +495,10 @@ class PersonalTask(Base):
     display_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    # Task-level acceptance (6.6): links to workflow step acceptance_criteria
+    acceptance_criteria: Mapped[str | None] = mapped_column(Text, nullable=True)
+    acceptance_met: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )
@@ -528,6 +532,8 @@ class PersonalTask(Base):
             "path": self.path,
             "display_id": self.display_id,
             "content_hash": self.content_hash,
+            "acceptance_criteria": self.acceptance_criteria,
+            "acceptance_met": self.acceptance_met,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
