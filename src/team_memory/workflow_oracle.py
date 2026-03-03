@@ -17,14 +17,36 @@ def _workflow_path(workflow_id: str, workspace_root: Path) -> Path:
     return workspace_root / ".cursor" / "plans" / "workflows" / f"{workflow_id}.yaml"
 
 
+def _resolve_step_ref(step: dict[str, Any], base_dir: Path) -> dict[str, Any]:
+    """Resolve step $ref to full step dict; return step unchanged if no $ref."""
+    if set(step.keys()) == {"$ref"}:
+        ref_path = base_dir / step["$ref"]
+        if not ref_path.exists():
+            raise FileNotFoundError(f"Step ref not found: {ref_path}")
+        ref_raw = ref_path.read_text(encoding="utf-8")
+        resolved = yaml.safe_load(ref_raw)
+        if not resolved or not isinstance(resolved, dict):
+            raise ValueError(f"Invalid step file: {ref_path}")
+        return resolved
+    return step
+
+
 def _load_workflow(path: Path) -> dict[str, Any]:
-    """Load workflow YAML; returns dict with meta and steps."""
+    """Load workflow YAML; returns dict with meta and steps. Resolves $ref in steps."""
     if not path.exists():
         raise FileNotFoundError(f"Workflow file not found: {path}")
     raw = path.read_text(encoding="utf-8")
     data = yaml.safe_load(raw)
     if not data or "steps" not in data:
         raise ValueError(f"Invalid workflow: no steps in {path}")
+    base_dir = path.parent
+    resolved_steps: list[dict[str, Any]] = []
+    for step in data["steps"]:
+        if isinstance(step, dict):
+            resolved_steps.append(_resolve_step_ref(step, base_dir))
+        else:
+            resolved_steps.append(step)
+    data["steps"] = resolved_steps
     return data
 
 

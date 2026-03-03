@@ -1,11 +1,52 @@
-"""Unit tests for workflow_oracle (parse_workflow_steps_from_messages, _last_step_from_messages)."""
+"""Unit tests for workflow_oracle: parse_workflow_steps, _last_step, _load_workflow."""
 
 from datetime import datetime, timezone
 
 from team_memory.workflow_oracle import (
     _last_step_from_messages,
+    _load_workflow,
     parse_workflow_steps_from_messages,
 )
+
+
+def test_load_workflow_resolves_step_ref(tmp_path):
+    """$ref in steps is resolved; referenced step has id, name, action."""
+    (tmp_path / "main.yaml").write_text("""
+meta:
+  id: test-workflow
+steps:
+  - $ref: steps/step-a.yaml
+""")
+    (tmp_path / "steps").mkdir()
+    (tmp_path / "steps" / "step-a.yaml").write_text("""
+id: step-a
+name: Step A
+action: Do A
+acceptance_criteria: A done
+allowed_next: [step-b]
+""")
+    data = _load_workflow(tmp_path / "main.yaml")
+    assert len(data["steps"]) == 1
+    assert data["steps"][0]["id"] == "step-a"
+    assert data["steps"][0]["action"] == "Do A"
+
+
+def test_load_workflow_inline_steps_unchanged(tmp_path):
+    """Inline steps (no $ref) work as before."""
+    (tmp_path / "w.yaml").write_text("""
+meta:
+  id: inline-workflow
+steps:
+  - id: step-1
+    name: One
+    action: Do one
+    acceptance_criteria: done
+    allowed_next: []
+""")
+    data = _load_workflow(tmp_path / "w.yaml")
+    assert len(data["steps"]) == 1
+    assert data["steps"][0]["id"] == "step-1"
+    assert data["steps"][0]["action"] == "Do one"
 
 
 def test_parse_workflow_steps_empty():
