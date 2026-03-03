@@ -1824,9 +1824,26 @@ const KANBAN_COLS = [
     { status: 'in_progress', label: '进行中', icon: '🔧' },
     { status: 'completed', label: '已完成', icon: '✅' },
 ];
+const UNGROUPED_ID = '__ungrouped__';
 const _kanbanVisibleGroups = new Set();
 let _kanbanInitialized = false;
+let _tasksShowArchived = false;
 const PRIORITY_COLORS = { urgent: 'priority-urgent', high: 'priority-high', medium: 'priority-medium', low: 'priority-low' };
+
+export function switchTasksSubTab(mode) {
+    _tasksShowArchived = mode === 'archived';
+    if (_tasksShowArchived) {
+        _kanbanVisibleGroups.clear();
+    }
+    const groupSelect = document.getElementById('tasks-group-filter');
+    if (groupSelect) groupSelect.value = '';
+    document.querySelectorAll('#page-tasks .mode-tab').forEach((el) => el.classList.remove('active'));
+    const tab = document.getElementById(`tasks-tab-${mode}`);
+    if (tab) tab.classList.add('active');
+    const titleEl = document.getElementById('page-tasks-title');
+    if (titleEl) titleEl.textContent = _tasksShowArchived ? '归档任务' : '任务列表';
+    loadTasks();
+}
 
 function _daysUntilDue(dueDate) {
     if (!dueDate) return null;
@@ -1863,21 +1880,36 @@ export async function loadTasks() {
     const board = document.getElementById('tasks-board');
     const groupsContainer = document.getElementById('tasks-groups');
     if (!board) return;
+    document.querySelectorAll('#page-tasks .mode-tab').forEach((el) => el.classList.remove('active'));
+    const tab = document.getElementById(_tasksShowArchived ? 'tasks-tab-archived' : 'tasks-tab-active');
+    if (tab) tab.classList.add('active');
+    const titleEl = document.getElementById('page-tasks-title');
+    if (titleEl) titleEl.textContent = _tasksShowArchived ? '归档任务' : '任务列表';
     board.innerHTML = '<div class="loading" style="grid-column:1/-1"><div class="spinner"></div></div>';
     try {
         const project = state.activeProject || state.defaultProject || 'default';
         const groupFilter = document.getElementById('tasks-group-filter')?.value || '';
         let url = `/api/v1/tasks?project=${encodeURIComponent(project)}`;
-        if (groupFilter) url += `&group_id=${encodeURIComponent(groupFilter)}`;
+        if (groupFilter && groupFilter !== UNGROUPED_ID) url += `&group_id=${encodeURIComponent(groupFilter)}`;
+        const includeArchived = _tasksShowArchived;
+        const groupUrl = `/api/v1/task-groups?project=${encodeURIComponent(project)}${includeArchived ? '&include_archived=true' : ''}`;
         const [taskData, groupData] = await Promise.all([
             api('GET', url),
-            api('GET', `/api/v1/task-groups?project=${encodeURIComponent(project)}`),
+            api('GET', groupUrl),
         ]);
         const tasks = taskData.tasks || [];
-        const groups = (groupData.groups || []).filter(g => !g.archived);
+        let groups = (groupData.groups || []).filter(g => includeArchived ? g.archived : !g.archived);
+        const ungroupedTasks = tasks.filter(t => !t.group_id);
+        if (ungroupedTasks.length > 0) {
+            groups = [
+                { id: UNGROUPED_ID, title: '无任务组', tasks: ungroupedTasks, archived: false, isVirtual: true },
+                ...groups,
+            ];
+        }
 
         // Fetch workflow progress per group (4.2 group progress)
         await Promise.all(groups.map(async (g) => {
+            if (g.isVirtual) return;
             try {
                 const d = await api('GET', `/api/v1/task-groups/${g.id}/workflow-progress`);
                 g.workflowProgress = d;
@@ -1886,8 +1918,8 @@ export async function loadTasks() {
             }
         }));
 
-        // Initialize visible groups on first load only (never auto-fill if user hid all)
-        if (!_kanbanInitialized && _kanbanVisibleGroups.size === 0 && groups.length > 0) {
+        // Initialize visible groups on first load (active mode only); archived mode defaults to all closed
+        if (!_tasksShowArchived && !_kanbanInitialized && _kanbanVisibleGroups.size === 0 && groups.length > 0) {
             groups.forEach(g => _kanbanVisibleGroups.add(g.id));
             _kanbanInitialized = true;
         }
@@ -1900,14 +1932,23 @@ export async function loadTasks() {
         }
 
         // Filter tasks by visible groups (only when not filtering by a specific group)
-        const filteredTasks = groupFilter ? tasks : tasks.filter(t => {
-            if (!t.group_id) return true;
-            return _kanbanVisibleGroups.has(t.group_id);
-        });
+        const groupIds = new Set(groups.map(g => g.id));
+        const filteredTasks = groupFilter
+            ? (groupFilter === UNGROUPED_ID ? tasks.filter(t => !t.group_id) : tasks)
+            : _tasksShowArchived
+                ? tasks.filter(t =>
+                    !t.group_id
+                        ? _kanbanVisibleGroups.has(UNGROUPED_ID)
+                        : (groupIds.has(t.group_id) && _kanbanVisibleGroups.has(t.group_id))
+                )
+                : tasks.filter(t => {
+                    if (!t.group_id) return _kanbanVisibleGroups.has(UNGROUPED_ID);
+                    return _kanbanVisibleGroups.has(t.group_id);
+                });
 
         let html = '';
         if (groupFilter) {
-            const gName = groups.find(g => g.id === groupFilter)?.title || '任务组';
+            const gName = groups.find(g => g.id === groupFilter)?.title || (groupFilter === UNGROUPED_ID ? '无任务组' : '任务组');
             html += `<div style="grid-column:1/-1;margin-bottom:8px">
               <button class="back-btn" onclick="document.getElementById('tasks-group-filter').value='';loadTasks()"
                 style="font-size:13px;cursor:pointer;background:none;border:none;color:var(--accent);padding:4px 0">
@@ -1933,19 +1974,24 @@ export async function loadTasks() {
         const TASK_GROUP_VISIBLE = 3;
         if (groups.length > 0 && !groupFilter) {
             const cardsHtml = groups.map((g) => {
+                const isArchived = _tasksShowArchived && g.archived;
                 const wp = g.workflowProgress;
                 const prog = wp ? { total: wp.total, completed: wp.completed } : (g.progress || { total: (g.tasks || []).length, completed: (g.tasks || []).filter(t => t.status === 'completed' || t.status === 'cancelled').length });
                 const pct = prog.total
                     ? Math.round(prog.completed / prog.total * 100) : 0;
                 const groupCompleted = g.group_completed === true;
                 const hasSediment = g.has_sediment === true;
-                const needsRetro = groupCompleted && !hasSediment;
-                const sedimentBtn = groupCompleted
-                    ? `<button class="sediment-btn" title="保存为组经验" onclick="event.stopPropagation();sedimentTaskGroup('${g.id}')">${needsRetro ? '组复盘' : '沉淀'}</button>`
+                const needsRetro = !g.isVirtual && groupCompleted && !hasSediment && !isArchived;
+                const sedimentBtn = !g.isVirtual && !isArchived && groupCompleted
+                    ? `<button class="sediment-btn" title="保存为组经验" onclick="event.stopPropagation();sedimentTaskGroup('${g.id}')">${needsRetro ? '组复盘' : '经验'}</button>`
                     : '';
-                const archiveBtn = pct === 100
+                const archiveBtn = !g.isVirtual && !isArchived && pct === 100
                     ? `<button class="archive-btn" onclick="event.stopPropagation();archiveGroup('${g.id}')">📦</button>`
                     : '';
+                const unarchiveBtn = isArchived
+                    ? `<button class="unarchive-btn" title="恢复到此任务列表" onclick="event.stopPropagation();unarchiveGroup('${g.id}')">恢复</button>`
+                    : '';
+                const archiveBadge = isArchived ? `<span class="archive-badge">已归档</span>` : '';
                 const circleColor = pct === 100
                     ? 'var(--green)' : pct >= 50
                         ? 'var(--accent)' : 'var(--yellow)';
@@ -1971,17 +2017,15 @@ export async function loadTasks() {
                         return `<div class="group-subtask-item"><span class="status-dot ${t.status || 'wait'}"></span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.title)}</span>${stepLabel ? `<span class="group-subtask-step">${esc(stepLabel)}</span>` : ''}</div>`;
                       }).join('')}${moreCount > 0 ? `<div style="font-size:11px;color:var(--text-muted)">+${moreCount} more</div>` : ''}</div>`
                     : '';
-                const retroBadge = needsRetro
-                    ? `<span class="group-retro-badge" title="本组全部完成，待执行组复盘">待复盘</span>`
-                    : '';
                 const retroBlock = needsRetro
                     ? `<div class="group-retro-prompt" onclick="event.stopPropagation()">
                         <div class="group-retro-prompt-text">待执行组复盘：本组任务已全部完成，请执行 tm_save_group 完成组级经验沉淀（总-分或总-分-分），再选活下一任务。</div>
                         <button class="btn btn-primary btn-sm group-retro-btn" onclick="event.stopPropagation();sedimentTaskGroup('${g.id}')">组复盘 / 保存为组经验</button>
                        </div>`
                     : '';
-                return `<div class="task-group-card task-group-collapsible" style="min-width:320px;max-width:360px;flex-shrink:0;scroll-snap-align:start"
+                return `<div class="task-group-card task-group-collapsible${isArchived ? ' archived' : ''}${g.isVirtual ? ' ungrouped' : ''}" style="min-width:320px;max-width:360px;flex-shrink:0;scroll-snap-align:start;position:relative"
                   onclick="document.getElementById('tasks-group-filter').value='${g.id}';loadTasks()">
+                  ${archiveBadge}
                   <div class="task-group-header">
                     <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
                       <svg class="circular-progress" viewBox="0 0 36 36">
@@ -1990,16 +2034,15 @@ export async function loadTasks() {
                         <text x="18" y="21" class="pct-text">${pct}%</text>
                       </svg>
                       <div style="flex:1;min-width:0">
-                        <div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:6px">
-                          ${esc(g.title)}
-                          ${retroBadge}
+                        <div style="font-weight:500;display:flex;align-items:center;gap:6px;min-width:0">
+                          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.title)}</span>
                         </div>
                         <div style="font-size:11px;color:var(--text-muted)">${prog.completed}/${prog.total} 任务完成</div>
                         ${stepSummary}
                       </div>
                     </div>
-                    <div style="display:flex;align-items:center;gap:6px">
-                      ${sedimentBtn}
+                    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+                      ${unarchiveBtn}
                       <button class="group-eye-btn ${eyeCls}" title="${isVisible ? '隐藏看板任务' : '显示看板任务'}"
                         onclick="event.stopPropagation();toggleGroupVisibility('${g.id}')">${eyeIcon}</button>
                       ${archiveBtn}
@@ -2007,15 +2050,23 @@ export async function loadTasks() {
                   </div>
                   ${retroBlock}
                   ${subtaskHtml}
+                  ${sedimentBtn ? `<div class="task-group-footer" style="margin-top:12px;display:flex;justify-content:flex-end"><div onclick="event.stopPropagation()">${sedimentBtn}</div></div>` : ''}
                 </div>`;
             }).join('');
+            const sectionTitle = _tasksShowArchived ? '归档任务组' : '任务组';
             groupsContainer.innerHTML =
                 `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">` +
-                `<h3 style="font-size:14px;font-weight:600;color:var(--text-secondary);margin:0">任务组</h3>` +
+                `<h3 style="font-size:14px;font-weight:600;color:var(--text-secondary);margin:0">${sectionTitle}</h3>` +
                 `</div>` +
                 `<div id="task-groups-grid" class="task-groups-grid" style="display:flex;gap:16px;overflow-x:auto;padding-bottom:8px;scroll-snap-type: x mandatory">${cardsHtml}</div>`;
         } else {
-            groupsContainer.innerHTML = '';
+            groupsContainer.innerHTML = _tasksShowArchived
+                ? `<div class="empty-state" style="padding:32px;text-align:center;color:var(--text-muted)">
+                    <div style="font-size:32px;margin-bottom:12px;opacity:0.6">📦</div>
+                    <div style="font-size:14px;font-weight:500;margin-bottom:6px">暂无归档任务组</div>
+                    <div style="font-size:12px">已完成并归档的任务组将显示在此处</div>
+                  </div>`
+                : '';
         }
     } catch (e) {
         board.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><h3>加载任务失败</h3><p>${esc(e.message)}</p></div>`;
@@ -2288,6 +2339,16 @@ export async function archiveGroup(groupId) {
         loadTasks();
     } catch (e) {
         toast('归档失败: ' + e.message, 'error');
+    }
+}
+
+export async function unarchiveGroup(groupId) {
+    try {
+        await api('PUT', `/api/v1/task-groups/${groupId}`, { archived: false });
+        toast('任务组已恢复', 'success');
+        loadTasks();
+    } catch (e) {
+        toast('恢复失败: ' + e.message, 'error');
     }
 }
 
