@@ -2875,8 +2875,12 @@ Important:
     )
 )
 def resume_project(project: str | None = None) -> str:
-    """Generate a prompt for resuming project context."""
-    proj = project or "default"
+    """Generate a prompt for resuming project context.
+
+    When project is not provided, uses the same resolution as other MCP tools:
+    env TEAM_MEMORY_PROJECT > config default_project (session/window project) > 'default'.
+    """
+    proj = _resolve_project(project)
     return f"""You are resuming work on project: {proj}
 
 To restore context, run these commands:
