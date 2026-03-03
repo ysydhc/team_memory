@@ -437,6 +437,8 @@ window.unarchiveGroup = pages.unarchiveGroup;
 window.switchTasksSubTab = pages.switchTasksSubTab;
 window.toggleTaskGroups = pages.toggleTaskGroups;
 window.toggleGroupVisibility = pages.toggleGroupVisibility;
+window.showAllTaskGroups = pages.showAllTaskGroups;
+window.hideAllTaskGroups = pages.hideAllTaskGroups;
 window.generateTaskPrompt = pages.generateTaskPrompt;
 window.openCreateTaskModal = () => toast('任务创建面板即将上线', 'info');
 window.changeExpStatus = pages.changeExpStatus;

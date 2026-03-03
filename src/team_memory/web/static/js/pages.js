@@ -1962,6 +1962,8 @@ export async function loadTasks() {
             _kanbanInitialized = true;
         }
 
+        window.__tasksCurrentGroups = groups;
+
         const groupSelect = document.getElementById('tasks-group-filter');
         if (groupSelect) {
             const cur = groupSelect.value;
@@ -2145,9 +2147,12 @@ export async function loadTasks() {
                 </div>`;
             }).join('');
             const sectionTitle = _tasksShowArchived ? '归档任务组' : '任务组';
+            const showAllBtn = `<button type="button" class="task-group-quick-btn" onclick="showAllTaskGroups()" title="全部显示">全部显示</button>`;
+            const hideAllBtn = `<button type="button" class="task-group-quick-btn" onclick="hideAllTaskGroups()" title="全部不显示">全部不显示</button>`;
             groupsContainer.innerHTML =
-                `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">` +
+                `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px">` +
                 `<h3 style="font-size:14px;font-weight:600;color:var(--text-secondary);margin:0">${sectionTitle}</h3>` +
+                `<div style="display:flex;gap:6px">${showAllBtn}${hideAllBtn}</div>` +
                 `</div>` +
                 `<div id="task-groups-grid" class="task-groups-grid" style="display:flex;gap:16px;overflow-x:auto;padding-bottom:8px;scroll-snap-type: x mandatory">${cardsHtml}</div>`;
         } else {
@@ -2468,6 +2473,21 @@ export function toggleGroupVisibility(groupId) {
     } else {
         _kanbanVisibleGroups.add(groupId);
     }
+    _saveVisibleGroupsToStorage();
+    loadTasks();
+}
+
+export function showAllTaskGroups() {
+    _kanbanInitialized = true;
+    _kanbanVisibleGroups.clear();
+    (window.__tasksCurrentGroups || []).forEach(g => _kanbanVisibleGroups.add(g.id));
+    _saveVisibleGroupsToStorage();
+    loadTasks();
+}
+
+export function hideAllTaskGroups() {
+    _kanbanInitialized = true;
+    _kanbanVisibleGroups.clear();
     _saveVisibleGroupsToStorage();
     loadTasks();
 }
