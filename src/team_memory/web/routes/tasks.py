@@ -43,6 +43,7 @@ class TaskCreate(BaseModel):
     due_date: datetime | None = None
     labels: list[str] = Field(default_factory=list)
     experience_id: str | None = None
+    acceptance_criteria: str | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -58,6 +59,8 @@ class TaskUpdate(BaseModel):
     due_date: datetime | None = None
     labels: list[str] | None = None
     experience_id: str | None = None
+    acceptance_criteria: str | None = None
+    acceptance_met: bool | None = None
 
 
 class TaskGroupCreate(BaseModel):
@@ -142,6 +145,7 @@ async def create_task(
             due_date=req.due_date,
             labels=req.labels,
             experience_id=uuid.UUID(req.experience_id) if req.experience_id else None,
+            acceptance_criteria=req.acceptance_criteria,
         )
         await session.commit()
 
@@ -201,6 +205,10 @@ async def update_task(
             kwargs["experience_id"] = (
                 uuid.UUID(raw["experience_id"]) if raw["experience_id"] else None
             )
+        if "acceptance_criteria" in raw:
+            kwargs["acceptance_criteria"] = raw["acceptance_criteria"]
+        if "acceptance_met" in raw:
+            kwargs["acceptance_met"] = raw["acceptance_met"]
 
         updated = await repo.update_task(task.id, **kwargs)
         await session.commit()

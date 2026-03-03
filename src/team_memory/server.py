@@ -2172,6 +2172,7 @@ async def tm_task(
                 due_date=parsed_due,
                 labels=labels,
                 experience_id=_uuid.UUID(experience_id) if experience_id else None,
+                acceptance_criteria=acceptance_criteria,
             )
             await session.commit()
             task_dict = task.to_dict()

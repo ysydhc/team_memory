@@ -1692,6 +1692,7 @@ class TaskRepository:
         due_date: datetime | None = None,
         labels: list[str] | None = None,
         experience_id: uuid.UUID | None = None,
+        acceptance_criteria: str | None = None,
     ) -> PersonalTask:
         task = PersonalTask(
             title=title,
@@ -1705,6 +1706,7 @@ class TaskRepository:
             due_date=due_date,
             labels=labels or [],
             experience_id=experience_id,
+            acceptance_criteria=acceptance_criteria,
         )
         self._session.add(task)
         await self._session.flush()
