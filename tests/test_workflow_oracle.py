@@ -127,6 +127,27 @@ def test_get_next_step_resolves_task_execution_workflow():
     assert "tm_task" in action or "冷启动" in action
 
 
+def test_load_workflow_step_with_optional_metadata(tmp_path):
+    """Step with timeout_hint, retry_hint, idempotent is loaded."""
+    (tmp_path / "w.yaml").write_text("""
+meta:
+  id: test
+steps:
+  - id: step-x
+    name: X
+    action: Do X
+    timeout_hint: 5min
+    retry_hint: "retry 2"
+    idempotent: true
+    allowed_next: []
+""")
+    data = _load_workflow(tmp_path / "w.yaml")
+    s = data["steps"][0]
+    assert s.get("timeout_hint") == "5min"
+    assert s.get("retry_hint") == "retry 2"
+    assert s.get("idempotent") is True
+
+
 def test_parse_workflow_steps_first_line_non_audit_second_line_audit():
     """First line non-audit, second line is audit: only first line is matched, so no match."""
     msgs = [
