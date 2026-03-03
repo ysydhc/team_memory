@@ -1948,13 +1948,67 @@ export async function loadTasks() {
 
         let html = '';
         if (groupFilter) {
-            const gName = groups.find(g => g.id === groupFilter)?.title || (groupFilter === UNGROUPED_ID ? '无任务组' : '任务组');
+            const g = groups.find(gr => gr.id === groupFilter);
+            const gName = g?.title || (groupFilter === UNGROUPED_ID ? '无任务组' : '任务组');
             html += `<div style="grid-column:1/-1;margin-bottom:8px">
               <button class="back-btn" onclick="document.getElementById('tasks-group-filter').value='';loadTasks()"
                 style="font-size:13px;cursor:pointer;background:none;border:none;color:var(--accent);padding:4px 0">
                 ← 返回全部任务</button>
               <span style="font-size:13px;color:var(--text-muted);margin-left:8px">${esc(gName)}</span>
             </div>`;
+            if (g) {
+                const isArchived = _tasksShowArchived && g.archived;
+                const wp = g.workflowProgress;
+                const prog = wp ? { total: wp.total, completed: wp.completed } : (g.progress || { total: (g.tasks || []).length, completed: (g.tasks || []).filter(t => t.status === 'completed' || t.status === 'cancelled').length });
+                const pct = prog.total ? Math.round(prog.completed / prog.total * 100) : 0;
+                const groupCompleted = g.group_completed === true;
+                const hasSediment = g.has_sediment === true;
+                const needsRetro = !g.isVirtual && groupCompleted && !hasSediment && !isArchived;
+                const sedimentBtn = !g.isVirtual && !isArchived && groupCompleted ? `<button class="sediment-btn" title="保存为组经验" onclick="sedimentTaskGroup('${g.id}')">${needsRetro ? '组复盘' : '经验'}</button>` : '';
+                const archiveBtn = !g.isVirtual && !isArchived && pct === 100 ? `<button class="archive-btn" onclick="archiveGroup('${g.id}')">📦</button>` : '';
+                const unarchiveBtn = isArchived ? `<button class="unarchive-btn" title="恢复到此任务列表" onclick="unarchiveGroup('${g.id}')">恢复</button>` : '';
+                const archiveBadge = isArchived ? `<span class="archive-badge">已归档</span>` : '';
+                const circleColor = pct === 100 ? 'var(--green)' : pct >= 50 ? 'var(--accent)' : 'var(--yellow)';
+                const stepSummary = (() => {
+                    if (!wp || !wp.tasks || wp.tasks.length === 0) return '';
+                    const byStep = {};
+                    wp.tasks.filter(t => t.status !== 'completed' && t.status !== 'cancelled').forEach(t => {
+                        const sid = t.current_step_id || 'unknown';
+                        byStep[sid] = (byStep[sid] || 0) + 1;
+                    });
+                    const parts = Object.entries(byStep).map(([sid, n]) => `${WORKFLOW_STEP_LABELS[sid] || sid} ${n}`).filter(Boolean);
+                    return parts.length > 0 ? `<div class="group-step-summary">${parts.join('，')}</div>` : '';
+                })();
+                const retroBlock = needsRetro ? `<div class="group-retro-prompt">
+                        <div class="group-retro-prompt-text">待执行组复盘：本组任务已全部完成，请执行 tm_save_group 完成组级经验沉淀（总-分或总-分-分），再选活下一任务。</div>
+                        <button class="btn btn-primary btn-sm group-retro-btn" onclick="sedimentTaskGroup('${g.id}')">组复盘 / 保存为组经验</button>
+                       </div>` : '';
+                html += `<div class="group-mode-header" style="grid-column:1/-1;margin-bottom:12px;padding:16px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;position:relative">
+                  ${archiveBadge}
+                  <div class="task-group-header">
+                    <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
+                      <svg class="circular-progress" viewBox="0 0 36 36">
+                        <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"></path>
+                        <path class="circle-fill" style="stroke:${circleColor}" stroke-dasharray="${pct}, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"></path>
+                        <text x="18" y="21" class="pct-text">${pct}%</text>
+                      </svg>
+                      <div style="flex:1;min-width:0">
+                        <div style="font-weight:500;display:flex;align-items:center;gap:6px;min-width:0">
+                          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.title)}</span>
+                        </div>
+                        <div style="font-size:11px;color:var(--text-muted)">${prog.completed}/${prog.total} 任务完成</div>
+                        ${stepSummary}
+                      </div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+                      ${sedimentBtn}
+                      ${unarchiveBtn}
+                      ${archiveBtn}
+                    </div>
+                  </div>
+                  ${retroBlock}
+                </div>`;
+            }
         }
         for (const col of KANBAN_COLS) {
             const colTasks = filteredTasks.filter(t => t.status === col.status);
