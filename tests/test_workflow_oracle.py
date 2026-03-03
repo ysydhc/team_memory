@@ -1,10 +1,14 @@
 """Unit tests for workflow_oracle: parse_workflow_steps, _last_step, _load_workflow."""
 
 from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
 
 from team_memory.workflow_oracle import (
     _last_step_from_messages,
     _load_workflow,
+    get_next_step,
     parse_workflow_steps_from_messages,
 )
 
@@ -108,6 +112,19 @@ def test_parse_workflow_steps_first_line_only_newline_content():
     msgs = [{"content": "\n", "created_at": None}]
     steps = parse_workflow_steps_from_messages(msgs, "task-execution-workflow")
     assert steps == []
+
+
+def test_get_next_step_resolves_task_execution_workflow():
+    """Integration: real task-execution-workflow with $ref returns full action."""
+    root = Path(__file__).resolve().parent.parent
+    workflow_path = root / ".cursor" / "plans" / "workflows" / "task-execution-workflow.yaml"
+    if not workflow_path.exists():
+        pytest.skip(".cursor/workflows not present")
+    r = get_next_step("task-execution-workflow", workspace_root=root, current_step_id=None)
+    assert r.get("next_step_id") == "step-coldstart"
+    action = r.get("action") or ""
+    assert len(action) > 50
+    assert "tm_task" in action or "冷启动" in action
 
 
 def test_parse_workflow_steps_first_line_non_audit_second_line_audit():
