@@ -876,3 +876,43 @@ class ToolUsageLog(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "api_key_name": self.api_key_name,
         }
+
+
+class PersonalMemory(Base):
+    """Per-user personal memory: preferences and habits for Agent context.
+
+    Stored separately from experiences. Scope: generic (always returned) or
+    context (returned only when current_context is semantically similar).
+    Write path: semantic comparison with existing rows for same user;
+    if similarity >= threshold, update that row (mem0-style overwrite).
+    """
+
+    __tablename__ = "personal_memories"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    scope: Mapped[str] = mapped_column(
+        String(20), default="generic", nullable=False, server_default="generic"
+    )  # generic | context
+    context_hint: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    embedding = mapped_column(Vector(768), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "user_id": self.user_id,
+            "content": self.content,
+            "scope": self.scope,
+            "context_hint": self.context_hint,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
