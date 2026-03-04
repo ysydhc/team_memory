@@ -587,7 +587,11 @@ export async function showDetail(id) {
     page.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
     try {
-        const exp = await api('GET', `/api/v1/experiences/${id}`);
+        const [exp, linksRes] = await Promise.all([
+            api('GET', `/api/v1/experiences/${id}`),
+            api('GET', `/api/v1/experiences/${id}/links`).catch(() => ({ links: [] })),
+        ]);
+        const links = linksRes.links || [];
         state.currentDetail = exp;
         const typeIcon = typeIcons[exp.experience_type] || defaultTypeIcons[exp.experience_type] || '📝';
         const dTier = exp.quality_tier || 'bronze';
@@ -651,6 +655,25 @@ export async function showDetail(id) {
       </div>`
                 : '';
 
+        const linkTypeLabels = { related: '相关', supersedes: '取代', derived_from: '衍生自' };
+        const experienceLinksHtml =
+            links.length > 0
+                ? `
+      <div class="detail-section">
+        <h3>关联经验 (${links.length})</h3>
+        <div class="content">
+          <ul class="related-exp-list" style="list-style:none;padding:0;margin:0">
+            ${links
+                .map(
+                    (l) =>
+                        `<li style="margin-bottom:8px"><a href="#detail/${esc(l.other_id)}" onclick="showDetail('${esc(l.other_id)}');return false" style="color:var(--accent)">${esc(l.other_title || l.other_id)}</a> <span style="font-size:11px;color:var(--text-muted)">${linkTypeLabels[l.link_type] || l.link_type}</span></li>`
+                )
+                .join('')}
+          </ul>
+        </div>
+      </div>`
+                : '';
+
         const backPage = state.detailReferrer || 'list';
         const backLabels = { reviews: '审核队列', drafts: '草稿箱', list: '经验列表', dashboard: '仪表盘' };
         const backLabel = backLabels[backPage] || '列表';
@@ -700,6 +723,7 @@ export async function showDetail(id) {
           ${sdHtml}
           ${gitRefsHtml}
           ${relatedLinksHtml}
+          ${experienceLinksHtml}
           ${exp.code_snippets ? `
           <div class="detail-section">
             <h3>代码示例</h3>
@@ -2137,9 +2161,11 @@ function _renderTaskCard(t) {
     const sediment = t.sediment_experience_id
         ? `<a onclick="event.stopPropagation();showDetail('${t.sediment_experience_id}')" style="font-size:10px;color:var(--accent);cursor:pointer">沉淀经验</a>`
         : '';
+    const taskCopyAttrs = `data-task-id="${esc(t.id)}" data-task-title="${esc((t.title || '').replace(/"/g, '&quot;'))}" data-task-status="${esc(t.status || '')}" data-task-priority="${esc(t.priority || '')}" data-task-group-id="${esc(t.group_id || '')}"`;
+    const taskCopyBtn = getTaskCopyDropdownHtml(taskCopyAttrs);
     return `
     <div class="task-card" onclick="showTaskDetail('${t.id}')">
-      <div class="task-card-title"><span class="priority-dot ${priClass}"></span> ${esc(t.title)}</div>
+      <div class="task-card-title"><span class="priority-dot ${priClass}"></span> ${esc(t.title)}<span onclick="event.stopPropagation()" style="margin-left:4px;vertical-align:middle">${taskCopyBtn}</span></div>
       <div class="task-card-meta">
         <span class="importance-stars">${stars}</span>
         ${dueTag}
@@ -2269,6 +2295,8 @@ export async function loadTasks() {
                         <div class="group-retro-prompt-text">待执行组复盘：本组任务已全部完成，请执行 tm_save_group 完成组级经验沉淀（总-分或总-分-分），再选活下一任务。</div>
                         <button class="btn btn-primary btn-sm group-retro-btn" onclick="sedimentTaskGroup('${g.id}')">组复盘 / 保存为组经验</button>
                        </div>` : '';
+                const groupDetailCopyAttrs = `data-group-id="${esc(g.id)}" data-group-title="${esc(g.title || '').replace(/"/g, '&quot;')}" data-group-archived="${isArchived}" data-group-total="${prog.total || 0}" data-group-completed="${prog.completed || 0}"`;
+                const groupDetailCopyBtn = getTaskGroupCopyDropdownHtml(groupDetailCopyAttrs);
                 html += `<div class="group-mode-header" style="grid-column:1/-1;margin-bottom:12px;padding:16px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;position:relative">
                   ${archiveBadge}
                   <div class="task-group-header">
@@ -2287,6 +2315,7 @@ export async function loadTasks() {
                       </div>
                     </div>
                     <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+                      ${groupDetailCopyBtn}
                       ${sedimentBtn}
                       ${unarchiveBtn}
                       ${archiveBtn}
@@ -2310,6 +2339,7 @@ export async function loadTasks() {
             </div>`;
         }
         board.innerHTML = html;
+        bindCopyDropdowns(board);
 
         const TASK_GROUP_VISIBLE = 3;
         if (groups.length > 0 && !groupFilter) {
@@ -2369,6 +2399,7 @@ export async function loadTasks() {
                 const groupCopyAttrs = `data-group-id="${esc(g.id)}" data-group-title="${esc(g.title || '').replace(/"/g, '&quot;')}" data-group-archived="${isArchived}" data-group-total="${prog.total || 0}" data-group-completed="${prog.completed || 0}"`;
                 const groupCopyBtn = getTaskGroupCopyDropdownHtml(groupCopyAttrs);
                 const dragAttrs = !g.isVirtual ? ` draggable="true" data-group-id="${g.id}"` : ` data-group-id="${g.id}"`;
+                const actionRow = `<div class="task-group-actions" onclick="event.stopPropagation()">${pinBtn}<span>${groupCopyBtn}</span>${unarchiveBtn}<button class="group-eye-btn ${eyeCls}" title="${isVisible ? '隐藏看板任务' : '显示看板任务'}" onclick="event.stopPropagation();toggleGroupVisibility('${g.id}')">${eyeIcon}</button>${archiveBtn}</div>`;
                 return `<div class="task-group-card task-group-collapsible${isArchived ? ' archived' : ''}${g.isVirtual ? ' ungrouped' : ''}"${dragAttrs} style="min-width:320px;max-width:360px;flex-shrink:0;scroll-snap-align:start;position:relative"
                   onclick="document.getElementById('tasks-group-filter').value='${g.id}';loadTasks()">
                   ${archiveBadge}
@@ -2380,22 +2411,15 @@ export async function loadTasks() {
                         <text x="18" y="21" class="pct-text">${pct}%</text>
                       </svg>
                       <div style="flex:1;min-width:0">
-                        <div style="font-weight:500;display:flex;align-items:center;gap:6px;min-width:0">
-                          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(g.title).replace(/"/g, '&quot;')}">${esc(g.title)}</span>
+                        <div style="font-weight:500;min-width:0">
+                          <span style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(g.title).replace(/"/g, '&quot;')}">${esc(g.title)}</span>
                         </div>
                         <div style="font-size:11px;color:var(--text-muted)">${prog.completed}/${prog.total} 任务完成</div>
                         ${stepSummary}
                       </div>
                     </div>
-                    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-                      ${pinBtn}
-                      <span onclick="event.stopPropagation()">${groupCopyBtn}</span>
-                      ${unarchiveBtn}
-                      <button class="group-eye-btn ${eyeCls}" title="${isVisible ? '隐藏看板任务' : '显示看板任务'}"
-                        onclick="event.stopPropagation();toggleGroupVisibility('${g.id}')">${eyeIcon}</button>
-                      ${archiveBtn}
-                    </div>
                   </div>
+                  ${actionRow}
                   ${retroBlock}
                   ${subtaskHtml}
                   ${sedimentBtn ? `<div class="task-group-footer" style="margin-top:12px;display:flex;justify-content:flex-end"><div onclick="event.stopPropagation()">${sedimentBtn}</div></div>` : ''}
@@ -2541,8 +2565,10 @@ export function showTaskDetail(taskId) {
                 onclick="createTaskGroupFromSlideout('${t.id}')">+ 新建</button>
             </div>
           </div>`;
+        const slideoutTaskCopyAttrs = `data-task-id="${esc(t.id)}" data-task-title="${esc((t.title || '').replace(/"/g, '&quot;'))}" data-task-status="${esc(t.status || '')}" data-task-priority="${esc(t.priority || '')}" data-task-group-id="${esc(t.group_id || '')}"`;
+        const slideoutTaskCopyBtn = getTaskCopyDropdownHtml(slideoutTaskCopyAttrs);
         content.innerHTML = `
-        <h2>任务详情</h2>
+        <h2 style="display:flex;align-items:center;gap:8px">任务详情<span>${slideoutTaskCopyBtn}</span></h2>
         ${groupSection}
         <div class="field-group">
           <div class="field-label">标题</div>
@@ -2613,6 +2639,8 @@ export function showTaskDetail(taskId) {
           </div>
         </div>
         <div style="margin-top:12px;font-size:11px;color:var(--text-muted)">ID: ${t.id}</div>`;
+
+        bindCopyDropdowns(content);
 
         // Load messages
         api('GET', `/api/v1/tasks/${taskId}/messages`).then(msgData => {
