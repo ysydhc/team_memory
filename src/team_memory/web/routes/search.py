@@ -102,6 +102,7 @@ async def search_experiences_debug(
                 max_results=max_results,
                 min_similarity=req.min_similarity,
                 user_name=user.name,
+                current_user=user.name,
                 source="web-debug",
                 grouped=req.grouped,
                 top_k_children=top_k_children,

@@ -280,14 +280,23 @@ class SearchCache:
 
     @staticmethod
     def _make_key(
-        query: str, tags: list[str] | None = None, project: str | None = None
+        query: str,
+        tags: list[str] | None = None,
+        project: str | None = None,
+        current_user: str | None = None,
     ) -> str:
-        """Create a cache key from query, tags, and project."""
+        """Create a cache key from query, tags, project, and optionally current_user.
+
+        When per-user expansion is used, current_user must be included to avoid
+        cross-user cache pollution.
+        """
         parts = [query.strip().lower()]
         if tags:
             parts.extend(sorted(tags))
         if project:
             parts.append(f"project:{project.strip().lower()}")
+        if current_user and str(current_user).strip().lower() != "anonymous":
+            parts.append(f"user:{current_user.strip().lower()}")
         raw = "|".join(parts)
         return hashlib.md5(raw.encode()).hexdigest()
 
@@ -296,11 +305,12 @@ class SearchCache:
         query: str,
         tags: list[str] | None = None,
         project: str | None = None,
+        current_user: str | None = None,
     ) -> Any | None:
         """Get cached search results."""
         if not self.enabled:
             return None
-        key = self._make_key(query, tags, project)
+        key = self._make_key(query, tags, project, current_user)
         result = await self._result_cache.get(key)
         if result is not None:
             logger.debug("Cache hit for query: %s", query[:50])
@@ -312,11 +322,12 @@ class SearchCache:
         tags: list[str] | None,
         value: Any,
         project: str | None = None,
+        current_user: str | None = None,
     ) -> None:
         """Cache search results."""
         if not self.enabled:
             return
-        key = self._make_key(query, tags, project)
+        key = self._make_key(query, tags, project, current_user)
         await self._result_cache.put(key, value)
 
     async def get_or_compute_embedding(

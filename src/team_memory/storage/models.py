@@ -916,3 +916,30 @@ class PersonalMemory(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class UserExpansionConfig(Base):
+    """Per-user expansion config: tag_synonyms for query expansion before search.
+
+    Format matches config.tag_synonyms: { "PG": "PostgreSQL", "JS": "JavaScript" }.
+    Anonymous users do not have per-user config; only logged-in users.
+    """
+
+    __tablename__ = "user_expansion_configs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
+    tag_synonyms: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "user_id": self.user_id,
+            "tag_synonyms": self.tag_synonyms or {},
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }

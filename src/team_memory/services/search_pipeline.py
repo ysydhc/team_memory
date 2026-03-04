@@ -24,7 +24,7 @@ from team_memory.embedding.base import EmbeddingProvider
 from team_memory.reranker.base import RerankerProvider
 from team_memory.services.cache import SearchCache
 from team_memory.services.context_trimmer import ContextTrimmer
-from team_memory.storage.repository import ExperienceRepository
+from team_memory.storage.repository import ExperienceRepository, UserExpansionRepository
 
 logger = logging.getLogger("team_memory.search_pipeline")
 
@@ -185,10 +185,27 @@ class SearchPipeline:
         stage_metrics: dict[str, int] = {}
         repo = ExperienceRepository(session)
 
-        # Stage 1: Cache check
+        # Per-user tag_synonyms: merge with global when current_user is set
+        effective_synonyms = dict(self._tag_synonyms)
+        if request.current_user and str(request.current_user).strip().lower() != "anonymous":
+            expansion_repo = UserExpansionRepository(session)
+            per_user = await expansion_repo.get_by_user(request.current_user)
+            if per_user:
+                effective_synonyms = {**effective_synonyms, **per_user}
+
+        cache_user = (
+            request.current_user
+            if (request.current_user and str(request.current_user).strip().lower() != "anonymous")
+            else None
+        )
+
+        # Stage 1: Cache check (key includes current_user when per-user expansion)
         if self._cache.enabled:
             cached = await self._cache.get(
-                request.query, request.tags, project=request.project
+                request.query,
+                request.tags,
+                project=request.project,
+                current_user=cache_user,
             )
             if cached is not None:
                 duration_ms = int((time.monotonic() - start) * 1000)
@@ -196,9 +213,9 @@ class SearchPipeline:
                 cached.duration_ms = duration_ms
                 return cached
 
-        # Query expansion (synonyms) for retrieval only; cache key stays request.query
+        # Query expansion (synonyms) for retrieval; per-user merged with global
         retrieval_query = _expand_query_synonyms(
-            request.query, self._tag_synonyms
+            request.query, effective_synonyms
         )
         # Optional LLM query expansion (P1-5): merge LLM keywords; fallback on timeout/failure
         if getattr(self._search_config, "query_expansion_enabled", False) and self._llm_config:
@@ -323,13 +340,14 @@ class SearchPipeline:
             stage_metrics=stage_metrics,
         )
 
-        # Stage 8: Cache store
+        # Stage 8: Cache store (key includes current_user when per-user expansion)
         if self._cache.enabled:
             await self._cache.put(
                 request.query,
                 request.tags,
                 pipeline_result,
                 project=request.project,
+                current_user=cache_user,
             )
 
         return pipeline_result

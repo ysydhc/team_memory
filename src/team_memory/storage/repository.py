@@ -21,6 +21,7 @@ from team_memory.storage.models import (
     TaskDependency,
     TaskGroup,
     TaskMessage,
+    UserExpansionConfig,
 )
 
 
@@ -2187,3 +2188,38 @@ class PersonalMemoryRepository:
             context_hint=context_hint,
             embedding=embedding,
         )
+
+
+class UserExpansionRepository:
+    """Repository for per-user tag_synonyms storage (query expansion)."""
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def get_by_user(self, user_id: str) -> dict[str, str]:
+        """Get tag_synonyms for user; returns {} if not found."""
+        result = await self._session.execute(
+            select(UserExpansionConfig).where(UserExpansionConfig.user_id == user_id)
+        )
+        row = result.scalar_one_or_none()
+        if row:
+            return dict(row.tag_synonyms or {})
+        return {}
+
+    async def upsert(self, user_id: str, tag_synonyms: dict[str, str]) -> UserExpansionConfig:
+        """Insert or update tag_synonyms for user."""
+        result = await self._session.execute(
+            select(UserExpansionConfig).where(UserExpansionConfig.user_id == user_id)
+        )
+        row = result.scalar_one_or_none()
+        if row:
+            row.tag_synonyms = dict(tag_synonyms) if tag_synonyms else {}
+            row.updated_at = _utcnow()
+            await self._session.flush()
+            await self._session.refresh(row)
+            return row
+        cfg = UserExpansionConfig(user_id=user_id, tag_synonyms=dict(tag_synonyms or {}))
+        self._session.add(cfg)
+        await self._session.flush()
+        await self._session.refresh(cfg)
+        return cfg

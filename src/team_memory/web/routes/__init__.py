@@ -16,6 +16,7 @@ from team_memory.web.routes import (
     schema,
     search,
     tasks,
+    user_expansion,
 )
 
 
@@ -33,6 +34,7 @@ def mount_all(parent_router: APIRouter) -> None:
     parent_router.include_router(search.router)
     parent_router.include_router(config.router)
     parent_router.include_router(personal_memory.router)
+    parent_router.include_router(user_expansion.router)
     parent_router.include_router(schema.router)
     parent_router.include_router(lifecycle.router)
     parent_router.include_router(analytics.router)
