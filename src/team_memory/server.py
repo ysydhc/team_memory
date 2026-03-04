@@ -154,6 +154,83 @@ def _get_db_url() -> str:
     return get_context().db_url
 
 
+async def _try_update_user_expansion_from_search(
+    query: str, results: list[dict], user: str | None
+) -> None:
+    """Update per-user tag_synonyms from query + result tags (Task 5 auto-maintain).
+
+    Only runs for logged-in non-anonymous user. Failure does not block search.
+    Infers mappings: short query tokens (2-5 chars) -> longer result tags.
+    """
+    if not user or str(user).strip().lower() == "anonymous":
+        return
+    if not query or not results:
+        return
+    try:
+        import re
+
+        from team_memory.bootstrap import get_context
+        from team_memory.storage.database import get_session
+        from team_memory.storage.repository import UserExpansionRepository
+
+        # Extract short alphanumeric tokens from query (2-5 chars)
+        tokens = re.findall(r"[a-zA-Z0-9]{2,5}", query.strip())
+        tokens = list(dict.fromkeys(t.lower() for t in tokens))[:10]
+
+        # Collect tags from top 5 results (parent + children)
+        all_tags: set[str] = set()
+        for r in results[:5]:
+            for t in r.get("tags") or []:
+                if isinstance(t, str) and t.strip():
+                    all_tags.add(t.strip())
+            for child in r.get("children") or []:
+                for t in child.get("tags") or []:
+                    if isinstance(t, str) and t.strip():
+                        all_tags.add(t.strip())
+
+        if not tokens or not all_tags:
+            return
+
+        # Infer: short token (2-4 chars) -> longer tag when tag could be expansion
+        new_mappings: dict[str, str] = {}
+        sorted_tags = sorted(all_tags, key=lambda x: (-len(x), x))
+        for t in tokens:
+            if len(t) > 4 or len(new_mappings) >= 10:
+                break
+            best_tag: str | None = None
+            for tag in sorted_tags:
+                tag_lower = tag.lower()
+                if t == tag_lower or len(tag) <= 4:
+                    continue
+                # Prefer: prefix match > contains > length+first-char heuristic
+                if tag_lower.startswith(t) or t in tag_lower:
+                    best_tag = tag
+                    break
+                if (
+                    len(t) <= 3
+                    and len(tag) >= 6
+                    and tag_lower[0] == t[0]
+                    and best_tag is None
+                ):
+                    best_tag = tag
+            if best_tag and t not in new_mappings:
+                new_mappings[t] = best_tag
+
+        if not new_mappings:
+            return
+
+        ctx = get_context()
+        async with get_session(ctx.db_url) as session:
+            repo = UserExpansionRepository(session)
+            existing = await repo.get_by_user(user)
+            merged = {**existing, **new_mappings}
+            await repo.upsert(user, merged)
+    except Exception as e:
+        logger.warning(
+            "User expansion auto-update skipped (no block): %s", e, exc_info=False
+        )
+
+
 async def _try_extract_and_save_personal_memory(
     conversation: str, user: str | None, settings
 ) -> None:
@@ -1058,6 +1135,9 @@ async def tm_search(
             {"message": "No matching experiences found.", "results": []},
             ensure_ascii=False,
         )
+
+    # Task 5: auto-update per-user tag_synonyms from query + result tags
+    await _try_update_user_expansion_from_search(query, results, user)
 
     # Auto-increment use_count on top-1 result (mirrors tm_solve behavior)
     best = results[0]

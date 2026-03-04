@@ -780,3 +780,69 @@ class TestTryExtractAndSavePersonalMemory:
         assert call_kw["user_id"] == "user-1"
         assert call_kw["content"] == "喜欢简洁回复"
         assert call_kw["scope"] == "generic"
+
+
+# ============================================================
+# Task 5: User expansion auto-maintain from tm_search
+# ============================================================
+
+
+class TestTryUpdateUserExpansionFromSearch:
+    """Test _try_update_user_expansion_from_search (no block on failure)."""
+
+    @pytest.mark.asyncio
+    async def test_skips_when_anonymous(self):
+        """Anonymous user: get_session not called (early return)."""
+        from team_memory.server import _try_update_user_expansion_from_search
+
+        with patch(
+            "team_memory.storage.database.get_session",
+        ) as mock_get_session:
+            await _try_update_user_expansion_from_search(
+                "PG timeout",
+                [{"tags": ["postgresql", "timeout"]}],
+                user=None,
+            )
+            await _try_update_user_expansion_from_search(
+                "PG timeout",
+                [{"tags": ["postgresql"]}],
+                user="anonymous",
+            )
+            mock_get_session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_upserts_when_logged_in_and_inference_possible(self):
+        """Logged-in user + query 'pg' + tag 'postgresql': upsert called with merged."""
+        from team_memory.server import _try_update_user_expansion_from_search
+
+        mock_upsert = AsyncMock()
+        mock_get = AsyncMock(return_value={})
+        mock_repo = MagicMock()
+        mock_repo.get_by_user = mock_get
+        mock_repo.upsert = mock_upsert
+        mock_session_obj = MagicMock()
+        with patch(
+            "team_memory.bootstrap.get_context",
+        ) as mock_ctx, patch(
+            "team_memory.storage.database.get_session",
+        ) as mock_get_session, patch(
+            "team_memory.storage.repository.UserExpansionRepository",
+            return_value=mock_repo,
+        ):
+            mock_ctx.return_value.db_url = "sqlite:///"
+            mock_get_session.return_value.__aenter__ = AsyncMock(
+                return_value=mock_session_obj
+            )
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+            await _try_update_user_expansion_from_search(
+                "pg connection",
+                [{"tags": ["postgresql", "connection"]}],
+                user="user-1",
+            )
+        mock_get.assert_called_once_with("user-1")
+        mock_upsert.assert_called_once()
+        args = mock_upsert.call_args[0]
+        assert args[0] == "user-1"
+        merged = args[1]
+        assert "pg" in merged
+        assert merged["pg"] == "postgresql"
