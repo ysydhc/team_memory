@@ -3,11 +3,49 @@
 # Usage: ./scripts/healthcheck.sh [web_port]
 #
 # Checks all team_memory components and reports their status.
+# Ollama URL and embedding model are read from config.yaml (same as app);
+# override with TEAM_MEMORY_EMBEDDING__OLLAMA__BASE_URL / TEAM_MEMORY_OLLAMA_MODEL.
 # Exit code 0 = all critical services OK, non-zero = at least one FAIL.
 
 PORT="${1:-9111}"
 WEB_URL="http://localhost:${PORT}"
 FAILURES=0
+
+# Resolve project root (directory containing config.yaml)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Load Ollama base_url and embedding model from config (same as app); fallback to defaults
+OLLAMA_BASE_URL="http://localhost:11434"
+OLLAMA_EMBED_MODEL="nomic-embed-text"
+OLLAMA_LLM_MODEL_CONFIG=""
+if [ -f "${ROOT_DIR}/config.yaml" ]; then
+  CONFIG_OUT=$(cd "${ROOT_DIR}" && python3 -c "
+try:
+    from team_memory.config import load_settings
+    s = load_settings()
+    if getattr(s.embedding, 'ollama', None) and getattr(s.embedding, 'provider', None) == 'ollama':
+        print(s.embedding.ollama.base_url.rstrip('/'))
+        print(s.embedding.ollama.model or 'nomic-embed-text')
+    else:
+        print('http://localhost:11434')
+        print('nomic-embed-text')
+    if getattr(s, 'llm', None) and getattr(s.llm, 'model', None):
+        print(s.llm.model)
+except Exception:
+    pass
+" 2>/dev/null)
+  if [ -n "$CONFIG_OUT" ]; then
+    OLLAMA_BASE_URL=$(echo "$CONFIG_OUT" | sed -n '1p')
+    OLLAMA_EMBED_MODEL=$(echo "$CONFIG_OUT" | sed -n '2p')
+    OLLAMA_LLM_MODEL_CONFIG=$(echo "$CONFIG_OUT" | sed -n '3p')
+    [ -z "$OLLAMA_BASE_URL" ] && OLLAMA_BASE_URL="http://localhost:11434"
+    [ -z "$OLLAMA_EMBED_MODEL" ] && OLLAMA_EMBED_MODEL="nomic-embed-text"
+  fi
+fi
+# Env overrides (same prefix as app)
+[ -n "${TEAM_MEMORY_EMBEDDING__OLLAMA__BASE_URL}" ] && OLLAMA_BASE_URL="${TEAM_MEMORY_EMBEDDING__OLLAMA__BASE_URL}"
+[ -n "${TEAM_MEMORY_OLLAMA_MODEL}" ] && OLLAMA_EMBED_MODEL="${TEAM_MEMORY_OLLAMA_MODEL}"
 
 echo "===== team_memory Health Check ====="
 echo ""
@@ -31,19 +69,18 @@ else
     fi
 fi
 
-# 2. Ollama
+# 2. Ollama (base_url from config.yaml / TEAM_MEMORY_EMBEDDING__OLLAMA__BASE_URL)
 printf "  %-22s" "Ollama:"
-if curl -sf --max-time 3 http://localhost:11434/api/tags >/dev/null 2>&1; then
-    # Check if embedding model is available
-    MODEL="${TEAM_MEMORY_OLLAMA_MODEL:-nomic-embed-text}"
-    if curl -sf --max-time 3 http://localhost:11434/api/tags | grep -q "\"${MODEL}\""; then
-        echo "OK (model: ${MODEL})"
+if curl -sf --max-time 3 "${OLLAMA_BASE_URL}/api/tags" >/dev/null 2>&1; then
+    # Check if embedding model is available (Ollama returns name with tag e.g. "nomic-embed-text:latest")
+    if curl -sf --max-time 3 "${OLLAMA_BASE_URL}/api/tags" | grep -qE "\"${OLLAMA_EMBED_MODEL}(\"|:)"; then
+        echo "OK (model: ${OLLAMA_EMBED_MODEL})"
     else
-        echo "WARN  (service up, but model '${MODEL}' not pulled)"
-        echo "                        Fix: ollama pull ${MODEL}"
+        echo "WARN  (service up, but model '${OLLAMA_EMBED_MODEL}' not pulled)"
+        echo "                        Fix: ollama pull ${OLLAMA_EMBED_MODEL}"
     fi
 else
-    echo "FAIL  (run: docker compose up -d ollama)"
+    echo "FAIL  (run: docker compose up -d ollama or check config embedding.ollama.base_url)"
     FAILURES=$((FAILURES + 1))
 fi
 
@@ -76,11 +113,11 @@ else
     FAILURES=$((FAILURES + 1))
 fi
 
-# 5. Ollama LLM model (optional, for parsing/reranking)
+# 5. Ollama LLM model (optional, for parsing/reranking; same base_url as embedding)
 printf "  %-22s" "LLM model (optional):"
-LLM_MODEL="${TEAM_MEMORY_LLM_MODEL:-}"
+LLM_MODEL="${TEAM_MEMORY_LLM_MODEL:-${OLLAMA_LLM_MODEL_CONFIG:-}}"
 if [ -n "$LLM_MODEL" ]; then
-    if curl -sf --max-time 3 http://localhost:11434/api/tags | grep -q "\"${LLM_MODEL}\""; then
+    if curl -sf --max-time 3 "${OLLAMA_BASE_URL}/api/tags" | grep -qE "\"${LLM_MODEL}(\"|:)"; then
         echo "OK (model: ${LLM_MODEL})"
     else
         echo "WARN  (model '${LLM_MODEL}' not found)"
