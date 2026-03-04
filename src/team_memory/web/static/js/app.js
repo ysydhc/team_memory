@@ -502,6 +502,8 @@ window.getCustomScanPaths = function() {
 // Components
 window.toggleSearchAdvanced = components.toggleSearchAdvanced;
 window.doSearch = components.doSearch;
+window.showSearchHistoryDropdown = components.showSearchHistoryDropdown;
+window.hideSearchHistoryDropdownSoon = components.hideSearchHistoryDropdownSoon;
 window.openCreateModal = components.openCreateModal;
 window.closeCreateModal = components.closeCreateModal;
 window.switchCreateMode = components.switchCreateMode;

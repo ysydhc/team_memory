@@ -514,8 +514,109 @@
       margin-bottom: 12px;
     }
 
-    .search-bar input {
+    .search-input-wrap {
+      position: relative;
       flex: 1;
+    }
+
+    .search-bar .search-input-wrap input {
+      width: 100%;
+      box-sizing: border-box;
+      transition: border-color var(--transition), box-shadow var(--transition);
+    }
+
+    .search-bar .search-input-wrap input:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    .search-history-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      margin-top: 6px;
+      background: linear-gradient(180deg, var(--bg-card) 0%, var(--bg-secondary) 100%);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, .35), 0 0 0 1px rgba(255, 255, 255, .03) inset;
+      max-height: 280px;
+      overflow-y: auto;
+      opacity: 0;
+      transform: translateY(-6px);
+      pointer-events: none;
+      transition: opacity .2s ease, transform .2s ease;
+    }
+
+    .search-history-dropdown.open {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+
+    .search-history-dropdown .search-history-item {
+      display: block;
+      width: 100%;
+      padding: 10px 14px;
+      border: none;
+      background: none;
+      font-family: var(--font-sans);
+      font-size: 13px;
+      color: var(--text-secondary);
+      text-align: left;
+      cursor: pointer;
+      border-radius: 6px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: background .15s ease, color .15s ease;
+    }
+
+    .search-history-dropdown .search-history-item:hover {
+      background: var(--accent-glow);
+      color: var(--accent);
+    }
+
+    .search-history-dropdown .search-history-item:first-child {
+      margin-top: 4px;
+    }
+
+    .search-history-dropdown .search-history-item:last-of-type {
+      margin-bottom: 4px;
+    }
+
+    .search-history-dropdown .search-history-empty {
+      cursor: default;
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+
+    .search-history-dropdown .search-history-empty:hover {
+      background: transparent;
+      color: var(--text-muted);
+    }
+
+    .search-history-dropdown .search-history-clear {
+      display: block;
+      width: 100%;
+      border: none;
+      border-top: 1px solid var(--border);
+      padding: 10px 14px;
+      margin: 0;
+      font-family: var(--font-sans);
+      font-size: 12px;
+      color: var(--text-muted);
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+      border-radius: 0 0 var(--radius) var(--radius);
+      transition: color .15s ease, background .15s ease;
+    }
+
+    .search-history-dropdown .search-history-clear:hover {
+      color: var(--accent);
+      background: rgba(59, 130, 246, 0.06);
     }
 
     .search-advanced-toggle {
@@ -3196,8 +3297,13 @@
             </div>
           </div>
           <div class="search-bar">
-            <input type="text" id="search-input" placeholder="输入自然语言描述进行语义搜索..."
-              onkeydown="if(event.key==='Enter')doSearch()">
+            <div class="search-input-wrap">
+              <input type="text" id="search-input" placeholder="输入自然语言描述进行语义搜索..."
+                onkeydown="if(event.key==='Enter')doSearch()"
+                onfocus="showSearchHistoryDropdown()"
+                onblur="hideSearchHistoryDropdownSoon()">
+              <div id="search-history-dropdown" class="search-history-dropdown" aria-hidden="true"></div>
+            </div>
             <button class="btn btn-primary" onclick="doSearch()">搜索</button>
           </div>
         </div>

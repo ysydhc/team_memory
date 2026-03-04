@@ -3,7 +3,7 @@
  */
 
 import { state } from './store.js';
-import { esc } from './utils.js';
+import { esc, getSearchHistory, addSearchHistory, clearSearchHistory } from './utils.js';
 import {
     resolveProjectInput,
     applyProjectPlaceholders,
@@ -82,10 +82,74 @@ export async function doSearch() {
         if (project) body.project = project;
         const data = await api('POST', '/api/v1/search', body);
         window.__renderExpList('search-results', data.results);
-        if (data.results.length > 0) toast(`找到 ${data.results.length} 条相关经验`, 'success');
+        if (data.results.length > 0) {
+            toast(`找到 ${data.results.length} 条相关经验`, 'success');
+            addSearchHistory(query);
+        }
     } catch (e) {
         container.innerHTML = `<div class="empty-state"><h3>搜索失败</h3><p>${e.message}</p></div>`;
     }
+}
+
+let _searchHistoryHideTimer = null;
+
+function hideSearchHistoryDropdown() {
+    const el = document.getElementById('search-history-dropdown');
+    if (el) {
+        el.classList.remove('open');
+        el.setAttribute('aria-hidden', 'true');
+    }
+}
+
+export function showSearchHistoryDropdown() {
+    if (_searchHistoryHideTimer) {
+        clearTimeout(_searchHistoryHideTimer);
+        _searchHistoryHideTimer = null;
+    }
+    const list = getSearchHistory();
+    const el = document.getElementById('search-history-dropdown');
+    if (!el) return;
+    el.innerHTML = '';
+    if (list.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'search-history-item search-history-empty';
+        empty.textContent = '暂无搜索历史';
+        el.appendChild(empty);
+    } else {
+        list.forEach((q) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'search-history-item';
+            btn.textContent = q;
+            btn.dataset.query = q;
+            btn.addEventListener('click', () => {
+                const input = document.getElementById('search-input');
+                if (input) input.value = q;
+                hideSearchHistoryDropdown();
+                doSearch();
+            });
+            el.appendChild(btn);
+        });
+        const clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.className = 'search-history-clear';
+        clearBtn.textContent = '清空历史';
+        clearBtn.addEventListener('click', () => {
+            clearSearchHistory();
+            showSearchHistoryDropdown();
+        });
+        el.appendChild(clearBtn);
+    }
+    el.classList.add('open');
+    el.setAttribute('aria-hidden', 'false');
+}
+
+export function hideSearchHistoryDropdownSoon() {
+    if (_searchHistoryHideTimer) clearTimeout(_searchHistoryHideTimer);
+    _searchHistoryHideTimer = setTimeout(() => {
+        _searchHistoryHideTimer = null;
+        hideSearchHistoryDropdown();
+    }, 150);
 }
 
 // ===== Create Modal =====
