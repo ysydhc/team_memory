@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import Integer, and_, func, select
 from sqlalchemy import text as sa_text
@@ -159,9 +159,10 @@ async def get_tool_usage(
     days: int = 30,
     group_by: str = "tool",  # tool, user, day, api_key
     api_key_name: str | None = None,
+    project: list[str] | None = Query(None, description="Filter by project(s); omit for all"),
     user: User = Depends(get_current_user),
 ):
-    """Get tool usage analytics. P3-7: supports group_by=api_key and filter by api_key_name."""
+    """Tool usage analytics: group_by=api_key, filter by api_key_name and project(s)."""
     try:
         db_url = _get_db_url()
         async with get_session(db_url) as session:
@@ -173,6 +174,8 @@ async def get_tool_usage(
                 base_filter = and_(
                     base_filter, ToolUsageLog.api_key_name == api_key_name
                 )
+            if project:
+                base_filter = and_(base_filter, ToolUsageLog.project.in_(project))
 
             if group_by == "user":
                 query = (
@@ -276,22 +279,26 @@ async def get_tool_usage(
 
 @router.get("/analytics/tool-usage/summary")
 async def get_tool_usage_summary(
+    project: list[str] | None = Query(None, description="Filter by project(s); omit for all"),
     user: User = Depends(get_current_user),
 ):
-    """Get tool usage summary: top tools, unused tools."""
+    """Get tool usage summary: top tools, total calls; optionally filtered by project(s)."""
     try:
         db_url = _get_db_url()
         async with get_session(db_url) as session:
             from team_memory.storage.models import ToolUsageLog
 
             cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+            base_filter = ToolUsageLog.created_at >= cutoff
+            if project:
+                base_filter = and_(base_filter, ToolUsageLog.project.in_(project))
             top_q = (
                 select(
                     ToolUsageLog.tool_name,
                     ToolUsageLog.tool_type,
                     func.count().label("count"),
                 )
-                .where(ToolUsageLog.created_at >= cutoff)
+                .where(base_filter)
                 .group_by(ToolUsageLog.tool_name, ToolUsageLog.tool_type)
                 .order_by(func.count().desc())
                 .limit(10)
@@ -305,7 +312,7 @@ async def get_tool_usage_summary(
             total_q = (
                 select(func.count())
                 .select_from(ToolUsageLog)
-                .where(ToolUsageLog.created_at >= cutoff)
+                .where(base_filter)
             )
             total = (await session.execute(total_q)).scalar_one()
 

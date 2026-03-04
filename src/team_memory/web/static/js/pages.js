@@ -661,16 +661,16 @@ export async function showDetail(id) {
                 ? `
       <div class="detail-section">
         <h3>关联经验 (${links.length})</h3>
-        <div class="content">
-          <ul class="related-exp-list" style="list-style:none;padding:0;margin:0">
-            ${links
-                .map(
-                    (l) =>
-                        `<li style="margin-bottom:8px"><a href="#detail/${esc(l.other_id)}" onclick="showDetail('${esc(l.other_id)}');return false" style="color:var(--accent)">${esc(l.other_title || l.other_id)}</a> <span style="font-size:11px;color:var(--text-muted)">${linkTypeLabels[l.link_type] || l.link_type}</span></li>`
-                )
+        <ul class="related-exp-list">
+          ${links
+                .map((l) => {
+                    const typeLabel = linkTypeLabels[l.link_type] || l.link_type;
+                    const title = esc(l.other_title || l.other_id);
+                    const titleAttr = esc((l.other_title || l.other_id).toString().replace(/"/g, '&quot;'));
+                    return `<li><a class="related-exp-pill" href="#detail/${esc(l.other_id)}" onclick="showDetail('${esc(l.other_id)}');return false" title="${titleAttr}">${title}<span class="related-exp-pill-type">${typeLabel}</span></a></li>`;
+                })
                 .join('')}
-          </ul>
-        </div>
+        </ul>
       </div>`
                 : '';
 
@@ -678,7 +678,7 @@ export async function showDetail(id) {
         const backLabels = { reviews: '审核队列', drafts: '草稿箱', list: '经验列表', dashboard: '仪表盘' };
         const backLabel = backLabels[backPage] || '列表';
         page.innerHTML = `
-      <button class="back-btn" onclick="navigate('${backPage}')">← 返回${backLabel}</button>
+      <button type="button" class="back-btn" onclick="navigate('${backPage}')">← 返回${backLabel}</button>
       <div class="detail-view">
         <div class="detail-header">
           <h1>${typeBadges} ${esc(exp.title)}
@@ -723,7 +723,6 @@ export async function showDetail(id) {
           ${sdHtml}
           ${gitRefsHtml}
           ${relatedLinksHtml}
-          ${experienceLinksHtml}
           ${exp.code_snippets ? `
           <div class="detail-section">
             <h3>代码示例</h3>
@@ -775,6 +774,7 @@ export async function showDetail(id) {
             </div>
           </div>
           ` : ''}
+          ${experienceLinksHtml}
           <div class="detail-section">
             <h3 style="cursor:pointer" onclick="toggleVersionHistory('${exp.id}')">版本历史 <span id="version-toggle-arrow" style="font-size:11px">▸</span></h3>
             <div id="version-history-panel" class="hidden">
@@ -1020,13 +1020,16 @@ export async function loadUsageStats() {
     const container = document.getElementById('usage-content');
     container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
     try {
-        const project = state.activeProject || state.defaultProject || 'default';
+        const selectedProjects = typeof window.getSelectedProjects === 'function' ? window.getSelectedProjects('usage') : [];
+        const projectForSkills = selectedProjects.length ? selectedProjects[0] : (state.activeProject || state.defaultProject || 'default');
+        const projectQs = selectedProjects.length ? selectedProjects.map((p) => 'project=' + encodeURIComponent(p)).join('&') : '';
+        const suffix = projectQs ? '&' + projectQs : '';
         const results = await Promise.allSettled([
-            api('GET', '/api/v1/analytics/tool-usage/summary'),
-            api('GET', '/api/v1/analytics/tool-usage?group_by=tool'),
-            api('GET', '/api/v1/analytics/tool-usage?group_by=user'),
-            api('GET', '/api/v1/analytics/tool-usage?group_by=api_key'),
-            api('GET', `/api/v1/analytics/skills-rules?project=${encodeURIComponent(project)}`),
+            api('GET', projectQs ? '/api/v1/analytics/tool-usage/summary?' + projectQs : '/api/v1/analytics/tool-usage/summary'),
+            api('GET', '/api/v1/analytics/tool-usage?group_by=tool' + (suffix ? suffix : '')),
+            api('GET', '/api/v1/analytics/tool-usage?group_by=user' + (suffix ? suffix : '')),
+            api('GET', '/api/v1/analytics/tool-usage?group_by=api_key' + (suffix ? suffix : '')),
+            api('GET', `/api/v1/analytics/skills-rules?project=${encodeURIComponent(projectForSkills)}`),
         ]);
         const val = (r, fallback) => r.status === 'fulfilled' ? r.value : fallback;
         const summary = val(results[0], { top_tools: [], total_calls: 0 });
@@ -1051,7 +1054,7 @@ export async function loadUsageStats() {
         }).join('');
 
         const userRows = (byUser.data || []).map(u => `
-            <tr><td>${esc(u.user)}</td><td style="text-align:right">${u.count}</td><td style="text-align:right">${u.avg_duration_ms ?? 0}ms</td></tr>
+            <tr><td>${esc(u.user ?? '匿名')}</td><td style="text-align:right">${u.count}</td><td style="text-align:right">${u.avg_duration_ms ?? 0}ms</td></tr>
         `).join('');
 
         const apiKeyRows = (byApiKey.data || []).map(k => `
