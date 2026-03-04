@@ -1705,6 +1705,10 @@ async def tm_skill_manage(
             for f in cache_dir.iterdir():
                 if f.name.endswith("__SKILL.md"):
                     cached_names.add(f.name.replace("__SKILL.md", ""))
+                elif f.is_dir() and f.name.count("__") >= 2:
+                    parts = f.name.split("__", 2)
+                    if len(parts) == 3:
+                        cached_names.add(parts[2])
 
         skill_dirs = [
             Path.cwd() / ".cursor" / "skills",
@@ -1736,35 +1740,64 @@ async def tm_skill_manage(
     if not skill_path:
         return "❌ skill_path required for disable/enable"
 
+    import hashlib
     import shutil
 
     cache_dir = Path.home() / ".team_memory" / "disabled_skills"
 
-    p = Path(skill_path)
+    def _skill_cache_key(base_path: Path, skill_dir_name: str) -> tuple[str, str]:
+        """Infer category from base_path and return (category, cache_key). Matches Web format."""
+        base_resolved = str(base_path.resolve())
+        home = str(Path.home())
+        if ".claude" in base_resolved and "skills" in base_resolved:
+            category = "user_claude_skills" if base_resolved.startswith(home) else "claude_skills"
+        elif ".cursor" in base_resolved and "skills-cursor" in base_resolved:
+            category = "user_cursor_skills" if base_resolved.startswith(home) else "cursor_skills"
+        else:
+            category = "claude_skills"
+        safe = hashlib.sha256(base_resolved.encode()).hexdigest()[:12]
+        return category, f"{category}__{safe}__{skill_dir_name}"
+
+    p = Path(skill_path).resolve()
+    skill_dir = p if p.is_dir() else p.parent
+    if not skill_dir.is_dir():
+        return f"❌ Not a directory: {skill_dir}"
+    skill_dir_name = skill_dir.name
+    base_path = skill_dir.parent
+
     if action == "disable":
-        src = p / "SKILL.md" if p.is_dir() else p
-        if src.exists():
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            cache_name = src.parent.name + "__SKILL.md"
-            shutil.copy2(str(src), str(cache_dir / cache_name))
-            os.remove(str(src))
-            return f"⏸️ Disabled: {src.parent.name} (cached to {cache_dir})"
-        return f"❌ Not found: {src}"
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.exists() or not skill_md.is_file():
+            return f"❌ SKILL.md not found in {skill_dir}"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        _, cache_key = _skill_cache_key(base_path, skill_dir_name)
+        cache_path = cache_dir / cache_key
+        if cache_path.exists():
+            shutil.rmtree(str(cache_path))
+        shutil.copytree(str(skill_dir), str(cache_path))
+        shutil.rmtree(str(skill_dir))
+        return f"⏸️ Disabled: {skill_dir_name} (whole folder cached to {cache_dir})"
 
     if action == "enable":
-        skill_dir = p if p.is_dir() else p.parent
-        cache_name = skill_dir.name + "__SKILL.md"
-        cached = cache_dir / cache_name
-        dst = skill_dir / "SKILL.md"
-        if cached.exists():
-            shutil.copy2(str(cached), str(dst))
-            os.remove(str(cached))
-            return f"✅ Enabled: {skill_dir.name} (restored from cache)"
+        _, cache_key = _skill_cache_key(base_path, skill_dir_name)
+        cache_path = cache_dir / cache_key
+        if cache_path.exists() and cache_path.is_dir():
+            # copytree(src, dst) requires dst to NOT exist; do not mkdir(skill_dir) first
+            shutil.copytree(str(cache_path), str(skill_dir))
+            shutil.rmtree(str(cache_path))
+            return f"✅ Enabled: {skill_dir_name} (folder restored from cache)"
+        legacy_file = cache_dir / (skill_dir_name + "__SKILL.md")
+        if legacy_file.exists() and legacy_file.is_file():
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(legacy_file), str(skill_dir / "SKILL.md"))
+            os.remove(str(legacy_file))
+            return f"✅ Enabled: {skill_dir_name} (SKILL.md restored from legacy cache)"
         old_disabled = skill_dir / "SKILL.md.disabled"
         if old_disabled.exists():
-            os.rename(str(old_disabled), str(dst))
-            return f"✅ Enabled: {skill_dir.name} (legacy rename)"
-        return f"❌ Not found in cache or disabled: {skill_dir.name}"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            os.rename(str(old_disabled), str(skill_dir / "SKILL.md"))
+            return f"✅ Enabled: {skill_dir_name} (legacy rename)"
+        return f"❌ Not found in cache or disabled: {skill_dir_name}"
 
     return f"❌ Unknown action: {action}"
 
