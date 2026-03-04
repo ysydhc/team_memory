@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -412,6 +414,36 @@ def _scan_directory(base: Path, pattern: str = "*") -> list[dict]:
     return items
 
 
+# Categories that are skill folders (SKILL.md + scripts/references/etc.)
+SKILL_FOLDER_CATEGORIES = (
+    "claude_skills",
+    "cursor_skills",
+    "user_claude_skills",
+    "user_cursor_skills",
+)
+
+
+def _safe_path_hash(path: Path) -> str:
+    """Stable short hash for workspace base path (for cache key)."""
+    return hashlib.sha256(str(path.resolve()).encode()).hexdigest()[:12]
+
+
+def _disabled_cache_key(
+    category: str, base_path: Path, file_path: str, *, is_skill_folder: bool
+) -> str:
+    """Cache key for disabled item: category + workspace hash + identifier."""
+    safe = _safe_path_hash(base_path)
+    if is_skill_folder:
+        skill_dir_name = file_path.split("/")[0]
+        return f"{category}__{safe}__{skill_dir_name}"
+    return f"{category}__{safe}__{file_path.replace('/', '__')}"
+
+
+def _disabled_cache_name(category: str, file_path: str) -> str:
+    """Legacy cache filename (single file); prefer _disabled_cache_key with is_skill_folder."""
+    return category + "__" + file_path.replace("/", "__")
+
+
 def _get_scan_config() -> dict:
     """Read scan directories config from .team_memory/scan_config.json."""
     import json as json_mod
@@ -509,8 +541,85 @@ async def get_skills_rules_stats(
     total_files = 0
 
     all_targets = {**scan_targets, **user_targets, **extra_targets}
+    cache_dir = Path.home() / ".team_memory" / "disabled_skills"
+    safe_by_path = {}
+
     for key, (path, pat) in all_targets.items():
         files = _scan_directory(path, pat)
+        existing_paths = {f["path"] for f in files}
+        if cache_dir.exists():
+            safe = safe_by_path.setdefault(str(path), _safe_path_hash(path))
+            prefix = f"{key}__{safe}__"
+            for cache_item in cache_dir.iterdir():
+                name = cache_item.name
+                if not name.startswith(prefix):
+                    continue
+                suffix = name[len(prefix) :]
+                if cache_item.is_dir():
+                    # Skill folder cache: suffix is skill_dir_name
+                    skill_dir_name = suffix
+                    rel = f"{skill_dir_name}/SKILL.md"
+                    if rel in existing_paths:
+                        continue
+                    full = path / rel
+                    skill_md = cache_item / "SKILL.md"
+                    size = 0
+                    mtime = None
+                    summary = ""
+                    if skill_md.exists() and skill_md.is_file():
+                        try:
+                            size = skill_md.stat().st_size
+                            mtime = datetime.fromtimestamp(
+                                skill_md.stat().st_mtime, tz=timezone.utc
+                            ).isoformat()
+                            if size > 0 and size < 51200:
+                                raw = skill_md.read_text("utf-8", errors="ignore")
+                                summary = _extract_summary_from_content(raw, max_len=200)
+                        except (OSError, Exception):
+                            pass
+                    files.append({
+                        "name": skill_dir_name,
+                        "path": rel,
+                        "full_path": str(full),
+                        "dir_path": str(full.parent),
+                        "size_bytes": size,
+                        "modified_at": mtime,
+                        "summary": summary or None,
+                        "enabled": False,
+                    })
+                elif cache_item.is_file():
+                    rel = suffix.replace("__", "/")
+                    if rel in existing_paths:
+                        continue
+                    full = path / rel
+                    display_name = Path(rel).stem
+                    if display_name.upper() == "SKILL" and "/" in rel:
+                        display_name = Path(rel).parent.name
+                    try:
+                        size = cache_item.stat().st_size
+                        mtime = datetime.fromtimestamp(
+                            cache_item.stat().st_mtime, tz=timezone.utc
+                        ).isoformat()
+                    except OSError:
+                        size = 0
+                        mtime = None
+                    summary = ""
+                    if size > 0 and size < 51200:
+                        try:
+                            raw = cache_item.read_text("utf-8", errors="ignore")
+                            summary = _extract_summary_from_content(raw, max_len=200)
+                        except Exception:
+                            pass
+                    files.append({
+                        "name": display_name,
+                        "path": rel,
+                        "full_path": str(full),
+                        "dir_path": str(full.parent),
+                        "size_bytes": size,
+                        "modified_at": mtime,
+                        "summary": summary or None,
+                        "enabled": False,
+                    })
         total_files += len(files)
         result["categories"][key] = {
             "path": str(path),
@@ -523,8 +632,9 @@ async def get_skills_rules_stats(
 
     for _cat in result["categories"].values():
         for f in _cat.get("files", []):
-            fp = f.get("full_path")
-            f["enabled"] = bool(fp and Path(fp).exists())
+            if "enabled" not in f:
+                fp = f.get("full_path")
+                f["enabled"] = bool(fp and Path(fp).exists())
 
     return result
 
@@ -541,9 +651,7 @@ async def toggle_skill_file(
     project: str | None = None,
     user: User | None = Depends(get_optional_user),
 ):
-    """Enable or disable a skill/rule file via cache-based approach."""
-    import shutil
-
+    """Enable or disable a skill/rule. Skills (SKILL.md in a folder) move the whole folder."""
     scan_cfg = _get_scan_config()
     project_paths = scan_cfg.get("project_paths", {})
     if project and project in project_paths:
@@ -576,28 +684,66 @@ async def toggle_skill_file(
     if not cat_info:
         raise HTTPException(status_code=400, detail=f"Unknown category: {req.category}")
 
-    base_path, _ = cat_info
+    base_path, pat = cat_info
     full_path = base_path / req.file_path
+    cache_dir = Path.home() / ".team_memory" / "disabled_skills"
+    is_skill_folder = (
+        req.category in SKILL_FOLDER_CATEGORIES or pat == "SKILL.md"
+    )
+    cache_key = _disabled_cache_key(
+        req.category, base_path, req.file_path, is_skill_folder=is_skill_folder
+    )
+    cache_path = cache_dir / cache_key
+
+    if is_skill_folder:
+        # Resolve skill dir: directory containing SKILL.md (so we move the whole folder)
+        if full_path.exists() and full_path.is_file():
+            skill_dir = full_path.parent
+        else:
+            skill_dir_name = req.file_path.split("/")[0] if "/" in req.file_path else req.file_path
+            skill_dir = base_path / skill_dir_name
+
+        if not skill_dir.exists() and req.enabled:
+            if cache_path.exists() and cache_path.is_dir():
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                # copytree(src, dst) requires dst to NOT exist; do not mkdir(skill_dir) first
+                shutil.copytree(str(cache_path), str(skill_dir))
+                shutil.rmtree(str(cache_path))
+                return {"status": "enabled", "file": req.file_path}
+            raise HTTPException(
+                status_code=404, detail=f"Skill folder not found: {skill_dir}"
+            )
+
+        if not req.enabled:
+            if skill_dir.exists() and skill_dir.is_dir():
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                if cache_path.exists():
+                    shutil.rmtree(str(cache_path))
+                shutil.copytree(str(skill_dir), str(cache_path))
+                shutil.rmtree(str(skill_dir))
+                return {"status": "disabled", "file": req.file_path}
+            raise HTTPException(
+                status_code=404, detail=f"Skill folder not found: {skill_dir}"
+            )
+        return {"status": "already_enabled", "file": req.file_path}
+
+    # Single-file (rules, prompts)
     if not full_path.exists() and req.enabled:
-        cache_dir = Path.home() / ".team_memory" / "disabled_skills"
-        cache_name = full_path.stem + "__" + full_path.name
-        if (cache_dir / cache_name).exists():
-            shutil.copy2(str(cache_dir / cache_name), str(full_path))
-            os.remove(str(cache_dir / cache_name))
+        if cache_path.exists() and cache_path.is_file():
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(cache_path), str(full_path))
+            os.remove(str(cache_path))
             return {"status": "enabled", "file": req.file_path}
         raise HTTPException(status_code=404, detail=f"File not found: {full_path}")
 
-    cache_dir = Path.home() / ".team_memory" / "disabled_skills"
     if not req.enabled:
         if full_path.exists():
             cache_dir.mkdir(parents=True, exist_ok=True)
-            cache_name = full_path.parent.name + "__" + full_path.name
-            shutil.copy2(str(full_path), str(cache_dir / cache_name))
+            shutil.copy2(str(full_path), str(cache_path))
             os.remove(str(full_path))
             return {"status": "disabled", "file": req.file_path}
         raise HTTPException(status_code=404, detail=f"File not found: {full_path}")
-    else:
-        return {"status": "already_enabled", "file": req.file_path}
+    return {"status": "already_enabled", "file": req.file_path}
 
 
 def _get_allowed_preview_roots() -> list[Path]:
@@ -612,6 +758,54 @@ def _get_allowed_preview_roots() -> list[Path]:
     return roots
 
 
+def _resolve_preview_from_cache(file_path: Path) -> str | None:
+    """If path is a disabled skill/rule, return content from cache; else None."""
+    cache_dir = Path.home() / ".team_memory" / "disabled_skills"
+    if not cache_dir.exists():
+        return None
+    scan_cfg = _get_scan_config()
+    project_paths = scan_cfg.get("project_paths", {})
+    workspaces = [Path(os.getcwd())] + [Path(p) for p in project_paths.values() if p]
+    user_home = Path.home()
+    for ws in workspaces:
+        scan_targets = {
+            "claude_skills": (ws / ".claude" / "skills", "SKILL.md"),
+            "cursor_rules": (ws / ".cursor" / "rules", "*.mdc"),
+            "cursor_prompts": (ws / ".cursor" / "prompts", "*.md"),
+            "cursor_skills": (ws / ".cursor" / "skills-cursor", "SKILL.md"),
+        }
+        user_targets = {
+            "user_claude_skills": (user_home / ".claude" / "skills", "SKILL.md"),
+            "user_cursor_skills": (user_home / ".cursor" / "skills-cursor", "SKILL.md"),
+        }
+        for _cat, (base_path, pat) in {**scan_targets, **user_targets}.items():
+            try:
+                if not file_path.resolve().is_relative_to(base_path.resolve()):
+                    continue
+                rel = file_path.relative_to(base_path)
+                is_skill = _cat in SKILL_FOLDER_CATEGORIES or pat == "SKILL.md"
+                if is_skill and len(rel.parts) >= 2:
+                    cache_key = _disabled_cache_key(
+                        _cat, base_path, str(rel), is_skill_folder=True
+                    )
+                    cached_dir = cache_dir / cache_key
+                    if cached_dir.exists() and cached_dir.is_dir():
+                        inner = Path(*rel.parts[1:])
+                        path_in_cache = cached_dir / inner
+                        if path_in_cache.exists() and path_in_cache.is_file():
+                            return path_in_cache.read_text("utf-8", errors="replace")
+                else:
+                    cache_key = _disabled_cache_key(
+                        _cat, base_path, str(rel), is_skill_folder=False
+                    )
+                    cached = cache_dir / cache_key
+                    if cached.exists() and cached.is_file():
+                        return cached.read_text("utf-8", errors="replace")
+            except (ValueError, OSError):
+                continue
+    return None
+
+
 @router.get("/analytics/skills-rules/preview")
 async def preview_skill_file(
     path: str,
@@ -619,18 +813,22 @@ async def preview_skill_file(
 ):
     """Read a skill/rule file content for preview. Path must be under allowed dirs."""
     file_path = Path(path).resolve()
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
     allowed = [r.resolve() for r in _get_allowed_preview_roots()]
     try:
-        if not any(file_path.resolve().is_relative_to(r) for r in allowed):
+        if not any(file_path.is_relative_to(r) for r in allowed):
             raise HTTPException(status_code=403, detail="Path not allowed")
     except (ValueError, OSError):
         raise HTTPException(status_code=403, detail="Path not allowed") from None
-    try:
-        content = file_path.read_text("utf-8")
-        if len(content) > 50000:
-            content = content[:50000] + "\n\n... (truncated)"
-        return {"content": content, "path": str(file_path), "name": file_path.name}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    if file_path.exists() and file_path.is_file():
+        try:
+            content = file_path.read_text("utf-8")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+    else:
+        content = _resolve_preview_from_cache(file_path)
+        if content is None:
+            raise HTTPException(status_code=404, detail="File not found")
+    if len(content) > 50000:
+        content = content[:50000] + "\n\n... (truncated)"
+    return {"content": content, "path": str(file_path), "name": file_path.name}

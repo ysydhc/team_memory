@@ -675,10 +675,13 @@ export async function showDetail(id) {
                 : '';
 
         const backPage = state.detailReferrer || 'list';
-        const backLabels = { reviews: '审核队列', drafts: '草稿箱', list: '经验列表', dashboard: '仪表盘' };
+        const backLabels = { reviews: '审核队列', drafts: '草稿箱', list: '经验列表', search: '语义搜索', dashboard: '仪表盘' };
         const backLabel = backLabels[backPage] || '列表';
+        const hasBackStack = (state.detailBackStack || []).length > 0;
+        const backBtnLabel = hasBackStack ? '返回上一经验' : `返回${backLabel}`;
+        const backBtnOnclick = hasBackStack ? 'backToPreviousDetail()' : `navigate('${backPage}')`;
         page.innerHTML = `
-      <button type="button" class="back-btn" onclick="navigate('${backPage}')">← 返回${backLabel}</button>
+      <button type="button" class="back-btn" onclick="${backBtnOnclick}">← ${backBtnLabel}</button>
       <div class="detail-view">
         <div class="detail-header">
           <h1>${typeBadges} ${esc(exp.title)}
