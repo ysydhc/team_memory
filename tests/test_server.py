@@ -682,3 +682,101 @@ class TestLLMParser:
         assert result["parent"]["title"] == "Parent"
         assert len(result["children"]) == 1
         assert result["children"][0]["tags"] == ["go"]
+
+    @pytest.mark.asyncio
+    async def test_parse_personal_memory_returns_list(self):
+        """parse_personal_memory returns normalized list from LLM array response."""
+        from team_memory.services.llm_parser import parse_personal_memory
+
+        fake_response = {
+            "message": {
+                "content": '[{"content": "喜欢简洁回复", "scope": "generic", "context_hint": null}]'
+            }
+        }
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json = MagicMock(return_value=fake_response)
+        mock_post = AsyncMock(return_value=resp)
+        client = MagicMock()
+        client.post = mock_post
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await parse_personal_memory("User said: keep it short.", timeout=5.0)
+        assert len(result) == 1
+        assert result[0]["content"] == "喜欢简洁回复"
+        assert result[0]["scope"] == "generic"
+        assert result[0]["context_hint"] is None
+
+    @pytest.mark.asyncio
+    async def test_parse_personal_memory_on_error_returns_empty(self):
+        """parse_personal_memory returns [] on timeout/connection error (no raise)."""
+        import httpx
+
+        from team_memory.services.llm_parser import parse_personal_memory
+
+        client = MagicMock()
+        client.post = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await parse_personal_memory("some text", timeout=1.0)
+        assert result == []
+
+
+# ============================================================
+# Personal memory extraction (Task 3) — tm_learn side path
+# ============================================================
+
+
+class TestTryExtractAndSavePersonalMemory:
+    """Test _try_extract_and_save_personal_memory (no block on failure)."""
+
+    @pytest.mark.asyncio
+    async def test_skips_when_anonymous(self):
+        """Anonymous user: no parse call, no write."""
+        from team_memory.server import _try_extract_and_save_personal_memory
+
+        with patch(
+            "team_memory.services.llm_parser.parse_personal_memory",
+            new_callable=AsyncMock,
+        ) as mock_parse:
+            await _try_extract_and_save_personal_memory(
+                "conversation", user=None, settings=MagicMock()
+            )
+            await _try_extract_and_save_personal_memory(
+                "conversation", user="anonymous", settings=MagicMock()
+            )
+            mock_parse.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_writes_when_logged_in_and_items_returned(self):
+        """Logged-in user and parse returns items: PersonalMemoryService.write called."""
+        from team_memory.server import _try_extract_and_save_personal_memory
+
+        items = [
+            {"content": "喜欢简洁回复", "scope": "generic", "context_hint": None},
+        ]
+        mock_write = AsyncMock(return_value={"id": "1", "content": "喜欢简洁回复"})
+        mock_pm_svc = MagicMock()
+        mock_pm_svc.write = mock_write
+        settings = MagicMock()
+        settings.llm = MagicMock()
+        with patch(
+            "team_memory.services.llm_parser.parse_personal_memory",
+            new_callable=AsyncMock,
+            return_value=items,
+        ), patch("team_memory.bootstrap.get_context") as mock_ctx, patch(
+            "team_memory.services.personal_memory.PersonalMemoryService",
+            return_value=mock_pm_svc,
+        ):
+            mock_ctx.return_value.embedding = MagicMock()
+            mock_ctx.return_value.db_url = "sqlite:///"
+            await _try_extract_and_save_personal_memory(
+                "user said: keep answers short.", user="user-1", settings=settings
+            )
+        mock_write.assert_called_once()
+        call_kw = mock_write.call_args.kwargs
+        assert call_kw["user_id"] == "user-1"
+        assert call_kw["content"] == "喜欢简洁回复"
+        assert call_kw["scope"] == "generic"

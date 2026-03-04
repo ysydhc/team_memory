@@ -45,6 +45,15 @@ def track_usage(func):
             pass
         api_key_name = os.environ.get("TEAM_MEMORY_API_KEY_NAME") or None
 
+        # MCP debug: log input (env TEAM_MEMORY_DEBUG=1 or TEAM_MEMORY_MCP_DEBUG=1)
+        try:
+            from team_memory import mcp_debug_log
+
+            if mcp_debug_log.is_mcp_debug_enabled():
+                await mcp_debug_log.log_mcp_io_async(tool_name, "in", kwargs)
+        except Exception:
+            pass
+
         pre_ctx = HookContext(
             event=HookEvent.PRE_TOOL_CALL,
             tool_name=tool_name,
@@ -58,10 +67,26 @@ def track_usage(func):
         error_msg = None
         try:
             result = await func(*args, **kwargs)
+            try:
+                from team_memory import mcp_debug_log
+
+                if mcp_debug_log.is_mcp_debug_enabled():
+                    await mcp_debug_log.log_mcp_io_async(tool_name, "out", result)
+            except Exception:
+                pass
             return result
         except Exception as e:
             success = False
             error_msg = str(e)
+            try:
+                from team_memory import mcp_debug_log
+
+                if mcp_debug_log.is_mcp_debug_enabled():
+                    await mcp_debug_log.log_mcp_io_async(
+                        tool_name, "out", {"error": error_msg}
+                    )
+            except Exception:
+                pass
             raise
         finally:
             post_ctx = HookContext(
@@ -127,6 +152,43 @@ def _resolve_project(project: str | None = None) -> str:
 
 def _get_db_url() -> str:
     return get_context().db_url
+
+
+async def _try_extract_and_save_personal_memory(
+    conversation: str, user: str | None, settings
+) -> None:
+    """Extract personal preferences from conversation and write to personal memory.
+
+    Only runs for logged-in non-anonymous user. Timeout/failure are logged and
+    do not block the caller (tm_learn experience save already done).
+    """
+    if not user or str(user).strip().lower() == "anonymous":
+        return
+    try:
+        from team_memory.bootstrap import get_context
+        from team_memory.services.llm_parser import parse_personal_memory
+        from team_memory.services.personal_memory import PersonalMemoryService
+
+        items = await parse_personal_memory(
+            conversation, llm_config=settings.llm, timeout=25.0
+        )
+        if not items:
+            return
+        ctx = get_context()
+        pm_svc = PersonalMemoryService(
+            embedding_provider=ctx.embedding, db_url=ctx.db_url
+        )
+        for item in items:
+            await pm_svc.write(
+                user_id=user,
+                content=item["content"],
+                scope=item.get("scope") or "generic",
+                context_hint=item.get("context_hint"),
+            )
+    except Exception as e:
+        logger.warning(
+            "Personal memory extract/save skipped (no block): %s", e, exc_info=False
+        )
 
 
 async def _create_reflection(
@@ -596,6 +658,7 @@ async def tm_learn(
             if publish_status == "draft"
             else ""
         )
+        await _try_extract_and_save_personal_memory(conversation, user, settings)
         return json.dumps(
             {
                 "message": (
@@ -659,6 +722,7 @@ async def tm_learn(
             if result.get("publish_status") == "draft"
             else ""
         )
+        await _try_extract_and_save_personal_memory(conversation, user, settings)
         return json.dumps(
             {
                 "message": (
@@ -1640,6 +1704,20 @@ async def tm_status() -> str:
         },
         ensure_ascii=False,
     )
+
+
+@mcp.tool(
+    name="tm_invalidate_search_cache",
+    description=(
+        "Clear the search result and embedding cache. "
+        "Call this when config changed (e.g. query_expansion_enabled) to force fresh retrieval."
+    ),
+)
+async def tm_invalidate_search_cache() -> str:
+    """Invalidate search cache so next tm_search runs the full pipeline (e.g. with query expansion)."""
+    service = _get_service()
+    await service.invalidate_search_cache()
+    return json.dumps({"message": "Search cache cleared"}, ensure_ascii=False)
 
 
 @mcp.tool(
