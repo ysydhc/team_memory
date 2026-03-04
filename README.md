@@ -206,7 +206,7 @@ echo "你的管理员 API Key: $TEAM_MEMORY_API_KEY"
 - 打开 http://localhost:9111
 - 点击「使用 API Key 登录」
 - 将上面的 TEAM_MEMORY_API_KEY 粘贴到输入框，点击「登录」
-- 登录成功后即为 admin，右上角显示当前用户名（默认来自 TEAM_MEMORY_USER，未设置时为 admin）
+- 登录成功后即为 admin，右上角显示当前用户名
 
 该 Key 仅在内存中生效（与 config 中的 auth.api_key 一样），重启服务后仍使用同一环境变量即可再次用该 Key 登录。若希望用「用户名 + 密码」登录并长期使用，见下文「可选：为自己创建持久 Admin 账户」。
 
@@ -298,7 +298,7 @@ pip install team_memory
 
 **3. 配置 MCP**
 
-在 **Cursor** 中编辑项目或用户下的 `.cursor/mcp.json`；在 **Claude Desktop** 中编辑 MCP Servers 对应配置。
+在 **Cursor** 中编辑项目或用户下的 `.cursor/mcp.json`；在 **Claude Desktop** 中编辑 MCP Servers 对应配置。MCP 的当前用户由 **TEAM_MEMORY_API_KEY** 解析（与 Web 同账号即同一人）；`TEAM_MEMORY_USER` 仅在不设 Key 或解析失败时作为回退，可选。
 
 - **从 pip 安装、无项目目录**（推荐）：用本机 Python + 环境变量，无需 `cwd`：
 
@@ -310,8 +310,7 @@ pip install team_memory
       "args": ["-m", "team_memory.server"],
       "env": {
         "TEAM_MEMORY_DB_URL": "postgresql+asyncpg://用户:密码@主机:5432/team_memory",
-        "TEAM_MEMORY_API_KEY": "你的API密钥",
-        "TEAM_MEMORY_USER": "你的名字"
+        "TEAM_MEMORY_API_KEY": "你的API密钥"
       }
     }
   }
@@ -328,8 +327,7 @@ pip install team_memory
       "args": ["-m", "team_memory.server"],
       "cwd": "/path/to/team_memory",
       "env": {
-        "TEAM_MEMORY_API_KEY": "你的API密钥",
-        "TEAM_MEMORY_USER": "你的名字"
+        "TEAM_MEMORY_API_KEY": "你的API密钥"
       }
     }
   }
@@ -361,24 +359,29 @@ pip install team_memory
       "args": ["-m", "team_memory.server"],
       "env": {
         "TEAM_MEMORY_DB_URL": "postgresql+asyncpg://用户:密码@主机:5432/team_memory",
-        "TEAM_MEMORY_API_KEY": "你的API密钥",
-        "TEAM_MEMORY_USER": "你的名字"
+        "TEAM_MEMORY_API_KEY": "你的API密钥"
       }
     }
   }
 }
 ```
 
-**从源码目录运行**（使用项目 venv 与 config）：将 `command` 改为 `/path/to/team_memory/.venv/bin/python`，增加 `"cwd": "/path/to/team_memory"`，`env` 中至少保留 `TEAM_MEMORY_API_KEY` 与 `TEAM_MEMORY_USER`（数据库由项目内 config 提供）。
+**从源码目录运行**（使用项目 venv 与 config）：将 `command` 改为 `/path/to/team_memory/.venv/bin/python`，增加 `"cwd": "/path/to/team_memory"`，`env` 中至少保留 `TEAM_MEMORY_API_KEY`（数据库由项目内 config 提供）。
 
 **Claude Desktop**：在 MCP 设置中添加同名 `team_memory` 条目，`command` / `args` / `env` 与上一致即可。
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
 | `TEAM_MEMORY_DB_URL` | 是（或由 config 提供） | PostgreSQL 连接串，`postgresql+asyncpg://...`，库需启用 pgvector |
-| `TEAM_MEMORY_API_KEY` | 是 | 与部署者在 auth 中配置一致 |
-| `TEAM_MEMORY_USER` | 否 | 当前用户标识，默认 `anonymous` |
+| `TEAM_MEMORY_API_KEY` | 推荐 | 与 Web 同账号的 API Key；MCP 据此解析为当前用户，与 Web 身份统一 |
+| `TEAM_MEMORY_USER` | 否 | 仅在不设 API Key 或解析失败时作为回退，默认 `anonymous` |
 | `TEAM_MEMORY_CONFIG_PATH` | 否 | 配置文件路径，设置则优先从该文件加载 |
+
+**MCP 身份与 Web 统一**：MCP 的当前用户（current_user）优先由 **TEAM_MEMORY_API_KEY** 经服务端 AuthProvider 解析得到，与 Web 使用同一套用户体系。配置与 Web 同账号的 API Key 后，在 Cursor 里写入的 personal 经验在同一 Cursor 会话内可被检索到，且 Web 用该账号登录后也能看到。推荐只配置 `TEAM_MEMORY_API_KEY`（与 Web 同账号的 Key），无需再设 `TEAM_MEMORY_USER`。
+
+**Docker/Helm**：若通过容器或编排部署，在配置中注入上述环境变量；生产环境禁止使用占位或默认 Key（如 `changeme`）。
+
+**回滚说明**：MCP 身份解析逻辑无 DB 变更。若需回滚，仅还原 `src/team_memory/server.py` 中相关改动，并通知用户恢复依赖 `TEAM_MEMORY_USER` 的配置即可。
 
 ### 实际场景：AI 如何使用 TeamMemory
 
