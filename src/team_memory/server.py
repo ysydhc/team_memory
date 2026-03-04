@@ -40,7 +40,7 @@ def track_usage(func):
         tool_name = func.__name__
         user = "anonymous"
         try:
-            user = _get_current_user()
+            user = await _get_current_user()
         except Exception:
             pass
         api_key_name = os.environ.get("TEAM_MEMORY_API_KEY_NAME") or None
@@ -121,7 +121,20 @@ def _get_settings():
         return bootstrap(enable_background=False).settings
 
 
-def _get_current_user() -> str:
+async def _get_current_user() -> str:
+    api_key = os.environ.get("TEAM_MEMORY_API_KEY", "")
+    if api_key:
+        try:
+            ctx = get_context()
+            if ctx.auth:
+                user = await ctx.auth.authenticate({"api_key": api_key})
+                if user is not None:
+                    return user.name
+            logger.warning("MCP auth resolve failed, using fallback user")
+        except RuntimeError:
+            logger.warning("MCP get_context failed, using fallback user")
+        except Exception as e:
+            logger.warning("MCP auth error: %s", type(e).__name__, exc_info=False)
     return os.environ.get("TEAM_MEMORY_USER", "anonymous")
 
 
@@ -511,7 +524,7 @@ async def tm_solve(
     """
     service = _get_service()
     db_url = _get_db_url()
-    user = _get_current_user()
+    user = await _get_current_user()
     resolved_project = _resolve_project(project)
 
     # Build enhanced query from context
@@ -677,7 +690,7 @@ async def tm_learn(
     service = _get_service()
     settings = _get_settings()
     db_url = _get_db_url()
-    user = _get_current_user()
+    user = await _get_current_user()
     resolved_project = _resolve_project(project)
 
     publish_status = "draft" if save_as_draft else "published"
@@ -1025,7 +1038,7 @@ async def tm_suggest(
         filter_tags.append(framework.lower())
 
     service = _get_service()
-    user = _get_current_user()
+    user = await _get_current_user()
     resolved_project = _resolve_project(project)
 
     results = await service.search(
@@ -1114,7 +1127,7 @@ async def tm_search(
         top_k_children: Max children per group. Default 3.
     """
     service = _get_service()
-    user = _get_current_user()
+    user = await _get_current_user()
     resolved_project = _resolve_project(project)
 
     results = await service.search(
@@ -1211,7 +1224,7 @@ async def tm_save(
     """
     service = _get_service()
     db_url = _get_db_url()
-    user = _get_current_user()
+    user = await _get_current_user()
     resolved_project = _resolve_project(project)
 
     async with get_session(db_url) as session:
@@ -1314,7 +1327,7 @@ async def tm_save_typed(
     """
     service = _get_service()
     db_url = _get_db_url()
-    user = _get_current_user()
+    user = await _get_current_user()
     resolved_project = _resolve_project(project)
 
     async with get_session(db_url) as session:
@@ -1427,7 +1440,7 @@ async def tm_save_group(
     """
     service = _get_service()
     db_url = _get_db_url()
-    user = _get_current_user()
+    user = await _get_current_user()
     resolved_project = _resolve_project(project)
 
     parent_data = {
@@ -1526,7 +1539,7 @@ async def tm_claim(
 
     _ = _get_service()  # ensure service initialized
     db_url = _get_db_url()
-    user = _get_current_user()
+    user = await _get_current_user()
 
     async with get_session(db_url) as session:
         from sqlalchemy import update
@@ -1572,7 +1585,7 @@ async def tm_notify(
         experience_id: The experience ID to notify about.
         message: Human-readable notification message.
     """
-    user = _get_current_user()
+    user = await _get_current_user()
 
     # Emit via event bus (will trigger webhook if configured)
     service = _get_service()
@@ -1626,7 +1639,7 @@ async def tm_feedback(
         return json.dumps({"message": "fitness_score must be between 1 and 5.", "error": True})
     service = _get_service()
     db_url = _get_db_url()
-    user = _get_current_user()
+    user = await _get_current_user()
 
     success = await service.feedback(
         experience_id=experience_id,
@@ -1822,7 +1835,7 @@ async def tm_track(
     from team_memory.storage.models import ToolUsageLog
 
     db_url = _get_db_url()
-    user = _get_current_user()
+    user = await _get_current_user()
     async with get_session(db_url) as session:
         log = ToolUsageLog(
             tool_name=tool_name,
@@ -1982,7 +1995,7 @@ async def tm_analyze_patterns(
     if not conversation_text:
         return "❌ conversation_text is required"
 
-    user = _get_current_user()
+    user = await _get_current_user()
     project = _resolve_project(None)
     settings = _get_settings()
 
@@ -2329,7 +2342,7 @@ async def tm_task(
 
     db_url = _get_db_url()
     resolved_project = _resolve_project(project)
-    user = _get_current_user()
+    user = await _get_current_user()
 
     from team_memory.storage.repository import TaskRepository
 
@@ -2588,7 +2601,7 @@ async def tm_task_claim(
     import uuid as _uuid
 
     db_url = _get_db_url()
-    user = _get_current_user()
+    user = await _get_current_user()
 
     from team_memory.storage.repository import TaskRepository
 
@@ -2622,7 +2635,7 @@ async def tm_ready(
         project: Project filter.
     """
     db_url = _get_db_url()
-    user = _get_current_user()
+    user = await _get_current_user()
     resolved_project = _resolve_project(project)
 
     from team_memory.storage.repository import TaskRepository
@@ -2658,7 +2671,7 @@ async def tm_message(
     import uuid as _uuid
 
     db_url = _get_db_url()
-    user = _get_current_user()
+    user = await _get_current_user()
 
     from team_memory.storage.repository import TaskRepository
 
@@ -2765,7 +2778,7 @@ async def tm_dependency(
     import uuid as _uuid
 
     db_url = _get_db_url()
-    user = _get_current_user()
+    user = await _get_current_user()
 
     from team_memory.storage.repository import TaskRepository
 
@@ -2817,7 +2830,7 @@ async def tm_doc_sync(
 
     db_url = _get_db_url()
     resolved_project = _resolve_project(project)
-    user = _get_current_user()
+    user = await _get_current_user()
     content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
 
     from team_memory.storage.repository import TaskRepository
@@ -2971,7 +2984,7 @@ async def tm_preflight(
     if complexity != "trivial":
         service = _get_service()
         resolved_project = _resolve_project(project)
-        user = _get_current_user()
+        user = await _get_current_user()
         try:
             results = await service.search(
                 query=task_description,
