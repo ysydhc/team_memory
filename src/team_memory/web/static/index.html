@@ -1803,8 +1803,24 @@
 
     .task-group-header {
       display: flex;
-      justify-content: space-between;
       align-items: center;
+    }
+
+    .task-group-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+
+    .task-group-actions .task-group-pin-btn {
+      opacity: 1;
+    }
+
+    .task-group-card:hover .task-group-actions .task-group-pin-btn {
+      opacity: 1;
     }
 
     .task-groups-grid {
