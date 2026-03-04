@@ -73,6 +73,12 @@
       background: var(--text-muted);
     }
 
+    /* ===== Focus (a11y) ===== */
+    button:focus-visible, a:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--accent);
+    }
+
     /* ===== Login Screen ===== */
     #login-screen {
       display: flex;
@@ -90,6 +96,18 @@
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
       box-shadow: var(--shadow);
+      animation: loginBoxIn 0.4s ease forwards;
+    }
+
+    @keyframes loginBoxIn {
+      from {
+        opacity: 0;
+        transform: translateY(16px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
 
     .login-box .logo {
@@ -373,6 +391,7 @@
     }
 
     .topbar-nav a {
+      position: relative;
       padding: 6px 14px;
       font-size: 13px;
       font-weight: 500;
@@ -389,8 +408,20 @@
     }
 
     .topbar-nav a.active {
-      color: var(--text-primary);
-      background: var(--bg-card);
+      color: var(--accent);
+      background: var(--accent-glow);
+      font-weight: 600;
+    }
+
+    .topbar-nav a.active::before {
+      content: '';
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      bottom: 4px;
+      height: 2px;
+      background: var(--accent);
+      border-radius: 1px;
     }
 
     .topbar-right {
@@ -651,6 +682,11 @@
       background: var(--bg-card-hover);
       transform: translateY(-1px);
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    }
+
+    .exp-card:active {
+      transform: translateY(0);
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
     }
 
     .exp-card-header {
@@ -1214,6 +1250,44 @@
       color: var(--text-muted);
     }
 
+    /* ===== Ops health status ===== */
+    .ops-health-card .settings-card-body { max-height: 600px; }
+    .health-loading, .health-error { padding: 12px 0; color: var(--text-muted); }
+    .health-error { color: var(--danger, #e5534b); }
+    .health-summary {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+      padding: 12px 14px;
+      background: var(--bg-input);
+      border-radius: var(--radius);
+      font-size: 14px;
+    }
+    .health-summary .status-badge { font-weight: 600; }
+    .health-summary .status-healthy { color: var(--success, #3fb950); }
+    .health-summary .status-degraded { color: var(--yellow, #d29922); }
+    .health-summary .status-unhealthy { color: var(--danger, #e5534b); }
+    .health-checks {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .health-check-item {
+      padding: 10px 12px;
+      background: var(--bg-input);
+      border-radius: var(--radius);
+      font-size: 13px;
+      border-left: 3px solid var(--border);
+    }
+    .health-check-item.up { border-left-color: var(--success, #3fb950); }
+    .health-check-item.down { border-left-color: var(--danger, #e5534b); }
+    .health-check-item .check-name { font-weight: 500; }
+    .health-check-item .check-detail { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+    .health-ops-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+
     /* ===== Modal ===== */
     .modal-overlay {
       position: fixed;
@@ -1226,6 +1300,10 @@
       backdrop-filter: blur(4px);
     }
 
+    .modal-overlay:not(.hidden) .modal {
+      animation: modalIn 0.25s ease forwards;
+    }
+
     .modal {
       width: 80%;
       max-width: 960px;
@@ -1235,6 +1313,15 @@
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
       box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+      opacity: 0;
+      transform: scale(0.96) translateY(12px);
+    }
+
+    @keyframes modalIn {
+      to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
     }
 
     .modal-header {
@@ -1299,24 +1386,29 @@
     /* ===== Empty state ===== */
     .empty-state {
       text-align: center;
-      padding: 64px 32px;
+      padding: 72px 32px;
       color: var(--text-muted);
     }
 
     .empty-state .icon {
-      font-size: 48px;
-      margin-bottom: 16px;
-      opacity: 0.4;
+      font-size: 56px;
+      margin-bottom: 20px;
+      opacity: 0.5;
+      line-height: 1;
     }
 
     .empty-state h3 {
       font-size: 18px;
+      font-weight: 600;
       color: var(--text-secondary);
       margin-bottom: 8px;
     }
 
     .empty-state p {
       font-size: 14px;
+      max-width: 360px;
+      margin: 0 auto;
+      line-height: 1.6;
     }
 
     /* ===== Loading ===== */
@@ -1332,7 +1424,16 @@
       border: 3px solid var(--border);
       border-top-color: var(--accent);
       border-radius: 50%;
-      animation: spin 0.8s linear infinite;
+      animation: spin 0.7s linear infinite;
+    }
+
+    .loading {
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    .loading .spinner {
+      margin-bottom: 12px;
     }
 
     @keyframes spin {
@@ -1345,11 +1446,11 @@
     .toast-container {
       position: fixed;
       top: 72px;
-      right: 32px;
+      right: 24px;
       z-index: 2000;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 10px;
     }
 
     .toast {
@@ -1359,8 +1460,8 @@
       border-radius: var(--radius);
       font-size: 14px;
       box-shadow: var(--shadow);
-      animation: slideIn 0.3s ease;
-      max-width: 400px;
+      animation: toastIn 0.35s cubic-bezier(0.21, 1.02, 0.73, 1);
+      max-width: 380px;
     }
 
     .toast.success {
@@ -1378,12 +1479,11 @@
       color: var(--accent);
     }
 
-    @keyframes slideIn {
+    @keyframes toastIn {
       from {
         transform: translateX(100%);
         opacity: 0;
       }
-
       to {
         transform: translateX(0);
         opacity: 1;
@@ -1636,6 +1736,29 @@
       box-shadow: 0 0 0 2px var(--accent-glow);
     }
 
+    .task-group-pin-btn {
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+      white-space: nowrap;
+      font-family: var(--font-sans);
+    }
+
+    .task-group-card:hover .task-group-pin-btn {
+      opacity: 1;
+    }
+
+    .task-group-pin-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
     .task-group-quick-btn {
       font-size: 12px;
       color: var(--text-muted);
@@ -1688,18 +1811,35 @@
       display: flex;
       gap: 16px;
       overflow-x: auto;
-      padding-bottom: 8px;
+      overflow-y: hidden;
+      padding-bottom: 4px;
       scroll-snap-type: x mandatory;
       -webkit-overflow-scrolling: touch;
+      scrollbar-width: thick;
+      scrollbar-color: var(--border) transparent;
     }
 
     .task-groups-grid::-webkit-scrollbar {
-      height: 4px;
+      height: 14px;
+    }
+
+    .task-groups-grid::-webkit-scrollbar-track {
+      background: var(--bg-input);
+      border-radius: 7px;
+      margin: 0 8px;
     }
 
     .task-groups-grid::-webkit-scrollbar-thumb {
       background: var(--border);
-      border-radius: 2px;
+      border-radius: 7px;
+    }
+
+    .task-groups-grid::-webkit-scrollbar-thumb:hover {
+      background: var(--text-muted);
+    }
+
+    .task-groups-grid::-webkit-scrollbar-thumb:active {
+      background: var(--accent);
     }
 
     .group-retro-prompt {
@@ -3118,6 +3258,27 @@
       <div id="page-settings" class="page hidden">
         <h2 class="settings-group-title">常用配置</h2>
 
+        <!-- Ops: Service health (no auth required for /health) -->
+        <div class="settings-card ops-health-card" style="margin-top:20px">
+          <h2>服务健康状态</h2>
+          <div class="settings-card-body" style="max-height:600px">
+            <p class="settings-desc">当前实例各依赖状态，便于运维快速诊断。异常时请按下方「排查手册」或执行 <code>make health</code>。</p>
+            <div id="health-status-container">
+              <div id="health-status-loading" class="health-loading">正在检测…</div>
+              <div id="health-status-body" class="hidden">
+                <div class="health-summary" id="health-summary"></div>
+                <div class="health-checks" id="health-checks"></div>
+                <div class="health-ops-actions">
+                  <button type="button" class="btn btn-secondary btn-sm" id="health-btn-refresh">刷新</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="health-btn-copy-cmd">复制命令: make health</button>
+                  <span class="hint" style="margin-left:8px">排查手册见项目 README「运维」章节</span>
+                </div>
+              </div>
+              <div id="health-status-error" class="health-error hidden"></div>
+            </div>
+          </div>
+        </div>
+
         <div class="settings-card" style="margin-top:20px"
           onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
           <h2>项目配置</h2>
@@ -3624,6 +3785,7 @@
             style="width:80px;padding:6px 10px;font-size:13px">
           <button class="btn btn-primary btn-sm" onclick="loadDuplicates()">扫描重复</button>
           <button class="btn btn-secondary btn-sm" onclick="reembedGroups()" title="重算所有经验组（父+子）的向量，修正“问题描述相同但子经验不同”被误判为重复">刷新经验组向量</button>
+          <span class="hint" style="font-size:12px;color:var(--text-muted)">经验组建议先执行刷新再扫描</span>
           <button class="btn btn-secondary btn-sm" onclick="scanStale()">扫描过期</button>
         </div>
         <div id="stale-results" class="hidden" style="margin-bottom:24px">

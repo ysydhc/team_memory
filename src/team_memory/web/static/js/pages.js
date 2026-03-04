@@ -152,6 +152,160 @@ function getCopyDropdownDetailHtml() {
     </div>`;
 }
 
+const COPY_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+
+/** Copy dropdown for task group card (data-copy-type="taskgroup", data-group-*). */
+function getTaskGroupCopyDropdownHtml(attrs) {
+    return `<div class="exp-copy-dropdown" data-copy-type="taskgroup" ${attrs}>
+      <button type="button" class="exp-copy-btn" title="复制" aria-haspopup="true" aria-expanded="false"><span class="exp-copy-icon" aria-hidden="true">${COPY_SVG}</span></button>
+      <div class="exp-copy-dropdown-menu" role="menu">
+        <button type="button" role="menuitem" data-copy-option="id">复制任务组ID</button>
+        <button type="button" role="menuitem" data-copy-option="title">复制任务组名称</button>
+        <button type="button" role="menuitem" data-copy-option="basic">复制基础信息</button>
+        <button type="button" role="menuitem" data-copy-option="full">复制全部信息</button>
+      </div>
+    </div>`;
+}
+
+/** Copy dropdown for task card / slideout (data-copy-type="task", data-task-*). */
+function getTaskCopyDropdownHtml(attrs) {
+    return `<div class="exp-copy-dropdown" data-copy-type="task" ${attrs}>
+      <button type="button" class="exp-copy-btn" title="复制" aria-haspopup="true" aria-expanded="false"><span class="exp-copy-icon" aria-hidden="true">${COPY_SVG}</span></button>
+      <div class="exp-copy-dropdown-menu" role="menu">
+        <button type="button" role="menuitem" data-copy-option="id">复制任务ID</button>
+        <button type="button" role="menuitem" data-copy-option="title">复制任务名称</button>
+        <button type="button" role="menuitem" data-copy-option="basic">复制基础信息</button>
+        <button type="button" role="menuitem" data-copy-option="full">复制全部信息</button>
+      </div>
+    </div>`;
+}
+
+function getTaskGroupBasicText(attrs) {
+    const id = attrs.groupId ?? '';
+    const title = attrs.groupTitle ?? '';
+    const archived = attrs.groupArchived === 'true' ? '是' : '否';
+    const total = attrs.groupTotal ?? '';
+    const completed = attrs.groupCompleted ?? '';
+    const lines = [
+        `ID: ${id}`,
+        `名称: ${title}`,
+        `归档: ${archived}`,
+        ...(total ? [`任务数: ${completed}/${total}`] : []),
+    ];
+    return lines.filter(Boolean).join('\n');
+}
+
+function formatTaskGroupFullText(g) {
+    const parts = [];
+    parts.push(`# ${g.title || ''}`);
+    parts.push(`ID: ${g.id}`);
+    parts.push(`归档: ${g.archived ? '是' : '否'}`);
+    const tasks = g.tasks || [];
+    parts.push(`任务数: ${tasks.length}`);
+    parts.push('');
+    if (tasks.length) {
+        parts.push('## 子任务');
+        tasks.forEach((t, i) => {
+            parts.push(`${i + 1}. [${t.status || ''}] ${t.title || ''}`);
+            if (t.description) parts.push(`   ${String(t.description).slice(0, 120)}${t.description.length > 120 ? '...' : ''}`);
+        });
+    }
+    return parts.join('\n');
+}
+
+function getTaskBasicText(attrs) {
+    const id = attrs.taskId ?? '';
+    const title = attrs.taskTitle ?? '';
+    const status = attrs.taskStatus ?? '';
+    const priority = attrs.taskPriority ?? '';
+    const groupId = attrs.taskGroupId ?? '';
+    const lines = [
+        `ID: ${id}`,
+        `标题: ${title}`,
+        ...(status ? [`状态: ${status}`] : []),
+        ...(priority ? [`优先级: ${priority}`] : []),
+        ...(groupId ? [`任务组ID: ${groupId}`] : []),
+    ];
+    return lines.filter(Boolean).join('\n');
+}
+
+function formatTaskFullText(t) {
+    const parts = [];
+    parts.push(`# ${t.title || ''}`);
+    parts.push(`ID: ${t.id}`);
+    if (t.group_id) parts.push(`任务组ID: ${t.group_id}`);
+    if (t.status) parts.push(`状态: ${t.status}`);
+    if (t.priority) parts.push(`优先级: ${t.priority}`);
+    if (t.importance != null) parts.push(`重要度: ${t.importance}`);
+    if (t.due_date) parts.push(`截止: ${t.due_date}`);
+    if (t.labels && t.labels.length) parts.push(`标签: ${t.labels.join(', ')}`);
+    parts.push('');
+    if (t.description) {
+        parts.push('## 描述');
+        parts.push(t.description);
+    }
+    if (t.acceptance_criteria) {
+        parts.push('');
+        parts.push('## 验收标准');
+        parts.push(t.acceptance_criteria);
+    }
+    return parts.join('\n');
+}
+
+async function copyTaskGroupOption(option, dropdownEl) {
+    let text = '';
+    if (option === 'id') {
+        text = dropdownEl.dataset.groupId ?? '';
+    } else if (option === 'title') {
+        text = dropdownEl.dataset.groupTitle ?? '';
+    } else if (option === 'basic') {
+        text = getTaskGroupBasicText(dropdownEl.dataset);
+    } else if (option === 'full') {
+        const id = dropdownEl.dataset.groupId;
+        if (!id) {
+            toast('无法获取任务组ID', 'error');
+            return;
+        }
+        try {
+            const g = await api('GET', `/api/v1/task-groups/${id}`);
+            text = formatTaskGroupFullText(g);
+        } catch (e) {
+            toast('获取任务组失败: ' + e.message, 'error');
+            return;
+        }
+    }
+    const ok = await copyTextToClipboard(text);
+    if (ok) toast('已复制', 'success');
+    else toast('复制失败', 'error');
+}
+
+async function copyTaskOption(option, dropdownEl) {
+    let text = '';
+    if (option === 'id') {
+        text = dropdownEl.dataset.taskId ?? '';
+    } else if (option === 'title') {
+        text = dropdownEl.dataset.taskTitle ?? '';
+    } else if (option === 'basic') {
+        text = getTaskBasicText(dropdownEl.dataset);
+    } else if (option === 'full') {
+        const id = dropdownEl.dataset.taskId;
+        if (!id) {
+            toast('无法获取任务ID', 'error');
+            return;
+        }
+        try {
+            const t = await api('GET', `/api/v1/tasks/${id}?with_context=true`);
+            text = formatTaskFullText(t);
+        } catch (e) {
+            toast('获取任务失败: ' + e.message, 'error');
+            return;
+        }
+    }
+    const ok = await copyTextToClipboard(text);
+    if (ok) toast('已复制', 'success');
+    else toast('复制失败', 'error');
+}
+
 /** Handle copy option from dropdown (card: dropdown has data-exp-*; detail: use state.currentDetail). */
 async function copyExpOption(option, dropdownEl) {
     const isDetail = dropdownEl.classList.contains('exp-copy-dropdown-detail');
@@ -219,7 +373,14 @@ function bindCopyDropdowns(container) {
                 e.preventDefault();
                 e.stopPropagation();
                 const option = btn.dataset.copyOption;
-                copyExpOption(option, dropdown);
+                const copyType = dropdown.dataset.copyType || 'exp';
+                if (copyType === 'taskgroup') {
+                    copyTaskGroupOption(option, dropdown);
+                } else if (copyType === 'task') {
+                    copyTaskOption(option, dropdown);
+                } else {
+                    copyExpOption(option, dropdown);
+                }
                 dropdown.classList.remove('open');
                 trigger.setAttribute('aria-expanded', 'false');
             });
@@ -1381,6 +1542,92 @@ export async function loadRetrievalConfig() {
     await loadAllConfig();
 }
 
+/** Load and render /health for ops; no auth required. */
+export async function loadHealthStatus() {
+    const loadingEl = document.getElementById('health-status-loading');
+    const bodyEl = document.getElementById('health-status-body');
+    const errorEl = document.getElementById('health-status-error');
+    if (!loadingEl || !bodyEl || !errorEl) return;
+
+    loadingEl.classList.remove('hidden');
+    loadingEl.textContent = '正在检测…';
+    bodyEl.classList.add('hidden');
+    errorEl.classList.add('hidden');
+    errorEl.textContent = '';
+
+    try {
+        const base = window.__apiBaseUrl || '';
+        const r = await fetch(base ? `${base}/health` : '/health', { method: 'GET', credentials: 'same-origin' });
+        const data = await r.json().catch(() => ({}));
+
+        loadingEl.classList.add('hidden');
+
+        const status = data.status || 'unknown';
+        const checks = data.checks || {};
+        const version = data.version || '';
+        const timestamp = data.timestamp || '';
+
+        const summaryEl = document.getElementById('health-summary');
+        if (summaryEl) {
+            const statusLabel = status === 'healthy' ? '正常' : status === 'degraded' ? '降级' : '异常';
+            const statusClass = status === 'healthy' ? 'status-healthy' : status === 'degraded' ? 'status-degraded' : 'status-unhealthy';
+            summaryEl.innerHTML = `
+        <span class="status-badge ${statusClass}">${statusLabel}</span>
+        <span>${version ? `v${version}` : ''}</span>
+        <span class="hint">${timestamp ? new Date(timestamp).toLocaleString('zh-CN') : ''}</span>
+      `;
+        }
+
+        const checksEl = document.getElementById('health-checks');
+        if (checksEl) {
+            const order = ['database', 'ollama', 'cache', 'dashboard_stats', 'embedding_provider', 'migration', 'event_bus', 'embedding_queue'];
+            const labels = {
+                database: '数据库',
+                ollama: 'Ollama',
+                cache: '缓存',
+                dashboard_stats: '仪表盘',
+                embedding_provider: 'Embedding',
+                migration: '迁移',
+                event_bus: '事件总线',
+                embedding_queue: '嵌入队列',
+            };
+            checksEl.innerHTML = order.filter((k) => k in checks).map((key) => {
+                const c = checks[key];
+                const st = (c && c.status) || 'unknown';
+                const name = labels[key] || key;
+                let detail = '';
+                if (st === 'down' && c) {
+                    if (c.error) detail += c.error;
+                    if (c.ops_hint) detail += (detail ? ' ' : '') + c.ops_hint;
+                    if (c.latency_ms != null) detail = (detail || '') + ` (${c.latency_ms}ms)`;
+                } else if (c && c.latency_ms != null) {
+                    detail = `${c.latency_ms}ms`;
+                }
+                return `<div class="health-check-item ${st}">
+          <div class="check-name">${esc(name)}</div>
+          ${detail ? `<div class="check-detail">${esc(detail)}</div>` : ''}
+        </div>`;
+            }).join('');
+        }
+
+        bodyEl.classList.remove('hidden');
+
+        const refreshBtn = document.getElementById('health-btn-refresh');
+        const copyBtn = document.getElementById('health-btn-copy-cmd');
+        if (refreshBtn) refreshBtn.onclick = () => loadHealthStatus();
+        if (copyBtn) {
+            copyBtn.onclick = () => {
+                copyTextToClipboard('make health');
+                toast('已复制 make health', 'success');
+            };
+        }
+    } catch (e) {
+        loadingEl.classList.add('hidden');
+        errorEl.textContent = '获取健康状态失败: ' + (e.message || String(e));
+        errorEl.classList.remove('hidden');
+    }
+}
+
 export async function saveRetrievalConfig() {
     const maxTokensVal = document.getElementById('cfg-max-tokens').value.trim();
     const body = {
@@ -2033,7 +2280,7 @@ export async function loadTasks() {
                       </svg>
                       <div style="flex:1;min-width:0">
                         <div style="font-weight:500;display:flex;align-items:center;gap:6px;min-width:0">
-                          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.title)}</span>
+                          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(g.title).replace(/"/g, '&quot;')}">${esc(g.title)}</span>
                         </div>
                         <div style="font-size:11px;color:var(--text-muted)">${prog.completed}/${prog.total} 任务完成</div>
                         ${stepSummary}
@@ -2116,6 +2363,11 @@ export async function loadTasks() {
                         <button class="btn btn-primary btn-sm group-retro-btn" onclick="event.stopPropagation();sedimentTaskGroup('${g.id}')">组复盘 / 保存为组经验</button>
                        </div>`
                     : '';
+                const pinBtn = !g.isVirtual && !isArchived
+                    ? `<button type="button" class="task-group-pin-btn" title="置顶到最前" onclick="event.stopPropagation();pinTaskGroupToTop('${g.id}')">置顶</button>`
+                    : '';
+                const groupCopyAttrs = `data-group-id="${esc(g.id)}" data-group-title="${esc(g.title || '').replace(/"/g, '&quot;')}" data-group-archived="${isArchived}" data-group-total="${prog.total || 0}" data-group-completed="${prog.completed || 0}"`;
+                const groupCopyBtn = getTaskGroupCopyDropdownHtml(groupCopyAttrs);
                 const dragAttrs = !g.isVirtual ? ` draggable="true" data-group-id="${g.id}"` : ` data-group-id="${g.id}"`;
                 return `<div class="task-group-card task-group-collapsible${isArchived ? ' archived' : ''}${g.isVirtual ? ' ungrouped' : ''}"${dragAttrs} style="min-width:320px;max-width:360px;flex-shrink:0;scroll-snap-align:start;position:relative"
                   onclick="document.getElementById('tasks-group-filter').value='${g.id}';loadTasks()">
@@ -2129,13 +2381,15 @@ export async function loadTasks() {
                       </svg>
                       <div style="flex:1;min-width:0">
                         <div style="font-weight:500;display:flex;align-items:center;gap:6px;min-width:0">
-                          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(g.title)}</span>
+                          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(g.title).replace(/"/g, '&quot;')}">${esc(g.title)}</span>
                         </div>
                         <div style="font-size:11px;color:var(--text-muted)">${prog.completed}/${prog.total} 任务完成</div>
                         ${stepSummary}
                       </div>
                     </div>
                     <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+                      ${pinBtn}
+                      <span onclick="event.stopPropagation()">${groupCopyBtn}</span>
                       ${unarchiveBtn}
                       <button class="group-eye-btn ${eyeCls}" title="${isVisible ? '隐藏看板任务' : '显示看板任务'}"
                         onclick="event.stopPropagation();toggleGroupVisibility('${g.id}')">${eyeIcon}</button>
@@ -2155,12 +2409,24 @@ export async function loadTasks() {
                 `<h3 style="font-size:14px;font-weight:600;color:var(--text-secondary);margin:0">${sectionTitle}</h3>` +
                 `<div style="display:flex;gap:6px">${showAllBtn}${hideAllBtn}</div>` +
                 `</div>` +
-                `<div id="task-groups-grid" class="task-groups-grid" style="display:flex;gap:16px;overflow-x:auto;padding-bottom:8px;scroll-snap-type: x mandatory">${cardsHtml}</div>`;
+                `<div id="task-groups-grid" class="task-groups-grid" style="display:flex;gap:16px;overflow-x:auto;padding-bottom:18px;scroll-snap-type: x mandatory">${cardsHtml}</div>`;
 
             const grid = document.getElementById('task-groups-grid');
             if (grid) {
                 const findCard = (el) => el?.closest?.('.task-group-card') || null;
                 const clearDragOver = () => grid.querySelectorAll('.task-group-card.drag-over').forEach((c) => c.classList.remove('drag-over'));
+
+                // Mouse wheel over task groups: vertical wheel scrolls horizontally for easier sliding
+                grid.addEventListener('wheel', (e) => {
+                    const canScrollH = grid.scrollWidth > grid.clientWidth;
+                    if (!canScrollH) return;
+                    const deltaY = e.deltaY;
+                    const deltaX = e.deltaX;
+                    if (deltaY !== 0 || deltaX !== 0) {
+                        e.preventDefault();
+                        grid.scrollLeft += deltaX !== 0 ? deltaX : deltaY;
+                    }
+                }, { passive: false });
 
                 grid.addEventListener('dragstart', (e) => {
                     const card = findCard(e.target);
@@ -2203,6 +2469,7 @@ export async function loadTasks() {
                 });
                 grid.addEventListener('dragend', clearDragOver);
             }
+            bindCopyDropdowns(groupsContainer);
         } else {
             groupsContainer.innerHTML = _tasksShowArchived
                 ? `<div class="empty-state" style="padding:32px;text-align:center;color:var(--text-muted)">
@@ -2478,6 +2745,16 @@ export async function sedimentTaskGroup(groupId) {
 async function reorderTaskGroups(newOrder) {
     await api('PUT', '/api/v1/task-groups/reorder', { order: newOrder });
     loadTasks();
+}
+
+export async function pinTaskGroupToTop(groupId) {
+    const currentGroups = window.__tasksCurrentGroups || [];
+    const realGroups = currentGroups.filter((g) => !g.isVirtual);
+    const idx = realGroups.findIndex((g) => g.id === groupId);
+    if (idx === -1) return;
+    const newOrder = [groupId, ...realGroups.filter((g) => g.id !== groupId).map((g) => g.id)];
+    await reorderTaskGroups(newOrder);
+    toast('已置顶', 'success');
 }
 
 export async function archiveGroup(groupId) {

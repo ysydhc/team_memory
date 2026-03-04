@@ -365,6 +365,7 @@ function navigate(page) {
         pages.loadCurrentSchema();
         pages.loadScoringConfig();
         pages.checkMergeSuggestions();
+        pages.loadHealthStatus();
         if (state.currentUser && state.currentUser.role === 'admin') {
             pages.loadKeyManagement();
         }
@@ -434,6 +435,7 @@ window.sendTaskMessage = pages.sendTaskMessage;
 window.sedimentTaskGroup = pages.sedimentTaskGroup;
 window.archiveGroup = pages.archiveGroup;
 window.unarchiveGroup = pages.unarchiveGroup;
+window.pinTaskGroupToTop = pages.pinTaskGroupToTop;
 window.switchTasksSubTab = pages.switchTasksSubTab;
 window.toggleTaskGroups = pages.toggleTaskGroups;
 window.toggleGroupVisibility = pages.toggleGroupVisibility;
