@@ -26,6 +26,8 @@ export const state = {
     importFile: null,
     generatedSchemaData: null,
     detailReferrer: 'list',
+    /** Stack of experience ids when navigating via related links; back button pops and shows that detail. */
+    detailBackStack: [],
     availableProjects: [],
 };
 

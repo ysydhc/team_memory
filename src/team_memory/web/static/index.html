@@ -1063,6 +1063,50 @@
       line-height: 1.7;
     }
 
+    /* Related experience links — pill tag style (dark blue bg, light blue text, shadow) */
+    .related-exp-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .related-exp-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      background: #35425d;
+      color: #81a3db;
+      border: none;
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: 500;
+      font-family: var(--font-sans);
+      text-decoration: none;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+      transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .related-exp-pill:hover {
+      background: #3f4f6e;
+      color: #9bb8ed;
+      box-shadow: 0 3px 12px rgba(0, 0, 0, 0.3);
+      transform: translateY(-1px);
+    }
+
+    .related-exp-pill-type {
+      font-size: 11px;
+      font-weight: 500;
+      opacity: 0.85;
+    }
+
     .code-block {
       background: var(--bg-primary);
       border: 1px solid var(--border);
@@ -1084,12 +1128,12 @@
       align-items: center;
     }
 
-    /* Detail back bar: fixed below topbar for reliable click, full-width strip */
+    /* Detail back bar: fixed below topbar for reliable click, full-width strip (experience detail only) */
     #page-detail {
       padding-top: 48px;
     }
 
-    .back-btn {
+    #page-detail .back-btn {
       position: fixed;
       top: 56px;
       left: 0;
@@ -1112,20 +1156,86 @@
       box-shadow: 0 1px 0 var(--border);
     }
 
-    .back-btn:hover {
+    #page-detail .back-btn:hover {
       color: var(--accent);
     }
 
     @media (min-width: 1200px) {
-      .back-btn {
+      #page-detail .back-btn {
         padding-left: calc((100vw - 1200px) / 2 + 32px);
         padding-right: calc((100vw - 1200px) / 2 + 32px);
       }
     }
 
     @media (max-width: 768px) {
-      .back-btn {
+      #page-detail .back-btn {
         padding: 0 16px;
+      }
+    }
+
+    /* Tasks page: back to all tasks — sticky at top when scrolled; opaque so content does not show through */
+    #page-tasks #tasks-groups:empty {
+      margin-bottom: 8px;
+    }
+
+    /* Stick when just below "任务列表" row so it does not slide up further; top = topbar + 任务列表 row */
+    #page-tasks .tasks-back-row {
+      margin-top: 4px;
+      margin-bottom: 12px;
+      position: sticky;
+      top: 100px;
+      z-index: 20;
+      padding: 10px 32px;
+      margin-left: -32px;
+      margin-right: -32px;
+      border-bottom: 1px solid var(--border);
+      box-shadow: 0 1px 0 var(--border);
+      isolation: isolate;
+    }
+
+    /* Extend opaque background down to cover gap before task group card, so "任务列表" etc. do not show through */
+    #page-tasks .tasks-back-row::before {
+      content: '';
+      position: absolute;
+      left: -32px;
+      right: -32px;
+      top: 0;
+      bottom: -12px;
+      background: var(--bg-primary);
+      z-index: -1;
+    }
+
+    #page-tasks .back-btn {
+      position: static;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: auto;
+      padding: 6px 0;
+      margin: 0;
+      background: none;
+      border: none;
+      box-shadow: none;
+      font-size: 13px;
+      color: var(--accent);
+      cursor: pointer;
+      font-family: var(--font-sans);
+    }
+
+    #page-tasks .back-btn:hover {
+      color: var(--accent-hover);
+    }
+
+    @media (max-width: 768px) {
+      #page-tasks .tasks-back-row {
+        margin-left: -16px;
+        margin-right: -16px;
+        padding-left: 16px;
+        padding-right: 16px;
+      }
+      #page-tasks .tasks-back-row::before {
+        left: -16px;
+        right: -16px;
       }
     }
 
@@ -3351,13 +3461,13 @@
       <!-- Tasks Page -->
       <div id="page-tasks" class="page hidden">
         <div class="page-toolbar">
-          <div class="mode-tabs" style="margin-bottom:12px">
-            <button class="mode-tab active" onclick="switchTasksSubTab('active')" id="tasks-tab-active">进行中</button>
-            <button class="mode-tab" onclick="switchTasksSubTab('archived')" id="tasks-tab-archived">📦 归档</button>
-          </div>
           <div style="display:flex;justify-content:space-between;align-items:center">
             <h2 style="font-size:16px;font-weight:600;color:var(--text-secondary)" id="page-tasks-title">任务列表</h2>
             <div style="display:flex;gap:8px;align-items:center">
+              <select id="tasks-status-filter" class="filter-select" onchange="switchTasksSubTab(this.value)" title="任务状态">
+                <option value="active">⏳ 进行中</option>
+                <option value="archived">📦 归档</option>
+              </select>
               <div class="project-multi-select" id="page-tasks-projects">
                 <button class="proj-trigger" onclick="toggleProjectDropdown(this)">
                   <span class="proj-label">全部项目</span><span class="proj-tags"></span><span

@@ -541,19 +541,43 @@ async def get_experience_links(
     experience_id: str,
     user: User | None = Depends(get_optional_user),
 ):
-    """Get all links for an experience (both directions)."""
+    """Get all links for an experience (both directions) with other experience id/title."""
     db_url = _get_db_url()
+    exp_uuid = uuid.UUID(experience_id)
     async with app_module.get_session(db_url) as session:
         result = await session.execute(
             select(ExperienceLink).where(
                 or_(
-                    ExperienceLink.source_id == uuid.UUID(experience_id),
-                    ExperienceLink.target_id == uuid.UUID(experience_id),
+                    ExperienceLink.source_id == exp_uuid,
+                    ExperienceLink.target_id == exp_uuid,
                 )
             )
         )
         links = result.scalars().all()
-        return {"links": [link.to_dict() for link in links]}
+        if not links:
+            return {"links": []}
+        other_ids = [
+            str(link.target_id if link.source_id == exp_uuid else link.source_id)
+            for link in links
+        ]
+        exp_result = await session.execute(
+            select(Experience.id, Experience.title).where(
+                Experience.id.in_([uuid.UUID(oid) for oid in other_ids])
+            )
+        )
+        id_to_title = {str(row[0]): row[1] for row in exp_result.all()}
+        out = []
+        for link in links:
+            other_id = (
+                str(link.target_id)
+                if link.source_id == exp_uuid
+                else str(link.source_id)
+            )
+            d = link.to_dict()
+            d["other_id"] = other_id
+            d["other_title"] = id_to_title.get(other_id, "")
+            out.append(d)
+        return {"links": out}
 
 
 @router.delete("/experiences/{experience_id}/links/{link_id}")

@@ -195,6 +195,22 @@ class ExperienceService:
                 except Exception:
                     logger.warning("Failed to log query", exc_info=True)
 
+                # Enrich each result with related_experience_ids (P1-3)
+                import uuid as _uuid
+
+                for r in pipeline_result.results:
+                    eid = r.get("group_id") or r.get("id")
+                    if eid:
+                        try:
+                            r["related_experience_ids"] = (
+                                await repo.get_related_experience_ids(
+                                    _uuid.UUID(str(eid))
+                                )
+                            )
+                        except (ValueError, TypeError):
+                            r["related_experience_ids"] = []
+                    else:
+                        r["related_experience_ids"] = []
                 return pipeline_result.results
 
             # Legacy fallback: direct vector/FTS search (reuse session)
@@ -283,6 +299,20 @@ class ExperienceService:
         except Exception:
             logger.warning("Failed to log query", exc_info=True)
 
+        # Enrich each result with related_experience_ids (P1-3)
+        for r in results:
+            eid = r.get("group_id") or r.get("id")
+            if eid:
+                try:
+                    r["related_experience_ids"] = (
+                        await repo.get_related_experience_ids(
+                            uuid.UUID(str(eid))
+                        )
+                    )
+                except (ValueError, TypeError):
+                    r["related_experience_ids"] = []
+            else:
+                r["related_experience_ids"] = []
         return results
 
     async def invalidate_search_cache(self):

@@ -574,7 +574,22 @@ function renderPagination(data) {
 // ===== Detail View =====
 export const viewDetail = (id) => showDetail(id);
 
-export async function showDetail(id) {
+/** Back from current detail: either to previous experience (from stack) or to referrer page (list/search etc.). */
+export function backToPreviousDetail() {
+    if ((state.detailBackStack || []).length > 0) {
+        const id = state.detailBackStack.pop();
+        showDetail(id, { isBack: true });
+    } else {
+        navigate(state.detailReferrer || 'list');
+    }
+}
+
+export async function showDetail(id, opts = {}) {
+    if (state.currentPage !== 'detail') {
+        state.detailBackStack = [];
+    } else if (!opts.isBack && state.currentDetail?.id && state.currentDetail.id !== id) {
+        (state.detailBackStack = state.detailBackStack || []).push(state.currentDetail.id);
+    }
     state.detailReferrer = state.currentPage || 'list';
     state.currentPage = 'detail';
     if (location.hash !== '#detail/' + id) {
@@ -582,6 +597,9 @@ export async function showDetail(id) {
     }
     document.querySelectorAll('.page').forEach((p) => p.classList.add('hidden'));
     document.querySelectorAll('.topbar-nav a').forEach((a) => a.classList.remove('active'));
+    if (state.detailReferrer === 'search') {
+        document.querySelectorAll('.topbar-nav a[data-page="search"]').forEach((a) => a.classList.add('active'));
+    }
     const page = document.getElementById('page-detail');
     page.classList.remove('hidden');
     page.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
@@ -1246,7 +1264,8 @@ window.toggleSkillFile = async function(category, filePath, toggleEl) {
     const isCurrentlyEnabled = knob.style.left === '18px';
     const newEnabled = !isCurrentlyEnabled;
     try {
-        const project = state.activeProject || state.defaultProject || 'default';
+        const selectedProjects = typeof window.getSelectedProjects === 'function' ? window.getSelectedProjects('usage') : [];
+        const project = selectedProjects.length ? selectedProjects[0] : (state.activeProject || state.defaultProject || 'default');
         await api('POST', `/api/v1/analytics/skills-rules/toggle?project=${encodeURIComponent(project)}`, {
             category, file_path: filePath, enabled: newEnabled,
         });
@@ -2140,9 +2159,8 @@ export function switchTasksSubTab(mode) {
     }
     const groupSelect = document.getElementById('tasks-group-filter');
     if (groupSelect) groupSelect.value = '';
-    document.querySelectorAll('#page-tasks .mode-tab').forEach((el) => el.classList.remove('active'));
-    const tab = document.getElementById(`tasks-tab-${mode}`);
-    if (tab) tab.classList.add('active');
+    const statusSelect = document.getElementById('tasks-status-filter');
+    if (statusSelect) statusSelect.value = mode;
     const titleEl = document.getElementById('page-tasks-title');
     if (titleEl) titleEl.textContent = _tasksShowArchived ? '归档任务' : '任务列表';
     loadTasks();
@@ -2185,9 +2203,8 @@ export async function loadTasks() {
     const board = document.getElementById('tasks-board');
     const groupsContainer = document.getElementById('tasks-groups');
     if (!board) return;
-    document.querySelectorAll('#page-tasks .mode-tab').forEach((el) => el.classList.remove('active'));
-    const tab = document.getElementById(_tasksShowArchived ? 'tasks-tab-archived' : 'tasks-tab-active');
-    if (tab) tab.classList.add('active');
+    const statusSelect = document.getElementById('tasks-status-filter');
+    if (statusSelect) statusSelect.value = _tasksShowArchived ? 'archived' : 'active';
     const titleEl = document.getElementById('page-tasks-title');
     if (titleEl) titleEl.textContent = _tasksShowArchived ? '归档任务' : '任务列表';
     board.innerHTML = '<div class="loading" style="grid-column:1/-1"><div class="spinner"></div></div>';
@@ -2268,9 +2285,8 @@ export async function loadTasks() {
         if (groupFilter) {
             const g = groups.find(gr => gr.id === groupFilter);
             const gName = g?.title || (groupFilter === UNGROUPED_ID ? '无任务组' : '任务组');
-            html += `<div style="grid-column:1/-1;margin-bottom:8px">
-              <button class="back-btn" onclick="document.getElementById('tasks-group-filter').value='';loadTasks()"
-                style="font-size:13px;cursor:pointer;background:none;border:none;color:var(--accent);padding:4px 0">
+            html += `<div class="tasks-back-row" style="grid-column:1/-1">
+              <button class="back-btn" type="button" onclick="document.getElementById('tasks-group-filter').value='';loadTasks()">
                 ← 返回全部任务</button>
               <span style="font-size:13px;color:var(--text-muted);margin-left:8px">${esc(gName)}</span>
             </div>`;
@@ -2501,13 +2517,16 @@ export async function loadTasks() {
             }
             bindCopyDropdowns(groupsContainer);
         } else {
-            groupsContainer.innerHTML = _tasksShowArchived
-                ? `<div class="empty-state" style="padding:32px;text-align:center;color:var(--text-muted)">
+            /* Only show "暂无归档任务组" when on full list (no group filter) and archived tab; hide in group detail view */
+            if (!groupFilter && _tasksShowArchived) {
+                groupsContainer.innerHTML = `<div class="empty-state" style="padding:32px;text-align:center;color:var(--text-muted)">
                     <div style="font-size:32px;margin-bottom:12px;opacity:0.6">📦</div>
                     <div style="font-size:14px;font-weight:500;margin-bottom:6px">暂无归档任务组</div>
                     <div style="font-size:12px">已完成并归档的任务组将显示在此处</div>
-                  </div>`
-                : '';
+                  </div>`;
+            } else {
+                groupsContainer.innerHTML = '';
+            }
         }
     } catch (e) {
         board.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><h3>加载任务失败</h3><p>${esc(e.message)}</p></div>`;

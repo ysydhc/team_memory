@@ -13,6 +13,7 @@ from team_memory.storage.models import (
     DocumentTreeNode,
     Experience,
     ExperienceFeedback,
+    ExperienceLink,
     ExperienceVersion,
     PersonalTask,
     QueryLog,
@@ -264,6 +265,29 @@ class ExperienceRepository:
                 return current_id
             current_id = exp.parent_id
         return current_id
+
+    async def get_related_experience_ids(
+        self, experience_id: uuid.UUID
+    ) -> list[str]:
+        """Return experience IDs linked to this one (both directions)."""
+        result = await self._session.execute(
+            select(ExperienceLink).where(
+                or_(
+                    ExperienceLink.source_id == experience_id,
+                    ExperienceLink.target_id == experience_id,
+                )
+            )
+        )
+        links = result.scalars().all()
+        out: list[str] = []
+        for link in links:
+            other = (
+                link.target_id
+                if link.source_id == experience_id
+                else link.source_id
+            )
+            out.append(str(other))
+        return out
 
     async def list_root_ids_with_children(
         self, project: str | None = None

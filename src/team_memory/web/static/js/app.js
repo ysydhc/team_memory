@@ -423,6 +423,7 @@ window.switchListSubTab = pages.switchListSubTab;
 window.filterByTag = pages.filterByTag;
 window.showDetail = pages.showDetail;
 window.viewDetail = pages.viewDetail;
+window.backToPreviousDetail = pages.backToPreviousDetail;
 window.loadDashboard = pages.loadDashboard;
 window.loadDrafts = pages.loadDrafts;
 window.loadTasks = pages.loadTasks;
