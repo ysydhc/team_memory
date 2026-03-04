@@ -88,6 +88,8 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 - **Token 预算控制**：自动裁剪输出长度，避免经验库增大后撑爆 AI 上下文
 - **记忆压缩与摘要**：经验支持 `summary` 字段，LLM 可生成简短摘要；单条（POST `/experiences/{id}/summarize`）与批量（POST `/experiences/batch-summarize`）生成；MCP 搜索结果中每条经验可包含 `summary`，便于节省 Token
 - **PageIndex-Lite**：长文档自动分块建立节点索引，支持节点级精准检索
+- **个人扩写**：per-user tag_synonyms 在检索前生效（词表替换 + LLM 扩写），MCP 搜索返回后自动维护；Web 设置 → 个人扩写
+- **个人记忆**：按 user 隔离的偏好与习惯，tm_learn 自动提炼、拉取时按 scope + current_context 语义返回；Web 设置 → 个人记忆；设计见 `docs/plans/2025-03-04-personal-memory-expansion-design.md`
 
 ### 任务管理
 
