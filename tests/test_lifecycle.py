@@ -345,8 +345,13 @@ class TestDedup:
 
         mock_session = AsyncMock()
         pair = {
-            "exp_a": {"id": str(uuid.uuid4()), "title": "A"},
-            "exp_b": {"id": str(uuid.uuid4()), "title": "B"},
+            "exp_a": {
+                "id": str(uuid.uuid4()), "title": "A", "children_count": 0, "children_preview": [],
+            },
+            "exp_b": {
+                "id": str(uuid.uuid4()), "title": "B", "children_count": 2,
+                "children_preview": ["B1", "B2"],
+            },
             "similarity": 0.95,
         }
 
@@ -362,6 +367,10 @@ class TestDedup:
             result = await service.find_duplicates(threshold=0.92)
             assert len(result) == 1
             assert result[0]["similarity"] == 0.95
+            assert result[0]["exp_a"]["children_count"] == 0
+            assert result[0]["exp_a"]["children_preview"] == []
+            assert result[0]["exp_b"]["children_count"] == 2
+            assert result[0]["exp_b"]["children_preview"] == ["B1", "B2"]
 
     @pytest.mark.asyncio
     async def test_merge_experiences_saves_versions(self):

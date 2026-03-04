@@ -205,6 +205,47 @@ class TestRepositoryIntegration:
             assert "python" in r.get("tags", [])
 
     @pytest.mark.asyncio
+    async def test_find_duplicates_excludes_groups_with_different_children(
+        self, session, mock_embed
+    ):
+        """Regression: two groups, same parent embedding, different child titles
+        must be excluded from duplicate list (Jaccard < 0.2)."""
+        repo = ExperienceRepository(session)
+        # Same embedding so vector similarity is 1.0 and they would appear as duplicate
+        same_embedding = await mock_embed.encode_single("本组4条相关经验")
+        parent_data = {
+            "title": "经验组",
+            "description": "本组4条相关经验",
+            "solution": "",
+            "embedding": same_embedding,
+            "created_by": "tester",
+            "publish_status": "published",
+        }
+        # Group A: children about "托底修复"
+        await repo.create_group(
+            parent_data={**parent_data, "title": "经验组A"},
+            children_data=[
+                {"title": "托底修复步骤1", "description": "d1", "solution": "s1", "embedding": None},  # noqa: E501
+                {"title": "配置检查", "description": "d2", "solution": "s2", "embedding": None},
+            ],
+            created_by="tester",
+        )
+        # Group B: children about "架构决策" (no overlap with A)
+        await repo.create_group(
+            parent_data={**parent_data, "title": "经验组B"},
+            children_data=[
+                {"title": "架构决策", "description": "d1", "solution": "s1", "embedding": None},
+                {"title": "技术选型", "description": "d2", "solution": "s2", "embedding": None},
+            ],
+            created_by="tester",
+        )
+        await session.commit()
+
+        pairs = await repo.find_duplicates(threshold=0.5, limit=10)
+        # Pair must be excluded by group-aware filter (Jaccard of child titles = 0)
+        assert len(pairs) == 0, "Groups with different children must be excluded"
+
+    @pytest.mark.asyncio
     async def test_feedback(self, session, mock_embed):
         """Test adding feedback and rating update."""
         repo = ExperienceRepository(session)
