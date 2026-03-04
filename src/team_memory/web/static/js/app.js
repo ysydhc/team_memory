@@ -328,6 +328,8 @@ const HASH_TO_PAGE = {
     settings: 'settings',
     usage: 'usage',
     dedup: 'dedup',
+    'personal-memory': 'personal-memory',
+    'user-expansion': 'user-expansion',
     // Legacy redirects
     dashboard: 'list',
     drafts: 'list',
@@ -359,6 +361,8 @@ function navigate(page) {
     else if (page === 'search') {}
     else if (page === 'usage') pages.loadUsageStats();
     else if (page === 'dedup') {}
+    else if (page === 'personal-memory') pages.loadPersonalMemoryList();
+    else if (page === 'user-expansion') pages.loadUserExpansion();
     else if (page === 'settings') {
         pages.loadRetrievalConfig();
         components.loadWebhookConfig();
@@ -484,6 +488,14 @@ window.scoreAction = pages.scoreAction;
 window.refreshScores = pages.refreshScores;
 window.saveScoringConfig = pages.saveScoringConfig;
 window.loadMergePreview = pages.loadMergePreview;
+window.loadPersonalMemoryList = pages.loadPersonalMemoryList;
+window.loadUserExpansion = pages.loadUserExpansion;
+window.showAddPersonalMemoryModal = pages.showAddPersonalMemoryModal;
+window.editPersonalMemory = pages.editPersonalMemory;
+window.deletePersonalMemory = pages.deletePersonalMemory;
+window.addExpansionRow = pages.addExpansionRow;
+window.removeExpansionRow = pages.removeExpansionRow;
+window.saveUserExpansion = pages.saveUserExpansion;
 
 window.addCustomScanPath = function() {
     const container = document.getElementById('custom-scan-paths');

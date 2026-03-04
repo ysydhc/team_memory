@@ -745,6 +745,62 @@ class TestParseDocument:
 
 
 # ============================================================
+# Personal Memory & User Expansion (Task 6)
+# ============================================================
+
+
+class TestPersonalMemoryAPI:
+    """Personal memory list/get/put/delete require auth."""
+
+    def test_list_requires_auth(self, client):
+        resp = client.get("/api/v1/personal-memory/list")
+        assert resp.status_code == 401
+
+    def test_list_with_auth(self, client, auth_headers):
+        with patch(
+            "team_memory.web.routes.personal_memory.get_context"
+        ) as mock_ctx, patch(
+            "team_memory.storage.database.get_session"
+        ) as mock_session, patch(
+            "team_memory.services.personal_memory.PersonalMemoryRepository"
+        ) as mock_repo_cls:
+            mock_ctx.return_value.embedding = MagicMock()
+            mock_ctx.return_value.embedding.encode_single = AsyncMock(
+                return_value=[0.1] * 768
+            )
+            mock_ctx.return_value.db_url = "sqlite:///"
+            mock_session.return_value.__aenter__ = AsyncMock(
+                return_value=MagicMock()
+            )
+            mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_repo = MagicMock()
+            mock_repo.list_by_user = AsyncMock(return_value=[])
+            mock_repo_cls.return_value = mock_repo
+            resp = client.get(
+                "/api/v1/personal-memory/list",
+                headers=auth_headers,
+            )
+        assert resp.status_code == 200
+        assert "items" in resp.json()
+
+
+class TestUserExpansionAPI:
+    """User expansion GET works for anonymous (empty); PUT requires auth."""
+
+    def test_get_anonymous_returns_empty(self, client):
+        resp = client.get("/api/v1/user-expansion-config")
+        assert resp.status_code == 200
+        assert resp.json()["tag_synonyms"] == {}
+
+    def test_put_requires_auth(self, client):
+        resp = client.put(
+            "/api/v1/user-expansion-config",
+            json={"tag_synonyms": {"PG": "PostgreSQL"}},
+        )
+        assert resp.status_code == 401
+
+
+# ============================================================
 # Parse URL Tests
 # ============================================================
 

@@ -3808,6 +3808,22 @@
           </div>
         </div>
 
+        <div class="settings-nav-card" onclick="navigate('personal-memory')">
+          <div class="settings-nav-icon">🧠</div>
+          <div class="settings-nav-body">
+            <div class="settings-nav-title">个人记忆</div>
+            <div class="settings-nav-desc">Agent 可拉取的偏好与习惯，从 tm_learn 自动提炼，支持手动添加与编辑</div>
+          </div>
+          <div class="settings-nav-arrow">›</div>
+        </div>
+        <div class="settings-nav-card" onclick="navigate('user-expansion')">
+          <div class="settings-nav-icon">📖</div>
+          <div class="settings-nav-body">
+            <div class="settings-nav-title">个人扩写</div>
+            <div class="settings-nav-desc">检索前同义词扩展，从 tm_search 自动维护，支持手动添加与编辑</div>
+          </div>
+          <div class="settings-nav-arrow">›</div>
+        </div>
         <div class="settings-nav-card" onclick="navigate('dedup')">
           <div class="settings-nav-icon">🔍</div>
           <div class="settings-nav-body">
@@ -4027,6 +4043,37 @@
 
           </div>
         </div>
+      </div>
+
+      <!-- Personal Memory Fullpage -->
+      <div id="page-personal-memory" class="page hidden">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+          <button class="btn btn-secondary btn-sm" onclick="navigate('settings')">← 返回设置</button>
+          <h2 style="font-size:16px;font-weight:600;color:var(--text-secondary);margin:0">个人记忆</h2>
+        </div>
+        <p class="settings-desc" style="margin-bottom:16px">Agent 通过 tm_learn 自动提炼，或在此手动添加。scope=generic 始终返回；scope=context 仅在当前上下文语义匹配时返回。</p>
+        <div style="margin-bottom:16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="pm-scope-filter" style="padding:6px 10px;font-size:13px" onchange="loadPersonalMemoryList()">
+            <option value="">全部 scope</option>
+            <option value="generic">generic</option>
+            <option value="context">context</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="showAddPersonalMemoryModal()">手动添加</button>
+        </div>
+        <div id="personal-memory-list"></div>
+      </div>
+
+      <!-- User Expansion Fullpage -->
+      <div id="page-user-expansion" class="page hidden">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+          <button class="btn btn-secondary btn-sm" onclick="navigate('settings')">← 返回设置</button>
+          <h2 style="font-size:16px;font-weight:600;color:var(--text-secondary);margin:0">个人扩写</h2>
+        </div>
+        <p class="settings-desc" style="margin-bottom:16px">检索前将缩写替换为标准词，如 PG→PostgreSQL。从 tm_search 自动维护，或在此手动添加。</p>
+        <div style="margin-bottom:16px">
+          <button class="btn btn-primary btn-sm" onclick="addExpansionRow()">添加同义词</button>
+        </div>
+        <div id="user-expansion-editor"></div>
       </div>
 
       <!-- Dedup Fullpage -->

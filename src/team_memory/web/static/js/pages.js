@@ -3073,3 +3073,166 @@ export async function checkMergeSuggestions() {
         if (dot) dot.classList.toggle('active', count > 0);
     } catch (_) { /* ignore */ }
 }
+
+// ===== Personal Memory (Task 6) =====
+export async function loadPersonalMemoryList() {
+    const container = document.getElementById('personal-memory-list');
+    if (!container) return;
+    const scopeEl = document.getElementById('pm-scope-filter');
+    const scope = scopeEl ? scopeEl.value || '' : '';
+    container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    try {
+        const url = scope ? `/api/v1/personal-memory/list?scope=${encodeURIComponent(scope)}` : '/api/v1/personal-memory/list';
+        const data = await api('GET', url);
+        const items = data.items || [];
+        if (items.length === 0) {
+            container.innerHTML = `<div class="empty-state"><div class="icon">🧠</div><h3>暂无个人记忆</h3><p>从 tm_learn 自动提炼，或点击「手动添加」</p><button class="btn btn-primary btn-sm" onclick="showAddPersonalMemoryModal()">手动添加</button></div>`;
+            return;
+        }
+        container.innerHTML = items.map((m) => `
+          <div class="settings-card" style="margin-bottom:12px">
+            <div class="settings-card-body" style="padding:12px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+                <div style="flex:1">
+                  <span class="tag" style="font-size:11px">${esc(m.scope || 'generic')}</span>
+                  ${m.context_hint ? `<span class="hint" style="font-size:11px;margin-left:6px">${esc(m.context_hint)}</span>` : ''}
+                  <p style="margin:8px 0 0;font-size:14px">${esc(m.content)}</p>
+                  <div style="font-size:11px;color:var(--text-muted);margin-top:6px">${m.updated_at ? formatDate(m.updated_at) : ''}</div>
+                </div>
+                <div style="display:flex;gap:6px">
+                  <button class="btn btn-secondary btn-sm" onclick="editPersonalMemory('${m.id}')">编辑</button>
+                  <button class="btn btn-secondary btn-sm" onclick="deletePersonalMemory('${m.id}')">删除</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        `).join('');
+    } catch (e) {
+        container.innerHTML = `<div class="empty-state"><h3>加载失败</h3><p>${esc(e.message)}</p></div>`;
+    }
+}
+
+export function showAddPersonalMemoryModal() {
+    const content = prompt('输入偏好或习惯（一句概括）:');
+    if (!content || !content.trim()) return;
+    const scope = prompt('scope: generic 或 context（直接回车=generic）:') || 'generic';
+    const contextHint = scope === 'context' ? prompt('context_hint（适用场景，可选）:') || '' : '';
+    savePersonalMemory(null, content.trim(), scope, contextHint || null);
+}
+
+async function savePersonalMemory(id, content, scope, contextHint) {
+    try {
+        if (id) {
+            await api('PUT', `/api/v1/personal-memory/${id}`, { content, scope, context_hint: contextHint });
+            toast('已更新', 'success');
+        } else {
+            await api('POST', '/api/v1/personal-memory', { content, scope, context_hint: contextHint });
+            toast('已添加', 'success');
+        }
+        loadPersonalMemoryList();
+    } catch (e) {
+        toast('保存失败: ' + e.message, 'error');
+    }
+}
+
+export async function editPersonalMemory(id) {
+    try {
+        const mem = await api('GET', `/api/v1/personal-memory/${id}`);
+        const content = prompt('修改内容:', mem.content || '');
+        if (content === null) return;
+        const scope = prompt('scope: generic 或 context（直接回车=保持）:', mem.scope || 'generic') || 'generic';
+        const contextHint = prompt('context_hint（可选）:', mem.context_hint || '') || null;
+        await savePersonalMemory(id, content.trim(), scope, contextHint);
+    } catch (e) {
+        toast('加载失败: ' + e.message, 'error');
+    }
+}
+
+export async function deletePersonalMemory(id) {
+    if (!confirm('确认删除？')) return;
+    try {
+        await api('DELETE', `/api/v1/personal-memory/${id}`);
+        toast('已删除', 'success');
+        loadPersonalMemoryList();
+    } catch (e) {
+        toast('删除失败: ' + e.message, 'error');
+    }
+}
+
+// ===== User Expansion (Task 6) =====
+export async function loadUserExpansion() {
+    const container = document.getElementById('user-expansion-editor');
+    if (!container) return;
+    container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    try {
+        const data = await api('GET', '/api/v1/user-expansion-config');
+        const synonyms = data.tag_synonyms || {};
+        const entries = Object.entries(synonyms);
+        if (entries.length === 0) {
+            container.innerHTML = `<div class="empty-state"><div class="icon">📖</div><h3>暂无个人扩写</h3><p>从 tm_search 自动维护，或点击「添加同义词」</p><button class="btn btn-primary btn-sm" onclick="addExpansionRow()">添加同义词</button></div>`;
+            return;
+        }
+        container.innerHTML = `
+          <table class="data-table" style="max-width:500px">
+            <thead><tr><th>缩写/键</th><th>标准词/值</th><th></th></tr></thead>
+            <tbody id="expansion-tbody">
+            ${entries.map(([k, v]) => `
+              <tr data-key="${esc(k)}">
+                <td><input type="text" class="expansion-key" value="${esc(k)}" style="width:100%;padding:6px"></td>
+                <td><input type="text" class="expansion-val" value="${esc(v)}" style="width:100%;padding:6px"></td>
+                <td><button class="btn btn-secondary btn-sm" onclick="removeExpansionRow(this)">删除</button></td>
+              </tr>
+            `).join('')}
+            </tbody>
+          </table>
+          <div style="margin-top:12px">
+            <button class="btn btn-primary btn-sm" onclick="saveUserExpansion()">保存</button>
+          </div>
+        `;
+    } catch (e) {
+        container.innerHTML = `<div class="empty-state"><h3>加载失败</h3><p>${esc(e.message)}</p></div>`;
+    }
+}
+
+export function addExpansionRow() {
+    const empty = document.querySelector('#user-expansion-editor .empty-state');
+    if (empty) {
+        empty.outerHTML = `
+          <table class="data-table" style="max-width:500px">
+            <thead><tr><th>缩写/键</th><th>标准词/值</th><th></th></tr></thead>
+            <tbody id="expansion-tbody"></tbody>
+          </table>
+          <div style="margin-top:12px">
+            <button class="btn btn-primary btn-sm" onclick="saveUserExpansion()">保存</button>
+          </div>
+        `;
+    }
+    const t = document.getElementById('expansion-tbody');
+    if (!t) return;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><input type="text" class="expansion-key" placeholder="如 PG" style="width:100%;padding:6px"></td><td><input type="text" class="expansion-val" placeholder="如 PostgreSQL" style="width:100%;padding:6px"></td><td><button class="btn btn-secondary btn-sm" onclick="removeExpansionRow(this)">删除</button></td>`;
+    t.appendChild(tr);
+}
+
+export function removeExpansionRow(btn) {
+    btn.closest('tr').remove();
+}
+
+export async function saveUserExpansion() {
+    const tbody = document.getElementById('expansion-tbody');
+    if (!tbody) return;
+    const rows = tbody.querySelectorAll('tr');
+    const synonyms = {};
+    for (const row of rows) {
+        const k = row.querySelector('.expansion-key')?.value?.trim();
+        const v = row.querySelector('.expansion-val')?.value?.trim();
+        if (k && v) synonyms[k] = v;
+    }
+    try {
+        await api('PUT', '/api/v1/user-expansion-config', { tag_synonyms: synonyms });
+        toast('已保存', 'success');
+        loadUserExpansion();
+    } catch (e) {
+        toast('保存失败: ' + e.message, 'error');
+    }
+}
