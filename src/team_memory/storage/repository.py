@@ -1300,9 +1300,12 @@ class ExperienceRepository:
         """Find near-duplicate experience pairs based on embedding similarity.
 
         Uses cosine similarity via pgvector. Only compares root/standalone
-        experiences that are published and not deleted.
+        experiences that are published and not deleted. Experience-group pairs
+        must be filtered by child set (group-aware dedup); see
+        docs/plans/2025-03-03-dedup-group-misjudge-optimization.md.
 
-        Returns list of dicts: {exp_a, exp_b, similarity}
+        Returns list of dicts: {exp_a, exp_b, similarity}; exp_a/exp_b include
+        children_count and children_preview when the root has children.
         """
         # Raw SQL for self-join with cosine similarity
         sql = text("""
@@ -1328,17 +1331,59 @@ class ExperienceRepository:
             sql, {"threshold": threshold, "lim": limit}
         )
         rows = result.all()
+        if not rows:
+            return []
+
+        # Batch load all root experiences with children (one query instead of 2N)
+        all_ids = set()
+        for a_id, b_id, _ in rows:
+            all_ids.add(a_id)
+            all_ids.add(b_id)
+        batch_query = (
+            select(Experience)
+            .where(Experience.id.in_(all_ids))
+            .options(selectinload(Experience.children))
+        )
+        batch_result = await self._session.execute(batch_query)
+        roots = {exp.id: exp for exp in batch_result.scalars().all()}
+
+        # Build per-root children_count, children_preview, children_titles (for Jaccard)
+        def _root_meta(exp: Experience) -> tuple[dict, int, list[str]]:
+            d = exp.to_dict()
+            children = exp.children or []
+            titles = [c.title or "" for c in children]
+            d["children_count"] = len(titles)
+            d["children_preview"] = titles[:3]
+            return d, len(titles), titles
+
+        # Group-aware filter: both groups and child set clearly different (Jaccard < 0.2) -> exclude
+        jaccard_threshold = 0.2
+
+        def _jaccard(a_titles: list[str], b_titles: list[str]) -> float:
+            sa = set(t.strip() for t in a_titles if t)
+            sb = set(t.strip() for t in b_titles if t)
+            if not sa and not sb:
+                return 1.0
+            inter = len(sa & sb)
+            union = len(sa | sb)
+            return inter / union if union else 0.0
 
         pairs = []
         for a_id, b_id, sim in rows:
-            exp_a = await self.get_by_id(a_id)
-            exp_b = await self.get_by_id(b_id)
-            if exp_a and exp_b:
-                pairs.append({
-                    "exp_a": exp_a.to_dict(),
-                    "exp_b": exp_b.to_dict(),
-                    "similarity": round(float(sim), 4),
-                })
+            exp_a = roots.get(a_id)
+            exp_b = roots.get(b_id)
+            if not exp_a or not exp_b:
+                continue
+            d_a, count_a, titles_a = _root_meta(exp_a)
+            d_b, count_b, titles_b = _root_meta(exp_b)
+            # Exclude pair when both are groups and child titles barely overlap
+            if count_a > 0 and count_b > 0 and _jaccard(titles_a, titles_b) < jaccard_threshold:
+                continue
+            pairs.append({
+                "exp_a": d_a,
+                "exp_b": d_b,
+                "similarity": round(float(sim), 4),
+            })
         return pairs
 
     async def merge_experiences(
