@@ -11,6 +11,17 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+# Load .env into os.environ so TEAM_MEMORY_API_KEY etc. are available for auth and config
+try:
+    from dotenv import load_dotenv
+
+    _env_file = Path(".env")
+    if _env_file.exists():
+        load_dotenv(_env_file)
+except ImportError:
+    pass
 from typing import TYPE_CHECKING
 
 from team_memory.auth.provider import AuthProvider, create_auth_provider
@@ -144,11 +155,12 @@ def _configure_auth(settings: Settings) -> AuthProvider:
     auth = create_auth_provider(settings.auth.type, db_url=db_url)
     if isinstance(auth, ApiKeyAuth):
         if settings.auth.api_key:
-            auth.register_key(settings.auth.api_key, settings.auth.user, "admin")
-        env_key = os.environ.get("TEAM_MEMORY_API_KEY", "")
+            auth.register_key((settings.auth.api_key or "").strip(), settings.auth.user, "admin")
+        env_key = (os.environ.get("TEAM_MEMORY_API_KEY") or "").strip()
         if env_key:
-            user_name = os.environ.get("TEAM_MEMORY_USER", "admin")
+            user_name = (os.environ.get("TEAM_MEMORY_USER") or "admin").strip()
             auth.register_key(env_key, user_name, "admin")
+            logger.debug("Registered API key from TEAM_MEMORY_API_KEY for user %s", user_name)
     return auth
 
 

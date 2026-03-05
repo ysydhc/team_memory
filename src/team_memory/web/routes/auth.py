@@ -88,8 +88,9 @@ async def login(req: LoginRequest):
     cookie_value = ""
 
     if req.api_key:
-        credentials = {"api_key": req.api_key}
-        cookie_value = req.api_key
+        api_key_clean = (req.api_key or "").strip()
+        credentials = {"api_key": api_key_clean}
+        cookie_value = api_key_clean
     elif req.username and req.password:
         credentials = {"username": req.username.strip(), "password": req.password}
     else:

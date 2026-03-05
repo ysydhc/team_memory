@@ -186,6 +186,7 @@ class SearchConfig(BaseModel):
     adaptive_filter: bool = True  # Enable adaptive score filtering
     score_gap_threshold: float = 0.15  # Gap threshold for elbow detection
     min_confidence_ratio: float = 0.6  # Min ratio vs top-1 for dynamic threshold
+    adaptive_min_keep: int = 3  # Min results before elbow cut; avoids losing good matches
     # Short-query relaxation (better recall for 1–2 word queries)
     short_query_max_chars: int = 20  # Treat query as "short" when len <= this
     min_similarity_short: float = 0.45  # Lower min_similarity for short queries
@@ -251,7 +252,7 @@ class InstallableCatalogConfig(BaseModel):
     sources: list[Literal["local", "registry"]] = Field(
         default_factory=lambda: ["local"]
     )
-    local_base_dir: str = ".debug/knowledge-pack"
+    local_base_dir: str = "docs/res"  # 可安装 rules/prompts 来源目录
     registry_manifest_url: str = ""
     target_rules_dir: str = ".cursor/rules"
     target_prompts_dir: str = ".cursor/prompts"
@@ -494,6 +495,18 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+def _load_dotenv_if_available() -> None:
+    """Load .env into os.environ so TEAM_MEMORY_* are available before config resolution."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    for candidate in (Path.cwd() / ".env", Path(__file__).resolve().parent.parent.parent / ".env"):
+        if candidate.exists():
+            load_dotenv(candidate)
+            return
+
+
 def load_settings(config_path: str | Path | None = None) -> Settings:
     """Load settings from YAML config file(s) with environment variable overrides.
 
@@ -515,6 +528,7 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
     Returns:
         Fully resolved Settings instance.
     """
+    _load_dotenv_if_available()
     yaml_data: dict = {}
 
     if config_path is not None:
