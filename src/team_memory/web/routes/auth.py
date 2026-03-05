@@ -345,6 +345,36 @@ async def delete_or_deactivate_key(
             return {"message": "用户已停用" if ok else "停用失败"}
 
 
+@router.post("/keys/{key_id}/generate")
+async def generate_api_key_for_user(
+    request: Request,
+    key_id: int,
+    user: User = Depends(require_role("admin")),
+):
+    """Generate API key for a user without key (admin only). Returns raw key once only."""
+    _auth = app_module._auth
+    if not isinstance(_auth, DbApiKeyAuth):
+        raise HTTPException(status_code=400, detail="需要 db_api_key 认证模式")
+
+    db_url = _get_db_url()
+    try:
+        async with get_session(db_url) as session:
+            result = await _auth.generate_key_for_user_db(session, key_id)
+            ip = request.client.host if request.client else None
+            await write_audit_log(
+                session,
+                user_name=user.name,
+                action="generate_key",
+                target_type="api_key",
+                target_id=str(key_id),
+                detail={},
+                ip_address=ip,
+            )
+            return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.put("/keys/{key_id}")
 async def update_api_key(
     request: Request,

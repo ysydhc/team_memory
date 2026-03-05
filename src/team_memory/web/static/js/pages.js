@@ -2212,7 +2212,10 @@ export async function loadKeyManagement() {
                                     <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;${k.is_active ? 'background:#dcfce7;color:#166534;' : 'background:#fee2e2;color:#991b1b;'}">${k.is_active ? '活跃' : '停用'}</span>
                                 </td>
                                 <td style="padding:8px 6px;">
-                                    <span style="font-size:11px; color:var(--text-secondary);">${k.has_api_key ? '已分配' : '无'}</span>
+                                    ${k.has_api_key
+                                        ? '<span style="font-size:11px; color:var(--text-secondary);">已分配</span>'
+                                        : `<button class="btn btn-primary" data-key-id="${k.id}" data-user-name="${_esc(k.user_name)}" onclick="generateKeyForUser(this)" style="font-size:11px; padding:3px 8px;">生成 MCP Key</button>`
+                                    }
                                 </td>
                                 <td style="padding:8px 6px; font-size:12px; color:var(--text-secondary);">${_fmtDate(k.created_at)}</td>
                                 <td style="padding:8px 6px;">
@@ -2229,6 +2232,21 @@ export async function loadKeyManagement() {
         }
     } catch (e) {
         toast('加载用户列表失败: ' + e.message, 'error');
+    }
+}
+
+export async function generateKeyForUser(btn) {
+    const keyId = parseInt(btn.dataset.keyId, 10);
+    const userName = btn.dataset.userName || '';
+    try {
+        const result = await api('POST', `/api/v1/keys/${keyId}/generate`);
+        if (result.api_key) {
+            prompt(`用户 ${userName} 的 API Key（仅显示一次，请复制保存）`, result.api_key);
+            toast('API Key 已生成，请复制保存', 'success');
+            loadKeyManagement();
+        }
+    } catch (e) {
+        toast('生成失败: ' + ((e && e.message) || '未知错误'), 'error');
     }
 }
 

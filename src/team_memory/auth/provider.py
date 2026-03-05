@@ -322,6 +322,36 @@ class DbApiKeyAuth(ApiKeyAuth):
         }
 
     # ------------------------------------------------------------------
+    # Generate API key for user without key (admin action)
+    # ------------------------------------------------------------------
+    async def generate_key_for_user_db(
+        self, session: "AsyncSession", key_id: int
+    ) -> dict:
+        """Generate API key for a user who has no key_hash. Returns api_key once only."""
+        from sqlalchemy import select
+
+        from team_memory.storage.models import ApiKey
+
+        result = await session.execute(select(ApiKey).where(ApiKey.id == key_id))
+        db_key = result.scalar_one_or_none()
+        if db_key is None:
+            raise ValueError("用户不存在")
+        if db_key.key_hash is not None:
+            raise ValueError("用户已有 API Key，无需重复生成")
+
+        raw_key = secrets.token_hex(32)
+        db_key.key_hash = self.hash_key(raw_key)
+        n = len(raw_key)
+        db_key.key_prefix = raw_key[: min(4, n)] if n else None
+        db_key.key_suffix = raw_key[-min(4, n) :] if n else None
+        await session.flush()
+
+        self._keys[db_key.key_hash] = User(
+            name=db_key.user_name, role=db_key.role
+        )
+        return {"api_key": raw_key}
+
+    # ------------------------------------------------------------------
     # List / deactivate / update password
     # ------------------------------------------------------------------
     async def list_keys_db(self, session: "AsyncSession") -> list[dict]:

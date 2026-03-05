@@ -622,6 +622,7 @@ window.doExport = components.doExport;
 window.loadAccountSecurity = pages.loadAccountSecurity;
 window.doChangePasswordByApiKey = pages.doChangePasswordByApiKey;
 window.loadKeyManagement = pages.loadKeyManagement;
+window.generateKeyForUser = pages.generateKeyForUser;
 window.approveUser = pages.approveUser;
 window.rejectUser = pages.rejectUser;
 window.createUserAdmin = pages.createUserAdmin;
