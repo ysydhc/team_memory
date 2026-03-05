@@ -883,6 +883,7 @@ class ApiKeyCreateRequest(BaseModel):
     user_name: str
     role: str = "editor"
     password: str | None = None
+    generate_api_key: bool = False
 
     @field_validator("role")
     @classmethod
@@ -895,6 +896,7 @@ class ApiKeyCreateRequest(BaseModel):
 class ApiKeyUpdateRequest(BaseModel):
     role: str | None = None
     is_active: bool | None = None
+    generate_api_key: bool | None = None  # for approval: whether to generate MCP key
 
 
 # ============================================================

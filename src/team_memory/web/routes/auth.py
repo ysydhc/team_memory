@@ -280,6 +280,7 @@ async def create_api_key(
                 user_name=req.user_name,
                 role=req.role,
                 password=req.password,
+                generate_api_key=req.generate_api_key,
             )
             ip = request.client.host if request.client else None
             await write_audit_log(
@@ -370,7 +371,11 @@ async def update_api_key(
         )
 
         if is_approval:
-            result = await _auth.approve_user_db(session, key_id)
+            result = await _auth.approve_user_db(
+                session,
+                key_id,
+                generate_key=req.generate_api_key or False,
+            )
             if req.role and req.role != db_key.role:
                 await session.execute(
                     update(ApiKey).where(ApiKey.id == key_id).values(role=req.role)

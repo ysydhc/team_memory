@@ -1530,12 +1530,133 @@ export async function previewInstallable(itemIdEncoded, sourceEncoded) {
 export async function installInstallable(itemIdEncoded, sourceEncoded) {
     const id = decodeURIComponent(itemIdEncoded || '');
     const source = decodeURIComponent(sourceEncoded || '');
-    if (!confirm(`确认安装 ${id} 到项目目录？`)) return;
+    const targetProject = document.getElementById('installables-target-project')?.value || '';
+    const targetPath = document.getElementById('installables-target-path')?.value?.trim() || '';
+    if (!targetProject && !targetPath) {
+        toast('请选择安装目标（项目或路径）', 'error');
+        return;
+    }
+    if (!confirm(`确认安装 ${id} 到 ${targetProject || targetPath}？`)) return;
     try {
-        const result = await api('POST', '/api/v1/installables/install', { id, source });
+        const body = { id, source };
+        if (targetProject) body.target_project = targetProject;
+        if (targetPath) body.target_path = targetPath;
+        const result = await api('POST', '/api/v1/installables/install', body);
         toast('安装成功: ' + (result.target_path || ''), 'success');
+        const proj = targetProject || (targetPath ? 'current' : null);
+        if (proj && document.getElementById('installables-installed-project')?.value === proj) {
+            loadInstalledInstallables();
+        }
     } catch (e) {
         toast('安装失败: ' + e.message, 'error');
+    }
+}
+
+export async function loadInstalledInstallables() {
+    const project = document.getElementById('installables-installed-project')?.value || '';
+    const listEl = document.getElementById('installables-installed-list');
+    if (!listEl) return;
+    if (!project) {
+        listEl.innerHTML = '<div class="empty-state"><p>选择项目后加载已安装项</p></div>';
+        return;
+    }
+    listEl.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    try {
+        const data = await api('GET', `/api/v1/installables/installed?project=${encodeURIComponent(project)}`);
+        const items = data.items || [];
+        if (items.length === 0) {
+            listEl.innerHTML = '<div class="empty-state"><p>该项目暂无已安装项</p></div>';
+            return;
+        }
+        listEl.innerHTML = items.map((it) => `
+            <div class="exp-card" style="cursor:default">
+              <div class="exp-card-header">
+                <div class="exp-card-title">
+                  ${it.type === 'rule' ? '📐' : '🧠'} ${esc(it.name)}
+                  <span class="tag">${esc(it.type)}</span>
+                </div>
+              </div>
+              <div class="installable-item-actions" style="margin-top:8px">
+                <button class="btn btn-secondary btn-sm" data-project="${esc(project)}" data-item-id="${esc(it.item_id)}" data-type="${esc(it.type)}" data-name="${esc(it.name)}" onclick="openEditInstallableModalFromBtn(this)">编辑</button>
+              </div>
+            </div>
+        `).join('');
+    } catch (e) {
+        listEl.innerHTML = `<div class="empty-state"><p>加载失败: ${esc(e.message)}</p></div>`;
+    }
+}
+
+let _editInstallableCtx = { project: '', item_id: '', item_type: '', name: '' };
+
+export function openEditInstallableModalFromBtn(btn) {
+    const d = btn.dataset;
+    openEditInstallableModal(d.project || '', d.itemId || '', d.type || '', d.name || '');
+}
+
+export async function openEditInstallableModal(project, itemId, itemType, name) {
+    _editInstallableCtx = { project, item_id: itemId, item_type: itemType, name };
+    document.getElementById('edit-installable-title').textContent = `编辑 ${itemType}: ${name}`;
+    document.getElementById('edit-installable-content').value = '';
+    switchEditInstallableTab('edit');
+    document.getElementById('edit-installable-modal').classList.remove('hidden');
+    try {
+        const data = await api('GET', `/api/v1/installables/custom?project=${encodeURIComponent(project)}&item_id=${encodeURIComponent(itemId)}`);
+        document.getElementById('edit-installable-content').value = data.content || '';
+    } catch (e) {
+        toast('加载内容失败: ' + e.message, 'error');
+    }
+}
+
+export function switchEditInstallableTab(tab) {
+    document.querySelectorAll('.edit-installable-tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
+    const editPanel = document.getElementById('edit-installable-edit-panel');
+    const previewPanel = document.getElementById('edit-installable-preview-panel');
+    if (tab === 'edit') {
+        if (editPanel) editPanel.classList.remove('hidden');
+        if (previewPanel) previewPanel.classList.add('hidden');
+    } else {
+        if (editPanel) editPanel.classList.add('hidden');
+        if (previewPanel) previewPanel.classList.remove('hidden');
+        renderEditInstallablePreview();
+    }
+}
+
+function renderEditInstallablePreview() {
+    const textarea = document.getElementById('edit-installable-content');
+    const previewEl = document.getElementById('edit-installable-preview-content');
+    if (!textarea || !previewEl) return;
+    const raw = textarea.value || '';
+    if (typeof marked !== 'undefined') {
+        previewEl.innerHTML = marked.parse(raw, { gfm: true, breaks: true });
+    } else {
+        previewEl.textContent = raw || '(无内容)';
+    }
+}
+
+export function closeEditInstallableModal() {
+    document.getElementById('edit-installable-modal').classList.add('hidden');
+}
+
+export async function saveEditInstallableContent() {
+    const { project, item_id, item_type } = _editInstallableCtx;
+    const content = document.getElementById('edit-installable-content')?.value || '';
+    if (!content.trim()) {
+        toast('内容不能为空', 'error');
+        return;
+    }
+    try {
+        await api('PUT', '/api/v1/installables/custom', {
+            project,
+            item_id,
+            item_type,
+            content,
+            sync_to_file: true,
+        });
+        toast('保存成功', 'success');
+        closeEditInstallableModal();
+        loadInstalledInstallables();
+    } catch (e) {
+        toast('保存失败: ' + e.message, 'error');
     }
 }
 
@@ -1714,10 +1835,25 @@ export async function saveDefaultProjectConfig() {
     }
 }
 
+function populateInstallablesProjectDropdowns(paths) {
+    const keys = Object.keys(paths || {});
+    const opts = '<option value="">— 选择项目 —</option>' +
+        keys.map((k) => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
+    const sel1 = document.getElementById('installables-target-project');
+    const sel2 = document.getElementById('installables-installed-project');
+    if (sel1) sel1.innerHTML = opts;
+    if (sel2) sel2.innerHTML = opts;
+    const hint = document.getElementById('installables-project-hint');
+    if (hint) {
+        hint.style.display = keys.length === 0 ? 'block' : 'none';
+    }
+}
+
 export async function loadScanDirsConfig() {
     try {
         const data = await api('GET', '/api/v1/config/scan-dirs');
         const paths = data.project_paths || {};
+        populateInstallablesProjectDropdowns(paths);
         const el = document.getElementById('cfg-project-paths');
         if (el) {
             el.value = Object.entries(paths).map(([k, v]) => `${k}=${v}`).join('\n');
@@ -2032,7 +2168,10 @@ export async function loadKeyManagement() {
                         <strong>${_esc(k.user_name)}</strong>
                         <span style="color:var(--text-secondary); font-size:12px; margin-left:8px;">注册于 ${_fmtDate(k.created_at)}</span>
                     </div>
-                    <div>
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <label style="display:flex; align-items:center; gap:4px; font-size:12px; margin:0; cursor:pointer;">
+                            <input type="checkbox" id="approve-gen-key-${k.id}" style="width:auto;"> 生成 MCP Key
+                        </label>
                         <button class="btn btn-primary" onclick="approveUser(${k.id})" style="font-size:12px; padding:4px 12px; margin-right:6px;">通过</button>
                         <button class="btn" onclick="rejectUser(${k.id})" style="font-size:12px; padding:4px 12px; color:var(--danger, #ef4444);">拒绝</button>
                     </div>
@@ -2095,7 +2234,12 @@ export async function loadKeyManagement() {
 
 export async function approveUser(id) {
     try {
-        const result = await api('PUT', `/api/v1/keys/${id}`, { is_active: true });
+        const genKeyEl = document.getElementById(`approve-gen-key-${id}`);
+        const generate_api_key = genKeyEl ? genKeyEl.checked : false;
+        const result = await api('PUT', `/api/v1/keys/${id}`, {
+            is_active: true,
+            generate_api_key,
+        });
         if (result.api_key) {
             const msg = `用户 ${result.user_name} 已审批通过。\n\nAPI Key（仅显示一次，请复制保存）：\n${result.api_key}`;
             prompt('审批成功 - 请复制 API Key 分发给用户', result.api_key);
@@ -2124,10 +2268,12 @@ export async function createUserAdmin() {
     const username = document.getElementById('admin-new-username').value.trim();
     const role = document.getElementById('admin-new-role').value;
     const password = document.getElementById('admin-new-password').value;
+    const genKeyEl = document.getElementById('admin-new-generate-key');
+    const generate_api_key = genKeyEl ? genKeyEl.checked : false;
     if (!username) { toast('请输入用户名', 'error'); return; }
 
     try {
-        const body = { user_name: username, role };
+        const body = { user_name: username, role, generate_api_key };
         if (password) body.password = password;
         const result = await api('POST', '/api/v1/keys', body);
         if (result.api_key) {
@@ -2137,6 +2283,8 @@ export async function createUserAdmin() {
         document.getElementById('admin-create-user-form').style.display = 'none';
         document.getElementById('admin-new-username').value = '';
         document.getElementById('admin-new-password').value = '';
+        const genKeyEl = document.getElementById('admin-new-generate-key');
+        if (genKeyEl) genKeyEl.checked = false;
         loadKeyManagement();
     } catch (e) {
         toast('创建失败: ' + e.message, 'error');

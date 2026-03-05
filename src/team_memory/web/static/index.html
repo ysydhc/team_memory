@@ -3905,6 +3905,10 @@
                   <label>初始密码 <span class="hint">(可选，用于 Web 登录)</span></label>
                   <input type="password" id="admin-new-password" placeholder="留空则只能用 API Key">
                 </div>
+                <div class="form-group" style="display:flex; align-items:center; gap:8px;">
+                  <input type="checkbox" id="admin-new-generate-key" style="width:auto;">
+                  <label for="admin-new-generate-key" style="margin:0;">为 MCP 生成 Key</label>
+                </div>
               </div>
               <div style="margin-top:12px;">
                 <button class="btn btn-primary" onclick="createUserAdmin()">创建</button>
