@@ -1,0 +1,14 @@
+# 任务执行工作流 — 状态（可选，已不推荐）
+
+> **说明**：状态文件与 TM 任务状态易叉开，工作流执行已**不以本文件为依据**，以 TM 任务状态与 tm_message 为准。本模板仅供可选本地备忘使用；若复制到 `.cursor/plans/workflows/task-execution-workflow_state.md`，仅作参考，不必与 TM 同步。
+
+| step_id  | status    | 完成时间 | 产出摘要 |
+|----------|-----------|----------|----------|
+| step-0   | pending   | —        | —        |
+| step-1   | pending   | —        | —        |
+| step-2   | pending   | —        | —        |
+| step-3   | pending   | —        | —        |
+| step-4   | pending   | —        | —        |
+| step-5   | pending   | —        | —        |
+
+状态取值：`pending` | `in_progress` | `completed` | `failed` | `skipped`
