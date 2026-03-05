@@ -2,8 +2,9 @@
 """Print vector and FTS candidate ids for a query to debug why an experience is missing.
 
 Usage:
-    TEAM_MEMORY_DEBUG_USER=admin python scripts/debug_search_candidates.py "验证默认可见性：个人经验检索测试" 4d44f14a
-    python scripts/debug_search_candidates.py "个人经验检索" 4d44f14a-af38-4147-8599-331f64dce351
+    TEAM_MEMORY_DEBUG_USER=admin python scripts/debug_search_candidates.py \\
+        "<query>" <target_id>
+    python scripts/debug_search_candidates.py "个人经验检索" 4d44f14a-...
 """
 
 from __future__ import annotations
@@ -56,7 +57,11 @@ async def main(query: str, target_id: str) -> None:
             return False
         tid = str(tid).lower()
         t = target_id.lower().strip()
-        return tid == t or t in tid or (len(t) == 8 and tid.replace("-", "").startswith(t.replace("-", "")))
+        return (
+            tid == t
+            or t in tid
+            or (len(t) == 8 and tid.replace("-", "").startswith(t.replace("-", "")))
+        )
 
     in_vector = any(matches(tid) for tid in vector_ids)
     in_fts = any(matches(tid) for tid in fts_ids)

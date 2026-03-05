@@ -13,13 +13,14 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import uuid
 
-import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import select
+
 from team_memory.config import load_settings
 from team_memory.storage.database import get_session
 from team_memory.storage.models import Experience
@@ -65,7 +66,10 @@ async def main(experience_id: str) -> None:
     print("Can appear in FTS search: {}".format(in_fts))
     print("Can appear in hybrid: {}".format(in_vector or in_fts))
     if not in_vector and not in_fts:
-        print("-> This experience will NOT be returned by tm_search until it has embedding or fts populated.")
+        print(
+            "-> This experience will NOT be returned by tm_search until "
+            "embedding or fts is populated."
+        )
 
 
 if __name__ == "__main__":
