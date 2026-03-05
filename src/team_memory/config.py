@@ -237,6 +237,8 @@ class AuthConfig(BaseModel):
     api_key: str | None = None
     user: str = "admin"
     allow_anonymous_search: bool = False
+    default_admin_password: str | None = None
+    session_secret: str | None = None
 
 
 class WebConfig(BaseModel):

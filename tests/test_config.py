@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from team_memory.config import Settings, load_settings, reset_settings
+from team_memory.config import AuthConfig, Settings, load_settings, reset_settings
 
 
 @pytest.fixture(autouse=True)
@@ -54,6 +54,12 @@ class TestSettings:
     def test_default_auth_type(self):
         settings = Settings()
         assert settings.auth.type == "db_api_key"
+
+
+def test_auth_config_has_default_admin_password_and_session_secret():
+    c = AuthConfig(default_admin_password="x", session_secret="y")
+    assert c.default_admin_password == "x"
+    assert c.session_secret == "y"
 
 
 class TestLoadSettings:
