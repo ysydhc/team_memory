@@ -35,6 +35,7 @@ class TestGetCurrentUserFallbackNoKey:
     async def test_no_api_key_uses_team_memory_user(self):
         env = os.environ.copy()
         env.pop("TEAM_MEMORY_API_KEY", None)
+        env["TEAM_MEMORY_API_KEY"] = ""  # Explicitly clear so patch removes it
         env["TEAM_MEMORY_USER"] = "fallback_user"
         with patch.dict(os.environ, env, clear=False):
             result = await _get_current_user()
