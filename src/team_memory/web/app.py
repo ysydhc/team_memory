@@ -33,9 +33,11 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
+from sqlalchemy import select
 
 from team_memory.auth.provider import (
     AuthProvider,
+    DbApiKeyAuth,
     User,
 )
 from team_memory.bootstrap import (
@@ -51,6 +53,7 @@ from team_memory.services.installable_catalog import (
     InstallableCatalogService,
 )
 from team_memory.storage.database import get_session
+from team_memory.storage.models import ApiKey
 from team_memory.storage.repository import ExperienceRepository  # noqa: F401
 
 logger = logging.getLogger("team_memory.web")
@@ -496,6 +499,35 @@ def _decode_session_token(token: str, secret: str) -> str | None:
     return user
 
 
+def _get_session_secret() -> str:
+    """Get session secret: env > config > derived from database URL."""
+    secret = os.environ.get("TEAM_MEMORY_SESSION_SECRET")
+    if secret:
+        return secret
+    settings = _settings or get_context().settings
+    if settings.auth.session_secret:
+        return settings.auth.session_secret
+    return hashlib.sha256(settings.database.url.encode()).hexdigest()
+
+
+async def _get_user_role_from_db(user_name: str) -> str:
+    """Get role from api_keys table when DbApiKeyAuth; else default to viewer."""
+    if not isinstance(_auth, DbApiKeyAuth):
+        return "viewer"
+    db_url = _get_db_url()
+    try:
+        async with get_session(db_url) as session:
+            result = await session.execute(
+                select(ApiKey).where(ApiKey.user_name == user_name)
+            )
+            row = result.scalar_one_or_none()
+            if row:
+                return row.role
+    except Exception:
+        pass
+    return "viewer"
+
+
 async def get_current_user(request: Request) -> User:
     """Extract and validate credentials from header or cookie.
 
@@ -520,6 +552,16 @@ async def get_current_user(request: Request) -> User:
 
     if not api_key:
         raise HTTPException(status_code=401, detail="Not authenticated")
+
+    if api_key.startswith("sess:"):
+        secret = _get_session_secret()
+        user_str = _decode_session_token(api_key, secret)
+        if user_str:
+            role = await _get_user_role_from_db(user_str)
+            user = User(name=user_str, role=role)
+            request.state.user = user
+            return user
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
 
     if api_key.startswith("pwd:"):
         parts = api_key.split(":", 2)
@@ -551,6 +593,14 @@ async def get_optional_user(request: Request) -> User | None:
     if not api_key or not _auth:
         if _settings and _settings.auth.allow_anonymous_search:
             return User(name="anonymous", role="viewer")
+        return None
+
+    if api_key.startswith("sess:"):
+        secret = _get_session_secret()
+        user_str = _decode_session_token(api_key, secret)
+        if user_str:
+            role = await _get_user_role_from_db(user_str)
+            return User(name=user_str, role=role)
         return None
 
     if api_key.startswith("pwd:"):
