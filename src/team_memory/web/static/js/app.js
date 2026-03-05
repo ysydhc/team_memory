@@ -620,7 +620,7 @@ window.doExport = components.doExport;
 
 // Key management exports
 window.loadAccountSecurity = pages.loadAccountSecurity;
-window.doChangePasswordByApiKey = pages.doChangePasswordByApiKey;
+window.doChangePassword = pages.doChangePassword;
 window.loadKeyManagement = pages.loadKeyManagement;
 window.generateKeyForUser = pages.generateKeyForUser;
 window.approveUser = pages.approveUser;

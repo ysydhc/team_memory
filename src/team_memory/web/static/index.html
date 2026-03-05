@@ -3584,11 +3584,11 @@
           </div>
         </div>
 
-        <!-- Account & Security: masked API Key + change password by API Key -->
+        <!-- Account & Security: masked API Key + change password -->
         <div id="settings-account-security" class="settings-card" style="margin-top:20px">
           <h2>账号与安全</h2>
           <div class="settings-card-body" style="max-height:400px">
-            <p class="settings-desc">查看 API Key 脱敏、使用 API Key 修改登录密码。仅适用于已保存 API Key 的用户。</p>
+            <p class="settings-desc">查看 API Key 脱敏、使用旧密码修改登录密码。</p>
             <div class="settings-grid" style="margin-bottom:16px">
               <div class="form-group full-width">
                 <label>您的 API Key</label>
@@ -3597,11 +3597,11 @@
               </div>
             </div>
             <div class="settings-group-title" style="margin-top:16px;margin-bottom:8px">修改密码</div>
-            <p class="settings-desc" style="margin-bottom:8px">使用 API Key 验证身份后设置新密码。</p>
+            <p class="settings-desc" style="margin-bottom:8px">输入旧密码验证身份后设置新密码。</p>
             <div class="settings-grid">
               <div class="form-group">
-                <label for="settings-change-apikey">API Key</label>
-                <input type="password" id="settings-change-apikey" placeholder="输入您的 API Key" autocomplete="off">
+                <label for="settings-old-password">旧密码</label>
+                <input type="password" id="settings-old-password" placeholder="输入当前密码" autocomplete="current-password">
               </div>
               <div class="form-group">
                 <label for="settings-new-password">新密码</label>
@@ -3613,7 +3613,7 @@
               </div>
             </div>
             <div class="settings-actions" style="margin-top:12px">
-              <button type="button" class="btn btn-primary" onclick="window.doChangePasswordByApiKey()">修改密码</button>
+              <button type="button" class="btn btn-primary" onclick="window.doChangePassword()">修改密码</button>
             </div>
           </div>
         </div>

@@ -634,18 +634,13 @@ class LoginResponse(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
-    old_password: str | None = None
+    old_password: str
     new_password: str
-    api_key: str | None = None
 
     @model_validator(mode="after")
-    def require_either_old_password_or_api_key(self):
-        if (self.old_password is None or self.old_password == "") and (
-            self.api_key is None or self.api_key == ""
-        ):
-            raise ValueError("请提供旧密码或 API Key 之一")
-        if (self.old_password or "") and (self.api_key or ""):
-            raise ValueError("旧密码与 API Key 只能二选一")
+    def require_old_password(self):
+        if not (self.old_password or "").strip():
+            raise ValueError("请提供旧密码")
         return self
 
 

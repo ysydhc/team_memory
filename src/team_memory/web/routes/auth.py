@@ -218,7 +218,7 @@ async def change_password(
     req: ChangePasswordRequest,
     user: User = Depends(get_current_user),
 ):
-    """Change the current user's password (by old_password or by api_key)."""
+    """Change the current user's password (by old_password)."""
     _auth = app_module._auth
     if not isinstance(_auth, DbApiKeyAuth):
         raise HTTPException(status_code=400, detail="密码功能需要 db_api_key 模式")
@@ -226,19 +226,9 @@ async def change_password(
     if len(req.new_password) < 6:
         raise HTTPException(status_code=422, detail="新密码至少 6 个字符")
 
-    if req.api_key:
-        api_user = await _auth.authenticate({"api_key": req.api_key})
-        if api_user is None or api_user.name != user.name:
-            raise HTTPException(status_code=403, detail="API Key 不属于当前用户")
-        ok = await _auth.update_password_by_api_key_db(user.name, req.api_key, req.new_password)
-    else:
-        ok = await _auth.update_password_db(user.name, req.old_password or "", req.new_password)
-
+    ok = await _auth.update_password_db(user.name, req.old_password, req.new_password)
     if not ok:
-        raise HTTPException(
-            status_code=400,
-            detail="API Key 不属于当前用户" if req.api_key else "旧密码不正确",
-        )
+        raise HTTPException(status_code=400, detail="旧密码不正确")
     return {"message": "密码修改成功"}
 
 

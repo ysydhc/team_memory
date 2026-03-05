@@ -2108,17 +2108,17 @@ export async function loadAccountSecurity() {
     }
 }
 
-export async function doChangePasswordByApiKey() {
-    const apiKeyEl = document.getElementById('settings-change-apikey');
+export async function doChangePassword() {
+    const oldPwdEl = document.getElementById('settings-old-password');
     const newPwdEl = document.getElementById('settings-new-password');
     const confirmEl = document.getElementById('settings-confirm-password');
-    if (!apiKeyEl || !newPwdEl || !confirmEl) return;
-    const apiKey = apiKeyEl.value;
+    if (!oldPwdEl || !newPwdEl || !confirmEl) return;
+    const oldPassword = oldPwdEl.value;
     const newPassword = newPwdEl.value;
     const confirmPassword = confirmEl.value;
 
-    if (!apiKey) {
-        toast('请输入 API Key', 'error');
+    if (!oldPassword) {
+        toast('请输入旧密码', 'error');
         return;
     }
     if (!newPassword || newPassword.length < 6) {
@@ -2131,9 +2131,9 @@ export async function doChangePasswordByApiKey() {
     }
 
     try {
-        await api('PUT', '/api/v1/auth/password', { api_key: apiKey, new_password: newPassword });
+        await api('PUT', '/api/v1/auth/password', { old_password: oldPassword, new_password: newPassword });
         toast('密码修改成功', 'success');
-        apiKeyEl.value = '';
+        oldPwdEl.value = '';
         newPwdEl.value = '';
         confirmEl.value = '';
     } catch (e) {

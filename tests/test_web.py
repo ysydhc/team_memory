@@ -260,14 +260,13 @@ class TestAuth:
         )
         assert resp.status_code == 422
 
-    def test_change_password_validation_both_old_and_api_key(self, client, auth_headers):
-        """PUT /auth/password with both old_password and api_key returns 422."""
+    def test_change_password_validation_empty_old_password(self, client, auth_headers):
+        """PUT /auth/password with empty old_password returns 422."""
         resp = client.put(
             "/api/v1/auth/password",
             headers=auth_headers,
             json={
-                "old_password": "old",
-                "api_key": "key",
+                "old_password": "",
                 "new_password": "newpass123",
             },
         )
