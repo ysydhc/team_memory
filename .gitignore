@@ -37,7 +37,6 @@ Thumbs.db
 
 
 .ruff_cache/
-migrations/
 .claude/
 .cursor/
 .mcpregistry_github_token
