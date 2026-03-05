@@ -200,6 +200,7 @@ def bootstrap(
         pageindex_lite_config=settings.pageindex_lite,
         llm_config=settings.llm,
         tag_synonyms=getattr(settings, "tag_synonyms", None) or {},
+        db_url=db_url,
     )
 
     event_bus = EventBus()

@@ -29,6 +29,19 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _fts_tokenized_fields(
+    title: str, description: str, solution: str | None
+) -> dict[str, str]:
+    """Return jieba-tokenized text for FTS weighted columns."""
+    from team_memory.services.tokenizer import tokenize
+
+    return {
+        "fts_title_text": tokenize(title or ""),
+        "fts_desc_text": tokenize(description or ""),
+        "fts_solution_text": tokenize(solution or ""),
+    }
+
+
 class ExperienceRepository:
     """Repository for Experience CRUD, vector search, and FTS operations.
 
@@ -130,12 +143,16 @@ class ExperienceRepository:
             }
             exp_status = ps_to_status.get(publish_status, "draft")
 
+        fts_fields = _fts_tokenized_fields(title, description, solution)
         experience = Experience(
             id=uuid.uuid4(),
             title=title,
             description=description,
             root_cause=root_cause,
             solution=solution,
+            fts_title_text=fts_fields["fts_title_text"] or None,
+            fts_desc_text=fts_fields["fts_desc_text"] or None,
+            fts_solution_text=fts_fields["fts_solution_text"] or None,
             created_by=created_by,
             tags=tags or [],
             programming_language=programming_language,
@@ -887,7 +904,8 @@ class ExperienceRepository:
 
         tokenized_query = tokenize(query_text)
         ts_query = func.plainto_tsquery("simple", tokenized_query)
-        rank_expr = func.ts_rank(Experience.fts, ts_query).label("rank")
+        # ts_rank_cd considers setweight (A=title, B=desc, C=solution)
+        rank_expr = func.ts_rank_cd(Experience.fts, ts_query).label("rank")
 
         query = (
             select(Experience, rank_expr)
@@ -934,6 +952,16 @@ class ExperienceRepository:
         for key, value in kwargs.items():
             if hasattr(experience, key):
                 setattr(experience, key, value)
+
+        # Refresh FTS tokenized columns when title/description/solution change
+        if any(k in kwargs for k in ("title", "description", "solution")):
+            title = kwargs.get("title", experience.title)
+            desc = kwargs.get("description", experience.description)
+            sol = kwargs.get("solution", experience.solution)
+            fts = _fts_tokenized_fields(title, desc, sol)
+            experience.fts_title_text = fts["fts_title_text"] or None
+            experience.fts_desc_text = fts["fts_desc_text"] or None
+            experience.fts_solution_text = fts["fts_solution_text"] or None
 
         experience.updated_at = datetime.now(timezone.utc)
         await self._session.flush()

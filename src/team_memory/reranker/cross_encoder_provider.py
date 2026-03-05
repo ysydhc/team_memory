@@ -65,6 +65,7 @@ class CrossEncoderRerankerProvider(RerankerProvider):
         query: str,
         documents: list[str],
         top_k: int | None = None,
+        document_metadata: list[dict] | None = None,
     ) -> list[RerankResult]:
         """Rerank documents using cross-encoder scoring."""
         effective_top_k = top_k or self._top_k
@@ -89,9 +90,14 @@ class CrossEncoderRerankerProvider(RerankerProvider):
             # Sort by score descending
             scored.sort(key=lambda x: x[1], reverse=True)
 
-            # Return top_k results
+            # Apply exact_title_match bonus
+            meta = document_metadata or []
+            exact_bonus = {"exact": 0.5, "contains": 0.2}
+
             results = []
             for idx, score, text in scored[:effective_top_k]:
+                em = meta[idx].get("exact_title_match", "") if idx < len(meta) else ""
+                score += exact_bonus.get(em, 0)
                 results.append(
                     RerankResult(index=idx, score=score, text=text)
                 )
@@ -99,11 +105,17 @@ class CrossEncoderRerankerProvider(RerankerProvider):
 
         except Exception as e:
             logger.error("Cross-encoder scoring failed: %s", e)
-            # Fallback: return in original order
-            return [
-                RerankResult(index=i, score=1.0 - i * 0.1, text=doc)
-                for i, doc in enumerate(documents[:effective_top_k])
-            ]
+            # Fallback: return in original order with exact_match bonus
+            meta = document_metadata or []
+            exact_bonus = {"exact": 0.5, "contains": 0.2}
+            fallback_results = []
+            for i, doc in enumerate(documents[:effective_top_k]):
+                score = 1.0 - i * 0.1
+                if i < len(meta):
+                    em = meta[i].get("exact_title_match", "")
+                    score += exact_bonus.get(em, 0)
+                fallback_results.append(RerankResult(index=i, score=score, text=doc))
+            return fallback_results
 
     @property
     def provider_name(self) -> str:

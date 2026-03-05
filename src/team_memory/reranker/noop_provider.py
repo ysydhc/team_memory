@@ -23,13 +23,19 @@ class NoopRerankerProvider(RerankerProvider):
         query: str,
         documents: list[str],
         top_k: int = 10,
+        document_metadata: list[dict] | None = None,
     ) -> list[RerankResult]:
         """Return documents in original order with position-based scores."""
+        meta = document_metadata or []
         results = []
         n = len(documents)
         for i, doc in enumerate(documents[:top_k]):
-            # Score from 1.0 (first) to ~0.5 (last), linearly decreasing
             score = 1.0 - (i / max(n, 1)) * 0.5
+            em = meta[i].get("exact_title_match", "") if i < len(meta) else ""
+            if em == "exact":
+                score += 0.5
+            elif em == "contains":
+                score += 0.2
             results.append(RerankResult(index=i, score=score, text=doc))
         return results
 

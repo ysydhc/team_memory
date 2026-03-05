@@ -6,7 +6,17 @@ import uuid
 from datetime import date, datetime, timezone
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -80,6 +90,16 @@ class Experience(Base):
 
     # Full-text search (populated via trigger in DB migration)
     fts = mapped_column(TSVECTOR, nullable=True)
+    # Jieba-tokenized text for weighted FTS (title A, desc B, solution C)
+    fts_title_text: Mapped[str | None] = mapped_column(
+        "fts_title_text", Text, nullable=True
+    )
+    fts_desc_text: Mapped[str | None] = mapped_column(
+        "fts_desc_text", Text, nullable=True
+    )
+    fts_solution_text: Mapped[str | None] = mapped_column(
+        "fts_solution_text", Text, nullable=True
+    )
 
     # Source tracking
     source: Mapped[str] = mapped_column(String(50), default="manual")
@@ -945,3 +965,25 @@ class UserExpansionConfig(Base):
             "tag_synonyms": self.tag_synonyms or {},
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class CustomInstallableContent(Base):
+    """User custom content for installed rules/prompts. Stored in DB, optionally synced to file."""
+
+    __tablename__ = "custom_installable_contents"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    project: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    item_id: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    item_type: Mapped[str] = mapped_column(String(20), nullable=False)  # rule | prompt
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_by: Mapped[str] = mapped_column(String(100), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint("project", "item_id", name="uq_custom_installable_project_item"),
+    )

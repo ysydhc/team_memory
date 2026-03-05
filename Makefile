@@ -94,6 +94,9 @@ migrate:        ## 运行数据库迁移
 migrate-fts:    ## 补齐经验表 FTS 字段（存量迁移）；可用 --dry-run 预览
 	python scripts/migrate_fts.py
 
+migrate-fts-jieba:  ## 回填 jieba 分词列（方案 C）；需先执行 alembic upgrade
+	python scripts/migrate_fts_jieba.py
+
 backup:         ## 备份数据库
 	./scripts/backup.sh
 

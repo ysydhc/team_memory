@@ -60,6 +60,7 @@ class OllamaLLMRerankerProvider(RerankerProvider):
         query: str,
         documents: list[str],
         top_k: int | None = None,
+        document_metadata: list[dict] | None = None,
     ) -> list[RerankResult]:
         """Rerank documents using LLM relevance scoring."""
         effective_top_k = top_k or self._top_k
@@ -94,8 +95,12 @@ class OllamaLLMRerankerProvider(RerankerProvider):
 
         # Sort by score descending and take top_k
         all_scores.sort(key=lambda x: x[1], reverse=True)
+        meta = document_metadata or []
+        exact_bonus = {"exact": 0.5, "contains": 0.2}
         results = []
         for orig_idx, score in all_scores[:effective_top_k]:
+            em = meta[orig_idx].get("exact_title_match", "") if orig_idx < len(meta) else ""
+            score += exact_bonus.get(em, 0)
             results.append(
                 RerankResult(
                     index=orig_idx,

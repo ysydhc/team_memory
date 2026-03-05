@@ -44,6 +44,7 @@ class JinaRerankerProvider(RerankerProvider):
         query: str,
         documents: list[str],
         top_k: int | None = None,
+        document_metadata: list[dict] | None = None,
     ) -> list[RerankResult]:
         """Rerank documents using Jina Reranker API."""
         effective_top_k = top_k or self._top_k
@@ -72,10 +73,14 @@ class JinaRerankerProvider(RerankerProvider):
                 resp.raise_for_status()
                 data = resp.json()
 
+            meta = document_metadata or []
+            exact_bonus = {"exact": 0.5, "contains": 0.2}
             results = []
             for item in data.get("results", []):
                 idx = item.get("index", 0)
                 score = float(item.get("relevance_score", 0.0))
+                em = meta[idx].get("exact_title_match", "") if idx < len(meta) else ""
+                score += exact_bonus.get(em, 0)
                 text = documents[idx] if idx < len(documents) else ""
                 results.append(
                     RerankResult(index=idx, score=score, text=text)
@@ -90,11 +95,16 @@ class JinaRerankerProvider(RerankerProvider):
             raise
         except Exception as e:
             logger.error("Jina reranking failed: %s", e)
-            # Fallback: return in original order
-            return [
-                RerankResult(index=i, score=1.0 - i * 0.1, text=doc)
-                for i, doc in enumerate(documents[:effective_top_k])
-            ]
+            # Fallback: return in original order with exact_match bonus
+            meta = document_metadata or []
+            exact_bonus = {"exact": 0.5, "contains": 0.2}
+            fallback_results = []
+            for i, doc in enumerate(documents[:effective_top_k]):
+                score = 1.0 - i * 0.1
+                if i < len(meta):
+                    score += exact_bonus.get(meta[i].get("exact_title_match", ""), 0)
+                fallback_results.append(RerankResult(index=i, score=score, text=doc))
+            return fallback_results
 
     @property
     def provider_name(self) -> str:

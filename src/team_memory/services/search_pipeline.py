@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,9 +25,12 @@ from team_memory.embedding.base import EmbeddingProvider
 from team_memory.reranker.base import RerankerProvider
 from team_memory.services.cache import SearchCache
 from team_memory.services.context_trimmer import ContextTrimmer
+from team_memory.storage.database import get_session
 from team_memory.storage.repository import ExperienceRepository, UserExpansionRepository
 
 logger = logging.getLogger("team_memory.search_pipeline")
+
+_SEARCH_DEBUG = os.environ.get("TEAM_MEMORY_SEARCH_DEBUG", "").lower() in ("1", "true", "yes")
 
 
 @dataclass
@@ -150,8 +154,10 @@ class SearchPipeline:
         pageindex_lite_config: PageIndexLiteConfig | None = None,
         llm_config=None,
         tag_synonyms: dict[str, str] | None = None,
+        db_url: str | None = None,
     ):
         self._embedding = embedding_provider
+        self._db_url = db_url
         self._reranker = reranker_provider
         self._search_config = search_config
         self._retrieval_config = retrieval_config
@@ -217,6 +223,15 @@ class SearchPipeline:
         retrieval_query = _expand_query_synonyms(
             request.query, effective_synonyms
         )
+        if _SEARCH_DEBUG:
+            logger.info(
+                "[SEARCH_DEBUG] query=%r retrieval_query=%r current_user=%r "
+                "query_expansion_enabled=%s",
+                (request.query or "")[:80],
+                (retrieval_query or "")[:80],
+                request.current_user,
+                getattr(self._search_config, "query_expansion_enabled", False),
+            )
         # Optional LLM query expansion (P1-5): merge LLM keywords; fallback on timeout/failure
         if getattr(self._search_config, "query_expansion_enabled", False) and self._llm_config:
             timeout_s = getattr(
@@ -275,12 +290,43 @@ class SearchPipeline:
         )
         stage_metrics["retrieve_fuse_ms"] = int((time.monotonic() - stage_begin) * 1000)
 
+        # Exact match boost (query == title or query in title; root + children)
+        candidates = self._apply_exact_match_boost(candidates, request.query)
+
         total_candidates = len(candidates)
+        if _SEARCH_DEBUG:
+            _ids = [
+                (c.data.get("group_id") or c.data.get("id"), c.similarity, c.score)
+                for c in candidates[:15]
+            ]
+            _has_target = any(
+                "4d44f14a" in str(x[0]) for x in _ids
+            )
+            logger.info(
+                "[SEARCH_DEBUG] after_retrieve total=%d ids=%s has_4d44f14a=%s",
+                total_candidates,
+                _ids,
+                _has_target,
+            )
 
         # Stage 5: Adaptive Filtering
         stage_begin = time.monotonic()
+        before_adaptive = len(candidates)
         if self._search_config.adaptive_filter and candidates:
             candidates = self._apply_adaptive_filter(candidates)
+        if _SEARCH_DEBUG:
+            _after_ids = [
+                (c.data.get("group_id") or c.data.get("id"), c.similarity)
+                for c in candidates
+            ]
+            _had_target = any("4d44f14a" in str(x[0]) for x in _after_ids)
+            logger.info(
+                "[SEARCH_DEBUG] after_adaptive before=%d after=%d ids=%s has_4d44f14a=%s",
+                before_adaptive,
+                len(candidates),
+                _after_ids,
+                _had_target,
+            )
         stage_metrics["adaptive_filter_ms"] = int((time.monotonic() - stage_begin) * 1000)
 
         # Stage 5.5: PageIndex-Lite candidate enhancement
@@ -560,14 +606,29 @@ class SearchPipeline:
         limit: int,
         request: SearchRequest,
     ) -> list[SearchResultItem]:
-        """Execute full-text search."""
-        raw = await repo.search_by_fts(
-            query_text=query_text,
-            max_results=limit,
-            tags=request.tags,
-            project=request.project,
-            current_user=request.current_user,
-        )
+        """Execute full-text search.
+
+        When self._db_url is set (hybrid mode), uses a separate session to avoid
+        SQLAlchemy "concurrent operations not permitted" on the same session.
+        """
+        if self._db_url:
+            async with get_session(self._db_url) as session2:
+                repo_fts = ExperienceRepository(session2)
+                raw = await repo_fts.search_by_fts(
+                    query_text=query_text,
+                    max_results=limit,
+                    tags=request.tags,
+                    project=request.project,
+                    current_user=request.current_user,
+                )
+        else:
+            raw = await repo.search_by_fts(
+                query_text=query_text,
+                max_results=limit,
+                tags=request.tags,
+                project=request.project,
+                current_user=request.current_user,
+            )
         items = []
         for r in raw:
             items.append(
@@ -637,6 +698,52 @@ class SearchPipeline:
         fused.sort(key=lambda x: x.score, reverse=True)
         return fused[:limit]
 
+    def _apply_exact_match_boost(
+        self, candidates: list[SearchResultItem], query: str
+    ) -> list[SearchResultItem]:
+        """Boost score when query exactly matches or is contained in title.
+
+        Checks root title and children titles (grouped). Sets exact_title_match
+        in item.data for downstream (adaptive filter, reranker).
+        """
+        if not query or not query.strip():
+            return candidates
+        q = query.strip()
+        q_lower = q.lower()
+        exact_boost = 0.4
+        contains_boost = 0.15
+
+        for item in candidates:
+            data = item.data
+            titles_to_check: list[str] = []
+            if data.get("title"):
+                titles_to_check.append(data["title"])
+            for child in data.get("children", []):
+                if child.get("title"):
+                    titles_to_check.append(child["title"])
+
+            match_type = ""
+            for t in titles_to_check:
+                t_stripped = (t or "").strip()
+                if not t_stripped:
+                    continue
+                if q == t_stripped:
+                    match_type = "exact"
+                    break
+                if q_lower in t_stripped.lower():
+                    match_type = "contains"
+                    break
+
+            if match_type:
+                data["exact_title_match"] = match_type
+                boost = exact_boost if match_type == "exact" else contains_boost
+                item.score = float(item.score) + boost
+            else:
+                data["exact_title_match"] = ""
+
+        candidates.sort(key=lambda x: x.score, reverse=True)
+        return candidates
+
     def _apply_adaptive_filter(
         self, candidates: list[SearchResultItem]
     ) -> list[SearchResultItem]:
@@ -661,6 +768,9 @@ class SearchPipeline:
         min_ratio = self._search_config.min_confidence_ratio
         gap_threshold = self._search_config.score_gap_threshold
         threshold = top_sim * min_ratio
+        # Never cut below this many results when candidates pass threshold;
+        # avoids losing good matches (e.g. exact title) when top-1 has slight edge
+        min_keep = getattr(self._search_config, "adaptive_min_keep", 3)
 
         filtered = [candidates[0]]
 
@@ -668,11 +778,21 @@ class SearchPipeline:
             curr = candidates[i]
             curr_s = _score(curr)
 
+            # Always keep exact match items (exact or contains); never cut them
+            if curr.data.get("exact_title_match"):
+                filtered.append(curr)
+                continue
+
             if curr_s < threshold:
                 break
 
             prev_s = _score(candidates[i - 1])
-            if prev_s > 0 and (prev_s - curr_s) / prev_s > gap_threshold:
+            # Apply elbow break only after we have min_keep results
+            if (
+                len(filtered) >= min_keep
+                and prev_s > 0
+                and (prev_s - curr_s) / prev_s > gap_threshold
+            ):
                 break
 
             filtered.append(curr)
@@ -697,11 +817,16 @@ class SearchPipeline:
                 parts.append(data["solution"][:500])  # Truncate long solutions
             doc_texts.append("\n".join(parts) if parts else str(data))
 
+        document_metadata = [
+            {"exact_title_match": c.data.get("exact_title_match", "")}
+            for c in candidates
+        ]
         try:
             rerank_results = await self._reranker.rank(
                 query=query,
                 documents=doc_texts,
                 top_k=len(candidates),  # Rerank all, filter later
+                document_metadata=document_metadata,
             )
 
             # Map rerank scores back to candidates

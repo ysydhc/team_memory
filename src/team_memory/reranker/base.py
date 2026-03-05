@@ -47,6 +47,7 @@ class RerankerProvider(ABC):
         query: str,
         documents: list[str],
         top_k: int = 10,
+        document_metadata: list[dict] | None = None,
     ) -> list[RerankResult]:
         """Rerank documents by relevance to the query.
 
@@ -54,6 +55,8 @@ class RerankerProvider(ABC):
             query: The search query string.
             documents: List of document texts to rerank.
             top_k: Maximum number of results to return.
+            document_metadata: Optional per-document metadata (e.g. exact_title_match)
+                for score boosting. document_metadata[i] corresponds to documents[i].
 
         Returns:
             List of RerankResult sorted by score descending,
