@@ -3276,25 +3276,29 @@
 
       <!-- Forgot Password (same-page) -->
       <div id="login-mode-forgot" style="display:none;" role="form" aria-labelledby="forgot-title">
-        <p id="forgot-title" class="settings-desc" style="margin-bottom:12px; font-size:13px;">仅适用于已保存 API Key 的用户；若未保存 Key 请联系管理员。</p>
-        <div class="form-group">
-          <label for="forgot-username">用户名</label>
-          <input type="text" id="forgot-username" placeholder="输入用户名" autocomplete="username" aria-describedby="forgot-err">
-        </div>
-        <div class="form-group">
-          <label for="forgot-apikey">API Key</label>
-          <input type="password" id="forgot-apikey" placeholder="输入您的 API Key" autocomplete="off" aria-describedby="forgot-err">
-        </div>
-        <div class="form-group">
-          <label for="forgot-new-password">新密码</label>
-          <input type="password" id="forgot-new-password" placeholder="至少 6 个字符" autocomplete="new-password" aria-describedby="forgot-err">
-        </div>
-        <div class="form-group">
-          <label for="forgot-confirm">确认新密码</label>
-          <input type="password" id="forgot-confirm" placeholder="再次输入新密码" autocomplete="new-password" aria-describedby="forgot-err">
-        </div>
-        <div id="forgot-err" class="error-msg" role="alert" aria-live="polite"></div>
-        <button type="button" class="btn btn-primary btn-full" onclick="doForgotPassword()">重置密码</button>
+        <p id="forgot-title" class="settings-desc" style="margin-bottom:12px; font-size:13px;">若您有 MCP API Key，可前往下方「高级」折叠区重置密码；若未保存 Key 请联系管理员重置。</p>
+        <details>
+          <summary>高级：用 API Key 重置</summary>
+          <div class="form-group" style="margin-top:12px;">
+            <label for="forgot-username">用户名</label>
+            <input type="text" id="forgot-username" placeholder="输入用户名" autocomplete="username" aria-describedby="forgot-err">
+          </div>
+          <div class="form-group">
+            <label for="forgot-apikey">API Key</label>
+            <input type="password" id="forgot-apikey" placeholder="输入您的 API Key" autocomplete="off" aria-describedby="forgot-err">
+          </div>
+          <div class="form-group">
+            <label for="forgot-new-password">新密码</label>
+            <input type="password" id="forgot-new-password" placeholder="至少 6 个字符" autocomplete="new-password" aria-describedby="forgot-err">
+          </div>
+          <div class="form-group">
+            <label for="forgot-confirm">确认新密码</label>
+            <input type="password" id="forgot-confirm" placeholder="再次输入新密码" autocomplete="new-password" aria-describedby="forgot-err">
+          </div>
+          <div id="forgot-err" class="error-msg" role="alert" aria-live="polite"></div>
+          <button type="button" class="btn btn-primary btn-full" onclick="doForgotPassword()">重置密码</button>
+        </details>
+        <p class="settings-desc" style="margin-top:12px; font-size:12px; color:var(--text-muted);">联系管理员重置：管理员可使用 admin reset API 为您的账号重置密码。</p>
         <div style="text-align:center; margin-top:12px; font-size:13px;">
           <a href="#" onclick="switchLoginMode('password'); return false;" style="color:var(--primary);">返回登录</a>
         </div>
