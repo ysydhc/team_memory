@@ -224,6 +224,55 @@ class TestAuth:
         assert resp.json()["user"] == "test_member"
         assert resp.json()["role"] == "member"
 
+    def test_auth_me_includes_api_key_masked(self, client, auth_headers):
+        """GET /auth/me returns api_key_masked (null for ApiKeyAuth, never full key)."""
+        resp = client.get("/api/v1/auth/me", headers=auth_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "api_key_masked" in data
+        assert data.get("user") == "test_admin"
+        # With ApiKeyAuth we get None; with DbApiKeyAuth would be "xxxx****xxxx"
+        assert data["api_key_masked"] is None or (
+            isinstance(data["api_key_masked"], str)
+            and "****" in data["api_key_masked"]
+            and len(data["api_key_masked"]) == 12
+        )
+
+    def test_forgot_password_reset_requires_db_mode(self, client):
+        """POST /auth/forgot-password/reset returns 400 when not DbApiKeyAuth."""
+        resp = client.post(
+            "/api/v1/auth/forgot-password/reset",
+            json={
+                "username": "test_admin",
+                "api_key": "test-key-123",
+                "new_password": "newpass123",
+            },
+        )
+        assert resp.status_code == 400
+        assert "db_api_key" in resp.json().get("detail", "")
+
+    def test_change_password_validation_neither_old_nor_api_key(self, client, auth_headers):
+        """PUT /auth/password with only new_password returns 422."""
+        resp = client.put(
+            "/api/v1/auth/password",
+            headers=auth_headers,
+            json={"new_password": "newpass123"},
+        )
+        assert resp.status_code == 422
+
+    def test_change_password_validation_both_old_and_api_key(self, client, auth_headers):
+        """PUT /auth/password with both old_password and api_key returns 422."""
+        resp = client.put(
+            "/api/v1/auth/password",
+            headers=auth_headers,
+            json={
+                "old_password": "old",
+                "api_key": "key",
+                "new_password": "newpass123",
+            },
+        )
+        assert resp.status_code == 422
+
 
 # ============================================================
 # Experience CRUD Tests

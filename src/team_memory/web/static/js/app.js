@@ -54,19 +54,80 @@ async function api(method, path, body = null) {
 }
 
 // ===== Login mode switching =====
-let _loginMode = 'password'; // 'password' | 'apikey' | 'register'
+let _loginMode = 'password'; // 'password' | 'apikey' | 'register' | 'forgot'
 
 function switchLoginMode(mode) {
     _loginMode = mode;
     document.getElementById('login-mode-password').style.display = mode === 'password' ? 'block' : 'none';
     document.getElementById('login-mode-apikey').style.display = mode === 'apikey' ? 'block' : 'none';
     document.getElementById('login-mode-register').style.display = mode === 'register' ? 'block' : 'none';
+    const forgotEl = document.getElementById('login-mode-forgot');
+    if (forgotEl) forgotEl.style.display = mode === 'forgot' ? 'block' : 'none';
     document.getElementById('login-error').style.display = 'none';
     document.getElementById('login-success').style.display = 'none';
+    const errForgot = document.getElementById('forgot-err');
+    if (errForgot) { errForgot.textContent = ''; errForgot.style.display = 'none'; }
     const sub = document.getElementById('login-subtitle');
     if (mode === 'register') sub.textContent = '注册新账号';
     else if (mode === 'apikey') sub.textContent = '使用 API Key 登录';
+    else if (mode === 'forgot') sub.textContent = '忘记密码';
     else sub.textContent = '团队经验数据库';
+}
+
+async function doForgotPassword() {
+    const username = document.getElementById('forgot-username').value.trim();
+    const apiKey = document.getElementById('forgot-apikey').value;
+    const newPassword = document.getElementById('forgot-new-password').value;
+    const confirmPassword = document.getElementById('forgot-confirm').value;
+    const errEl = document.getElementById('forgot-err');
+    errEl.textContent = '';
+    errEl.style.display = 'none';
+
+    if (!username) {
+        errEl.textContent = '请输入用户名';
+        errEl.style.display = 'block';
+        return;
+    }
+    if (!apiKey) {
+        errEl.textContent = '请输入 API Key';
+        errEl.style.display = 'block';
+        return;
+    }
+    if (!newPassword || newPassword.length < 6) {
+        errEl.textContent = '新密码至少 6 个字符';
+        errEl.style.display = 'block';
+        return;
+    }
+    if (newPassword !== confirmPassword) {
+        errEl.textContent = '两次密码输入不一致';
+        errEl.style.display = 'block';
+        return;
+    }
+
+    try {
+        const data = await api('POST', '/api/v1/auth/forgot-password/reset', {
+            username,
+            api_key: apiKey,
+            new_password: newPassword
+        });
+        if (data.message) {
+            document.getElementById('login-success').textContent = '密码已重置，请使用新密码登录';
+            document.getElementById('login-success').style.display = 'block';
+            document.getElementById('login-mode-forgot').style.display = 'none';
+            document.getElementById('login-mode-password').style.display = 'block';
+            document.getElementById('forgot-username').value = '';
+            document.getElementById('forgot-apikey').value = '';
+            document.getElementById('forgot-new-password').value = '';
+            document.getElementById('forgot-confirm').value = '';
+            setTimeout(() => {
+                document.getElementById('login-success').style.display = 'none';
+                switchLoginMode('password');
+            }, 2500);
+        }
+    } catch (e) {
+        errEl.textContent = (e && e.message) || '重置失败，请检查用户名与 API Key';
+        errEl.style.display = 'block';
+    }
 }
 
 // ===== Auth =====
@@ -370,6 +431,7 @@ function navigate(page) {
         pages.loadScoringConfig();
         pages.checkMergeSuggestions();
         pages.loadHealthStatus();
+        pages.loadAccountSecurity();
         if (state.currentUser && state.currentUser.role === 'admin') {
             pages.loadKeyManagement();
         }
@@ -548,6 +610,8 @@ window.closeExportModal = components.closeExportModal;
 window.doExport = components.doExport;
 
 // Key management exports
+window.loadAccountSecurity = pages.loadAccountSecurity;
+window.doChangePasswordByApiKey = pages.doChangePasswordByApiKey;
 window.loadKeyManagement = pages.loadKeyManagement;
 window.approveUser = pages.approveUser;
 window.rejectUser = pages.rejectUser;

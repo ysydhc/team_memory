@@ -670,6 +670,8 @@ class ApiKey(Base):
     role: Mapped[str] = mapped_column(String(50), default="editor")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     password_hash: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    key_prefix: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    key_suffix: Mapped[str | None] = mapped_column(String(4), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )

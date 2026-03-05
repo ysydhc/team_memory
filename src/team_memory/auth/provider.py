@@ -241,6 +241,9 @@ class DbApiKeyAuth(ApiKeyAuth):
         raw_key = secrets.token_hex(32)
         db_key.is_active = True
         db_key.key_hash = self.hash_key(raw_key)
+        n = len(raw_key)
+        db_key.key_prefix = raw_key[: min(4, n)] if n else None
+        db_key.key_suffix = raw_key[-min(4, n) :] if n else None
         await session.flush()
 
         self._keys[db_key.key_hash] = User(name=db_key.user_name, role=db_key.role)
@@ -278,6 +281,9 @@ class DbApiKeyAuth(ApiKeyAuth):
         raw_key = api_key or secrets.token_hex(32)
         key_hash = self.hash_key(raw_key)
         pwd_hash = _hash_password(password) if password else None
+        n = len(raw_key)
+        key_prefix = raw_key[: min(4, n)] if n else None
+        key_suffix = raw_key[-min(4, n) :] if n else None
 
         db_key = ApiKey(
             key_hash=key_hash,
@@ -285,6 +291,8 @@ class DbApiKeyAuth(ApiKeyAuth):
             role=role,
             is_active=True,
             password_hash=pwd_hash,
+            key_prefix=key_prefix,
+            key_suffix=key_suffix,
         )
         session.add(db_key)
         await session.flush()
@@ -368,6 +376,51 @@ class DbApiKeyAuth(ApiKeyAuth):
             if db_key is None:
                 return False
             if db_key.password_hash and not _verify_password(old_password, db_key.password_hash):
+                return False
+            db_key.password_hash = _hash_password(new_password)
+            await session.flush()
+            return True
+
+    async def get_masked_key_for_user(self, username: str) -> str | None:
+        """Return masked API key (prefix + '****' + suffix) for display; never full key."""
+        from sqlalchemy import select
+
+        from team_memory.storage.database import get_session
+        from team_memory.storage.models import ApiKey
+
+        async with get_session(self._db_url) as session:
+            result = await session.execute(
+                select(ApiKey).where(
+                    ApiKey.user_name == username,
+                    ApiKey.key_hash.isnot(None),
+                    ApiKey.is_active == True,  # noqa: E712
+                )
+            )
+            db_key = result.scalar_one_or_none()
+            if db_key is None or not db_key.key_prefix or not db_key.key_suffix:
+                return None
+            return f"{db_key.key_prefix}****{db_key.key_suffix}"
+
+    async def update_password_by_api_key_db(
+        self, username: str, api_key: str, new_password: str
+    ) -> bool:
+        """Update password after verifying api_key belongs to username.
+        Shared by forgot-password and settings change-password.
+        """
+        user = await self._db_key_lookup(api_key)
+        if user is None or user.name != username:
+            return False
+        from sqlalchemy import select
+
+        from team_memory.storage.database import get_session
+        from team_memory.storage.models import ApiKey
+
+        async with get_session(self._db_url) as session:
+            result = await session.execute(
+                select(ApiKey).where(ApiKey.user_name == username)
+            )
+            db_key = result.scalar_one_or_none()
+            if db_key is None:
                 return False
             db_key.password_hash = _hash_password(new_password)
             await session.flush()

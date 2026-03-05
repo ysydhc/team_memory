@@ -1950,6 +1950,61 @@ export async function batchSummarize() {
     }
 }
 
+// ===== Account & Security (masked API Key + change password) =====
+
+export async function loadAccountSecurity() {
+    const maskedEl = document.getElementById('settings-api-key-masked');
+    const errEl = document.getElementById('settings-api-key-error');
+    if (!maskedEl) return;
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    try {
+        const data = await api('GET', '/api/v1/auth/me');
+        const masked = data.api_key_masked;
+        maskedEl.textContent = (masked && masked !== 'null') ? masked : '未保存脱敏信息';
+        maskedEl.style.color = 'var(--text-secondary)';
+    } catch (e) {
+        maskedEl.textContent = '加载失败';
+        maskedEl.style.color = 'var(--text-muted)';
+        if (errEl) {
+            errEl.textContent = (e && e.message) || '获取失败';
+            errEl.style.display = 'block';
+        }
+    }
+}
+
+export async function doChangePasswordByApiKey() {
+    const apiKeyEl = document.getElementById('settings-change-apikey');
+    const newPwdEl = document.getElementById('settings-new-password');
+    const confirmEl = document.getElementById('settings-confirm-password');
+    if (!apiKeyEl || !newPwdEl || !confirmEl) return;
+    const apiKey = apiKeyEl.value;
+    const newPassword = newPwdEl.value;
+    const confirmPassword = confirmEl.value;
+
+    if (!apiKey) {
+        toast('请输入 API Key', 'error');
+        return;
+    }
+    if (!newPassword || newPassword.length < 6) {
+        toast('新密码至少 6 个字符', 'error');
+        return;
+    }
+    if (newPassword !== confirmPassword) {
+        toast('两次密码输入不一致', 'error');
+        return;
+    }
+
+    try {
+        await api('PUT', '/api/v1/auth/password', { api_key: apiKey, new_password: newPassword });
+        toast('密码修改成功', 'success');
+        apiKeyEl.value = '';
+        newPwdEl.value = '';
+        confirmEl.value = '';
+    } catch (e) {
+        toast((e && e.message) || '修改失败', 'error');
+    }
+}
+
 // ===== Key / User Management (admin) =====
 
 export async function loadKeyManagement() {

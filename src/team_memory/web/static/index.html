@@ -3235,7 +3235,34 @@
         <button class="btn btn-primary btn-full" onclick="doLogin()">登 录</button>
         <div style="display:flex; justify-content:space-between; margin-top:12px; font-size:13px;">
           <a href="#" onclick="switchLoginMode('apikey'); return false;" style="color:var(--primary);">使用 API Key 登录</a>
+          <a href="#" onclick="switchLoginMode('forgot'); return false;" style="color:var(--primary);">忘记密码</a>
           <a href="#" onclick="switchLoginMode('register'); return false;" style="color:var(--primary);">没有账号？注册</a>
+        </div>
+      </div>
+
+      <!-- Forgot Password (same-page) -->
+      <div id="login-mode-forgot" style="display:none;" role="form" aria-labelledby="forgot-title">
+        <p id="forgot-title" class="settings-desc" style="margin-bottom:12px; font-size:13px;">仅适用于已保存 API Key 的用户；若未保存 Key 请联系管理员。</p>
+        <div class="form-group">
+          <label for="forgot-username">用户名</label>
+          <input type="text" id="forgot-username" placeholder="输入用户名" autocomplete="username" aria-describedby="forgot-err">
+        </div>
+        <div class="form-group">
+          <label for="forgot-apikey">API Key</label>
+          <input type="password" id="forgot-apikey" placeholder="输入您的 API Key" autocomplete="off" aria-describedby="forgot-err">
+        </div>
+        <div class="form-group">
+          <label for="forgot-new-password">新密码</label>
+          <input type="password" id="forgot-new-password" placeholder="至少 6 个字符" autocomplete="new-password" aria-describedby="forgot-err">
+        </div>
+        <div class="form-group">
+          <label for="forgot-confirm">确认新密码</label>
+          <input type="password" id="forgot-confirm" placeholder="再次输入新密码" autocomplete="new-password" aria-describedby="forgot-err">
+        </div>
+        <div id="forgot-err" class="error-msg" role="alert" aria-live="polite"></div>
+        <button type="button" class="btn btn-primary btn-full" onclick="doForgotPassword()">重置密码</button>
+        <div style="text-align:center; margin-top:12px; font-size:13px;">
+          <a href="#" onclick="switchLoginMode('password'); return false;" style="color:var(--primary);">返回登录</a>
         </div>
       </div>
 
@@ -3531,6 +3558,40 @@
                 </div>
               </div>
               <div id="health-status-error" class="health-error hidden"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Account & Security: masked API Key + change password by API Key -->
+        <div id="settings-account-security" class="settings-card" style="margin-top:20px">
+          <h2>账号与安全</h2>
+          <div class="settings-card-body" style="max-height:400px">
+            <p class="settings-desc">查看 API Key 脱敏、使用 API Key 修改登录密码。仅适用于已保存 API Key 的用户。</p>
+            <div class="settings-grid" style="margin-bottom:16px">
+              <div class="form-group full-width">
+                <label>您的 API Key</label>
+                <div id="settings-api-key-masked" style="font-family:var(--font-mono);font-size:13px;color:var(--text-secondary);min-height:24px">加载中…</div>
+                <div id="settings-api-key-error" class="error-msg" style="display:none"></div>
+              </div>
+            </div>
+            <div class="settings-group-title" style="margin-top:16px;margin-bottom:8px">修改密码</div>
+            <p class="settings-desc" style="margin-bottom:8px">使用 API Key 验证身份后设置新密码。</p>
+            <div class="settings-grid">
+              <div class="form-group">
+                <label for="settings-change-apikey">API Key</label>
+                <input type="password" id="settings-change-apikey" placeholder="输入您的 API Key" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label for="settings-new-password">新密码</label>
+                <input type="password" id="settings-new-password" placeholder="至少 6 个字符" autocomplete="new-password">
+              </div>
+              <div class="form-group">
+                <label for="settings-confirm-password">确认新密码</label>
+                <input type="password" id="settings-confirm-password" placeholder="再次输入新密码" autocomplete="new-password">
+              </div>
+            </div>
+            <div class="settings-actions" style="margin-top:12px">
+              <button type="button" class="btn btn-primary" onclick="window.doChangePasswordByApiKey()">修改密码</button>
             </div>
           </div>
         </div>

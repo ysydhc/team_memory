@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import time
+from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -18,6 +20,7 @@ from team_memory.web.app import (
     ApiKeyCreateRequest,
     ApiKeyUpdateRequest,
     ChangePasswordRequest,
+    ForgotPasswordResetRequest,
     LoginRequest,
     LoginResponse,
     RegisterRequest,
@@ -25,6 +28,21 @@ from team_memory.web.app import (
     _get_db_url,
     get_current_user,
 )
+
+# In-memory rate limit for forgot-password: max 5 requests per IP per 60 seconds
+_forgot_password_attempts: dict[str, list[float]] = defaultdict(list)
+_FORGOT_PASSWORD_WINDOW = 60.0
+_FORGOT_PASSWORD_MAX_PER_WINDOW = 5
+
+
+def _check_forgot_password_rate_limit(client_ip: str) -> bool:
+    now = time.monotonic()
+    attempts = _forgot_password_attempts[client_ip]
+    attempts[:] = [t for t in attempts if now - t < _FORGOT_PASSWORD_WINDOW]
+    if len(attempts) >= _FORGOT_PASSWORD_MAX_PER_WINDOW:
+        return False
+    attempts.append(now)
+    return True
 
 logger = logging.getLogger("team_memory.web")
 
@@ -129,15 +147,53 @@ async def logout():
 
 @router.get("/auth/me")
 async def auth_me(user: User = Depends(get_current_user)):
-    """Check current auth status and permissions."""
+    """Current auth status and permissions; api_key_masked for display (never full key)."""
     from team_memory.auth.permissions import ROLE_PERMISSIONS
 
     perms = ROLE_PERMISSIONS.get(user.role, set())
-    return {
+    out = {
         "user": user.name,
         "role": user.role,
         "permissions": sorted(perms) if "*" not in perms else ["*"],
     }
+    if isinstance(_auth := app_module._auth, DbApiKeyAuth):
+        masked = await _auth.get_masked_key_for_user(user.name)
+        out["api_key_masked"] = masked if masked else "••••****••••"
+    else:
+        out["api_key_masked"] = None
+    return out
+
+
+# ------------------------------------------------------------------
+# Forgot password (no login; verify by username + api_key)
+# ------------------------------------------------------------------
+@router.post("/auth/forgot-password/reset")
+async def forgot_password_reset(req: ForgotPasswordResetRequest, request: Request):
+    """Reset password by username + API Key. Rate-limited; unified error to prevent enumeration."""
+    _auth = app_module._auth
+    if not isinstance(_auth, DbApiKeyAuth):
+        raise HTTPException(status_code=400, detail="密码重置需要 db_api_key 模式")
+
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=422, detail="新密码至少 6 个字符")
+
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_forgot_password_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
+
+    username = (req.username or "").strip()
+    if not username:
+        raise HTTPException(status_code=422, detail="用户名或 API Key 不正确")
+
+    user = await _auth.authenticate({"api_key": req.api_key})
+    if user is None or user.name != username:
+        raise HTTPException(status_code=400, detail="用户名或 API Key 不正确")
+
+    ok = await _auth.update_password_by_api_key_db(username, req.api_key, req.new_password)
+    if not ok:
+        raise HTTPException(status_code=400, detail="用户名或 API Key 不正确")
+
+    return {"message": "密码已重置"}
 
 
 # ------------------------------------------------------------------
@@ -148,7 +204,7 @@ async def change_password(
     req: ChangePasswordRequest,
     user: User = Depends(get_current_user),
 ):
-    """Change the current user's password."""
+    """Change the current user's password (by old_password or by api_key)."""
     _auth = app_module._auth
     if not isinstance(_auth, DbApiKeyAuth):
         raise HTTPException(status_code=400, detail="密码功能需要 db_api_key 模式")
@@ -156,9 +212,19 @@ async def change_password(
     if len(req.new_password) < 6:
         raise HTTPException(status_code=422, detail="新密码至少 6 个字符")
 
-    ok = await _auth.update_password_db(user.name, req.old_password, req.new_password)
+    if req.api_key:
+        api_user = await _auth.authenticate({"api_key": req.api_key})
+        if api_user is None or api_user.name != user.name:
+            raise HTTPException(status_code=403, detail="API Key 不属于当前用户")
+        ok = await _auth.update_password_by_api_key_db(user.name, req.api_key, req.new_password)
+    else:
+        ok = await _auth.update_password_db(user.name, req.old_password or "", req.new_password)
+
     if not ok:
-        raise HTTPException(status_code=400, detail="旧密码不正确")
+        raise HTTPException(
+            status_code=400,
+            detail="API Key 不属于当前用户" if req.api_key else "旧密码不正确",
+        )
     return {"message": "密码修改成功"}
 
 
