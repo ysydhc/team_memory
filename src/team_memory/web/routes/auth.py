@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
 import time
 from collections import defaultdict
 
@@ -12,6 +14,7 @@ from sqlalchemy import select, update
 
 from team_memory.auth.permissions import require_role
 from team_memory.auth.provider import DbApiKeyAuth, User
+from team_memory.config import get_settings
 from team_memory.storage.audit import write_audit_log
 from team_memory.storage.database import get_session
 from team_memory.storage.models import ApiKey
@@ -25,6 +28,7 @@ from team_memory.web.app import (
     LoginResponse,
     RegisterRequest,
     _encode_api_key_cookie,
+    _encode_session_token,
     _get_db_url,
     get_current_user,
 )
@@ -43,6 +47,18 @@ def _check_forgot_password_rate_limit(client_ip: str) -> bool:
         return False
     attempts.append(now)
     return True
+
+
+def _get_session_secret() -> str:
+    """Get session secret: env > config > derived from database URL."""
+    secret = os.environ.get("TEAM_MEMORY_SESSION_SECRET")
+    if secret:
+        return secret
+    settings = app_module._settings or get_settings()
+    if settings.auth.session_secret:
+        return settings.auth.session_secret
+    return hashlib.sha256(settings.database.url.encode()).hexdigest()
+
 
 logger = logging.getLogger("team_memory.web")
 
@@ -93,6 +109,7 @@ async def login(req: LoginRequest):
         cookie_value = api_key_clean
     elif req.username and req.password:
         credentials = {"username": req.username.strip(), "password": req.password}
+        cookie_value = ""
     else:
         return LoginResponse(success=False, message="请提供 API Key 或用户名密码")
 
@@ -110,6 +127,11 @@ async def login(req: LoginRequest):
             message="API Key 无效" if req.api_key else "用户名或密码错误",
         )
 
+    # For username+password auth, use session token instead of pwd:user:pass
+    if req.username and req.password:
+        secret = _get_session_secret()
+        cookie_value = _encode_session_token(user.name, secret)
+
     from team_memory.auth.permissions import ROLE_PERMISSIONS
 
     perms = ROLE_PERMISSIONS.get(user.role, set())
@@ -119,22 +141,13 @@ async def login(req: LoginRequest):
     resp_data["permissions"] = sorted(perms) if "*" not in perms else ["*"]
 
     response = JSONResponse(content=resp_data)
-    if cookie_value:
-        response.set_cookie(
-            key="api_key",
-            value=_encode_api_key_cookie(cookie_value),
-            httponly=True,
-            samesite="strict",
-            max_age=86400 * 7,
-        )
-    else:
-        response.set_cookie(
-            key="api_key",
-            value=_encode_api_key_cookie(f"pwd:{req.username}:{req.password}"),
-            httponly=True,
-            samesite="strict",
-            max_age=86400 * 7,
-        )
+    response.set_cookie(
+        key="api_key",
+        value=_encode_api_key_cookie(cookie_value),
+        httponly=True,
+        samesite="strict",
+        max_age=86400 * 7,
+    )
     return response
 
 
