@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from team_memory.auth.init_admin import ensure_default_admin, is_api_keys_empty
-from team_memory.auth.provider import ApiKeyAuth, NoAuth, create_auth_provider
+from team_memory.auth.provider import ApiKeyAuth, DbApiKeyAuth, NoAuth, create_auth_provider
 
 
 class TestNoAuth:
@@ -80,6 +80,62 @@ class TestApiKeyAuth:
 
         assert user_alice is not None and user_alice.name == "alice"
         assert user_bob is not None and user_bob.name == "bob"
+
+
+class TestDbApiKeyAuthKeyHashGuard:
+    """Guard key_hash=None when API key not generated (no crash at self._keys[None])."""
+
+    @pytest.mark.asyncio
+    async def test_approve_user_db_generate_key_false_no_crash(self):
+        """approve_user_db with generate_key=False: no key generated, no self._keys[None]."""
+        auth = DbApiKeyAuth(db_url="sqlite+aiosqlite:///:memory:", keys={})
+        mock_db_key = MagicMock()
+        mock_db_key.id = 1
+        mock_db_key.user_name = "alice"
+        mock_db_key.role = "editor"
+        mock_db_key.is_active = False
+        mock_db_key.key_hash = None
+        mock_db_key.key_prefix = None
+        mock_db_key.key_suffix = None
+        mock_db_key.created_at = None
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_db_key
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.flush = AsyncMock()
+
+        result = await auth.approve_user_db(
+            mock_session, key_id=1, generate_key=False
+        )
+        assert result["api_key"] is None
+        assert result["is_active"] is True
+        assert result["user_name"] == "alice"
+        assert None not in auth._keys
+        assert len(auth._keys) == 0
+
+    @pytest.mark.asyncio
+    async def test_register_key_db_generate_api_key_false_no_crash(self):
+        """register_key_db with generate_api_key=False: no key generated, no self._keys[None]."""
+        auth = DbApiKeyAuth(db_url="sqlite+aiosqlite:///:memory:", keys={})
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.add = MagicMock()
+        mock_session.flush = AsyncMock()
+
+        result = await auth.register_key_db(
+            mock_session,
+            user_name="bob",
+            role="editor",
+            generate_api_key=False,
+        )
+        assert result["api_key"] is None
+        assert result["is_active"] is True
+        assert result["user_name"] == "bob"
+        assert None not in auth._keys
+        assert len(auth._keys) == 0
 
 
 class TestCreateAuthProvider:

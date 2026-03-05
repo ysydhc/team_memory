@@ -227,8 +227,10 @@ class DbApiKeyAuth(ApiKeyAuth):
     # ------------------------------------------------------------------
     # Approve user (admin action — generates API key)
     # ------------------------------------------------------------------
-    async def approve_user_db(self, session: "AsyncSession", key_id: int) -> dict:
-        """Approve a pending user: set is_active=True, generate API key."""
+    async def approve_user_db(
+        self, session: "AsyncSession", key_id: int, generate_key: bool = True
+    ) -> dict:
+        """Approve a pending user: set is_active=True; optionally generate API key."""
         from sqlalchemy import select
 
         from team_memory.storage.models import ApiKey
@@ -238,15 +240,20 @@ class DbApiKeyAuth(ApiKeyAuth):
         if db_key is None:
             raise ValueError("用户不存在")
 
-        raw_key = secrets.token_hex(32)
         db_key.is_active = True
-        db_key.key_hash = self.hash_key(raw_key)
-        n = len(raw_key)
-        db_key.key_prefix = raw_key[: min(4, n)] if n else None
-        db_key.key_suffix = raw_key[-min(4, n) :] if n else None
+        raw_key: str | None = None
+        if generate_key:
+            raw_key = secrets.token_hex(32)
+            db_key.key_hash = self.hash_key(raw_key)
+            n = len(raw_key)
+            db_key.key_prefix = raw_key[: min(4, n)] if n else None
+            db_key.key_suffix = raw_key[-min(4, n) :] if n else None
         await session.flush()
 
-        self._keys[db_key.key_hash] = User(name=db_key.user_name, role=db_key.role)
+        if db_key.key_hash:
+            self._keys[db_key.key_hash] = User(
+                name=db_key.user_name, role=db_key.role
+            )
         return {
             "id": db_key.id,
             "user_name": db_key.user_name,
@@ -266,8 +273,9 @@ class DbApiKeyAuth(ApiKeyAuth):
         role: str = "editor",
         password: str | None = None,
         api_key: str | None = None,
+        generate_api_key: bool = True,
     ) -> dict:
-        """Admin creates a user: active immediately, API key auto-generated."""
+        """Admin creates a user: active immediately; optionally generate API key."""
         from sqlalchemy import select
 
         from team_memory.storage.models import ApiKey
@@ -278,13 +286,18 @@ class DbApiKeyAuth(ApiKeyAuth):
         if existing.scalar_one_or_none() is not None:
             raise ValueError(f"用户名 '{user_name}' 已存在")
 
-        raw_key = api_key or secrets.token_hex(32)
-        key_hash = self.hash_key(raw_key)
-        pwd_hash = _hash_password(password) if password else None
-        n = len(raw_key)
-        key_prefix = raw_key[: min(4, n)] if n else None
-        key_suffix = raw_key[-min(4, n) :] if n else None
+        raw_key: str | None = None
+        key_hash: str | None = None
+        key_prefix: str | None = None
+        key_suffix: str | None = None
+        if generate_api_key:
+            raw_key = api_key or secrets.token_hex(32)
+            key_hash = self.hash_key(raw_key)
+            n = len(raw_key)
+            key_prefix = raw_key[: min(4, n)] if n else None
+            key_suffix = raw_key[-min(4, n) :] if n else None
 
+        pwd_hash = _hash_password(password) if password else None
         db_key = ApiKey(
             key_hash=key_hash,
             user_name=user_name,
@@ -297,7 +310,8 @@ class DbApiKeyAuth(ApiKeyAuth):
         session.add(db_key)
         await session.flush()
 
-        self._keys[key_hash] = User(name=user_name, role=role)
+        if key_hash:
+            self._keys[key_hash] = User(name=user_name, role=role)
         return {
             "id": db_key.id,
             "user_name": db_key.user_name,
