@@ -1598,6 +1598,34 @@
       gap: 12px;
     }
 
+    .edit-installable-tab {
+      padding: 12px 20px;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 14px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+    }
+    .edit-installable-tab:hover { color: var(--text-primary); }
+    .edit-installable-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .markdown-preview h1, .markdown-preview h2, .markdown-preview h3 { margin: 1em 0 0.5em; }
+    .markdown-preview h1 { font-size: 1.5em; }
+    .markdown-preview h2 { font-size: 1.25em; }
+    .markdown-preview h3 { font-size: 1.1em; }
+    .markdown-preview table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+    .markdown-preview th, .markdown-preview td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+    .markdown-preview th { background: var(--bg-input); }
+    .markdown-preview code { background: var(--bg-input); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+    .markdown-preview pre { background: var(--bg-input); padding: 12px; border-radius: var(--radius); overflow-x: auto; }
+    .markdown-preview pre code { background: none; padding: 0; }
+    .markdown-preview ul, .markdown-preview ol { margin: 0.5em 0; padding-left: 1.5em; }
+    .markdown-preview hr { border: none; border-top: 1px solid var(--border); margin: 1em 0; }
+
     /* ===== Pagination ===== */
     .pagination {
       display: flex;
@@ -3233,8 +3261,14 @@
           <input type="password" id="login-password" placeholder="输入密码">
         </div>
         <button class="btn btn-primary btn-full" onclick="doLogin()">登 录</button>
+        <details id="auth-advanced-details">
+          <summary>高级：使用 API Key 登录</summary>
+          <div class="form-group" style="margin-top:12px;">
+            <label for="login-key">API Key</label>
+            <input type="password" id="login-key" placeholder="输入你的 API Key...">
+          </div>
+        </details>
         <div style="display:flex; justify-content:space-between; margin-top:12px; font-size:13px;">
-          <a href="#" onclick="switchLoginMode('apikey'); return false;" style="color:var(--primary);">使用 API Key 登录</a>
           <a href="#" onclick="switchLoginMode('forgot'); return false;" style="color:var(--primary);">忘记密码</a>
           <a href="#" onclick="switchLoginMode('register'); return false;" style="color:var(--primary);">没有账号？注册</a>
         </div>
@@ -3263,18 +3297,6 @@
         <button type="button" class="btn btn-primary btn-full" onclick="doForgotPassword()">重置密码</button>
         <div style="text-align:center; margin-top:12px; font-size:13px;">
           <a href="#" onclick="switchLoginMode('password'); return false;" style="color:var(--primary);">返回登录</a>
-        </div>
-      </div>
-
-      <!-- API Key Login -->
-      <div id="login-mode-apikey" style="display:none;">
-        <div class="form-group">
-          <label for="login-key">API Key</label>
-          <input type="password" id="login-key" placeholder="输入你的 API Key...">
-        </div>
-        <button class="btn btn-primary btn-full" onclick="doLogin()">登 录</button>
-        <div style="text-align:center; margin-top:12px; font-size:13px;">
-          <a href="#" onclick="switchLoginMode('password'); return false;" style="color:var(--primary);">使用密码登录</a>
         </div>
       </div>
 
@@ -3603,8 +3625,7 @@
             <div class="proj-cfg-tabs">
               <button class="proj-cfg-tab active" onclick="switchProjCfgTab('basic')">基础配置</button>
               <button class="proj-cfg-tab" onclick="switchProjCfgTab('scan')">扫描目录</button>
-              <button class="proj-cfg-tab" onclick="switchProjCfgTab('installables')">可安装 Rules / Prompts /
-                Skills</button>
+              <button class="proj-cfg-tab" onclick="switchProjCfgTab('installables')">可安装 Rules、Prompt</button>
             </div>
 
             <!-- Basic Config -->
@@ -3666,7 +3687,7 @@
 
             <!-- Installables -->
             <div class="proj-cfg-panel" id="proj-cfg-installables">
-              <p class="settings-desc">浏览本地与共享注册表中的可安装项，支持预览并一键安装到项目目录。</p>
+              <p class="settings-desc">浏览本地与共享注册表中的可安装项，支持预览并一键安装到指定项目或目录；已安装项可编辑，修改会保存到数据库并同步到项目文件。</p>
               <div class="settings-grid">
                 <div class="form-group">
                   <label>来源</label>
@@ -3682,17 +3703,42 @@
                     <option value="">全部</option>
                     <option value="rule">rule</option>
                     <option value="prompt">prompt</option>
-                    <option value="skill">skill</option>
                   </select>
+                </div>
+                <div class="form-group">
+                  <label>安装目标（项目）</label>
+                  <select id="installables-target-project">
+                    <option value="">— 选择项目 —</option>
+                  </select>
+                  <div id="installables-project-hint" class="hint" style="margin-top:6px;display:none;font-size:12px">
+                    请先在「<a href="#" onclick="switchProjCfgTab('scan');return false;">扫描目录</a>」中配置项目路径映射（格式：项目名=绝对路径）
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>或安装路径</label>
+                  <input type="text" id="installables-target-path" placeholder="项目根目录绝对路径（可选）" style="font-family:var(--font-mono);font-size:12px">
                 </div>
               </div>
               <div class="settings-actions">
-                <button class="btn btn-secondary" onclick="loadInstallables()">刷新列表</button>
+                <button class="btn btn-secondary" onclick="loadInstallables()">刷新可安装列表</button>
               </div>
               <div id="installables-list" class="exp-list" style="margin-top:10px">
                 <div class="empty-state">
                   <h3>暂无数据</h3>
-                  <p>点击"刷新列表"加载可安装项</p>
+                  <p>点击"刷新可安装列表"加载可安装项</p>
+                </div>
+              </div>
+              <hr style="margin:20px 0;border-color:var(--border-color)">
+              <h4 style="margin-bottom:10px">已安装（可编辑）</h4>
+              <div class="form-group">
+                <label>项目</label>
+                <select id="installables-installed-project" onchange="loadInstalledInstallables()">
+                  <option value="">— 选择项目 —</option>
+                </select>
+              </div>
+              <div id="installables-installed-list" class="exp-list" style="margin-top:10px">
+                <div class="empty-state">
+                  <p>选择项目后加载已安装项</p>
                 </div>
               </div>
             </div>
@@ -4542,9 +4588,36 @@
     </div>
   </div>
 
+  <!-- ===== Edit Installable Modal ===== -->
+  <div id="edit-installable-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeEditInstallableModal()">
+    <div class="modal" style="max-width:95vw;width:1200px;max-height:90vh;display:flex;flex-direction:column">
+      <div class="modal-header">
+        <h2 id="edit-installable-title">编辑 Rule / Prompt</h2>
+        <button class="modal-close" onclick="closeEditInstallableModal()">&times;</button>
+      </div>
+      <div class="modal-body" style="flex:1;overflow:auto;padding:0">
+        <div class="edit-installable-tabs" style="display:flex;border-bottom:1px solid var(--border);padding:0 16px;gap:0">
+          <button type="button" class="edit-installable-tab active" data-tab="edit" onclick="switchEditInstallableTab('edit')">编辑</button>
+          <button type="button" class="edit-installable-tab" data-tab="preview" onclick="switchEditInstallableTab('preview')">Markdown 预览</button>
+        </div>
+        <div id="edit-installable-edit-panel" style="padding:16px">
+          <textarea id="edit-installable-content" style="width:100%;min-height:500px;font-family:var(--font-mono);font-size:13px;padding:12px;resize:vertical;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary)"></textarea>
+        </div>
+        <div id="edit-installable-preview-panel" class="hidden" style="padding:16px;overflow:auto;min-height:500px;max-height:70vh">
+          <div id="edit-installable-preview-content" class="markdown-preview" style="font-size:14px;line-height:1.7"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeEditInstallableModal()">取消</button>
+        <button class="btn btn-primary" onclick="saveEditInstallableContent()">保存（同步到项目文件）</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Container -->
   <div class="toast-container" id="toast-container"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script type="module" src="/static/js/app.js"></script>
 </body>
 

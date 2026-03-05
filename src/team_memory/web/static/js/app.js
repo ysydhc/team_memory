@@ -58,8 +58,7 @@ let _loginMode = 'password'; // 'password' | 'apikey' | 'register' | 'forgot'
 
 function switchLoginMode(mode) {
     _loginMode = mode;
-    document.getElementById('login-mode-password').style.display = mode === 'password' ? 'block' : 'none';
-    document.getElementById('login-mode-apikey').style.display = mode === 'apikey' ? 'block' : 'none';
+    document.getElementById('login-mode-password').style.display = (mode === 'password' || mode === 'apikey') ? 'block' : 'none';
     document.getElementById('login-mode-register').style.display = mode === 'register' ? 'block' : 'none';
     const forgotEl = document.getElementById('login-mode-forgot');
     if (forgotEl) forgotEl.style.display = mode === 'forgot' ? 'block' : 'none';
@@ -69,8 +68,11 @@ function switchLoginMode(mode) {
     if (errForgot) { errForgot.textContent = ''; errForgot.style.display = 'none'; }
     const sub = document.getElementById('login-subtitle');
     if (mode === 'register') sub.textContent = '注册新账号';
-    else if (mode === 'apikey') sub.textContent = '使用 API Key 登录';
-    else if (mode === 'forgot') sub.textContent = '忘记密码';
+    else if (mode === 'apikey') {
+        sub.textContent = '使用 API Key 登录';
+        const details = document.getElementById('auth-advanced-details');
+        if (details) { details.open = true; document.getElementById('login-key')?.focus(); }
+    } else if (mode === 'forgot') sub.textContent = '忘记密码';
     else sub.textContent = '团队经验数据库';
 }
 
@@ -133,9 +135,8 @@ async function doForgotPassword() {
 // ===== Auth =====
 async function doLogin() {
     let body;
-    if (_loginMode === 'apikey') {
-        const key = document.getElementById('login-key').value.trim();
-        if (!key) return;
+    const key = document.getElementById('login-key')?.value?.trim();
+    if (key) {
         body = { api_key: key };
     } else {
         const username = document.getElementById('login-username').value.trim();
@@ -483,6 +484,9 @@ window.switchProjCfgTab = function(tab) {
     document.querySelectorAll('.proj-cfg-panel').forEach(p => p.classList.remove('active'));
     const panel = document.getElementById('proj-cfg-' + tab);
     if (panel) panel.classList.add('active');
+    if (tab === 'installables') {
+        pages.loadScanDirsConfig();
+    }
 };
 window.loadList = pages.loadList;
 window.switchListSubTab = pages.switchListSubTab;
@@ -529,6 +533,11 @@ window.loadInstallables = pages.loadInstallables;
 window.previewInstallable = pages.previewInstallable;
 window.toggleInstallablePreview = pages.toggleInstallablePreview;
 window.installInstallable = pages.installInstallable;
+window.loadInstalledInstallables = pages.loadInstalledInstallables;
+window.openEditInstallableModalFromBtn = pages.openEditInstallableModalFromBtn;
+window.closeEditInstallableModal = pages.closeEditInstallableModal;
+window.switchEditInstallableTab = pages.switchEditInstallableTab;
+window.saveEditInstallableContent = pages.saveEditInstallableContent;
 window.loadAllConfig = pages.loadAllConfig;
 window.saveRetrievalConfig = pages.saveRetrievalConfig;
 window.saveDefaultProjectConfig = pages.saveDefaultProjectConfig;
@@ -625,7 +634,17 @@ window.openAdminCreateUser = function() {
 // ===== Init =====
 document.addEventListener('DOMContentLoaded', () => {
     checkAuth();
-    document.getElementById('login-key').addEventListener('keydown', (e) => {
+    const details = document.getElementById('auth-advanced-details');
+    if (details) {
+        const stored = typeof localStorage !== 'undefined' && localStorage.getItem('auth_advanced_expanded');
+        if (stored === 'true') details.open = true;
+        details.addEventListener('toggle', () => {
+            if (typeof localStorage !== 'undefined') {
+                localStorage.setItem('auth_advanced_expanded', details.open ? 'true' : 'false');
+            }
+        });
+    }
+    document.getElementById('login-key')?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') doLogin();
     });
     document.getElementById('login-password').addEventListener('keydown', (e) => {
