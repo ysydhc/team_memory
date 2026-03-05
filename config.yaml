@@ -144,8 +144,8 @@ search:
   adaptive_filter: true # Enable adaptive score filtering
   score_gap_threshold: 0.15 # Gap threshold for elbow detection
   min_confidence_ratio: 0.6 # Min ratio vs top-1 score for dynamic threshold
-  query_expansion_enabled: false # P1-5: LLM expands query for better recall; fallback to synonym/original on timeout
-  query_expansion_timeout_seconds: 3
+  query_expansion_enabled: true # P1-5: LLM expands query for better recall; fallback to synonym/original on timeout
+  query_expansion_timeout_seconds: 5
 
 # ╔══════════════════════════════════════════════════════════╗
 # ║  [可选] 缓存配置 — 默认使用内存缓存，无需额外依赖         ║
