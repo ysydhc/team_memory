@@ -9,6 +9,7 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from team_memory.auth.permissions import require_role
@@ -17,7 +18,7 @@ from team_memory.services.installable_catalog import (
     InstallableCatalogError,
 )
 from team_memory.storage.database import get_session
-from team_memory.storage.models import AuditLog, Experience
+from team_memory.storage.models import AuditLog, CustomInstallableContent, Experience
 from team_memory.web import app as app_module
 from team_memory.web.app import (
     BatchActionRequest,
@@ -330,19 +331,62 @@ async def preview_installable(
     return payload
 
 
+def _resolve_install_workspace(
+    target_project: str | None, target_path: str | None
+) -> Path | None:
+    """Resolve workspace root for install. Returns None to use default."""
+    if target_path:
+        p = Path(target_path).resolve()
+        if p.exists() and p.is_dir():
+            return p
+        raise HTTPException(
+            status_code=400, detail=f"target_path 不存在或非目录: {target_path}"
+        )
+    if target_project:
+        from team_memory.web.routes.analytics import _get_scan_config
+
+        cfg = _get_scan_config()
+        paths = cfg.get("project_paths", {})
+        if target_project not in paths:
+            raise HTTPException(
+                status_code=400,
+                detail=f"项目 '{target_project}' 未在 project_paths 中配置",
+            )
+        p = Path(paths[target_project]).resolve()
+        if not p.exists() or not p.is_dir():
+            raise HTTPException(
+                status_code=400,
+                detail=f"项目路径不存在或非目录: {paths[target_project]}",
+            )
+        return p
+    return None
+
+
 @router.post("/installables/install")
 async def install_installable(
     req: InstallableInstallRequest,
     user: User = Depends(require_role("admin")),
 ):
-    """Install one rule/prompt into configured target directory."""
+    """Install one rule/prompt into configured target directory.
+    Optional: target_project (from project_paths) or target_path (project root).
+    """
 
     if req.source and req.source not in ("local", "registry"):
         raise HTTPException(status_code=422, detail="source must be local or registry")
 
+    workspace_override = None
+    if req.target_project or req.target_path:
+        workspace_override = _resolve_install_workspace(
+            req.target_project, req.target_path
+        )
+
     try:
         service = app_module._get_catalog_service()
-        payload = await service.install(item_id=req.id, source=req.source)
+        payload = await service.install(
+            item_id=req.id,
+            source=req.source,
+            workspace_root_override=workspace_override,
+        )
     except InstallableCatalogError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
@@ -359,3 +403,175 @@ async def install_installable(
         payload.get("target_path"),
     )
     return payload
+
+
+@router.get("/installables/installed")
+async def list_installed_installables(
+    project: str = Query(..., min_length=1),
+    user: User = Depends(get_current_user),
+):
+    """List installed rules/prompts in a project (scan .cursor/rules and .cursor/prompts)."""
+    from team_memory.web.routes.analytics import _get_scan_config
+
+    cfg = _get_scan_config()
+    paths = cfg.get("project_paths", {})
+    if project not in paths:
+        raise HTTPException(
+            status_code=400,
+            detail=f"项目 '{project}' 未在 project_paths 中配置",
+        )
+    ws = Path(paths[project]).resolve()
+    if not ws.exists() or not ws.is_dir():
+        return {"items": []}
+
+    try:
+        service = app_module._get_catalog_service()
+        catalog_items = await service.list_items()
+    except Exception:
+        catalog_items = []
+
+    items = []
+    rules_dir = ws / ".cursor" / "rules"
+    prompts_dir = ws / ".cursor" / "prompts"
+    catalog_by_fname = {}
+    for item in catalog_items:
+        fname = item.file_name or (
+            f"{item.id}.mdc" if item.type == "rule" else f"{item.id}.md"
+        )
+        if not fname.endswith(".mdc") and item.type == "rule":
+            fname += ".mdc"
+        elif not fname.endswith(".md") and item.type == "prompt":
+            fname += ".md"
+        catalog_by_fname[fname] = item
+    for d, itype in [(rules_dir, "rule"), (prompts_dir, "prompt")]:
+        if not d.exists():
+            continue
+        pat = "*.mdc" if itype == "rule" else "*.md"
+        for path in d.glob(pat):
+            fname = path.name
+            if fname in catalog_by_fname:
+                item = catalog_by_fname[fname]
+                if item.type == itype:
+                    items.append(
+                        {
+                            "item_id": item.id,
+                            "type": item.type,
+                            "name": item.name,
+                            "file_path": str(path),
+                        }
+                    )
+    return {"items": items}
+
+
+@router.get("/installables/custom")
+async def get_custom_installable_content(
+    project: str = Query(..., min_length=1),
+    item_id: str = Query(..., min_length=1),
+    user: User = Depends(get_current_user),
+):
+    """Get content for an installed item: custom (DB) if exists, else from file."""
+    from team_memory.web.routes.analytics import _get_scan_config
+
+    async with get_session() as session:
+        result = await session.execute(
+            select(CustomInstallableContent).where(
+                CustomInstallableContent.project == project,
+                CustomInstallableContent.item_id == item_id,
+            )
+        )
+        row = result.scalar_one_or_none()
+        if row:
+            return {
+                "content": row.content,
+                "source": "custom",
+                "updated_at": row.updated_at.isoformat(),
+            }
+
+    cfg = _get_scan_config()
+    paths = cfg.get("project_paths", {})
+    if project not in paths:
+        raise HTTPException(status_code=404, detail="项目未配置或文件不存在")
+    ws = Path(paths[project])
+    try:
+        service = app_module._get_catalog_service()
+        item = await service._find_item(item_id=item_id, source=None)
+    except Exception:
+        raise HTTPException(status_code=404, detail="可安装项不存在")
+    if item.type == "rule":
+        path = ws / ".cursor" / "rules" / (item.file_name or f"{item.id}.mdc")
+    else:
+        path = ws / ".cursor" / "prompts" / (item.file_name or f"{item.id}.md")
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    content = path.read_text(encoding="utf-8")
+    return {"content": content, "source": "file"}
+
+
+class CustomInstallableSaveRequest(BaseModel):
+    project: str
+    item_id: str
+    item_type: str  # rule | prompt
+    content: str
+    sync_to_file: bool = True
+
+
+@router.put("/installables/custom")
+async def save_custom_installable_content(
+    req: CustomInstallableSaveRequest,
+    user: User = Depends(get_current_user),
+):
+    """Save custom content to DB. If sync_to_file and project path exists, also write to file."""
+    from team_memory.web.routes.analytics import _get_scan_config
+
+    project, item_id, item_type, content, sync_to_file = (
+        req.project,
+        req.item_id,
+        req.item_type,
+        req.content,
+        req.sync_to_file,
+    )
+    if item_type not in ("rule", "prompt"):
+        raise HTTPException(status_code=422, detail="item_type must be rule or prompt")
+
+    async with get_session() as session:
+        result = await session.execute(
+            select(CustomInstallableContent).where(
+                CustomInstallableContent.project == project,
+                CustomInstallableContent.item_id == item_id,
+            )
+        )
+        row = result.scalar_one_or_none()
+        if row:
+            row.content = content
+            row.updated_by = user.name
+        else:
+            session.add(
+                CustomInstallableContent(
+                    project=project,
+                    item_id=item_id,
+                    item_type=item_type,
+                    content=content,
+                    updated_by=user.name,
+                )
+            )
+        await session.commit()
+
+    if sync_to_file:
+        cfg = _get_scan_config()
+        paths = cfg.get("project_paths", {})
+        if project in paths:
+            ws = Path(paths[project]).resolve()
+            try:
+                service = app_module._get_catalog_service()
+                item = await service._find_item(item_id=item_id, source=None)
+                fname = item.file_name or (
+                    f"{item_id}.mdc" if item_type == "rule" else f"{item_id}.md"
+                )
+            except Exception:
+                fname = f"{item_id}.mdc" if item_type == "rule" else f"{item_id}.md"
+            subdir = ".cursor/rules" if item_type == "rule" else ".cursor/prompts"
+            path = ws / subdir / fname
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+
+    return {"saved": True}

@@ -81,7 +81,7 @@ web:
 # ╚══════════════════════════════════════════════════════════╝
 installable_catalog:
   sources: ["local"] # local | registry
-  local_base_dir: ".debug/knowledge-pack"
+  local_base_dir: "docs/res"  # 可安装 rules/prompts 来源
   registry_manifest_url: "" # 示例: https://example.com/team-memory-manifest.json
   target_rules_dir: ".cursor/rules"
   target_prompts_dir: ".cursor/prompts"

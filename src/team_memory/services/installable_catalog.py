@@ -133,11 +133,36 @@ class InstallableCatalogService:
             "truncated": len(content) > max_preview_chars,
         }
 
-    async def install(self, *, item_id: str, source: str | None = None) -> dict:
-        """Install one item into configured target directory."""
+    async def install(
+        self,
+        *,
+        item_id: str,
+        source: str | None = None,
+        workspace_root_override: Path | None = None,
+    ) -> dict:
+        """Install one item into configured target directory.
+
+        If workspace_root_override is provided, use it as the project root
+        (target dirs will be workspace_root/.cursor/rules or .cursor/prompts).
+        """
         item = await self._find_item(item_id=item_id, source=source)
         content = await self._load_content(item)
-        target_dir = self._target_rules if item.type == "rule" else self._target_prompts
+
+        if workspace_root_override is not None:
+            ws = Path(workspace_root_override).resolve()
+            target_rules = (ws / self._config.target_rules_dir).resolve()
+            target_prompts = (ws / self._config.target_prompts_dir).resolve()
+            if not self._is_within(ws, target_rules) or not self._is_within(
+                ws, target_prompts
+            ):
+                raise InstallableCatalogError(
+                    "Target directories must be within workspace"
+                )
+            target_dir = target_rules if item.type == "rule" else target_prompts
+        else:
+            target_dir = (
+                self._target_rules if item.type == "rule" else self._target_prompts
+            )
         target_dir.mkdir(parents=True, exist_ok=True)
 
         file_name = self._target_file_name(item)
