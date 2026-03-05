@@ -1020,6 +1020,19 @@ class TestParseURL:
 
 
 # ============================================================
+# Session Token Encode/Decode (Task 4)
+# ============================================================
+
+
+def test_session_token_encode_decode_roundtrip():
+    from team_memory.web.app import _decode_session_token, _encode_session_token
+    token = _encode_session_token("admin", secret="test-secret")
+    assert token.startswith("sess:")
+    user = _decode_session_token(token, secret="test-secret")
+    assert user == "admin"
+
+
+# ============================================================
 # SPA Tests
 # ============================================================
 

@@ -9,6 +9,8 @@ Authentication is via API Key (same keys used for MCP access).
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -463,6 +465,35 @@ async def _global_exception_handler(request: Request, exc: Exception):
 def _encode_api_key_cookie(api_key: str) -> str:
     """Encode API key into ASCII-safe cookie value."""
     return quote(api_key, safe="")
+
+
+def _encode_session_token(user: str, secret: str, expiry_days: int = 7) -> str:
+    """Encode session token: sess:{user}:{expiry_ts}:{hmac_hex}."""
+    expiry_ts = int(time.time()) + expiry_days * 86400
+    msg = f"{user}:{expiry_ts}".encode()
+    sig = hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()
+    return f"sess:{user}:{expiry_ts}:{sig}"
+
+
+def _decode_session_token(token: str, secret: str) -> str | None:
+    """Validate format, HMAC, and expiry; return user or None."""
+    if not token or not token.startswith("sess:"):
+        return None
+    parts = token.split(":", 3)
+    if len(parts) != 4:
+        return None
+    _, user, expiry_str, sig = parts
+    try:
+        expiry_ts = int(expiry_str)
+    except ValueError:
+        return None
+    if time.time() > expiry_ts:
+        return None
+    msg = f"{user}:{expiry_ts}".encode()
+    expected = hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        return None
+    return user
 
 
 async def get_current_user(request: Request) -> User:
