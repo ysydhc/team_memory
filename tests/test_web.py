@@ -251,6 +251,69 @@ class TestAuth:
         assert resp.status_code == 400
         assert "db_api_key" in resp.json().get("detail", "")
 
+    def test_admin_reset_password_requires_admin(self, client, member_headers):
+        """POST /auth/admin/reset-password returns 403 when not admin."""
+        resp = client.post(
+            "/api/v1/auth/admin/reset-password",
+            headers=member_headers,
+            json={"username": "test_admin", "new_password": "newpass123"},
+        )
+        assert resp.status_code == 403
+
+    def test_admin_reset_password_requires_db_mode(self, client, auth_headers):
+        """POST /auth/admin/reset-password returns 400 when not DbApiKeyAuth."""
+        resp = client.post(
+            "/api/v1/auth/admin/reset-password",
+            headers=auth_headers,
+            json={"username": "test_admin", "new_password": "newpass123"},
+        )
+        assert resp.status_code == 400
+        assert "db_api_key" in resp.json().get("detail", "")
+
+    def test_admin_reset_password_success(self, client, auth_headers):
+        """POST /auth/admin/reset-password updates password when admin + DbApiKeyAuth."""
+        from team_memory.auth.provider import DbApiKeyAuth, User
+        from team_memory.storage.models import ApiKey
+
+        class TestDbApiKeyAuth(DbApiKeyAuth):
+            """DbApiKeyAuth that accepts test-key-123 for auth (no DB lookup)."""
+
+            async def authenticate(self, credentials):
+                if credentials.get("api_key") == "test-key-123":
+                    return User("test_admin", "admin")
+                return await super().authenticate(credentials)
+
+        mock_key = MagicMock(spec=ApiKey)
+        mock_key.user_name = "target_user"
+        mock_key.password_hash = "old_hash"
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_key
+
+        mock_sess = AsyncMock()
+        mock_sess.execute = AsyncMock(return_value=mock_result)
+        mock_sess.add = MagicMock()
+        mock_sess.flush = AsyncMock()
+
+        def mock_get_session(_db_url):
+            cm = AsyncMock()
+            cm.__aenter__ = AsyncMock(return_value=mock_sess)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        db_auth = TestDbApiKeyAuth(db_url="sqlite+aiosqlite:///:memory:", keys={})
+        with patch("team_memory.web.routes.auth.app_module._auth", db_auth), patch(
+            "team_memory.web.routes.auth.get_session", side_effect=mock_get_session
+        ):
+            resp = client.post(
+                "/api/v1/auth/admin/reset-password",
+                headers=auth_headers,
+                json={"username": "target_user", "new_password": "newpass123"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["message"] == "密码已重置"
+        assert mock_key.password_hash != "old_hash"
+
     def test_change_password_validation_neither_old_nor_api_key(self, client, auth_headers):
         """PUT /auth/password with only new_password returns 422."""
         resp = client.put(

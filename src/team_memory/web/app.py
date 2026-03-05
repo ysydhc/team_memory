@@ -650,6 +650,13 @@ class ForgotPasswordResetRequest(BaseModel):
     new_password: str
 
 
+class AdminResetPasswordRequest(BaseModel):
+    """Admin reset user password (no old password required)."""
+
+    username: str
+    new_password: str
+
+
 class ExperienceCreate(BaseModel):
     title: str
     problem: str

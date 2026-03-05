@@ -13,13 +13,14 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select, update
 
 from team_memory.auth.permissions import require_role
-from team_memory.auth.provider import DbApiKeyAuth, User
+from team_memory.auth.provider import DbApiKeyAuth, User, _hash_password
 from team_memory.config import get_settings
 from team_memory.storage.audit import write_audit_log
 from team_memory.storage.database import get_session
 from team_memory.storage.models import ApiKey
 from team_memory.web import app as app_module
 from team_memory.web.app import (
+    AdminResetPasswordRequest,
     ApiKeyCreateRequest,
     ApiKeyUpdateRequest,
     ChangePasswordRequest,
@@ -230,6 +231,52 @@ async def change_password(
     if not ok:
         raise HTTPException(status_code=400, detail="旧密码不正确")
     return {"message": "密码修改成功"}
+
+
+# ------------------------------------------------------------------
+# Admin reset password (admin only)
+# ------------------------------------------------------------------
+@router.post("/auth/admin/reset-password")
+async def admin_reset_password(
+    request: Request,
+    req: AdminResetPasswordRequest,
+    user: User = Depends(require_role("admin")),
+):
+    """Admin reset a user's password (no old password required)."""
+    _auth = app_module._auth
+    if not isinstance(_auth, DbApiKeyAuth):
+        raise HTTPException(status_code=400, detail="密码重置需要 db_api_key 模式")
+
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=422, detail="新密码至少 6 个字符")
+
+    username = (req.username or "").strip()
+    if not username:
+        raise HTTPException(status_code=422, detail="用户名不能为空")
+
+    db_url = _get_db_url()
+    async with get_session(db_url) as session:
+        result = await session.execute(
+            select(ApiKey).where(ApiKey.user_name == username)
+        )
+        db_key = result.scalar_one_or_none()
+        if not db_key:
+            raise HTTPException(status_code=404, detail="用户不存在")
+
+        db_key.password_hash = _hash_password(req.new_password)
+
+        ip = request.client.host if request.client else None
+        await write_audit_log(
+            session,
+            user_name=user.name,
+            action="admin_reset_password",
+            target_type="api_key",
+            target_id=username,
+            detail={},
+            ip_address=ip,
+        )
+
+    return {"message": "密码已重置"}
 
 
 # ------------------------------------------------------------------
