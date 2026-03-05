@@ -1,7 +1,10 @@
 """Tests for authentication providers."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
+from team_memory.auth.init_admin import ensure_default_admin, is_api_keys_empty
 from team_memory.auth.provider import ApiKeyAuth, NoAuth, create_auth_provider
 
 
@@ -93,3 +96,89 @@ class TestCreateAuthProvider:
     def test_create_unknown_raises(self):
         with pytest.raises(ValueError, match="Unknown auth type"):
             create_auth_provider("oauth")
+
+
+class TestEnsureDefaultAdmin:
+    """Test ensure_default_admin and is_api_keys_empty."""
+
+    @pytest.mark.asyncio
+    async def test_ensure_default_admin_creates_when_empty(self):
+        """When api_keys is empty, creates admin and returns True."""
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = 0
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.add = MagicMock()
+        mock_session.flush = AsyncMock()
+
+        def mock_get_session(_db_url):
+            cm = AsyncMock()
+            cm.__aenter__ = AsyncMock(return_value=mock_session)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        with patch("team_memory.storage.database.get_session", side_effect=mock_get_session):
+            created = await ensure_default_admin("sqlite+aiosqlite:///:memory:", "secret123")
+        assert created is True
+        mock_session.add.assert_called_once()
+        added = mock_session.add.call_args[0][0]
+        assert added.user_name == "admin"
+        assert added.role == "admin"
+        assert added.is_active is True
+        assert added.password_hash is not None
+
+    @pytest.mark.asyncio
+    async def test_ensure_default_admin_skips_when_not_empty(self):
+        """When api_keys has rows, does nothing and returns False."""
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = 1
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.add = MagicMock()
+
+        def mock_get_session(_db_url):
+            cm = AsyncMock()
+            cm.__aenter__ = AsyncMock(return_value=mock_session)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        with patch("team_memory.storage.database.get_session", side_effect=mock_get_session):
+            created = await ensure_default_admin("sqlite+aiosqlite:///:memory:", "secret123")
+        assert created is False
+        mock_session.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_is_api_keys_empty_true(self):
+        """Returns True when api_keys has no rows."""
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = 0
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        def mock_get_session(_db_url):
+            cm = AsyncMock()
+            cm.__aenter__ = AsyncMock(return_value=mock_session)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        with patch("team_memory.storage.database.get_session", side_effect=mock_get_session):
+            empty = await is_api_keys_empty("sqlite+aiosqlite:///:memory:")
+        assert empty is True
+
+    @pytest.mark.asyncio
+    async def test_is_api_keys_empty_false(self):
+        """Returns False when api_keys has rows."""
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = 3
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        def mock_get_session(_db_url):
+            cm = AsyncMock()
+            cm.__aenter__ = AsyncMock(return_value=mock_session)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        with patch("team_memory.storage.database.get_session", side_effect=mock_get_session):
+            empty = await is_api_keys_empty("sqlite+aiosqlite:///:memory:")
+        assert empty is False

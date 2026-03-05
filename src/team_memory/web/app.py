@@ -129,6 +129,28 @@ def _get_catalog_service() -> InstallableCatalogService:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     ctx = bootstrap()
     _init_from_context(ctx)
+
+    # Ensure default admin when db_api_key auth and no users exist
+    if ctx.settings.auth.type == "db_api_key":
+        password = (
+            os.environ.get("TEAM_MEMORY_ADMIN_PASSWORD")
+            or ctx.settings.auth.default_admin_password
+            or ""
+        )
+        db_url = ctx.db_url
+        if not password:
+            from team_memory.auth.init_admin import is_api_keys_empty
+
+            if await is_api_keys_empty(db_url):
+                raise RuntimeError(
+                    "首次启动需设置 TEAM_MEMORY_ADMIN_PASSWORD 以创建默认 admin，"
+                    "或手动在 DB 中创建用户"
+                )
+        else:
+            from team_memory.auth.init_admin import ensure_default_admin
+
+            await ensure_default_admin(db_url, password)
+
     # Defer route registration to avoid circular import (routes -> app)
     from team_memory.web.routes import mount_all
     v1_router = APIRouter(prefix="/api/v1")
@@ -633,6 +655,8 @@ class SearchRequest(BaseModel):
 class InstallableInstallRequest(BaseModel):
     id: str
     source: str | None = None
+    target_project: str | None = None  # 项目名，从 project_paths 解析路径
+    target_path: str | None = None  # 或直接指定项目根目录
 
 
 class ReviewRequest(BaseModel):
