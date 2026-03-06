@@ -4,6 +4,21 @@
 
 ---
 
+## 路径约定（Markdown 链接）
+
+Markdown 链接 `[text](path)` 按**相对当前文件**解析。跨目录引用须使用正确相对路径：
+
+| 源位置 | 目标 | 路径示例 |
+|--------|------|----------|
+| `.cursor/rules/` | `docs/design-docs/` | `../docs/design-docs/xxx.md` |
+| `.cursor/rules/` | `docs/exec-plans/` | `../docs/exec-plans/xxx.md` |
+| `docs/design-docs/` | 同目录 | `xxx.md` 或 `./xxx.md` |
+| `docs/design-docs/` | `.cursor/rules/` | `../../.cursor/rules/xxx.mdc` |
+| `docs/exec-plans/` | `docs/design-docs/` | `../design-docs/xxx.md` |
+| `docs/` | 同目录 | `xxx.md` |
+
+---
+
 ## 索引
 
 | 文档 | 说明 |

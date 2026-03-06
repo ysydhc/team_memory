@@ -20,23 +20,23 @@
 
 | Agent | 路径 | 触发 |
 |-------|------|------|
-| implementer | [.cursor/agents/implementer.md](.cursor/agents/implementer.md) | 派发实现任务 |
-| spec-reviewer | [.cursor/agents/spec-reviewer.md](.cursor/agents/spec-reviewer.md) | 实现完成后 |
-| code-quality-reviewer | [.cursor/agents/code-quality-reviewer.md](.cursor/agents/code-quality-reviewer.md) | spec 通过后 |
+| implementer | [implementer.md](../../.cursor/agents/implementer.md) | 派发实现任务 |
+| spec-reviewer | [spec-reviewer.md](../../.cursor/agents/spec-reviewer.md) | 实现完成后 |
+| code-reviewer | [code-reviewer.md](../../.cursor/agents/code-reviewer.md) | spec 通过后 |
 
 ---
 
 ## 三、逐步引入
 
 - **当前**：implementer（或 generalPurpose）+ 主 Agent 完成度检查
-- **目标**：implementer → spec-reviewer → code-quality-reviewer 三阶段
+- **目标**：implementer → spec-reviewer → code-reviewer 三阶段
 - **路径**：先在高价值或复杂任务上启用 spec + code quality 评审，再推广到全部任务
 
 ---
 
 ## 四、Prompt 模板
 
-详见 [.claude/skills/subagent-driven-development/](.claude/skills/subagent-driven-development/)：
+详见 [subagent-driven-development](../../.claude/skills/subagent-driven-development/SKILL.md)：
 
 - `implementer-prompt.md`
 - `spec-reviewer-prompt.md`

@@ -1,6 +1,6 @@
 # 去重检测经验组误判优化 — 执行计划（可勾选任务清单）
 
-> 完整设计与三 Agent 评审合并见 **[docs/plans/2025-03-03-dedup-group-misjudge-optimization.md](../../docs/plans/2025-03-03-dedup-group-misjudge-optimization.md)**。本文件为当前轮次的可执行任务清单，按依赖顺序执行，完成后可勾选。
+> 完整设计与三 Agent 评审合并见 **2025-03-03-dedup-group-misjudge-optimization.md**（原计划文档已归档或移除）。本文件为当前轮次的可执行任务清单，按依赖顺序执行，完成后可勾选。
 
 ---
 

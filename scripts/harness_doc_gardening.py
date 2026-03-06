@@ -125,7 +125,10 @@ def _is_whitelisted(
     # Line-level
     if f"{rel_path}:{line_no}" in whitelist:
         return True
-    # Rule-level
+    # Line+rule-level (path:line:rule_id)
+    if f"{rel_path}:{line_no}:{rule_id}" in whitelist:
+        return True
+    # Rule-level (path:rule_id)
     if f"{rel_path}:{rule_id}" in whitelist:
         return True
     return False
@@ -288,6 +291,8 @@ def main() -> int:
     whitelist_path = args.whitelist
     if whitelist_path is None:
         whitelist_path = root / "scripts" / DEFAULT_WHITELIST_NAME
+    else:
+        whitelist_path = whitelist_path.resolve()
     whitelist = _load_whitelist(whitelist_path)
 
     if args.path is not None:

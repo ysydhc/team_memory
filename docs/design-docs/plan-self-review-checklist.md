@@ -27,6 +27,6 @@
 
 ## 三、引用
 
-- [harness-engineering](.cursor/rules/harness-engineering.mdc)
-- [harness-workflow-execution](harness-workflow-execution.md)
-- [subagent-workflow](subagent-workflow.md)
+- [harness-engineering](../../.cursor/rules/harness-engineering.mdc)
+- [harness-workflow-execution](./harness-workflow-execution.md)
+- [subagent-workflow](./subagent-workflow.md)

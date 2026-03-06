@@ -9,6 +9,8 @@
 | [harness-phase-3-implementation-plan.md](harness-phase-3-implementation-plan.md) | Harness Phase 3 架构约束 — 分层定义、import 检查、CI 集成 |
 | [harness-phase-4-implementation-plan.md](harness-phase-4-implementation-plan.md) | Harness Phase 4 可观测性 + 文档维护 — 日志 JSON、doc-gardening |
 | [harness-phase-5-implementation-plan.md](harness-phase-5-implementation-plan.md) | Harness Phase 5 收尾与规则分离 — Phase 3 收尾、Harness/tm 分离、step-0 模板、feedback-loop 回溯、Phase 5→6 重排 |
+| [harness-methodology-follow-up-implementation-plan.md](harness-methodology-follow-up-implementation-plan.md) | Harness 方法论跟进 — 系统通知显式化、notify 记录、文档加载强制化、断点恢复 |
+| [harness-follow-up-backlog.md](harness-follow-up-backlog.md) | 后续待执行清单 — CI/tm/能力限制等 |
 
 ## completed/
 

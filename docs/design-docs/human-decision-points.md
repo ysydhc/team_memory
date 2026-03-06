@@ -26,6 +26,6 @@
 
 ## 三、引用
 
-- [harness-engineering](.cursor/rules/harness-engineering.mdc)
-- [harness-workflow-execution](harness-workflow-execution.md)
-- [plan-self-review-checklist](plan-self-review-checklist.md)
+- [harness-engineering](../../.cursor/rules/harness-engineering.mdc)
+- [harness-workflow-execution](./harness-workflow-execution.md)
+- [plan-self-review-checklist](./plan-self-review-checklist.md)

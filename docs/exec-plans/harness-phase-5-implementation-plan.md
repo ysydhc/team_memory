@@ -47,7 +47,7 @@
 ### Task 1：Phase 3 Task 5 收尾验证
 
 **Files:**
-- Modify: [docs/design-docs/architecture-layers.md](docs/design-docs/architecture-layers.md)（4.3 节）
+- Modify: [architecture-layers.md](../design-docs/architecture-layers.md)（4.3 节）
 - 若存在违规：按 Phase 3 Plan 修复 `architecture` → `web.architecture_models`、`auth` → `web.app`
 
 **步骤：**
@@ -61,11 +61,11 @@
 ### Task 2：Harness 与 tm 规则分离
 
 **Files:**
-- Modify: [.cursor/rules/harness-engineering.mdc](.cursor/rules/harness-engineering.mdc)
-- Modify: [docs/design-docs/feedback-loop.md](docs/design-docs/feedback-loop.md)
-- Modify: [.cursor/rules/tm-doc-maintenance.mdc](.cursor/rules/tm-doc-maintenance.mdc)（**若存在**；若不存在则跳过）
-- Modify: [docs/design-docs/phase1-closure-checklist.md](docs/design-docs/phase1-closure-checklist.md)（**若存在**；若不存在则跳过）
-- 参考: [docs/design-docs/harness-vs-tm-boundary.md](docs/design-docs/harness-vs-tm-boundary.md) 第四、五节
+- Modify: [harness-engineering.mdc](../../.cursor/rules/harness-engineering.mdc)
+- Modify: [feedback-loop.md](../design-docs/feedback-loop.md)
+- Modify: tm-doc-maintenance.mdc（**若存在**；若不存在则跳过）
+- Modify: [phase1-closure-checklist.md](../design-docs/phase1-closure-checklist.md)（**若存在**；若不存在则跳过）
+- 参考: [harness-vs-tm-boundary.md](../design-docs/harness-vs-tm-boundary.md) 第四、五节
 
 **调整方向（按 boundary 文档）：**
 
@@ -90,7 +90,7 @@
 ### Task 3：harness-workflow-execution 补充 Phase 4 step-0 模板
 
 **Files:**
-- Modify: [docs/design-docs/harness-workflow-execution.md](docs/design-docs/harness-workflow-execution.md)（3.2 节表格后或 3.4 节）
+- Modify: [harness-workflow-execution.md](../design-docs/harness-workflow-execution.md)（3.2 节表格后或 3.4 节）
 
 **内容：**
 在「3.2 内容（按 Plan 类型可配置）」表格中增加一行，或在 3.4 节后新增「3.5 Phase 4 类 step-0 示例」：
@@ -108,7 +108,7 @@
 ### Task 4：feedback-loop 回溯（已固化项移入已完成）
 
 **Files:**
-- Modify: [docs/design-docs/feedback-loop.md](docs/design-docs/feedback-loop.md)
+- Modify: [feedback-loop.md](../design-docs/feedback-loop.md)
 
 **步骤：**
 1. 确认 4.1（Web 静态缓存）、4.2（ruff 检查）已固化为 rules 或 team_memory 经验
@@ -123,8 +123,8 @@
 ### Task 5：Phase 5→6 编号重排
 
 **Files:**
-- Modify: [docs/exec-plans/harness-phase-4-implementation-plan.md](docs/exec-plans/harness-phase-4-implementation-plan.md)（第六节标题与内容）
-- Modify: [docs/exec-plans/completed/harness-phase4-flow-observer-report-2025-03-07.md](docs/exec-plans/completed/harness-phase4-flow-observer-report-2025-03-07.md)（3.4 规则与文档更新建议）
+- Modify: [harness-phase-4-implementation-plan.md](harness-phase-4-implementation-plan.md)（第六节标题与内容）
+- Modify: [harness-phase4-flow-observer-report-2025-03-07.md](completed/harness-phase4-flow-observer-report-2025-03-07.md)（3.4 规则与文档更新建议）
 - 检索并更新：所有提及「Phase 5 预留」的文档（**排除**：`workflow_oracle.py` 等代码注释中的 "phase 5" 为无关含义）
 
 **调整：**
@@ -139,9 +139,9 @@
 ### Task 6：文档索引与 execute 记录
 
 **Files:**
-- Modify: [docs/exec-plans/index.md](docs/exec-plans/index.md)
-- Create/Verify: [docs/exec-plans/executing/harness-phase-5-execute.md](docs/exec-plans/executing/harness-phase-5-execute.md)（若 step-0 时已创建则跳过创建，仅更新）
-- Modify: [.cursor/rules/harness-engineering.mdc](.cursor/rules/harness-engineering.mdc)（若需增加 Phase 5 节）
+- Modify: [index.md](index.md)
+- Create/Verify: [harness-phase-5-execute.md](executing/harness-phase-5-execute.md)（若 step-0 时已创建则跳过创建，仅更新）
+- Modify: [harness-engineering.mdc](../../.cursor/rules/harness-engineering.mdc)（若需增加 Phase 5 节）
 
 **步骤：**
 1. 在 exec-plans/index.md 的 active 区增加 `harness-phase-5-implementation-plan.md` 链接

@@ -1,0 +1,20 @@
+# Doc gardening whitelist: path, path:line, path:line:rule_id, or path:rule_id
+# Lines starting with # are ignored
+
+# doc-gardening.md: example link (line 42) and stale marker examples (45, 68) in rule description
+docs/design-docs/doc-gardening.md:42:DOC_LINK_404
+docs/design-docs/doc-gardening.md:DOC_STALE_MARKER
+
+# code-arch-viz-operations.md line 123: HTML </a> tag in code example, parsed as angle link
+docs/design-docs/code-arch-viz/code-arch-viz-operations.md:123:DOC_LINK_BROKEN
+
+# index.md: intentionally lists archive docs for navigation
+docs/exec-plans/index.md:DOC_DEPRECATED_REF
+
+# archive/completed: historical docs with links to moved/deleted files
+docs/exec-plans/archive/workflow-writing-alternatives.md:DOC_LINK_404
+docs/exec-plans/completed/task-execution-workflow.md:DOC_LINK_404
+docs/exec-plans/completed/workflow-improvement-checklist.md:DOC_LINK_404
+docs/exec-plans/completed/workflow-optimization-tasks.md:DOC_STALE_MARKER
+docs/exec-plans/completed/workflow-optimization.md:DOC_LINK_404
+docs/exec-plans/harness-phase-4-implementation-plan.md:DOC_STALE_MARKER

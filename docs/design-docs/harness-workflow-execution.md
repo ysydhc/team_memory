@@ -25,6 +25,8 @@
 
 **流程**：step-0 完成 → 对 Task 1 派发 implementer → implementer 完成 → 主 Agent 验收、更新 execute → 对 Task 2 派发 implementer → … → 全部 Task 完成。
 
+**强制要求**：须通过 `mcp_task(subagent_type="implementer", ...)` 派发；主 Agent **不得直接修改** Task 涉及的文件（代码、文档、配置等）。
+
 **引用**：[subagent-workflow](subagent-workflow.md)。
 
 ---
@@ -61,6 +63,8 @@
 - **动作**：{做了什么}
 - **产出**：{文件、结果}
 - **下一步**：{待执行或需确认}
+- **Subagent**：（Task 相关必填）task-N 派发 implementer / task-N 完成 — 每个 Task 须含派发与完成记录
+- **通知**：（可选）已调用 notify_plan_status.sh（{时机}）— 若本节点调用了 notify，须在**同条日志**中记录
 
 ---
 
@@ -72,6 +76,8 @@
 - 每次执行动作（Task 完成、人类决策点、中断、重启）后，**追加**一条日志到「执行日志」区。
 - **最新在上**：新条目插入在「执行日志」区顶部，便于 AI 快速读取当前状态。
 - **中断后重启**：读取同一 execute 文档，解析「当前 Task」「最后节点」，从断点继续；新日志仍追加到同一文件。
+- **notify 记录**：调用 notify 后，须在同一条日志中记录「**通知**：已调用 notify_plan_status.sh（{时机}）」，便于复盘确认。
+- **Subagent 记录**：每个 Task 的日志条目须含「**Subagent**：task-N 派发 implementer」及「task-N 完成」，便于验证 Subagent-Driven 合规。
 
 ### 3.4 给 AI 的回复格式
 
@@ -85,6 +91,21 @@ Plan 执行记录已更新：docs/exec-plans/executing/{plan-id}-execute.md
 ```
 
 该格式供 AI 在后续对话中加载并理解执行进度，不依赖人类转述。
+
+### 3.5 断点恢复
+
+**触发条件**：用户说「继续」「从断点恢复」「接着执行」等，或新 session 中加载同一 Plan；且 execute 存在且状态为「已中断」或「进行中」。
+
+**步骤**：
+
+1. 加载 `docs/exec-plans/executing/{plan-id}-execute.md`
+2. 解析「执行摘要」中的「当前 Task」「最后节点」，确定 last_step
+3. **按需重新加载** 4 文档（harness-workflow-execution、subagent-workflow、feedback-loop、human-decision-points）
+4. **step-0 是否重跑**：若 step-0 已产出基线且未过期（如 ruff/pytest 状态仍有效），可跳过；否则重跑
+5. 从 last_step 的下一 Task 继续执行（若 last_step 为人类决策点且已确认，则进入下一 Task）
+6. 新日志仍追加到同一 execute 文件
+
+**注意**：不重复执行已完成 Task；若 last_step 为「中断」，须先确认用户意图后再继续。
 
 ---
 
@@ -132,12 +153,13 @@ Plan 执行记录已更新：docs/exec-plans/executing/{plan-id}-execute.md
 
 - **任务开始前**：根据 Plan 或任务描述，到 `docs/design-docs/` 查找相关文档（如 architecture-layers、feedback-loop、human-decision-points）。
 - **任务执行中**：若涉及反馈回路、人类决策点，加载 `feedback-loop.md`、`human-decision-points.md`。
-- **断点恢复**：加载 `docs/exec-plans/executing/{plan-id}-execute.md` 获取上次执行状态。
+- **断点恢复**：加载 `docs/exec-plans/executing/{plan-id}-execute.md` 获取上次执行状态；**详见 3.5 断点恢复**。
 
 ### 5.3 规则约定
 
-- 在 harness-engineering 或专用规则中约定：**执行 Plan 前，Agent 须根据 Plan 内容自动加载 `docs/design-docs/` 下相关文档**。
-- 不依赖人类事先阅读或转述。
+- **执行 Plan 前必须加载**：harness-workflow-execution、subagent-workflow、feedback-loop、human-decision-points；**未加载则不得进入 step-0**。
+- Agent 须自检：上述 4 文档已加载；若未加载，视为流程不规范，**中断并提醒**。
+- 进入 step-0 前，须在回复或 step-0 首条日志中**显式列出**「已加载文档：xxx」，便于 observer 验证。
 
 ---
 
@@ -172,6 +194,11 @@ Plan 执行记录已更新：docs/exec-plans/executing/{plan-id}-execute.md
 - 执行记录为**持久日志**，供 AI 与人类回溯。
 - 二者互补：通知触发查看，记录提供详情。
 
+### 6.4 notify 失败策略（best-effort）
+
+- notify 为 **best-effort**：脚本失败（如 osascript 不可用）时，**仅记录到 execute**，**不中断 Plan 执行**。
+- 若 Agent 逻辑依赖脚本返回值，须忽略非零退出，不将其视为 Plan 失败。
+
 ---
 
 ## 七、流程自检与中断
@@ -181,6 +208,7 @@ Plan 执行记录已更新：docs/exec-plans/executing/{plan-id}-execute.md
 | 检查项 | 说明 |
 |--------|------|
 | step-0 已执行 | 摸底（或等效）已完成 |
+| Subagent-Driven 合规 | 每个 Task 须通过 implementer 派发；execute 日志须含 `[subagent] task-N:` 或 `**Subagent**：task-N 派发/完成`；主 Agent 不得直接修改 Task 文件 |
 | 人类决策点已确认 | 若当前为决策点，须收到用户肯定回复 |
 | harness-check 通过 | 若涉及代码改动，提交前须 `make harness-check` |
 | execute 已更新 | 每次关键节点后，execute 文档已追加 |
@@ -223,4 +251,4 @@ Plan 执行记录已更新：docs/exec-plans/executing/{plan-id}-execute.md
 | [feedback-loop](feedback-loop.md) | 待完善项结构、回溯修改规则、待完善项固化后移入已完成区 |
 | [human-decision-points](human-decision-points.md) | 决策点清单、中断与确认 |
 | [plan-self-review-checklist](plan-self-review-checklist.md) | Task 完成后自审 |
-| [harness-engineering](.cursor/rules/harness-engineering.mdc) | 规则中引用本设计、自动找文档约定 |
+| [harness-engineering](../../.cursor/rules/harness-engineering.mdc) | 规则中引用本设计、自动找文档约定 |
