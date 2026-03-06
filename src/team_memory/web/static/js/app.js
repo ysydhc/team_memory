@@ -139,7 +139,7 @@ async function doRegister() {
 function doLogout() {
     state.apiKey = '';
     if (typeof localStorage !== 'undefined') localStorage.removeItem('api_key');
-    api('POST', '/api/v1/auth/logout').catch(() => {});
+    api('POST', '/api/v1/auth/logout').catch(() => { });
     document.getElementById('login-screen').style.display = 'flex';
     document.getElementById('app-screen').style.display = 'none';
     document.getElementById('login-error').style.display = 'none';
@@ -165,7 +165,7 @@ function showApp() {
     document.getElementById('app-screen').style.display = 'block';
     document.getElementById('user-name').textContent = state.currentUser.name;
     document.getElementById('user-avatar').textContent = state.currentUser.name[0].toUpperCase();
-    api('GET', '/api/v1/config/retrieval').then((cfg) => { state.cachedRetrievalConfig = cfg; }).catch(() => {});
+    api('GET', '/api/v1/config/retrieval').then((cfg) => { state.cachedRetrievalConfig = cfg; }).catch(() => { });
     api('GET', '/api/v1/config/project')
         .then((cfg) => {
             state.defaultProject = cfg.default_project || 'default';
@@ -190,7 +190,7 @@ function showApp() {
             state.availableProjects = r.projects || [];
             populateProjectSwitcher();
         })
-        .catch(() => {});
+        .catch(() => { });
     loadSchemaAndPopulateFilters(api);
     navigateFromHash();
     window.addEventListener('hashchange', navigateFromHash);
@@ -359,9 +359,9 @@ function navigate(page) {
         pages.checkOutdatedCount();
     }
     else if (page === 'tasks') pages.loadTasks();
-    else if (page === 'search') {}
+    else if (page === 'search') { }
     else if (page === 'usage') pages.loadUsageStats();
-    else if (page === 'dedup') {}
+    else if (page === 'dedup') { }
     else if (page === 'personal-memory') pages.loadPersonalMemoryList();
     else if (page === 'user-expansion') pages.loadUserExpansion();
     else if (page === 'settings') {
@@ -419,7 +419,7 @@ window.toggleProjectDropdown = toggleProjectDropdown;
 window.onProjectMultiChange = onProjectMultiChange;
 window.getSelectedProjects = getSelectedProjects;
 window.toggleProjectOpt = toggleProjectOpt;
-window.switchProjCfgTab = function(tab) {
+window.switchProjCfgTab = function (tab) {
     document.querySelectorAll('.proj-cfg-tab').forEach(t => t.classList.toggle('active', t.textContent.includes(
         tab === 'basic' ? '基础' : tab === 'scan' ? '扫描' : '可安装'
     )));
@@ -510,7 +510,7 @@ window.addExpansionRow = pages.addExpansionRow;
 window.removeExpansionRow = pages.removeExpansionRow;
 window.saveUserExpansion = pages.saveUserExpansion;
 
-window.addCustomScanPath = function() {
+window.addCustomScanPath = function () {
     const container = document.getElementById('custom-scan-paths');
     const row = document.createElement('div');
     row.className = 'scan-path-row custom';
@@ -520,7 +520,7 @@ window.addCustomScanPath = function() {
     row.querySelector('input').focus();
 };
 
-window.getCustomScanPaths = function() {
+window.getCustomScanPaths = function () {
     const inputs = document.querySelectorAll('#custom-scan-paths .scan-path-row.custom input');
     return Array.from(inputs).map(i => i.value.trim()).filter(Boolean);
 };
@@ -569,7 +569,7 @@ window.rejectUser = pages.rejectUser;
 window.createUserAdmin = pages.createUserAdmin;
 window.updateUserRole = pages.updateUserRole;
 window.toggleUserActive = pages.toggleUserActive;
-window.openAdminCreateUser = function() {
+window.openAdminCreateUser = function () {
     document.getElementById('admin-create-user-form').style.display = 'block';
 };
 

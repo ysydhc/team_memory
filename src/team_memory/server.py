@@ -1807,7 +1807,9 @@ async def tm_status() -> str:
     ),
 )
 async def tm_invalidate_search_cache() -> str:
-    """Invalidate search cache so next tm_search runs the full pipeline (e.g. with query expansion)."""
+    """Invalidate search cache so next tm_search runs the full pipeline
+    (e.g. with query expansion).
+    """
     service = _get_service()
     await service.invalidate_search_cache()
     return json.dumps({"message": "Search cache cleared"}, ensure_ascii=False)
