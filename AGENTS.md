@@ -1,62 +1,60 @@
-<!-- gitnexus:start -->
-# GitNexus MCP
+# TeamMemory Agent 导航地图
 
-This project is indexed by GitNexus as **team_doc** (2066 symbols, 6085 relationships, 172 execution flows).
+> 项目概览：基于 MCP 的团队经验库，让 AI 拥有跨会话记忆。**Harness 原则**：人类掌舵、Agent 执行、尽量不手写。
 
-GitNexus provides a knowledge graph over this codebase — call chains, blast radius, execution flows, and semantic search.
+---
 
-## Always Start Here
+## 双轨结构（R4）
 
-For any task involving code understanding, debugging, impact analysis, or refactoring, you must:
+| 轨道 | 路径 | 用途 |
+|------|------|------|
+| 设计/执行计划 | [docs/design-docs](docs/design-docs/) · [docs/exec-plans](docs/exec-plans/) | 设计文档、执行计划、归档 |
+| 工作流 YAML | [.cursor/plans/workflows/](.cursor/plans/workflows/) | 可执行工作流定义 |
 
-1. **Read `gitnexus://repo/{name}/context`** — codebase overview + check index freshness
-2. **Match your task to a skill below** and **read that skill file**
-3. **Follow the skill's workflow and checklist**
+---
 
-> If step 1 warns the index is stale, run `npx gitnexus analyze` in the terminal first.
+## GitNexus（代码理解）
 
-## Skills
+项目索引：**team_doc**。任务开始先读 `gitnexus://repo/team_doc/context` 检查索引新鲜度。
 
-| Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/refactoring/SKILL.md` |
+| 任务 | Skill 文件 |
+|------|------------|
+| 理解架构 / "How does X work?" | [.claude/skills/gitnexus/exploring/SKILL.md](.claude/skills/gitnexus/exploring/SKILL.md) |
+| 影响分析 / "What breaks if I change X?" | [.claude/skills/gitnexus/impact-analysis/SKILL.md](.claude/skills/gitnexus/impact-analysis/SKILL.md) |
+| 调试 / "Why is X failing?" | [.claude/skills/gitnexus/debugging/SKILL.md](.claude/skills/gitnexus/debugging/SKILL.md) |
+| 重构 / 重命名 / 拆分 | [.claude/skills/gitnexus/refactoring/SKILL.md](.claude/skills/gitnexus/refactoring/SKILL.md) |
 
-## Tools Reference
+工具：`query` · `context` · `impact` · `detect_changes` · `rename` · `cypher`。Schema 见 `gitnexus://repo/team_doc/schema`。
 
-| Tool | What it gives you |
-|------|-------------------|
-| `query` | Process-grouped code intelligence — execution flows related to a concept |
-| `context` | 360-degree symbol view — categorized refs, processes it participates in |
-| `impact` | Symbol blast radius — what breaks at depth 1/2/3 with confidence |
-| `detect_changes` | Git-diff impact — what do your current changes affect |
-| `rename` | Multi-file coordinated rename with confidence-tagged edits |
-| `cypher` | Raw graph queries (read `gitnexus://repo/{name}/schema` first) |
-| `list_repos` | Discover indexed repos |
+---
 
-## Resources Reference
+## 知识库导航
 
-Lightweight reads (~100-500 tokens) for navigation:
+| 入口 | 路径 | 说明 |
+|------|------|------|
+| 设计文档 | [docs/design-docs](docs/design-docs/) | 架构、方案、设计决策 |
+| 执行计划 | [docs/exec-plans](docs/exec-plans/) | 计划、任务、归档 |
+| 入门 | [docs/GETTING-STARTED](docs/GETTING-STARTED.md) | 部署、接入、开发 |
+| 扩展 | [docs/EXTENDED](docs/EXTENDED.md) | 任务管理、Skills、工作流 |
 
-| Resource | Content |
-|----------|---------|
-| `gitnexus://repo/{name}/context` | Stats, staleness check |
-| `gitnexus://repo/{name}/clusters` | All functional areas with cohesion scores |
-| `gitnexus://repo/{name}/cluster/{clusterName}` | Area members |
-| `gitnexus://repo/{name}/processes` | All execution flows |
-| `gitnexus://repo/{name}/process/{processName}` | Step-by-step trace |
-| `gitnexus://repo/{name}/schema` | Graph schema for Cypher |
+---
 
-## Graph Schema
+## 工作流
 
-**Nodes:** File, Function, Class, Interface, Method, Community, Process
-**Edges (via CodeRelation.type):** CALLS, IMPORTS, EXTENDS, IMPLEMENTS, DEFINES, MEMBER_OF, STEP_IN_PROCESS
+工作流 YAML 位于 [.cursor/plans/workflows/](.cursor/plans/workflows/)：
 
-```cypher
-MATCH (caller)-[:CodeRelation {type: 'CALLS'}]->(f:Function {name: "myFunc"})
-RETURN caller.name, caller.filePath
-```
+- `task-execution-workflow.yaml` · `task-execution-workflow-optimized.yaml` — 任务执行
+- `workflow-optimization-workflow.yaml` — 工作流优化
+- `steps/` · `actions/` · `checklists/` — 步骤、动作、检查清单
 
-<!-- gitnexus:end -->
+---
+
+## 规则
+
+规则位于 [.cursor/rules/](.cursor/rules/)：
+
+- **tm-core** — MCP 核心、预检、任务管理
+- **tm-extraction-retrieval** — 经验提取与检索
+- **tm-commit-push-checklist** — 提交/推送前收口
+- **tm-web** · **tm-quality** · **tm-plan** — Web、质量、Plan
+- **team_memory-codified-shortcuts** — 固化结论快路径
