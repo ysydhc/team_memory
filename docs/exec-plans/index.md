@@ -23,6 +23,7 @@
 | [workflow-optimization-tasks.md](completed/workflow-optimization-tasks.md) | workflow-optimization 任务组清单 |
 | [workflow-optimization.md](completed/workflow-optimization.md) | 工作流优化任务组 — 使用说明 |
 | [workflow-pm-final-three-solutions.md](completed/workflow-pm-final-three-solutions.md) | 开发者工作流与项目进度管理 — 三视角 PK 后的最终三方案 |
+| [harness-phase-0-1-monitoring-report.md](completed/harness-phase-0-1-monitoring-report.md) | Harness Phase 0-1 Plan 监控报告 — 协作打分、工作流总结、改进建议 |
 
 ## archive/
 
