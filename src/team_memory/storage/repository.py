@@ -1356,7 +1356,7 @@ class ExperienceRepository:
         Uses cosine similarity via pgvector. Only compares root/standalone
         experiences that are published and not deleted. Experience-group pairs
         must be filtered by child set (group-aware dedup); see
-        .debug/docs/plans/2025-03-03-dedup-group-misjudge-optimization.md.
+        docs/exec-plans/completed/dedup-group-misjudge-optimization-execution-plan.md.
 
         Returns list of dicts: {exp_a, exp_b, similarity}; exp_a/exp_b include
         children_count and children_preview when the root has children.
