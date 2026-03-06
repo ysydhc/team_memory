@@ -1,0 +1,39 @@
+---
+description: Harness 原则、知识库结构、反馈回路
+globs:
+alwaysApply: true
+---
+
+# harness-engineering：Harness 工程原则
+
+本规则定义项目协作模式与知识库结构，Agent 执行任务时须遵守。
+
+---
+
+## 一、Harness 原则
+
+1. **人类掌舵**：人类负责目标设定、优先级、验收与关键决策；Agent 负责执行与产出。
+2. **Agent 执行**：代码、文档、配置等由 Agent 生成与修改，人类通过指令与验收把关。
+3. **尽量不手写**：优先通过规则、工作流、MCP 工具驱动 Agent 产出，减少人工重复劳动。
+
+---
+
+## 二、知识库结构
+
+| 轨道 | 路径 | 用途 |
+|------|------|------|
+| 设计文档 | [docs/design-docs](docs/design-docs/) | 架构、方案、设计决策 |
+| 执行计划 | [docs/exec-plans](docs/exec-plans/) | 计划、任务、归档（completed/archive） |
+| 工作流 YAML | [.cursor/plans/workflows/](.cursor/plans/workflows/) | 可执行工作流定义 |
+
+- 新增设计或方案时，优先放入 `docs/design-docs/`。
+- 执行计划完成后，移入 `docs/exec-plans/completed/` 或 `archive/`。
+- 结构变更时，须同步更新主入口 README、AGENTS.md 等索引（见 tm-doc-maintenance）。
+
+---
+
+## 三、反馈回路
+
+1. **出错时沉淀**：执行过程中遇到错误、修复、或可复用的排查路径时，应调用 `tm_save` 或 `tm_learn` 沉淀经验，便于后续检索。
+2. **类型勿用 general**：经验类型优先使用 bugfix、tech_design、best_practice、incident 等具体类型。
+3. **自包含**：若改动涉及未被 git 追踪的路径，须将关键内容写入 `solution` 或 `code_snippets`，不得仅写文件路径。
