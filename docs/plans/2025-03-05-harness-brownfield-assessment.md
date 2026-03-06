@@ -96,8 +96,7 @@ docs/
 │   │   ├── checklists/
 │   │   ├── archive/
 │   │   └── expired/
-│   ├── code-arch-viz/    # 设计文档 → 迁至 docs/design-docs
-│   └── *.md              # 执行计划 → 迁至 docs/exec-plans
+│   └── *.md              # 执行计划 → 迁至 docs/exec-plans（code-arch-viz 已迁至 docs/design-docs）
 ├── rules/                # 项目规则（.mdc）
 ├── prompts/              # 项目 prompts（.md）
 ├── skills/               # 项目 skills
@@ -131,8 +130,8 @@ docs/
 | config.py | `docs/res` | InstallableCatalogConfig.local_base_dir，可安装 rules/prompts 来源 |
 | config.py | `.cursor/rules`、`.cursor/prompts`、`.cursor/skills` | 安装目标目录 |
 | workflow_oracle.py | `.cursor/plans/workflows/{id}.yaml` | 硬编码，YAML 不迁移 |
-| architecture/base.py | `.cursor/plans/code-arch-viz/code-arch-viz-provider-interface.md` | 契约对齐，迁移后需更新 |
-| web/architecture_models.py | `.cursor/plans/code-arch-viz/` | 同上 |
+| architecture/base.py | `docs/design-docs/code-arch-viz/code-arch-viz-provider-interface.md` | 契约对齐，已迁移 |
+| web/architecture_models.py | `docs/design-docs/code-arch-viz/` | 同上 |
 | storage/repository.py | `.debug/docs/plans/` | 与 docs/exec-plans 职责不同，保持不变 |
 | web/routes/import_export.py | `.cursor/rules`、`.cursor/prompts` | 扫描已安装项、安装写入 |
 | web/routes/analytics.py | `.cursor/rules`、`.cursor/prompts`、`.cursor/skills-cursor` | 扫描统计 |
@@ -161,7 +160,7 @@ docs/
 | 风险 | 影响 | 缓解 |
 |------|------|------|
 | workflow_oracle 硬编码 | YAML 不迁移，路径不变，无影响 | 保持 `.cursor/plans/workflows/` |
-| code-arch-viz 迁移 | architecture/base.py、architecture_models.py 需改路径 | 迁移后批量替换为 `docs/design-docs/code-arch-viz/` |
+| code-arch-viz 迁移 | architecture/base.py、architecture_models.py 需改路径 | 已完成，已替换为 `docs/design-docs/code-arch-viz/` |
 | .cursor/plans/*.md 迁移 | 若有代码引用执行计划路径，需排查 | 当前仅 repository 引用 .debug/docs/plans/，职责分离 |
 | docs/res 与 .cursor 联动 | config 中 local_base_dir、target_* 已指向正确路径 | 无需变更 |
 | .debug 与 docs 职责混淆 | .debug 为 Agent 临时产出，docs 为正式文档 | 明确不迁移 .debug 到 docs |
@@ -171,7 +170,7 @@ docs/
 ## 7. 建议迁移顺序
 
 1. **Phase 0（基线）**：完成本 Brownfield 评估，不做结构变更。
-2. **Phase 1 第一步**：创建 `docs/design-docs/`，将 `.cursor/plans/code-arch-viz/` 迁入，同步更新 `architecture/base.py`、`web/architecture_models.py` 中的路径引用。
+2. **Phase 1 第一步**：创建 `docs/design-docs/`，将 `.cursor/plans/code-arch-viz/` 迁入，同步更新 `architecture/base.py`、`web/architecture_models.py` 中的路径引用。（**已完成**）
 3. **Phase 1 第二步**：创建 `docs/exec-plans/`，将 `.cursor/plans/` 下非 workflows 的 `*.md` 迁入；确认无代码硬编码引用后执行。
 4. **Phase 1 第三步**：更新 `.cursor/rules/` 中 tm-doc-maintenance 等与 docs 结构相关的规则，确保与 harness 文档布局一致。
 5. **不迁移**：`.cursor/plans/workflows/`（YAML）、`.debug/`（Agent 临时产出）。
