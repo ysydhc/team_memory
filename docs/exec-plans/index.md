@@ -31,6 +31,7 @@
 | [harness-phase3-collaboration-retrospective-2025-03-06.md](completed/harness-phase3-collaboration-retrospective-2025-03-06.md) | 第二轮 Plan 协作回溯 — Phase 3 架构约束 + harness 纯化 |
 | [harness-phase4-flow-observer-report-2025-03-07.md](completed/harness-phase4-flow-observer-report-2025-03-07.md) | Phase 4 计划分析与生成 — Flow Observer 协作回溯 |
 | [harness-phase5-flow-observer-report-2025-03-07.md](completed/harness-phase5-flow-observer-report-2025-03-07.md) | Phase 5 计划生成（收尾与规则分离）— Flow Observer 协作回溯 |
+| [harness-phase5-execution-flow-observer-report-2025-03-07.md](completed/harness-phase5-execution-flow-observer-report-2025-03-07.md) | Phase 5 计划优化→执行→提交 — Flow Observer 全流程监督 |
 
 ## archive/
 

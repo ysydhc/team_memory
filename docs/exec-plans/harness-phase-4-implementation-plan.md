@@ -3,6 +3,7 @@
 > **前置**：Phase 0-1、Phase 2、Phase 3 已完成
 > **Goal:** 日志 JSON 结构化、doc-gardening 过时文档扫描，提升可观测性与文档健康度。纯 Harness 优先。
 > **评审**：已根据《Harness Phase 4 全维度评审报告》完成调整。
+> **执行模式**：Subagent-Driven（每个 Task 派发 implementer subagent，主 Agent 验收）
 
 **Architecture:** 日志统一 → doc-gardening 脚本 → 规则/文档衔接；经验库策略为 tm 项目可选子项。
 

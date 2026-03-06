@@ -4,6 +4,7 @@
 > **来源**：Phase 0～4 执行过程自检发现的待办项
 > **编号重排**：原「Phase 5 预留」（经验库策略、Plan 末尾预留节写法）更名为 **Phase 6**
 > **修订**：已根据 plan-evaluator 报告完成 P1 修复与改进建议
+> **执行模式**：Subagent-Driven（每个 Task 派发 implementer subagent，主 Agent 验收）
 
 **Goal:** 完成 Phase 3 收尾验证、Harness 与 tm 规则分离、step-0 模板补充、feedback-loop 回溯，并统一将「Phase 5」预留内容更名为「Phase 6」。
 

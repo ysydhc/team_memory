@@ -2,6 +2,7 @@
 
 > **前置**：Phase 0-1 已完成；Phase 2 已完成（先规划再执行、自审清单、功能验证、人类决策点）
 > **评审**：已根据《Harness Phase 3 全维度评审报告》完成调整；已根据《Plan 细节评估报告》补充豁免规则、Task 边界、Brownfield 对齐等。
+> **执行模式**：Subagent-Driven（每个 Task 派发 implementer subagent，主 Agent 验收）
 
 **Goal:** 为 team_doc 定义分层与依赖方向，用脚本与 CI 强制约束，防止架构漂移。
 

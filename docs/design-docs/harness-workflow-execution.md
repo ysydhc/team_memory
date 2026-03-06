@@ -16,9 +16,22 @@
 
 ---
 
-## 二、Plan 执行记录
+## 二、Plan 执行模式（Subagent-Driven）
 
-### 2.1 路径与命名
+| 模式 | 说明 | 默认 |
+|------|------|------|
+| **Subagent-Driven** | 每个 Task 派发 implementer subagent 执行；主 Agent 验收、更新 execute、派发下一 Task | ✅ 强制 |
+| 主 Agent 直接执行 | 主 Agent 自行实现所有 Task（**禁止**，违反 subagent-workflow 约定） | ❌ |
+
+**流程**：step-0 完成 → 对 Task 1 派发 implementer → implementer 完成 → 主 Agent 验收、更新 execute → 对 Task 2 派发 implementer → … → 全部 Task 完成。
+
+**引用**：[subagent-workflow](subagent-workflow.md)。
+
+---
+
+## 三、Plan 执行记录
+
+### 3.1 路径与命名
 
 | 项目 | 约定 |
 |------|------|
@@ -26,7 +39,7 @@
 | **命名** | `{plan-id}-execute.md`，如 `harness-phase-3-execute.md` |
 | **一个 Plan 一个文件** | 同一 Plan 的多次执行（含中断后重启）均追加写入同一文件 |
 
-### 2.2 文档格式
+### 3.2 文档格式
 
 ```markdown
 # Plan 执行记录：{Plan 名称}
@@ -54,13 +67,13 @@
 （更多日志条目...）
 ```
 
-### 2.3 追加写入规则
+### 3.3 追加写入规则
 
 - 每次执行动作（Task 完成、人类决策点、中断、重启）后，**追加**一条日志到「执行日志」区。
 - **最新在上**：新条目插入在「执行日志」区顶部，便于 AI 快速读取当前状态。
 - **中断后重启**：读取同一 execute 文档，解析「当前 Task」「最后节点」，从断点继续；新日志仍追加到同一文件。
 
-### 2.4 给 AI 的回复格式
+### 3.4 给 AI 的回复格式
 
 Agent 在关键节点（Task 完成、中断、需确认）的回复中**必须**包含：
 
@@ -75,14 +88,14 @@ Plan 执行记录已更新：docs/exec-plans/executing/{plan-id}-execute.md
 
 ---
 
-## 三、摸底步骤（通用 step-0）
+## 四、摸底步骤（通用 step-0）
 
-### 3.1 定位
+### 4.1 定位
 
 - 作为 **Plan 执行流程的固定 step-0**，在进入 Task 1 之前执行。
 - 适用于所有 Plan，不限于 Phase 3。
 
-### 3.2 内容（按 Plan 类型可配置）
+### 4.2 内容（按 Plan 类型可配置）
 
 | Plan 类型 | 摸底动作 | 产出 |
 |-----------|----------|------|
@@ -93,21 +106,21 @@ Plan 执行记录已更新：docs/exec-plans/executing/{plan-id}-execute.md
 
 **Phase 4 类 step-0 示例**：`rg -l 'logging.getLogger' src/ --type py \| wc -l` 统计 logger；`ruff check src/`、`pytest tests/ -q` 基线；列出 `docs/design-docs`、`docs/exec-plans` 确认结构。产出为基线报告（logger 数量、docs 路径、ruff/pytest 状态）。
 
-### 3.3 门控
+### 4.3 门控
 
 - 摸底**必须**执行并通过（或产出可接受的基线报告），才能进入 Task 1。
 - 若 Plan 未声明摸底，step-0 可简化为「确认 Plan 已加载、execute 文档已创建」。
 
-### 3.4 自动化
+### 4.4 自动化
 
 - 在 harness 规则或 Plan 模板中**强制** step-0 存在。
 - Agent 执行 Plan 时，**先**执行 step-0，**再**进入 Task 1；否则视为流程不规范，中断并提醒。
 
 ---
 
-## 四、Agent 自动找文档
+## 五、Agent 自动找文档
 
-### 4.1 指定目录
+### 5.1 指定目录
 
 | 目录 | 用途 |
 |------|------|
@@ -115,22 +128,22 @@ Plan 执行记录已更新：docs/exec-plans/executing/{plan-id}-execute.md
 | `docs/exec-plans/` | 执行计划、execute 记录 |
 | `docs/exec-plans/executing/` | 当前 Plan 的 execute 文档 |
 
-### 4.2 查找策略
+### 5.2 查找策略
 
 - **任务开始前**：根据 Plan 或任务描述，到 `docs/design-docs/` 查找相关文档（如 architecture-layers、feedback-loop、human-decision-points）。
 - **任务执行中**：若涉及反馈回路、人类决策点，加载 `feedback-loop.md`、`human-decision-points.md`。
 - **断点恢复**：加载 `docs/exec-plans/executing/{plan-id}-execute.md` 获取上次执行状态。
 
-### 4.3 规则约定
+### 5.3 规则约定
 
 - 在 harness-engineering 或专用规则中约定：**执行 Plan 前，Agent 须根据 Plan 内容自动加载 `docs/design-docs/` 下相关文档**。
 - 不依赖人类事先阅读或转述。
 
 ---
 
-## 五、系统通知
+## 六、系统通知
 
-### 5.1 脚本接口
+### 6.1 脚本接口
 
 **路径**：`scripts/notify_plan_status.sh`
 
@@ -144,7 +157,7 @@ Plan 执行记录已更新：docs/exec-plans/executing/{plan-id}-execute.md
 - Linux：`notify-send "标题" "正文"`（需 libnotify）
 - Windows：可选用 PowerShell 或第三方工具
 
-### 5.2 调用时机
+### 6.2 调用时机
 
 | 时机 | 标题 | 正文示例 |
 |------|------|----------|
@@ -153,7 +166,7 @@ Plan 执行记录已更新：docs/exec-plans/executing/{plan-id}-execute.md
 | 中断 | Harness 已中断 | {plan-id} 已中断，原因：{简要} |
 | Plan 完成 | Harness Plan | {plan-id} 已完成 |
 
-### 5.3 与执行记录的关系
+### 6.3 与执行记录的关系
 
 - 通知为**即时提醒**，供执行人感知。
 - 执行记录为**持久日志**，供 AI 与人类回溯。
@@ -161,7 +174,7 @@ Plan 执行记录已更新：docs/exec-plans/executing/{plan-id}-execute.md
 
 ---
 
-## 六、流程自检与中断
+## 七、流程自检与中断
 
 ### 6.1 自检项
 
@@ -181,7 +194,7 @@ Plan 执行记录已更新：docs/exec-plans/executing/{plan-id}-execute.md
 
 ---
 
-## 七、与 feedback-loop 的衔接
+## 八、与 feedback-loop 的衔接
 
 ### 7.1 依赖关系
 
@@ -203,7 +216,7 @@ Plan 执行记录已更新：docs/exec-plans/executing/{plan-id}-execute.md
 
 ---
 
-## 八、与现有文档的衔接
+## 九、与现有文档的衔接
 
 | 文档 | 衔接点 |
 |------|--------|

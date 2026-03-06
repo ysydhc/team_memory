@@ -10,7 +10,7 @@
 |------|------|
 | [architecture-layers](architecture-layers.md) | 分层定义、import 约束、harness-check |
 | [feedback-loop](feedback-loop.md) | Agent 出错时沉淀、规则更新 |
-| [harness-workflow-execution](harness-workflow-execution.md) | Plan 执行记录、摸底、通知、自检 |
+| [harness-workflow-execution](harness-workflow-execution.md) | Plan 执行模式（Subagent-Driven）、执行记录、摸底、通知、自检 |
 | [harness-vs-tm-boundary](harness-vs-tm-boundary.md) | 纯 Harness 与 tm 叠加的分离说明 |
 | [human-decision-points](human-decision-points.md) | 需用户确认的节点 |
 | [plan-self-review-checklist](plan-self-review-checklist.md) | Task 完成后自审 |
