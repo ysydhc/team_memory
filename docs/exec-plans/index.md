@@ -8,6 +8,7 @@
 |------|------|
 | [harness-phase-3-implementation-plan.md](harness-phase-3-implementation-plan.md) | Harness Phase 3 架构约束 — 分层定义、import 检查、CI 集成 |
 | [harness-phase-4-implementation-plan.md](harness-phase-4-implementation-plan.md) | Harness Phase 4 可观测性 + 文档维护 — 日志 JSON、doc-gardening |
+| [harness-phase-5-implementation-plan.md](harness-phase-5-implementation-plan.md) | Harness Phase 5 收尾与规则分离 — Phase 3 收尾、Harness/tm 分离、step-0 模板、feedback-loop 回溯、Phase 5→6 重排 |
 
 ## completed/
 
@@ -28,6 +29,8 @@
 | [workflow-pm-final-three-solutions.md](completed/workflow-pm-final-three-solutions.md) | 开发者工作流与项目进度管理 — 三视角 PK 后的最终三方案 |
 | [harness-phase-0-1-monitoring-report.md](completed/harness-phase-0-1-monitoring-report.md) | Harness Phase 0-1 Plan 监控报告 — 协作打分、工作流总结、改进建议 |
 | [harness-phase3-collaboration-retrospective-2025-03-06.md](completed/harness-phase3-collaboration-retrospective-2025-03-06.md) | 第二轮 Plan 协作回溯 — Phase 3 架构约束 + harness 纯化 |
+| [harness-phase4-flow-observer-report-2025-03-07.md](completed/harness-phase4-flow-observer-report-2025-03-07.md) | Phase 4 计划分析与生成 — Flow Observer 协作回溯 |
+| [harness-phase5-flow-observer-report-2025-03-07.md](completed/harness-phase5-flow-observer-report-2025-03-07.md) | Phase 5 计划生成（收尾与规则分离）— Flow Observer 协作回溯 |
 
 ## archive/
 

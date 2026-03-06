@@ -154,10 +154,11 @@ step-0 摸底 → Task 1 → Task 2 → Task 3 → Task 4 → Task 5 → Task 6
 
 ---
 
-## 六、Phase 4 可选（tm 项目，后续排期）
+## 六、Phase 6 预留（原 Phase 5，tm 项目，后续排期）
 
 - 经验库策略：若启用 tm，可定义 stale 经验判定、归档策略、清理频率等
-- 本计划不包含，完成 Phase 4 核心后可单独排期。
+- Plan 末尾预留节写法：在 Plan 末尾增加「Phase N+1 预留」节，延续 Phase 3→4→5 的写法
+- 本计划不包含，完成 Phase 5 后可单独排期。
 
 ---
 

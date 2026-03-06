@@ -4,15 +4,26 @@
 
 ---
 
-## 一、机制概述
+## 一、机制概述（纯 Harness）
 
-当 Agent 执行任务过程中遇到错误、修复或可复用的排查路径时，应通过 **反馈回路** 将经验沉淀到团队经验库（team_memory），便于后续检索与复用。
+**核心流程**：出错 → 定位根因 → 修复 → **更新 rules 或 docs** → 必要时更新规则。
 
-**核心流程**：出错 → 定位根因 → 修复 → 沉淀经验（建议 `tm_save`）→ 必要时更新规则。
+纯 Harness 的反馈回路**不依赖任何 MCP**：将根因、修复与规则更新步骤写入 `.cursor/rules/` 或 `docs/`，使同类错误不再发生。
 
 ---
 
 ## 二、沉淀方式
+
+### 2.1 通用（纯 Harness）
+
+| 方式 | 说明 |
+|------|------|
+| 更新 rules | 在 `.cursor/rules/` 中新增或修改规则，固化错误与修复 |
+| 更新 docs | 在 `docs/design-docs/` 或 `docs/exec-plans/` 中记录经验 |
+
+### 2.2 team_memory 项目可选：经验库叠加
+
+若项目启用 team_memory MCP，可**额外**沉淀到经验库：
 
 | 场景 | 推荐工具 | experience_type |
 |------|----------|-----------------|
@@ -33,52 +44,36 @@
 
 ---
 
-## 四、示例
+## 四、待完善项（待沉淀为 rules 或 docs）
 
-### 示例 1：Web 静态缓存导致旧 JS 生效
+> 上方为当前待办，下方为已完成归档。当某条已固化为 rules 后，移至「已完成」区，保持上方简洁。
 
-**问题**：修改前端 JS 后，页面仍加载旧逻辑。
-
-**根因**：浏览器或 CDN 缓存了旧版静态资源，未强制刷新。
-
-**修复**：部署/开发时禁用静态资源缓存，或在构建产物中加入版本号/hash；本地调试时使用硬刷新（Ctrl+Shift+R）或禁用缓存。
-
-**沉淀**（`tm_save`）：
-
-```
-title: Web 前端修改后需禁用静态缓存避免旧 JS 生效
-problem: 修改前端 JS 后页面仍执行旧逻辑
-solution: 部署时禁用静态缓存或为资源加版本号；本地调试用硬刷新或禁用缓存
-experience_type: best_practice
-tags: ["web", "cache", "frontend"]
-```
+（暂无。新待完善项可在此处添加。）
 
 ---
 
-### 示例 2：ruff 检查未通过导致提交失败
+## 五、已完成（归档）
 
-**问题**：本地 `git commit` 后 CI 报 ruff 检查失败。
+> 以下为已固化为 rules 或 docs 的项。从上方移入时，注明完成时间与固化位置。  
+> **路径约定**：启用 tm 时规则在 `.tm_cursor/rules/`；纯 Harness 规则在 `.cursor/rules/`。
 
-**根因**：提交前未执行 `ruff check src/`，本地与 CI 环境不一致。
+### 5.1 Web 静态缓存导致旧 JS 生效（2025-03-07）
 
-**修复**：提交前必须执行 `ruff check src/`（及 `tests/` 若涉及测试），通过后再提交。
+- **固化位置**：`.tm_cursor/rules/tm-commit-push-checklist.mdc`、`tm-web.mdc`、`team_memory-codified-shortcuts.mdc`
+- **经验**：Web 前端修改后需禁用静态缓存避免旧 JS 生效
 
-**沉淀**（`tm_save`）：
+### 5.2 ruff 检查未通过导致提交失败（2025-03-07）
 
-```
-title: Python 代码改动后必须通过 ruff check 再提交
-problem: 未在提交前执行 ruff 检查，CI 报错
-solution: 提交前执行 ruff check src/ 及 tests/（若涉及），通过后再提交
-experience_type: best_practice
-tags: ["ruff", "ci", "quality"]
-```
+- **固化位置**：`.tm_cursor/rules/tm-core.mdc`、`tm-commit-push-checklist.mdc`、`team_memory-codified-shortcuts.mdc`、`tm-quality.mdc`
+- **经验**：Python 代码改动后必须通过 `ruff check src/` 再提交
 
 ---
 
-## 五、与现有规则衔接
+## 六、与现有规则衔接
 
 | 规则 | 衔接点 |
 |------|--------|
-| tm-extraction-retrieval | Bug 修复、故障排查等场景触发经验提取 |
-| harness-engineering | 反馈回路为「出错时沉淀」的细化设计 |
-| tm-core | 类型勿用 general；自包含写入 solution/code_snippets |
+| harness-engineering | 反馈回路为「出错时沉淀」的细化设计；纯 Harness 用 rules/docs |
+| [harness-workflow-execution](harness-workflow-execution.md) | 工作流执行时加载本文档；某条待完善项固化后，移入「已完成」区 |
+| tm-extraction-retrieval | 若启用 tm：Bug 修复、故障排查等场景触发经验提取 |
+| tm-core | 若启用 tm：类型勿用 general；自包含写入 solution/code_snippets |

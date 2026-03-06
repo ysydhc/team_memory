@@ -98,10 +98,10 @@ L3 (web, server, bootstrap, workflow_oracle)
 3. 实现代码；
 4. 通过 import 检查脚本验证。
 
-### 4.3 已知待修复（Phase 3 执行中）
+### 4.3 已修复（Phase 3 Task 5，2025-03-07）
 
-- `architecture` → `web.architecture_models`：反向依赖，需将 architecture_models 迁至 schemas 或 `team_memory.schemas.architecture`
-- `auth` → `web.app`：反向依赖，按分层文档方案调整
+- `architecture` → `web.architecture_models`：已通过 architecture 使用 `team_memory.schemas_architecture` 解决
+- `auth` → `web.app`：当前 import 检查零违规，分层符合要求
 
 ---
 

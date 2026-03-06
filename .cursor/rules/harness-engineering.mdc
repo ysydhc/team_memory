@@ -28,7 +28,7 @@ alwaysApply: true
 
 - 新增设计或方案时，优先放入 `docs/design-docs/`。
 - 执行计划完成后，移入 `docs/exec-plans/completed/` 或 `archive/`。
-- 结构变更时，须同步更新主入口 README、AGENTS.md 等索引（见项目文档维护规则，如 tm-doc-maintenance）。
+- 结构变更时，须同步更新主入口 README、AGENTS.md 等索引（见项目文档维护规则；tm 项目可叠加 tm-doc-maintenance）。
 
 ### 架构约束（Phase 3）
 
@@ -40,6 +40,12 @@ alwaysApply: true
 - **日志格式**：统一 JSON 行输出规范见 [logging-format](docs/design-docs/logging-format.md)；生产/CI 建议 `LOG_FORMAT=json`。
 - **doc-gardening**：定期扫描 `docs/design-docs`、`docs/exec-plans` 下文档，检出断裂链接、deprecated 引用、过时标注；输出 `file:line: rule_id: message` 可被脚本与 Agent 解析；执行 `make harness-doc-check` 或由 CI 独立 job 运行。设计见 [doc-gardening](docs/design-docs/doc-gardening.md)。
 
+### Phase 5 收尾（2025-03-07）
+
+- **Phase 3 收尾**：architecture-layers 已知待修复已解决；`make harness-check` 零违规。
+- **Harness/tm 分离**：纯 Harness 主路径清晰，tm 叠加处均有「可选」标注；见 [harness-vs-tm-boundary](docs/design-docs/harness-vs-tm-boundary.md)。
+- **feedback-loop 回溯**：Web 缓存、ruff 检查已移入「已完成」区。
+
 ---
 
 ## 三、反馈回路（纯 Harness）
@@ -48,13 +54,13 @@ alwaysApply: true
 2. **类型勿用 general**：若使用经验库沉淀，经验类型优先使用 bugfix、tech_design、best_practice、incident 等具体类型。
 3. **自包含**：若改动涉及未被 git 追踪的路径，须将关键内容写入规则或文档，不得仅写文件路径。
 
-> **团队经验库叠加**：若项目启用 team_memory MCP，可额外调用 `tm_save` 或 `tm_learn` 沉淀到经验库（见 feedback-loop）。
+> **团队经验库叠加**：主路径为更新 rules/docs；若项目启用 team_memory MCP，可额外调用 `tm_save` 或 `tm_learn` 沉淀到经验库（见 feedback-loop）。
 
 ---
 
 ## 四、Plan 执行与 Subagent 可观测性
 
-1. **Subagent 审计格式**：主 Agent 派发子 Agent 执行 Plan 任务时，须**在回复中**记录，格式：`[subagent] task-<N>: <摘要>`（N 为 Task 编号），便于 observer 与复盘解析。
+1. **Subagent 审计格式**：主 Agent 派发子 Agent 执行 Plan 任务时，须**在回复中**记录，格式：`[subagent] task-<N>: <摘要>`（N 为 Task 编号），便于 observer 与复盘解析；若与 tm_task 关联，可同时 tm_message。
 2. **关键节点监控埋点**：在 Plan 执行以下节点须做简要记录（同上格式或 `[plan] phase-<X> task-<N>: <摘要>`）：
    - Phase 完成（如 Phase 0 完成、进入 Phase 1）
    - 子 Agent 派发（task-N: 派发 generalPurpose 执行 xxx）
