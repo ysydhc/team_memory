@@ -1,0 +1,70 @@
+---
+description: team_memory 核心 — MCP 工具使用、工作流、预检与任务管理
+globs:
+alwaysApply: true
+---
+
+# tm-core：团队经验库核心规则
+
+## 语言要求
+
+- 所有思考过程和执行输出必须使用中文
+- 代码注释使用英文，文档使用中文
+- 变量/函数/类名使用英文
+- 写入 `team_memory` 的经验内容必须使用中文（除代码、命令、专有名词外）
+
+## 可用工具一览
+
+| 工具 | 用途 |
+|------|------|
+| `tm_preflight` | 任务预检（每次任务必调） |
+| `tm_solve` | 智能问题解决（推荐优先） |
+| `tm_search` | 通用搜索 |
+| `tm_suggest` | 上下文推荐 |
+| `tm_learn` / `tm_save` / `tm_save_group` | 保存经验 |
+| `tm_feedback` | 反馈评分 |
+| `tm_task` / `tm_task_claim` / `tm_ready` / `tm_message` / `tm_dependency` | 任务管理 |
+| `tm_doc_sync` / `tm_track` / `tm_skill_manage` / `tm_analyze_patterns` | 文档/统计/技能 |
+
+遵循 **harness-engineering**：复杂任务先规划再执行；失败即更新规则。
+
+## 推荐工作流
+
+1. **遇到问题** → 先看 `.cursor/rules/` 与 `.cursor/prompts/` 是否命中固化结论；否则 `tm_solve` 或 `tm_search`。
+2. **解决问题后** → `tm_learn` 或 `tm_save` 保存经验；类型勿用 `general`（除非确实通用）。
+3. **方案有帮助** → `tm_feedback` 评分。
+4. **多项目** → 检索/保存显式带 `project`，避免跨项目污染。
+
+## 经验引用与检索（必须遵守）
+
+- **引用文件**：若改动文件已被 git 追踪，可用 `git_refs` 记录「commit hash + 文件路径」便于回溯；**若改动涉及未被 git 追踪的路径（如 `.cursor/` 下），必须将关键改动与必要上下文直接写入 `solution` 或 `code_snippets`，不得仅写文件路径**——经验须自包含、不依赖外部文件是否存在。
+- **检索工作流类经验**：可带 `tags=["workflow"]`，搜索管道会自动放宽相似度阈值以提高稳定命中。
+
+## 任务预检（每次必须）
+
+- 任务开始调用 `tm_preflight(task_description=..., current_files=...)`。
+- 按返回的 `search_depth`：skip → 直接执行；light → 参考 quick_results；full → 追加 `tm_search/tm_solve`。
+- 创建 Plan / TaskGroup 时无论 preflight 结果如何，都必须全量检索。
+
+## 任务管理工作流
+
+- 创建 `tm_task(action=create)` → 认领 `tm_task_claim` → 执行中用 `tm_message` 记录 → 完成 `tm_task(action=update, status=completed, summary=...)`。
+- Git commit 中含 `[TM-xxx]` 可关联任务。
+
+### 选活/完成入口与 group_completed（必须）
+
+- **选活→认领**：当用户说「执行下一个就绪任务」「给我一个能做的任务」「进入下一个任务」等时，调用 `tm_ready(project=当前项目)` 展示可执行任务，经确认或仅一项时调用 `tm_task_claim(task_id)`；回复中附带「当前认领任务：TM-xxx（标题）」。
+- **完成并沉淀**：当用户说「完成当前任务并沉淀」「把当前任务标记完成，总结为：xxx」等时，若未提供 summary 则**先追问**再调用 `tm_task(action=update, task_id=xxx, status=completed, summary=...)`。为得到更丰富的沉淀经验，推荐在 step-complete 用 **subagent** 对任务执行过程按 `.cursor/prompts/task-sediment-extract.md` 做结构化提取，用 `tm_save`/`tm_save_typed` 保存后，再调用 `tm_task(..., status=completed, summary=简短一句, sediment_experience_id=<保存后的经验 id>)`，此时后端不再用 summary 自动生成简单沉淀。
+- **group_completed 时必调 tm_save_group**：当 `tm_task(action=update, status=completed, summary=...)` 的**响应**中出现 `group_completed: true` 和 `group_id` 时，当轮或下一轮**必须**调用 `tm_save_group` 做组级复盘（总-分或总-分-分），并可用 `tm_message` 记录「组级复盘已完成」；**在成功执行 tm_save_group 前，不得执行 tm_task_claim 或进入 step-claim 选活**；未执行前不得视为任务组闭环完成。
+- **当前任务提示（必须）**：认领任务后或通过 execute_task 执行任务时，首条回复或上下文中**必须**明确写出「当前认领任务：TM-xxx（标题）」；TM-xxx 为任务 ID 的短格式（取 UUID 前 8 位，如 7eadd0d0）。标题来自 `tm_task(action=get, task_id=...)` 或认领时的任务信息。
+- **我的进度摘要**：当用户询问「我的进度」「做到哪了」或处于工作流关键节点时，应通过 `tm_task(action="list", group_id=当前组)` 获取组内任务状态并输出简短摘要；示例句式：「本组已完成 x/y，当前任务：TM-xxx（标题）；工作流 step-X 执行中」。
+- **关键节点自动汇报进度（必须）**：在工作流执行的关键节点（如 step-coldstart/claim/execute/complete 完成、选活、认领、完成并沉淀、组复盘前），Agent **须主动**汇报进度：除按步骤审计格式发送 `tm_message` 外，在回复中可简要写明「当前 step-X 已完成」或「本组进度 x/y」，无需等用户询问。
+- **按任务执行工作流时**：当用户说「按任务执行工作流」「执行 TM 任务工作流」「只做下一步」等时，**不要事先指定工作流**。由 **subAgent 仅读取各工作流 YAML 的开头**（使用场景描述 + meta，到 `steps:` 之前），根据任务 title/description 匹配后**仅返回选中的 workflow_id**；主 Agent 根据返回的 workflow_id **只读取该一个** YAML 全文并按 step 执行，避免主 Agent 上下文加载全量 YAML。约定见 `.cursor/prompts/execute-task-workflow-by-match.md`。
+  - **任务组执行前确认依赖已建**：按任务组执行时，在 step-coldstart 或选活（step-claim）前应确认组内任务间依赖已通过 `tm_dependency` 建立；可通过 `tm_ready` 仅返回无未满足依赖的任务来间接确认。若需严格按序执行而依赖未建，则先补建依赖再选活，避免逆序执行。
+  - **步骤门控（必须）**：进入下一步前**必须**调用一次 `tm_workflow_next_step(workflow_id, task_id=当前任务)`；仅当返回的 next step 与当前意图一致时才执行该步，否则先补做缺失步骤或报错。
+  - **步骤审计（格式必须）**：每完成工作流一步后，对当前认领的 task_id 调用 `tm_message(task_id, content)`，其中 content **必须**为单行前缀格式：`[workflow] <workflow_id> step-<id>: <摘要>`（workflow_id 为当前执行的 YAML 的 meta.id，id 为该 YAML 的 step id，如 step-coldstart、step-claim），后接本步摘要，便于解析与 Web 按 step 筛选。**每条 message 仅允许一条**上述审计行；若需记录多步，分多条 message 发送。摘要中避免未转义冒号导致歧义（约定仅匹配第一个 `: ` 后的内容为摘要）。可选在摘要中带「acceptance: 已满足/未满足」。发送该审计前**必须**自检该步 acceptance_criteria 是否满足。解析端（workflow_oracle）**仅以每条 message 的首行**匹配审计行，其余行不参与匹配。
+  - **冷启动仅在 step-coldstart**：认领后若该任务 description 为空或不足，须补做 step-coldstart 的冷启动动作并记为 step-coldstart 完成，再进入 step-execute。
+  - **断点恢复**：Agent 或调度方在再次执行同一 task 时，通过该 task 的 tm_message 历史解析出 last_step（及 last_at），再调用 `tm_workflow_next_step(workflow_id, task_id)` 得到下一步并执行；不新增存储与自动重试逻辑，责任方为执行工作流的 Agent/调用方。
+- **任务结束收口验证（必须）**：每个任务完成后、任务级 git 提交前，必须执行：
+  1. **ruff 收口验证**：`ruff check src/`，若本任务涉及测试则加上 `tests/` 或对应测试文件；未通过则修复直至通过后再提交。
+  2. **经验沉淀评估**：评估本次任务是否产生可复用经验；若有且用户未明确反对，调用 `tm_save` 或 `tm_learn` 沉淀（详见 tm-extraction-retrieval 6.1）。

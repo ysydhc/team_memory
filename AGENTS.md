@@ -33,6 +33,7 @@
 | 入口 | 路径 | 说明 |
 |------|------|------|
 | 设计文档 | [docs/design-docs](docs/design-docs/) | 架构、方案、设计决策 |
+| 反馈回路 | [docs/design-docs/feedback-loop](docs/design-docs/feedback-loop.md) | Agent 出错时沉淀、规则更新 |
 | 执行计划 | [docs/exec-plans](docs/exec-plans/) | 计划、任务、归档 |
 | 入门 | [docs/GETTING-STARTED](docs/GETTING-STARTED.md) | 部署、接入、开发 |
 | 扩展 | [docs/EXTENDED](docs/EXTENDED.md) | 任务管理、Skills、工作流 |
