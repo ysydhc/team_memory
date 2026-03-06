@@ -74,7 +74,8 @@
     }
 
     /* ===== Focus (a11y) ===== */
-    button:focus-visible, a:focus-visible {
+    button:focus-visible,
+    a:focus-visible {
       outline: none;
       box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--accent);
     }
@@ -104,6 +105,7 @@
         opacity: 0;
         transform: translateY(16px);
       }
+
       to {
         opacity: 1;
         transform: translateY(0);
@@ -470,6 +472,7 @@
 
     .main-content {
       max-width: 1200px;
+      user-select: text;
       margin: 0 auto;
       padding: 32px;
     }
@@ -865,18 +868,22 @@
       cursor: pointer;
       transition: color 0.15s ease, background 0.15s ease;
     }
+
     .exp-copy-btn:hover {
       color: var(--accent);
       background: var(--accent-glow);
     }
+
     .exp-copy-btn:active {
       transform: scale(0.96);
     }
+
     .exp-copy-icon {
       display: inline-flex;
       align-items: center;
       justify-content: center;
     }
+
     .exp-copy-icon svg {
       display: block;
     }
@@ -886,9 +893,11 @@
       display: inline-flex;
       margin-left: 4px;
     }
+
     .exp-copy-dropdown .exp-copy-btn {
       margin-left: 0;
     }
+
     .exp-copy-dropdown-menu {
       display: none;
       position: absolute;
@@ -900,13 +909,15 @@
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 8px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.04);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.04);
       z-index: 100;
       list-style: none;
     }
+
     .exp-copy-dropdown.open .exp-copy-dropdown-menu {
       display: block;
     }
+
     .exp-copy-dropdown-menu button {
       display: block;
       width: 100%;
@@ -919,6 +930,7 @@
       cursor: pointer;
       white-space: nowrap;
     }
+
     .exp-copy-dropdown-menu button:hover {
       background: var(--accent-glow);
       color: var(--accent);
@@ -1233,6 +1245,7 @@
         padding-left: 16px;
         padding-right: 16px;
       }
+
       #page-tasks .tasks-back-row::before {
         left: -16px;
         right: -16px;
@@ -1411,11 +1424,22 @@
     .settings-card h2 {
       font-size: 18px;
       font-weight: 600;
+      line-height: 1.4;
+      height: 28px;
+      min-height: 28px;
       cursor: pointer;
       display: flex;
       justify-content: space-between;
       align-items: center;
       user-select: none;
+    }
+
+    .settings-card .settings-card-body,
+    .settings-card .settings-desc,
+    .settings-nav-card .settings-nav-body,
+    .settings-nav-card .settings-nav-title,
+    .settings-nav-card .settings-nav-desc {
+      user-select: text;
     }
 
     .settings-card h2::after {
@@ -1426,6 +1450,26 @@
     }
 
     .settings-card.collapsed h2::after {
+      transform: rotate(-90deg);
+    }
+
+    .ops-health-card h2::after {
+      content: none;
+    }
+    .h2-right-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: auto;
+      height: 28px;
+      min-height: 28px;
+    }
+    .h2-right-group .h2-arrow {
+      font-size: 12px;
+      color: var(--text-muted);
+      transition: transform 0.2s;
+    }
+    .ops-health-card.collapsed .h2-right-group .h2-arrow {
       transform: rotate(-90deg);
     }
 
@@ -1486,9 +1530,20 @@
     }
 
     /* ===== Ops health status ===== */
-    .ops-health-card .settings-card-body { max-height: 600px; }
-    .health-loading, .health-error { padding: 12px 0; color: var(--text-muted); }
-    .health-error { color: var(--danger, #e5534b); }
+    .ops-health-card .settings-card-body {
+      max-height: 600px;
+    }
+
+    .health-loading,
+    .health-error {
+      padding: 12px 0;
+      color: var(--text-muted);
+    }
+
+    .health-error {
+      color: var(--danger, #e5534b);
+    }
+
     .health-summary {
       display: flex;
       align-items: center;
@@ -1500,16 +1555,49 @@
       border-radius: var(--radius);
       font-size: 14px;
     }
-    .health-summary .status-badge { font-weight: 600; }
-    .health-summary .status-healthy { color: var(--success, #3fb950); }
-    .health-summary .status-degraded { color: var(--yellow, #d29922); }
-    .health-summary .status-unhealthy { color: var(--danger, #e5534b); }
+
+    .health-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      min-width: 8px;
+      max-width: 8px;
+      min-height: 8px;
+      max-height: 8px;
+      flex: 0 0 8px;
+      flex-shrink: 0;
+      align-self: center;
+      border-radius: 50%;
+      background: currentColor;
+      box-sizing: border-box;
+    }
+    .health-dot.healthy { color: var(--success, #3fb950); }
+    .health-dot.unhealthy { color: var(--danger, #e5534b); }
+    .health-dot.loading { color: var(--text-muted); }
+
+    .health-summary .status-badge {
+      font-weight: 600;
+    }
+
+    .health-summary .status-healthy {
+      color: var(--success, #3fb950);
+    }
+
+    .health-summary .status-degraded {
+      color: var(--yellow, #d29922);
+    }
+
+    .health-summary .status-unhealthy {
+      color: var(--danger, #e5534b);
+    }
+
     .health-checks {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
       gap: 10px;
       margin-bottom: 14px;
     }
+
     .health-check-item {
       padding: 10px 12px;
       background: var(--bg-input);
@@ -1517,11 +1605,31 @@
       font-size: 13px;
       border-left: 3px solid var(--border);
     }
-    .health-check-item.up { border-left-color: var(--success, #3fb950); }
-    .health-check-item.down { border-left-color: var(--danger, #e5534b); }
-    .health-check-item .check-name { font-weight: 500; }
-    .health-check-item .check-detail { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
-    .health-ops-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+
+    .health-check-item.up {
+      border-left-color: var(--success, #3fb950);
+    }
+
+    .health-check-item.down {
+      border-left-color: var(--danger, #e5534b);
+    }
+
+    .health-check-item .check-name {
+      font-weight: 500;
+    }
+
+    .health-check-item .check-detail {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .health-ops-actions {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
 
     /* ===== Modal ===== */
     .modal-overlay {
@@ -1608,23 +1716,81 @@
       border-bottom: 2px solid transparent;
       margin-bottom: -1px;
     }
-    .edit-installable-tab:hover { color: var(--text-primary); }
+
+    .edit-installable-tab:hover {
+      color: var(--text-primary);
+    }
+
     .edit-installable-tab.active {
       color: var(--accent);
       border-bottom-color: var(--accent);
     }
-    .markdown-preview h1, .markdown-preview h2, .markdown-preview h3 { margin: 1em 0 0.5em; }
-    .markdown-preview h1 { font-size: 1.5em; }
-    .markdown-preview h2 { font-size: 1.25em; }
-    .markdown-preview h3 { font-size: 1.1em; }
-    .markdown-preview table { border-collapse: collapse; width: 100%; margin: 1em 0; }
-    .markdown-preview th, .markdown-preview td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
-    .markdown-preview th { background: var(--bg-input); }
-    .markdown-preview code { background: var(--bg-input); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
-    .markdown-preview pre { background: var(--bg-input); padding: 12px; border-radius: var(--radius); overflow-x: auto; }
-    .markdown-preview pre code { background: none; padding: 0; }
-    .markdown-preview ul, .markdown-preview ol { margin: 0.5em 0; padding-left: 1.5em; }
-    .markdown-preview hr { border: none; border-top: 1px solid var(--border); margin: 1em 0; }
+
+    .markdown-preview h1,
+    .markdown-preview h2,
+    .markdown-preview h3 {
+      margin: 1em 0 0.5em;
+    }
+
+    .markdown-preview h1 {
+      font-size: 1.5em;
+    }
+
+    .markdown-preview h2 {
+      font-size: 1.25em;
+    }
+
+    .markdown-preview h3 {
+      font-size: 1.1em;
+    }
+
+    .markdown-preview table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 1em 0;
+    }
+
+    .markdown-preview th,
+    .markdown-preview td {
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+      text-align: left;
+    }
+
+    .markdown-preview th {
+      background: var(--bg-input);
+    }
+
+    .markdown-preview code {
+      background: var(--bg-input);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+
+    .markdown-preview pre {
+      background: var(--bg-input);
+      padding: 12px;
+      border-radius: var(--radius);
+      overflow-x: auto;
+    }
+
+    .markdown-preview pre code {
+      background: none;
+      padding: 0;
+    }
+
+    .markdown-preview ul,
+    .markdown-preview ol {
+      margin: 0.5em 0;
+      padding-left: 1.5em;
+    }
+
+    .markdown-preview hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 1em 0;
+    }
 
     /* ===== Pagination ===== */
     .pagination {
@@ -1747,6 +1913,7 @@
         transform: translateX(100%);
         opacity: 0;
       }
+
       to {
         transform: translateX(0);
         opacity: 1;
@@ -1975,6 +2142,7 @@
       background: linear-gradient(135deg, var(--bg-card) 0%, rgba(15, 23, 36, 0.6) 100%);
       position: relative;
     }
+
     .task-group-card.archived::before {
       content: '';
       position: absolute;
@@ -1985,6 +2153,7 @@
       background: linear-gradient(180deg, var(--text-muted), transparent);
       border-radius: 8px 0 0 8px;
     }
+
     .task-group-card.archived:hover {
       opacity: 1;
       border-color: var(--text-muted);
@@ -2031,6 +2200,7 @@
       padding: 2px 8px;
       border-radius: 4px;
     }
+
     .task-group-quick-btn:hover {
       color: var(--accent);
     }
@@ -2059,6 +2229,7 @@
       cursor: pointer;
       transition: all 0.15s;
     }
+
     .unarchive-btn:hover {
       border-color: var(--green);
       color: var(--green);
@@ -2130,10 +2301,12 @@
       font-size: 12px;
       color: var(--text-primary);
     }
+
     .group-retro-prompt-text {
       margin-bottom: 10px;
       line-height: 1.45;
     }
+
     .group-retro-prompt .group-retro-btn {
       width: 100%;
       justify-content: center;
@@ -2147,12 +2320,14 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
+
     @media (max-width: 480px) {
       .group-step-summary {
         white-space: normal;
         word-break: break-all;
       }
     }
+
     .group-subtask-step {
       font-size: 10px;
       color: var(--accent);
@@ -2302,49 +2477,59 @@
       border-top: 1px solid var(--border);
       padding-top: 12px;
     }
+
     .workflow-steps-loading,
     .workflow-steps-empty {
       font-size: 12px;
       color: var(--text-muted);
     }
+
     .workflow-steps-empty-hint {
       font-size: 11px;
       color: var(--text-muted);
       margin-top: 4px;
     }
+
     .workflow-step-item {
       padding: 8px 0;
       border-bottom: 1px solid var(--border);
       font-size: 12px;
     }
+
     .workflow-step-item.current {
       border-left: 3px solid var(--accent);
       padding-left: 8px;
       margin-left: -8px;
     }
+
     .workflow-step-head {
       display: flex;
       align-items: center;
       gap: 8px;
     }
+
     .workflow-step-done {
       color: var(--green, #22c55e);
       font-weight: 600;
     }
+
     .workflow-step-current {
       color: var(--accent);
       font-size: 11px;
       font-weight: 500;
     }
+
     .workflow-step-label {
       font-weight: 500;
     }
+
     .workflow-step-summary {
       margin-top: 4px;
       color: var(--text-secondary);
       white-space: pre-wrap;
       word-break: break-word;
     }
+
     .workflow-step-time {
       margin-top: 2px;
       font-size: 11px;
@@ -2844,6 +3029,7 @@
       cursor: pointer;
       transition: all 0.15s;
     }
+
     .sediment-btn:hover {
       opacity: 0.9;
       filter: brightness(1.05);
@@ -2906,6 +3092,7 @@
       gap: 14px;
       padding: 14px 18px;
       margin-top: 16px;
+      min-height: 64px;
       width: 100%;
       box-sizing: border-box;
       background: var(--bg-card);
@@ -3254,53 +3441,16 @@
       <div id="login-mode-password">
         <div class="form-group">
           <label for="login-username">用户名</label>
-          <input type="text" id="login-username" placeholder="输入用户名" autofocus>
+          <input type="text" id="login-username" placeholder="输入用户名" autocomplete="username" autofocus>
         </div>
         <div class="form-group">
           <label for="login-password">密码</label>
-          <input type="password" id="login-password" placeholder="输入密码">
+          <input type="password" id="login-password" placeholder="输入密码" autocomplete="current-password">
         </div>
         <button class="btn btn-primary btn-full" onclick="doLogin()">登 录</button>
-        <details id="auth-advanced-details">
-          <summary>高级：使用 API Key 登录</summary>
-          <div class="form-group" style="margin-top:12px;">
-            <label for="login-key">API Key</label>
-            <input type="password" id="login-key" placeholder="输入你的 API Key...">
-          </div>
-        </details>
-        <div style="display:flex; justify-content:space-between; margin-top:12px; font-size:13px;">
-          <a href="#" onclick="switchLoginMode('forgot'); return false;" style="color:var(--primary);">忘记密码</a>
+        <p class="settings-desc" style="margin-top:12px; font-size:12px; color:var(--text-muted);">忘记密码请联系管理员重置</p>
+        <div style="display:flex; justify-content:flex-end; margin-top:8px; font-size:13px;">
           <a href="#" onclick="switchLoginMode('register'); return false;" style="color:var(--primary);">没有账号？注册</a>
-        </div>
-      </div>
-
-      <!-- Forgot Password (same-page) -->
-      <div id="login-mode-forgot" style="display:none;" role="form" aria-labelledby="forgot-title">
-        <p id="forgot-title" class="settings-desc" style="margin-bottom:12px; font-size:13px;">若您有 MCP API Key，可前往下方「高级」折叠区重置密码；若未保存 Key 请联系管理员重置。</p>
-        <details>
-          <summary>高级：用 API Key 重置</summary>
-          <div class="form-group" style="margin-top:12px;">
-            <label for="forgot-username">用户名</label>
-            <input type="text" id="forgot-username" placeholder="输入用户名" autocomplete="username" aria-describedby="forgot-err">
-          </div>
-          <div class="form-group">
-            <label for="forgot-apikey">API Key</label>
-            <input type="password" id="forgot-apikey" placeholder="输入您的 API Key" autocomplete="off" aria-describedby="forgot-err">
-          </div>
-          <div class="form-group">
-            <label for="forgot-new-password">新密码</label>
-            <input type="password" id="forgot-new-password" placeholder="至少 6 个字符" autocomplete="new-password" aria-describedby="forgot-err">
-          </div>
-          <div class="form-group">
-            <label for="forgot-confirm">确认新密码</label>
-            <input type="password" id="forgot-confirm" placeholder="再次输入新密码" autocomplete="new-password" aria-describedby="forgot-err">
-          </div>
-          <div id="forgot-err" class="error-msg" role="alert" aria-live="polite"></div>
-          <button type="button" class="btn btn-primary btn-full" onclick="doForgotPassword()">重置密码</button>
-        </details>
-        <p class="settings-desc" style="margin-top:12px; font-size:12px; color:var(--text-muted);">联系管理员重置：管理员可使用 admin reset API 为您的账号重置密码。</p>
-        <div style="text-align:center; margin-top:12px; font-size:13px;">
-          <a href="#" onclick="switchLoginMode('password'); return false;" style="color:var(--primary);">返回登录</a>
         </div>
       </div>
 
@@ -3462,8 +3612,7 @@
           <div class="search-bar">
             <div class="search-input-wrap">
               <input type="text" id="search-input" placeholder="输入自然语言描述进行语义搜索..."
-                onkeydown="if(event.key==='Enter')doSearch()"
-                onfocus="showSearchHistoryDropdown()"
+                onkeydown="if(event.key==='Enter')doSearch()" onfocus="showSearchHistoryDropdown()"
                 onblur="hideSearchHistoryDropdownSoon()">
               <div id="search-history-dropdown" class="search-history-dropdown" aria-hidden="true"></div>
             </div>
@@ -3517,7 +3666,8 @@
           <div style="display:flex;justify-content:space-between;align-items:center">
             <h2 style="font-size:16px;font-weight:600;color:var(--text-secondary)" id="page-tasks-title">任务列表</h2>
             <div style="display:flex;gap:8px;align-items:center">
-              <select id="tasks-status-filter" class="filter-select" onchange="switchTasksSubTab(this.value)" title="任务状态">
+              <select id="tasks-status-filter" class="filter-select" onchange="switchTasksSubTab(this.value)"
+                title="任务状态">
                 <option value="active">⏳ 进行中</option>
                 <option value="archived">📦 归档</option>
               </select>
@@ -3568,8 +3718,9 @@
         <h2 class="settings-group-title">常用配置</h2>
 
         <!-- Ops: Service health (no auth required for /health) -->
-        <div class="settings-card ops-health-card" style="margin-top:20px">
-          <h2>服务健康状态</h2>
+        <div id="ops-health-card" class="settings-card ops-health-card collapsed" style="margin-top:20px"
+          onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
+          <h2>服务健康状态<span class="h2-right-group"><span id="health-status-dot" class="health-dot loading" title="加载中…" role="img" aria-label="加载中"></span><span class="h2-arrow">▾</span></span></h2>
           <div class="settings-card-body" style="max-height:600px">
             <p class="settings-desc">当前实例各依赖状态，便于运维快速诊断。异常时请按下方「排查手册」或执行 <code>make health</code>。</p>
             <div id="health-status-container">
@@ -3579,45 +3730,12 @@
                 <div class="health-checks" id="health-checks"></div>
                 <div class="health-ops-actions">
                   <button type="button" class="btn btn-secondary btn-sm" id="health-btn-refresh">刷新</button>
-                  <button type="button" class="btn btn-secondary btn-sm" id="health-btn-copy-cmd">复制命令: make health</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="health-btn-copy-cmd">复制命令: make
+                    health</button>
                   <span class="hint" style="margin-left:8px">排查手册见项目 README「运维」章节</span>
                 </div>
               </div>
               <div id="health-status-error" class="health-error hidden"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Account & Security: masked API Key + change password -->
-        <div id="settings-account-security" class="settings-card" style="margin-top:20px">
-          <h2>账号与安全</h2>
-          <div class="settings-card-body" style="max-height:400px">
-            <p class="settings-desc">查看 API Key 脱敏、使用旧密码修改登录密码。</p>
-            <div class="settings-grid" style="margin-bottom:16px">
-              <div class="form-group full-width">
-                <label>您的 API Key</label>
-                <div id="settings-api-key-masked" style="font-family:var(--font-mono);font-size:13px;color:var(--text-secondary);min-height:24px">加载中…</div>
-                <div id="settings-api-key-error" class="error-msg" style="display:none"></div>
-              </div>
-            </div>
-            <div class="settings-group-title" style="margin-top:16px;margin-bottom:8px">修改密码</div>
-            <p class="settings-desc" style="margin-bottom:8px">输入旧密码验证身份后设置新密码。</p>
-            <div class="settings-grid">
-              <div class="form-group">
-                <label for="settings-old-password">旧密码</label>
-                <input type="password" id="settings-old-password" placeholder="输入当前密码" autocomplete="current-password">
-              </div>
-              <div class="form-group">
-                <label for="settings-new-password">新密码</label>
-                <input type="password" id="settings-new-password" placeholder="至少 6 个字符" autocomplete="new-password">
-              </div>
-              <div class="form-group">
-                <label for="settings-confirm-password">确认新密码</label>
-                <input type="password" id="settings-confirm-password" placeholder="再次输入新密码" autocomplete="new-password">
-              </div>
-            </div>
-            <div class="settings-actions" style="margin-top:12px">
-              <button type="button" class="btn btn-primary" onclick="window.doChangePassword()">修改密码</button>
             </div>
           </div>
         </div>
@@ -3720,7 +3838,8 @@
                 </div>
                 <div class="form-group">
                   <label>或安装路径</label>
-                  <input type="text" id="installables-target-path" placeholder="项目根目录绝对路径（可选）" style="font-family:var(--font-mono);font-size:12px">
+                  <input type="text" id="installables-target-path" placeholder="项目根目录绝对路径（可选）"
+                    style="font-family:var(--font-mono);font-size:12px">
                 </div>
               </div>
               <div class="settings-actions">
@@ -3749,7 +3868,7 @@
           </div>
         </div>
 
-        <div class="settings-card"
+        <div class="settings-card collapsed"
           onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
           <h2>检索参数配置</h2>
           <div class="settings-card-body" style="max-height:2000px">
@@ -3867,57 +3986,82 @@
           </div>
         </div>
 
-        <div id="settings-key-mgmt" class="settings-card collapsed" style="margin-top:20px; display:none;"
+        <div id="settings-key-mgmt" class="settings-card" style="margin-top:20px"
           onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
-          <h2>用户管理</h2>
+          <h2>用户与账号</h2>
           <div class="settings-card-body" style="max-height:2000px">
-            <p class="settings-desc">管理团队成员账号、审批注册申请、分配角色和 API Key。</p>
-
-            <!-- Pending approvals -->
-            <div id="keys-pending-section" style="margin-bottom:20px; display:none;">
-              <h3 style="margin-bottom:8px; color:var(--warning, #f59e0b);">待审批用户</h3>
-              <div id="keys-pending-list"></div>
-            </div>
-
-            <!-- Active users -->
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-              <h3 style="margin:0;">已有用户</h3>
-              <button class="btn btn-primary" onclick="openAdminCreateUser()"
-                style="font-size:13px; padding:5px 14px;">+ 添加用户</button>
-            </div>
-            <div id="keys-active-list"></div>
-
-            <!-- Admin create user form (hidden by default) -->
-            <div id="admin-create-user-form"
-              style="display:none; margin-top:16px; padding:16px; background:var(--bg-input); border:1px solid var(--border); border-radius:var(--radius);">
-              <h3 style="margin-top:0; margin-bottom:12px;">添加新用户</h3>
-              <div class="settings-grid" style="gap:10px;">
+            <!-- Account & Security: change password (visible to all) -->
+            <div id="settings-account-security" style="margin-bottom:24px">
+              <div class="settings-group-title" style="margin-bottom:8px">账号与安全</div>
+              <p class="settings-desc" style="margin-bottom:8px">输入旧密码验证身份后设置新密码。</p>
+              <div class="settings-grid">
                 <div class="form-group">
-                  <label>用户名</label>
-                  <input type="text" id="admin-new-username" placeholder="用户名">
+                  <label for="settings-old-password">旧密码</label>
+                  <input type="password" id="settings-old-password" placeholder="输入当前密码"
+                    autocomplete="current-password">
                 </div>
                 <div class="form-group">
-                  <label>角色</label>
-                  <select id="admin-new-role"
-                    style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius);padding:6px 10px;">
-                    <option value="editor">editor</option>
-                    <option value="viewer">viewer</option>
-                    <option value="admin">admin</option>
-                  </select>
+                  <label for="settings-new-password">新密码</label>
+                  <input type="password" id="settings-new-password" placeholder="至少 6 个字符" autocomplete="new-password">
                 </div>
                 <div class="form-group">
-                  <label>初始密码 <span class="hint">(可选，用于 Web 登录)</span></label>
-                  <input type="password" id="admin-new-password" placeholder="留空则只能用 API Key">
-                </div>
-                <div class="form-group" style="display:flex; align-items:center; gap:8px;">
-                  <input type="checkbox" id="admin-new-generate-key" style="width:auto;">
-                  <label for="admin-new-generate-key" style="margin:0;">为 MCP 生成 Key</label>
+                  <label for="settings-confirm-password">确认新密码</label>
+                  <input type="password" id="settings-confirm-password" placeholder="再次输入新密码"
+                    autocomplete="new-password">
                 </div>
               </div>
-              <div style="margin-top:12px;">
-                <button class="btn btn-primary" onclick="createUserAdmin()">创建</button>
-                <button class="btn" onclick="document.getElementById('admin-create-user-form').style.display='none'"
-                  style="margin-left:8px;">取消</button>
+              <div class="settings-actions" style="margin-top:12px">
+                <button type="button" class="btn btn-primary" onclick="window.doChangePassword()">修改密码</button>
+              </div>
+            </div>
+
+            <!-- User Management (admin only) -->
+            <div id="settings-user-mgmt-section" style="display:none">
+              <div class="settings-group-title" style="margin-bottom:8px">用户管理</div>
+              <p class="settings-desc">管理团队成员账号、审批注册申请、分配角色。</p>
+
+              <!-- Pending approvals -->
+              <div id="keys-pending-section" style="margin-bottom:20px; display:none;">
+                <h3 style="margin-bottom:8px; color:var(--warning, #f59e0b);">待审批用户</h3>
+                <div id="keys-pending-list"></div>
+              </div>
+
+              <!-- Active users -->
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h3 style="margin:0;">已有用户</h3>
+                <button class="btn btn-primary" onclick="openAdminCreateUser()"
+                  style="font-size:13px; padding:5px 14px;">+ 添加用户</button>
+              </div>
+              <div id="keys-active-list"></div>
+
+              <!-- Admin create user form (hidden by default) -->
+              <div id="admin-create-user-form"
+                style="display:none; margin-top:16px; padding:16px; background:var(--bg-input); border:1px solid var(--border); border-radius:var(--radius);">
+                <h3 style="margin-top:0; margin-bottom:12px;">添加新用户</h3>
+                <div class="settings-grid" style="gap:10px;">
+                  <div class="form-group">
+                    <label>用户名</label>
+                    <input type="text" id="admin-new-username" placeholder="用户名">
+                  </div>
+                  <div class="form-group">
+                    <label>角色</label>
+                    <select id="admin-new-role"
+                      style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius);padding:6px 10px;">
+                      <option value="editor">editor</option>
+                      <option value="viewer">viewer</option>
+                      <option value="admin">admin</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>初始密码 <span class="hint">(可选，用于 Web 登录)</span></label>
+                    <input type="password" id="admin-new-password" placeholder="初始密码（用于 Web 登录）">
+                  </div>
+                </div>
+                <div style="margin-top:12px;">
+                  <button class="btn btn-primary" onclick="createUserAdmin()">创建</button>
+                  <button class="btn" onclick="document.getElementById('admin-create-user-form').style.display='none'"
+                    style="margin-left:8px;">取消</button>
+                </div>
               </div>
             </div>
           </div>
@@ -4166,7 +4310,8 @@
           <button class="btn btn-secondary btn-sm" onclick="navigate('settings')">← 返回设置</button>
           <h2 style="font-size:16px;font-weight:600;color:var(--text-secondary);margin:0">个人记忆</h2>
         </div>
-        <p class="settings-desc" style="margin-bottom:16px">Agent 通过 tm_learn 自动提炼，或在此手动添加。scope=generic 始终返回；scope=context 仅在当前上下文语义匹配时返回。</p>
+        <p class="settings-desc" style="margin-bottom:16px">Agent 通过 tm_learn 自动提炼，或在此手动添加。scope=generic
+          始终返回；scope=context 仅在当前上下文语义匹配时返回。</p>
         <div style="margin-bottom:16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <select id="pm-scope-filter" style="padding:6px 10px;font-size:13px" onchange="loadPersonalMemoryList()">
             <option value="">全部 scope</option>
@@ -4202,7 +4347,8 @@
           <input type="number" id="dedup-threshold" value="0.92" min="0.5" max="1" step="0.01"
             style="width:80px;padding:6px 10px;font-size:13px">
           <button class="btn btn-primary btn-sm" onclick="loadDuplicates()">扫描重复</button>
-          <button class="btn btn-secondary btn-sm" onclick="reembedGroups()" title="重算所有经验组（父+子）的向量，修正“问题描述相同但子经验不同”被误判为重复">刷新经验组向量</button>
+          <button class="btn btn-secondary btn-sm" onclick="reembedGroups()"
+            title="重算所有经验组（父+子）的向量，修正“问题描述相同但子经验不同”被误判为重复">刷新经验组向量</button>
           <span class="hint" style="font-size:12px;color:var(--text-muted)">经验组建议先执行刷新再扫描</span>
           <button class="btn btn-secondary btn-sm" onclick="scanStale()">扫描过期</button>
         </div>
@@ -4597,22 +4743,29 @@
   </div>
 
   <!-- ===== Edit Installable Modal ===== -->
-  <div id="edit-installable-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeEditInstallableModal()">
+  <div id="edit-installable-modal" class="modal-overlay hidden"
+    onclick="if(event.target===this)closeEditInstallableModal()">
     <div class="modal" style="max-width:95vw;width:1200px;max-height:90vh;display:flex;flex-direction:column">
       <div class="modal-header">
         <h2 id="edit-installable-title">编辑 Rule / Prompt</h2>
         <button class="modal-close" onclick="closeEditInstallableModal()">&times;</button>
       </div>
       <div class="modal-body" style="flex:1;overflow:auto;padding:0">
-        <div class="edit-installable-tabs" style="display:flex;border-bottom:1px solid var(--border);padding:0 16px;gap:0">
-          <button type="button" class="edit-installable-tab active" data-tab="edit" onclick="switchEditInstallableTab('edit')">编辑</button>
-          <button type="button" class="edit-installable-tab" data-tab="preview" onclick="switchEditInstallableTab('preview')">Markdown 预览</button>
+        <div class="edit-installable-tabs"
+          style="display:flex;border-bottom:1px solid var(--border);padding:0 16px;gap:0">
+          <button type="button" class="edit-installable-tab active" data-tab="edit"
+            onclick="switchEditInstallableTab('edit')">编辑</button>
+          <button type="button" class="edit-installable-tab" data-tab="preview"
+            onclick="switchEditInstallableTab('preview')">Markdown 预览</button>
         </div>
         <div id="edit-installable-edit-panel" style="padding:16px">
-          <textarea id="edit-installable-content" style="width:100%;min-height:500px;font-family:var(--font-mono);font-size:13px;padding:12px;resize:vertical;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary)"></textarea>
+          <textarea id="edit-installable-content"
+            style="width:100%;min-height:500px;font-family:var(--font-mono);font-size:13px;padding:12px;resize:vertical;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary)"></textarea>
         </div>
-        <div id="edit-installable-preview-panel" class="hidden" style="padding:16px;overflow:auto;min-height:500px;max-height:70vh">
-          <div id="edit-installable-preview-content" class="markdown-preview" style="font-size:14px;line-height:1.7"></div>
+        <div id="edit-installable-preview-panel" class="hidden"
+          style="padding:16px;overflow:auto;min-height:500px;max-height:70vh">
+          <div id="edit-installable-preview-content" class="markdown-preview" style="font-size:14px;line-height:1.7">
+          </div>
         </div>
       </div>
       <div class="modal-footer">
