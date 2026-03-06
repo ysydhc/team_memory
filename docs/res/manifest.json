@@ -1,0 +1,22 @@
+{
+  "items": [
+    {
+      "id": "tm-extraction-retrieval",
+      "type": "rule",
+      "name": "经验提取与检索触发",
+      "version": "1.0.0",
+      "source": "local",
+      "description": "经验与记忆的提取触发、检索触发 — 何时沉淀、何时获取。基于 GitHub、AI 论坛、2024-2025 记忆领域调研。",
+      "path": "rules/tm-extraction-retrieval.mdc"
+    },
+    {
+      "id": "experience-extraction-retrieval",
+      "type": "prompt",
+      "name": "经验提取与检索执行指南",
+      "version": "1.0.0",
+      "source": "local",
+      "description": "供 Agent 快速查阅的提取/检索检查清单、工具选择决策树与执行示例。",
+      "path": "prompts/experience-extraction-retrieval.md"
+    }
+  ]
+}
