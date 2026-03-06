@@ -12,7 +12,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, update
 
-from team_memory.auth.permissions import require_role
 from team_memory.auth.provider import DbApiKeyAuth, User, _hash_password
 from team_memory.config import get_settings
 from team_memory.storage.audit import write_audit_log
@@ -33,6 +32,7 @@ from team_memory.web.app import (
     _get_db_url,
     get_current_user,
 )
+from team_memory.web.dependencies import require_role
 
 # In-memory rate limit for forgot-password: max 5 requests per IP per 60 seconds
 _forgot_password_attempts: dict[str, list[float]] = defaultdict(list)

@@ -7,10 +7,10 @@ PACK_DIR="$ROOT_DIR/.debug/knowledge-pack"
 RULE_SRC="$PACK_DIR/rules/team_memory-codified-shortcuts.mdc"
 SKILL_SRC="$PACK_DIR/skills/team-memory-codified-workflow/SKILL.md"
 
-RULE_DST_DIR="$ROOT_DIR/.cursor/rules"
+RULE_DST_DIR="$ROOT_DIR/.tm_cursor/rules"
 RULE_DST="$RULE_DST_DIR/team_memory-codified-shortcuts.mdc"
 
-SKILL_DST_DIR="$ROOT_DIR/.cursor/skills/team-memory-codified-workflow"
+SKILL_DST_DIR="$ROOT_DIR/.tm_cursor/skills/team-memory-codified-workflow"
 SKILL_DST="$SKILL_DST_DIR/SKILL.md"
 
 if [ ! -f "$RULE_SRC" ]; then

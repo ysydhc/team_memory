@@ -4,7 +4,9 @@
 
 ## active/
 
-（暂无）
+| 文档 | 说明 |
+|------|------|
+| [harness-phase-3-implementation-plan.md](harness-phase-3-implementation-plan.md) | Harness Phase 3 架构约束 — 分层定义、import 检查、CI 集成 |
 
 ## completed/
 

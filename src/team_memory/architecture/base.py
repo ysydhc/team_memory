@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from team_memory.web.architecture_models import (
+from team_memory.schemas_architecture import (
     ArchitectureContext,
     ArchitectureGraph,
     ClusterMembers,

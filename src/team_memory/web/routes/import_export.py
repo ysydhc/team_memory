@@ -12,7 +12,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from team_memory.auth.permissions import require_role
 from team_memory.auth.provider import User
 from team_memory.services.installable_catalog import (
     InstallableCatalogError,
@@ -27,6 +26,7 @@ from team_memory.web.app import (
     get_current_user,
     get_optional_user,
 )
+from team_memory.web.dependencies import require_role
 
 router = APIRouter(tags=["import_export"])
 

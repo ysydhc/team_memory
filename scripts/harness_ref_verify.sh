@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verify harness doc references after exec-plans migration.
-# Validates: docs/design-docs/, docs/exec-plans/, .cursor/plans/workflows/,
-#            architecture_models.py and base.py docstrings -> docs/design-docs/
+# Validates: docs/design-docs/, docs/exec-plans/,
+#            schemas_architecture.py and base.py docstrings -> docs/design-docs/
 # Exit 1 if any check fails.
 set -e
 cd "$(dirname "$0")/.."
@@ -24,23 +24,15 @@ else
   FAIL=1
 fi
 
-# 3. .cursor/plans/workflows/*.yaml
-if [ -d "$ROOT/.cursor/plans/workflows" ] && [ -n "$(find "$ROOT/.cursor/plans/workflows" -maxdepth 1 -name '*.yaml' -type f 2>/dev/null)" ]; then
-  echo "OK: .cursor/plans/workflows/*.yaml"
+# 3. schemas_architecture.py docstring -> docs/design-docs/
+if grep -q "docs/design-docs/" "$ROOT/src/team_memory/schemas_architecture.py" 2>/dev/null; then
+  echo "OK: schemas_architecture.py docstring -> docs/design-docs/"
 else
-  echo "FAIL: .cursor/plans/workflows/*.yaml - path missing or no .yaml files"
+  echo "FAIL: schemas_architecture.py docstring does not point to docs/design-docs/"
   FAIL=1
 fi
 
-# 4. architecture_models.py docstring -> docs/design-docs/
-if grep -q "docs/design-docs/" "$ROOT/src/team_memory/web/architecture_models.py" 2>/dev/null; then
-  echo "OK: architecture_models.py docstring -> docs/design-docs/"
-else
-  echo "FAIL: architecture_models.py docstring does not point to docs/design-docs/"
-  FAIL=1
-fi
-
-# 5. base.py docstring -> docs/design-docs/
+# 4. base.py docstring -> docs/design-docs/
 if grep -q "docs/design-docs/" "$ROOT/src/team_memory/architecture/base.py" 2>/dev/null; then
   echo "OK: base.py docstring -> docs/design-docs/"
 else

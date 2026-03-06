@@ -10,7 +10,6 @@ from sqlalchemy import func as sa_func
 from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 
-from team_memory.auth.permissions import require_role
 from team_memory.auth.provider import User
 from team_memory.storage.audit import write_audit_log
 from team_memory.storage.models import Experience, ExperienceLink, ReviewHistory
@@ -27,6 +26,7 @@ from team_memory.web.app import (
     get_current_user,
     get_optional_user,
 )
+from team_memory.web.dependencies import require_role
 
 router = APIRouter(tags=["experiences"])
 

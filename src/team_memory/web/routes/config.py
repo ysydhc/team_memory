@@ -9,7 +9,6 @@ import time
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 
-from team_memory.auth.permissions import require_role
 from team_memory.auth.provider import User
 from team_memory.web import app as app_module
 from team_memory.web.app import (
@@ -28,6 +27,7 @@ from team_memory.web.app import (
     get_current_user,
     get_optional_user,
 )
+from team_memory.web.dependencies import require_role
 
 router = APIRouter(tags=["config"])
 

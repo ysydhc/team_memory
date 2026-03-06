@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from team_memory.architecture.base import ArchitectureProvider
 from team_memory.config import ArchitectureGitnexusConfig
-from team_memory.web.architecture_models import (
+from team_memory.schemas_architecture import (
     ArchitectureContext,
     ArchitectureGraph,
     ClusterMembers,

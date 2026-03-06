@@ -39,6 +39,7 @@ Thumbs.db
 .ruff_cache/
 .claude/
 .cursor/
+.tm_cursor/
 .mcpregistry_github_token
 .mcpregistry_registry_token
 .playwright-mcp/

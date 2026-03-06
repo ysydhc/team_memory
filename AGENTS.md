@@ -9,7 +9,6 @@
 | 轨道 | 路径 | 用途 |
 |------|------|------|
 | 设计/执行计划 | [docs/design-docs](docs/design-docs/) · [docs/exec-plans](docs/exec-plans/) | 设计文档、执行计划、归档 |
-| 工作流 YAML | [.cursor/plans/workflows/](.cursor/plans/workflows/) | 可执行工作流定义 |
 
 ---
 
@@ -33,20 +32,16 @@
 | 入口 | 路径 | 说明 |
 |------|------|------|
 | 设计文档 | [docs/design-docs](docs/design-docs/) | 架构、方案、设计决策 |
+| 架构分层 | [docs/design-docs/architecture-layers](docs/design-docs/architecture-layers.md) | 分层定义、import 约束、提交前 harness-check |
 | 反馈回路 | [docs/design-docs/feedback-loop](docs/design-docs/feedback-loop.md) | Agent 出错时沉淀、规则更新 |
+| Phase 1 收尾清单 | [docs/design-docs/phase1-closure-checklist](docs/design-docs/phase1-closure-checklist.md) | 文档迁移收尾清单 |
+| Subagent 工作流 | [docs/design-docs/subagent-workflow](docs/design-docs/subagent-workflow.md) | 两阶段评审、逐步引入 |
+| Harness vs tm 边界 | [docs/design-docs/harness-vs-tm-boundary](docs/design-docs/harness-vs-tm-boundary.md) | 纯 Harness 与 tm 叠加的分离说明 |
+| Plan 自审清单 | [docs/design-docs/plan-self-review-checklist](docs/design-docs/plan-self-review-checklist.md) | Task 完成后自审 |
+| 人类决策点 | [docs/design-docs/human-decision-points](docs/design-docs/human-decision-points.md) | 需用户确认的节点 |
 | 执行计划 | [docs/exec-plans](docs/exec-plans/) | 计划、任务、归档 |
 | 入门 | [docs/GETTING-STARTED](docs/GETTING-STARTED.md) | 部署、接入、开发 |
 | 扩展 | [docs/EXTENDED](docs/EXTENDED.md) | 任务管理、Skills、工作流 |
-
----
-
-## 工作流
-
-工作流 YAML 位于 [.cursor/plans/workflows/](.cursor/plans/workflows/)：
-
-- `task-execution-workflow.yaml` · `task-execution-workflow-optimized.yaml` — 任务执行
-- `workflow-optimization-workflow.yaml` — 工作流优化
-- `steps/` · `actions/` · `checklists/` — 步骤、动作、检查清单
 
 ---
 

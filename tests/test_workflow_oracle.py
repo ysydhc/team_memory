@@ -129,8 +129,8 @@ def test_get_next_step_resolves_task_execution_workflow():
 
 def test_get_next_step_returns_optional_metadata(tmp_path):
     """get_next_step includes timeout_hint, retry_hint, idempotent when present."""
-    (tmp_path / ".cursor" / "plans" / "workflows").mkdir(parents=True)
-    wf = tmp_path / ".cursor" / "plans" / "workflows" / "test-wf.yaml"
+    (tmp_path / ".tm_cursor" / "plans" / "workflows").mkdir(parents=True)
+    wf = tmp_path / ".tm_cursor" / "plans" / "workflows" / "test-wf.yaml"
     wf.write_text("""
 meta:
   id: test-wf

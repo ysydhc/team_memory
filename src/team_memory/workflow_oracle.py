@@ -1,6 +1,6 @@
 """Workflow step oracle: load YAML and return next step from current step or messages.
 
-Used by tm_workflow_next_step MCP tool. Reads .cursor/plans/workflows/{workflow_id}.yaml.
+Used by tm_workflow_next_step MCP tool. Reads .tm_cursor/plans/workflows/{workflow_id}.yaml.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import yaml
 
 def _workflow_path(workflow_id: str, workspace_root: Path) -> Path:
     """Path to workflow YAML; workflow_id is e.g. task-execution-workflow."""
-    return workspace_root / ".cursor" / "plans" / "workflows" / f"{workflow_id}.yaml"
+    return workspace_root / ".tm_cursor" / "plans" / "workflows" / f"{workflow_id}.yaml"
 
 
 def _resolve_action_ref(item: Any, base_dir: Path) -> dict[str, Any]:

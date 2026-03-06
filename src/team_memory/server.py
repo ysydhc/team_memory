@@ -3051,7 +3051,7 @@ def execute_task(task_id: str | None = None, group_id: str | None = None) -> str
             '\n**My progress (我的进度):** When the user asks or at key steps, '
             'call tm_task(action="list", group_id=...) and summarize e.g. '
             '本组已完成 x/y，当前任务：TM-xxx（标题）. Optionally combine with '
-            'workflow state from .cursor/plans/workflows/task-execution-workflow_state.md.\n'
+            'workflow state from .tm_cursor/plans/workflows/task-execution-workflow_state.md.\n'
         )
     return f"""You are executing a TeamMemory task.{current_task_line}{progress_line}
 
