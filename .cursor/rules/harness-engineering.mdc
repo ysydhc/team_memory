@@ -35,6 +35,11 @@ alwaysApply: true
 - 分层与依赖方向见 [docs/design-docs/architecture-layers](docs/design-docs/architecture-layers.md)。
 - **提交前**须通过 `make harness-check`（import 方向检查 + ruff + harness_ref_verify）；CI 已接入，失败时阻断。
 
+### Phase 4 可观测性
+
+- **日志格式**：统一 JSON 行输出规范见 [logging-format](docs/design-docs/logging-format.md)；生产/CI 建议 `LOG_FORMAT=json`。
+- **doc-gardening**：定期扫描 `docs/design-docs`、`docs/exec-plans` 下文档，检出断裂链接、deprecated 引用、过时标注；输出 `file:line: rule_id: message` 可被脚本与 Agent 解析；执行 `make harness-doc-check` 或由 CI 独立 job 运行。设计见 [doc-gardening](docs/design-docs/doc-gardening.md)。
+
 ---
 
 ## 三、反馈回路（纯 Harness）
@@ -55,3 +60,17 @@ alwaysApply: true
    - 子 Agent 派发（task-N: 派发 generalPurpose 执行 xxx）
    - 子 Agent 完成（task-N: 完成，xxx）
 3. **目的**：便于 observer 复盘、协作方式打分、可复用工作流总结。
+
+---
+
+## 五、Plan 执行流程（工作流）
+
+> 完整约定见 [harness-workflow-execution](docs/design-docs/harness-workflow-execution.md)。
+
+1. **摸底 step-0**：执行 Plan 前须先执行 step-0（摸底或确认 Plan 已加载、execute 已创建）；否则视为流程不规范，**中断并提醒**。
+2. **执行记录**：一个 Plan 对应 `docs/exec-plans/executing/{plan-id}-execute.md`；关键节点后须追加日志。
+3. **回复格式**：关键节点回复须含「Plan 执行记录已更新：xxx，状态：xxx，当前 Task：xxx」。
+4. **Agent 自动找文档**：执行 Plan 前，根据 Plan 内容自动加载 `docs/design-docs/` 下相关文档（如 feedback-loop、human-decision-points、architecture-layers）。
+5. **系统通知**：Plan 开始、人类决策点、中断、完成时调用 `./scripts/notify_plan_status.sh`。
+6. **流程自检**：step-0 已执行、人类决策点已确认、execute 已更新；不规范时停止执行、写入 execute、回复提示、发通知。
+7. **feedback-loop 回溯**：待完善项固化后，移入 feedback-loop 的「已完成」区。

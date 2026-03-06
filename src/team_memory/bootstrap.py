@@ -8,9 +8,11 @@ the MCP stdio process share the same objects when running in-process.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Load .env into os.environ so TEAM_MEMORY_API_KEY etc. are available for auth and config
@@ -38,6 +40,83 @@ if TYPE_CHECKING:
     from team_memory.services.webhook import WebhookService
 
 logger = logging.getLogger("team_memory.bootstrap")
+
+
+_LOG_RECORD_STD_ATTRS = frozenset({
+    "name", "msg", "args", "created", "filename", "funcName",
+    "levelname", "levelno", "lineno", "module", "msecs",
+    "pathname", "process", "processName", "relativeCreated",
+    "stack_info", "exc_info", "exc_text", "thread", "threadName",
+    "message", "taskName",
+})
+
+# Sensitive keys to redact in extra (per docs/design-docs/logging-format.md)
+_SENSITIVE_KEYS = frozenset({
+    "api_key", "apikey", "api-key", "password", "secret", "token",
+    "authorization", "auth_header",
+})
+
+
+def _redact_sensitive(extra: dict) -> dict:
+    """Redact sensitive keys in extra dict. Returns new dict."""
+    result = {}
+    for k, v in extra.items():
+        key_lower = k.lower().replace("-", "_")
+        is_sensitive = (
+            key_lower in _SENSITIVE_KEYS
+            or any(s in key_lower for s in ("secret", "token", "password"))
+        )
+        result[k] = "***" if is_sensitive else v
+    return result
+
+
+class _JsonFormatter(logging.Formatter):
+    """JSON Lines formatter per docs/design-docs/logging-format.md.
+
+    Outputs single-line JSON with required fields: timestamp, level, logger, message.
+    Redacts sensitive keys in extra per logging-format.md.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        ts = datetime.fromtimestamp(record.created, tz=timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%S.%f"
+        )[:-3] + "Z"
+        log_record: dict = {
+            "timestamp": ts,
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if hasattr(record, "request_id") and record.request_id:
+            log_record["request_id"] = record.request_id
+        extra = {k: v for k, v in record.__dict__.items() if k not in _LOG_RECORD_STD_ATTRS}
+        if extra:
+            log_record["extra"] = _redact_sensitive(extra)
+        return json.dumps(log_record, ensure_ascii=False)
+
+
+def _configure_logging(settings: Settings) -> None:
+    """Configure team_memory loggers per config.LOG_FORMAT (L3 only)."""
+    use_json = getattr(settings, "log_format", "human") == "json"
+    root = logging.getLogger("team_memory")
+    root.setLevel(logging.INFO)
+    root.propagate = False  # Capture all team_memory.* here, avoid duplicate to root
+    for h in root.handlers[:]:
+        root.removeHandler(h)
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.INFO)
+    if use_json:
+        handler.setFormatter(_JsonFormatter())
+    else:
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
+        )
+    root.addHandler(handler)
+    # request_logger: remove app.py hardcoded handler, inherit from team_memory
+    req_log = logging.getLogger("team_memory.web.request")
+    for h in req_log.handlers[:]:
+        req_log.removeHandler(h)
+    req_log.propagate = True
 
 
 @dataclass
@@ -183,6 +262,7 @@ def bootstrap(
         return _instance
 
     settings = load_settings(config_path)
+    _configure_logging(settings)
     db_url = _resolve_db_url(settings)
     embedding = _create_embedding_provider(settings)
     auth = _configure_auth(settings)

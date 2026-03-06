@@ -4,7 +4,7 @@
 # ============================================================
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp test lint lint-fix harness-check verify verify-web backup health clean migrate migrate-fts install-knowledge release-9111 hooks-install
+.PHONY: help setup dev web mcp test lint lint-fix harness-check harness-doc-check verify verify-web backup health clean migrate migrate-fts install-knowledge release-9111 hooks-install
 
 help:           ## 显示所有可用命令
 	@echo ""
@@ -68,6 +68,9 @@ lint:           ## Ruff 代码检查
 
 lint-fix:       ## Ruff 代码检查并自动修复
 	ruff check src/ --fix
+
+harness-doc-check:  ## Doc gardening：扫描 docs/design-docs、docs/exec-plans 链接与 deprecated 引用
+	python scripts/harness_doc_gardening.py
 
 harness-check:  ## Harness 门禁：import 方向检查 + ruff + harness_ref_verify
 	python scripts/harness_import_check.py

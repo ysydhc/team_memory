@@ -1,0 +1,4 @@
+foo.md:3: DOC_LINK_404: Link target does not exist: missing.md
+foo.md:5: DOC_LINK_404: Link target does not exist: docs/design-docs/nonexistent.md
+index.md:3: DOC_DEPRECATED_REF: Should not reference archived doc: archive/old-plan.md
+stale.md:3: DOC_STALE_MARKER: Contains stale marker: 部分内容已过时

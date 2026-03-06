@@ -39,6 +39,9 @@
 | Harness vs tm 边界 | [docs/design-docs/harness-vs-tm-boundary](docs/design-docs/harness-vs-tm-boundary.md) | 纯 Harness 与 tm 叠加的分离说明 |
 | Plan 自审清单 | [docs/design-docs/plan-self-review-checklist](docs/design-docs/plan-self-review-checklist.md) | Task 完成后自审 |
 | 人类决策点 | [docs/design-docs/human-decision-points](docs/design-docs/human-decision-points.md) | 需用户确认的节点 |
+| 工作流执行 | [docs/design-docs/harness-workflow-execution](docs/design-docs/harness-workflow-execution.md) | Plan 执行记录、摸底、通知、自检 |
+| 日志格式 | [docs/design-docs/logging-format](docs/design-docs/logging-format.md) | JSON 行日志规范、生产/CI 切换 |
+| doc-gardening | [docs/design-docs/doc-gardening](docs/design-docs/doc-gardening.md) | 文档健康度扫描、断裂链接、deprecated 引用 |
 | 执行计划 | [docs/exec-plans](docs/exec-plans/) | 计划、任务、归档 |
 | 入门 | [docs/GETTING-STARTED](docs/GETTING-STARTED.md) | 部署、接入、开发 |
 | 扩展 | [docs/EXTENDED](docs/EXTENDED.md) | 任务管理、Skills、工作流 |

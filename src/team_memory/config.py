@@ -441,6 +441,10 @@ class Settings(BaseSettings):
     webhooks: list[WebhookItemConfig] = Field(default_factory=list)
     tag_synonyms: dict[str, str] = Field(default_factory=dict)  # P2-7: PG -> PostgreSQL
     architecture: ArchitectureConfig = Field(default_factory=ArchitectureConfig)
+    # Log format: "human" (default) or "json".
+    # Priority: TEAM_MEMORY_LOG_FORMAT > LOG_FORMAT (in load_settings) > yaml.
+    # Use LOG_FORMAT for quick dev override; TEAM_MEMORY_LOG_FORMAT wins if both set.
+    log_format: Literal["human", "json"] = "human"
 
     model_config = SettingsConfigDict(
         env_prefix="TEAM_MEMORY_",
@@ -594,6 +598,11 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
             env_data = _resolve_dict(env_raw)
             yaml_data = _deep_merge(yaml_data, env_data)
 
+    # LOG_FORMAT (no prefix) overrides yaml; applied before pydantic.
+    # TEAM_MEMORY_LOG_FORMAT (pydantic env) wins if both LOG_FORMAT and TEAM_MEMORY_LOG_FORMAT set.
+    if os.environ.get("LOG_FORMAT"):
+        v = os.environ["LOG_FORMAT"].lower()
+        yaml_data["log_format"] = "json" if v == "json" else "human"
     # Environment variable overrides (e.g. TEAM_MEMORY_DATABASE__URL)
     # are handled by pydantic-settings automatically
     return Settings(**yaml_data)

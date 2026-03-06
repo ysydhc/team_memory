@@ -4,6 +4,7 @@
 
 ## 目录结构
 
+- `executing/`：Plan 执行记录，一个 Plan 一个 `{plan-id}-execute.md`；格式见 [harness-workflow-execution](../design-docs/harness-workflow-execution.md)
 - `completed/`：已完成或进行中的执行计划（从 `.cursor/plans/` 及 `workflows/` 迁移）
 - `archive/`：已归档或过期的计划（从 `workflows/archive/`、`workflows/expired/` 迁移）
 

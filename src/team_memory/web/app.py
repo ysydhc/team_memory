@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-import json
 import logging
 import os
 import re
@@ -58,15 +57,7 @@ from team_memory.storage.repository import ExperienceRepository  # noqa: F401
 
 logger = logging.getLogger("team_memory.web")
 request_logger = logging.getLogger("team_memory.web.request")
-
-# Ensure request JSON logs reach console (uvicorn may not attach handlers to this logger)
-if not request_logger.handlers:
-    _req_handler = logging.StreamHandler()
-    _req_handler.setLevel(logging.INFO)
-    _req_handler.setFormatter(logging.Formatter("%(message)s"))
-    request_logger.addHandler(_req_handler)
-    request_logger.setLevel(logging.INFO)
-    request_logger.propagate = False
+# Handler/Formatter configured in bootstrap._configure_logging per LOG_FORMAT
 
 # ============================================================
 # Global state — backed by bootstrap.AppContext singleton
@@ -428,7 +419,7 @@ async def request_log_middleware(request: Request, call_next):
         "ip": ip or "",
         "user": user_name or "",
     }
-    request_logger.info("%s", json.dumps(payload, ensure_ascii=False))
+    request_logger.info("request", extra=payload)
     return response
 
 
