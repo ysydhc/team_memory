@@ -54,107 +54,31 @@ async function api(method, path, body = null) {
 }
 
 // ===== Login mode switching =====
-let _loginMode = 'password'; // 'password' | 'apikey' | 'register' | 'forgot'
+let _loginMode = 'password'; // 'password' | 'register'
 
 function switchLoginMode(mode) {
     _loginMode = mode;
-    document.getElementById('login-mode-password').style.display = (mode === 'password' || mode === 'apikey') ? 'block' : 'none';
+    document.getElementById('login-mode-password').style.display = mode === 'password' ? 'block' : 'none';
     document.getElementById('login-mode-register').style.display = mode === 'register' ? 'block' : 'none';
-    const forgotEl = document.getElementById('login-mode-forgot');
-    if (forgotEl) forgotEl.style.display = mode === 'forgot' ? 'block' : 'none';
     document.getElementById('login-error').style.display = 'none';
     document.getElementById('login-success').style.display = 'none';
-    const errForgot = document.getElementById('forgot-err');
-    if (errForgot) { errForgot.textContent = ''; errForgot.style.display = 'none'; }
     const sub = document.getElementById('login-subtitle');
     if (mode === 'register') sub.textContent = '注册新账号';
-    else if (mode === 'apikey') {
-        sub.textContent = '使用 API Key 登录';
-        const details = document.getElementById('auth-advanced-details');
-        if (details) { details.open = true; document.getElementById('login-key')?.focus(); }
-    } else if (mode === 'forgot') sub.textContent = '忘记密码';
     else sub.textContent = '团队经验数据库';
-}
-
-async function doForgotPassword() {
-    const username = document.getElementById('forgot-username').value.trim();
-    const apiKey = document.getElementById('forgot-apikey').value;
-    const newPassword = document.getElementById('forgot-new-password').value;
-    const confirmPassword = document.getElementById('forgot-confirm').value;
-    const errEl = document.getElementById('forgot-err');
-    errEl.textContent = '';
-    errEl.style.display = 'none';
-
-    if (!username) {
-        errEl.textContent = '请输入用户名';
-        errEl.style.display = 'block';
-        return;
-    }
-    if (!apiKey) {
-        errEl.textContent = '请输入 API Key';
-        errEl.style.display = 'block';
-        return;
-    }
-    if (!newPassword || newPassword.length < 6) {
-        errEl.textContent = '新密码至少 6 个字符';
-        errEl.style.display = 'block';
-        return;
-    }
-    if (newPassword !== confirmPassword) {
-        errEl.textContent = '两次密码输入不一致';
-        errEl.style.display = 'block';
-        return;
-    }
-
-    try {
-        const data = await api('POST', '/api/v1/auth/forgot-password/reset', {
-            username,
-            api_key: apiKey,
-            new_password: newPassword
-        });
-        if (data.message) {
-            document.getElementById('login-success').textContent = '密码已重置，请使用新密码登录';
-            document.getElementById('login-success').style.display = 'block';
-            document.getElementById('login-mode-forgot').style.display = 'none';
-            document.getElementById('login-mode-password').style.display = 'block';
-            document.getElementById('forgot-username').value = '';
-            document.getElementById('forgot-apikey').value = '';
-            document.getElementById('forgot-new-password').value = '';
-            document.getElementById('forgot-confirm').value = '';
-            setTimeout(() => {
-                document.getElementById('login-success').style.display = 'none';
-                switchLoginMode('password');
-            }, 2500);
-        }
-    } catch (e) {
-        errEl.textContent = (e && e.message) || '重置失败，请检查用户名与 API Key';
-        errEl.style.display = 'block';
-    }
 }
 
 // ===== Auth =====
 async function doLogin() {
-    let body;
-    const key = document.getElementById('login-key')?.value?.trim();
-    if (key) {
-        body = { api_key: key };
-    } else {
-        const username = document.getElementById('login-username').value.trim();
-        const password = document.getElementById('login-password').value;
-        if (!username || !password) return;
-        body = { username, password };
-    }
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
+    if (!username || !password) return;
+    const body = { username, password };
 
     try {
         const data = await api('POST', '/api/v1/auth/login', body);
         if (data.success) {
-            if (body.api_key) {
-                state.apiKey = body.api_key;
-                if (typeof localStorage !== 'undefined') localStorage.setItem('api_key', body.api_key);
-            } else {
-                state.apiKey = '';
-                if (typeof localStorage !== 'undefined') localStorage.removeItem('api_key');
-            }
+            state.apiKey = '';
+            if (typeof localStorage !== 'undefined') localStorage.removeItem('api_key');
             state.currentUser = { name: data.user, role: data.role };
             showApp();
         } else {
@@ -403,6 +327,15 @@ function reloadCurrentPage() {
 }
 
 function navigate(page) {
+    const fromSettings = state.currentPage === 'settings';
+    const toSubPage = ['personal-memory', 'user-expansion', 'dedup'].includes(page);
+    const toSettings = page === 'settings';
+    const fromSubPage = ['personal-memory', 'user-expansion', 'dedup'].includes(state.currentPage);
+
+    if (fromSettings && toSubPage) {
+        state.settingsScrollTop = window.scrollY || document.documentElement.scrollTop;
+    }
+
     state.currentPage = page;
     document.querySelectorAll('.page').forEach((p) => p.classList.add('hidden'));
     const target = document.getElementById(`page-${page}`);
@@ -413,6 +346,12 @@ function navigate(page) {
     const hash = `#${page}`;
     if (location.hash.slice(1) !== page) {
         history.pushState(null, '', location.pathname + hash);
+    }
+
+    if (toSettings && fromSubPage && state.settingsScrollTop > 0) {
+        requestAnimationFrame(() => {
+            window.scrollTo(0, state.settingsScrollTop);
+        });
     }
 
     if (page === 'list') {
@@ -426,6 +365,11 @@ function navigate(page) {
     else if (page === 'personal-memory') pages.loadPersonalMemoryList();
     else if (page === 'user-expansion') pages.loadUserExpansion();
     else if (page === 'settings') {
+        const dotEl = document.getElementById('health-status-dot');
+        if (dotEl) {
+            dotEl.className = 'health-dot loading';
+            dotEl.title = '加载中…';
+        }
         pages.loadRetrievalConfig();
         components.loadWebhookConfig();
         pages.loadCurrentSchema();
@@ -433,9 +377,7 @@ function navigate(page) {
         pages.checkMergeSuggestions();
         pages.loadHealthStatus();
         pages.loadAccountSecurity();
-        if (state.currentUser && state.currentUser.role === 'admin') {
-            pages.loadKeyManagement();
-        }
+        pages.loadKeyManagement();
     }
 }
 
@@ -622,7 +564,6 @@ window.doExport = components.doExport;
 window.loadAccountSecurity = pages.loadAccountSecurity;
 window.doChangePassword = pages.doChangePassword;
 window.loadKeyManagement = pages.loadKeyManagement;
-window.generateKeyForUser = pages.generateKeyForUser;
 window.approveUser = pages.approveUser;
 window.rejectUser = pages.rejectUser;
 window.createUserAdmin = pages.createUserAdmin;
@@ -635,19 +576,6 @@ window.openAdminCreateUser = function() {
 // ===== Init =====
 document.addEventListener('DOMContentLoaded', () => {
     checkAuth();
-    const details = document.getElementById('auth-advanced-details');
-    if (details) {
-        const stored = typeof localStorage !== 'undefined' && localStorage.getItem('auth_advanced_expanded');
-        if (stored === 'true') details.open = true;
-        details.addEventListener('toggle', () => {
-            if (typeof localStorage !== 'undefined') {
-                localStorage.setItem('auth_advanced_expanded', details.open ? 'true' : 'false');
-            }
-        });
-    }
-    document.getElementById('login-key')?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') doLogin();
-    });
     document.getElementById('login-password').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') doLogin();
     });

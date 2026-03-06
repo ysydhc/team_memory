@@ -28,6 +28,8 @@ export const state = {
     detailReferrer: 'list',
     /** Stack of experience ids when navigating via related links; back button pops and shows that detail. */
     detailBackStack: [],
+    /** Scroll position when returning to settings from personal-memory/user-expansion/dedup. */
+    settingsScrollTop: 0,
     availableProjects: [],
 };
 

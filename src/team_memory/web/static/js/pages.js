@@ -1049,15 +1049,13 @@ export async function loadUsageStats() {
             api('GET', projectQs ? '/api/v1/analytics/tool-usage/summary?' + projectQs : '/api/v1/analytics/tool-usage/summary'),
             api('GET', '/api/v1/analytics/tool-usage?group_by=tool' + (suffix ? suffix : '')),
             api('GET', '/api/v1/analytics/tool-usage?group_by=user' + (suffix ? suffix : '')),
-            api('GET', '/api/v1/analytics/tool-usage?group_by=api_key' + (suffix ? suffix : '')),
             api('GET', `/api/v1/analytics/skills-rules?project=${encodeURIComponent(projectForSkills)}`),
         ]);
         const val = (r, fallback) => r.status === 'fulfilled' ? r.value : fallback;
         const summary = val(results[0], { top_tools: [], total_calls: 0 });
         const byTool = val(results[1], { data: [] });
         const byUser = val(results[2], { data: [] });
-        const byApiKey = val(results[3], { data: [] });
-        const skillsRules = val(results[4], { categories: {}, total_files: 0, workspace: '' });
+        const skillsRules = val(results[3], { categories: {}, total_files: 0, workspace: '' });
         const maxCount = Math.max(...(byTool.data || []).map(t => t.count), 1);
         const toolRows = (byTool.data || []).slice(0, 15).map(t => {
             const pct = Math.round((t.count / maxCount) * 100);
@@ -1076,10 +1074,6 @@ export async function loadUsageStats() {
 
         const userRows = (byUser.data || []).map(u => `
             <tr><td>${esc(u.user ?? '匿名')}</td><td style="text-align:right">${u.count}</td><td style="text-align:right">${u.avg_duration_ms ?? 0}ms</td></tr>
-        `).join('');
-
-        const apiKeyRows = (byApiKey.data || []).map(k => `
-            <tr><td>${esc(k.api_key_name)}</td><td style="text-align:right">${k.count}</td><td style="text-align:right">${k.avg_duration_ms ?? 0}ms</td><td style="text-align:right">${k.errors ?? 0}</td></tr>
         `).join('');
 
         const catLabels = {
@@ -1142,7 +1136,6 @@ export async function loadUsageStats() {
                 <button class="mode-tab active" onclick="switchUsageTab('skills',this)">Skills & Rules</button>
                 <button class="mode-tab" onclick="switchUsageTab('mcp',this)">MCP 工具调用</button>
                 <button class="mode-tab" onclick="switchUsageTab('team',this)">团队成员</button>
-                <button class="mode-tab" onclick="switchUsageTab('apikey',this)">按 API Key</button>
             </div>
 
             <div id="usage-tab-skills">
@@ -1156,9 +1149,6 @@ export async function loadUsageStats() {
 
             <div id="usage-tab-team" class="hidden">
                 ${userRows ? `<table class="data-table"><thead><tr><th>用户</th><th style="text-align:right">调用次数</th><th style="text-align:right">平均耗时</th></tr></thead><tbody>${userRows}</tbody></table>` : '<p style="color:var(--text-muted)">暂无数据</p>'}
-            </div>
-            <div id="usage-tab-apikey" class="hidden">
-                ${apiKeyRows ? `<table class="data-table"><thead><tr><th>API Key</th><th style="text-align:right">调用次数</th><th style="text-align:right">平均耗时</th><th style="text-align:right">错误数</th></tr></thead><tbody>${apiKeyRows}</tbody></table>` : '<p style="color:var(--text-muted)">暂无数据（MCP 调用时可设置 TEAM_MEMORY_API_KEY_NAME 关联到 Key）</p>'}
             </div>
         `;
         if (!container._srDelegation) {
@@ -1195,7 +1185,7 @@ window.toggleSrCategoryMore = function(btn) {
 
 // ===== Usage Sub-tabs =====
 window.switchUsageTab = function(tab, btn) {
-    ['skills', 'mcp', 'team', 'apikey'].forEach(t => {
+    ['skills', 'mcp', 'team'].forEach(t => {
         const el = document.getElementById('usage-tab-' + t);
         if (el) el.classList.toggle('hidden', t !== tab);
     });
@@ -1717,6 +1707,7 @@ export async function loadHealthStatus() {
     const loadingEl = document.getElementById('health-status-loading');
     const bodyEl = document.getElementById('health-status-body');
     const errorEl = document.getElementById('health-status-error');
+    const dotEl = document.getElementById('health-status-dot');
     if (!loadingEl || !bodyEl || !errorEl) return;
 
     loadingEl.classList.remove('hidden');
@@ -1724,6 +1715,10 @@ export async function loadHealthStatus() {
     bodyEl.classList.add('hidden');
     errorEl.classList.add('hidden');
     errorEl.textContent = '';
+    if (dotEl) {
+        dotEl.className = 'health-dot loading';
+        dotEl.title = '加载中…';
+    }
 
     try {
         const base = window.__apiBaseUrl || '';
@@ -1736,6 +1731,12 @@ export async function loadHealthStatus() {
         const checks = data.checks || {};
         const version = data.version || '';
         const timestamp = data.timestamp || '';
+
+        const dotEl = document.getElementById('health-status-dot');
+        if (dotEl) {
+            dotEl.className = 'health-dot ' + (status === 'healthy' ? 'healthy' : 'unhealthy');
+            dotEl.title = status === 'healthy' ? '正常' : status === 'degraded' ? '降级' : '异常';
+        }
 
         const summaryEl = document.getElementById('health-summary');
         if (summaryEl) {
@@ -1795,6 +1796,11 @@ export async function loadHealthStatus() {
         loadingEl.classList.add('hidden');
         errorEl.textContent = '获取健康状态失败: ' + (e.message || String(e));
         errorEl.classList.remove('hidden');
+        const dotEl = document.getElementById('health-status-dot');
+        if (dotEl) {
+            dotEl.className = 'health-dot unhealthy';
+            dotEl.title = '获取失败';
+        }
     }
 }
 
@@ -2086,26 +2092,10 @@ export async function batchSummarize() {
     }
 }
 
-// ===== Account & Security (masked API Key + change password) =====
+// ===== Account & Security (change password) =====
 
 export async function loadAccountSecurity() {
-    const maskedEl = document.getElementById('settings-api-key-masked');
-    const errEl = document.getElementById('settings-api-key-error');
-    if (!maskedEl) return;
-    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
-    try {
-        const data = await api('GET', '/api/v1/auth/me');
-        const masked = data.api_key_masked;
-        maskedEl.textContent = (masked && masked !== 'null') ? masked : '未保存脱敏信息';
-        maskedEl.style.color = 'var(--text-secondary)';
-    } catch (e) {
-        maskedEl.textContent = '加载失败';
-        maskedEl.style.color = 'var(--text-muted)';
-        if (errEl) {
-            errEl.textContent = (e && e.message) || '获取失败';
-            errEl.style.display = 'block';
-        }
-    }
+    // API key display removed; password change handled by doChangePassword
 }
 
 export async function doChangePassword() {
@@ -2145,12 +2135,13 @@ export async function doChangePassword() {
 
 export async function loadKeyManagement() {
     const card = document.getElementById('settings-key-mgmt');
+    const userMgmtSec = document.getElementById('settings-user-mgmt-section');
     if (!card) return;
-    if (!state.currentUser || state.currentUser.role !== 'admin') {
-        card.style.display = 'none';
-        return;
-    }
     card.style.display = 'block';
+    if (userMgmtSec) {
+        userMgmtSec.style.display = (state.currentUser && state.currentUser.role === 'admin') ? 'block' : 'none';
+    }
+    if (!state.currentUser || state.currentUser.role !== 'admin') return;
 
     try {
         const data = await api('GET', '/api/v1/keys');
@@ -2169,9 +2160,6 @@ export async function loadKeyManagement() {
                         <span style="color:var(--text-secondary); font-size:12px; margin-left:8px;">注册于 ${_fmtDate(k.created_at)}</span>
                     </div>
                     <div style="display:flex; align-items:center; gap:10px;">
-                        <label style="display:flex; align-items:center; gap:4px; font-size:12px; margin:0; cursor:pointer;">
-                            <input type="checkbox" id="approve-gen-key-${k.id}" style="width:auto;"> 生成 MCP Key
-                        </label>
                         <button class="btn btn-primary" onclick="approveUser(${k.id})" style="font-size:12px; padding:4px 12px; margin-right:6px;">通过</button>
                         <button class="btn" onclick="rejectUser(${k.id})" style="font-size:12px; padding:4px 12px; color:var(--danger, #ef4444);">拒绝</button>
                     </div>
@@ -2192,7 +2180,6 @@ export async function loadKeyManagement() {
                             <th style="padding:8px 6px;">用户名</th>
                             <th style="padding:8px 6px;">角色</th>
                             <th style="padding:8px 6px;">状态</th>
-                            <th style="padding:8px 6px;">API Key</th>
                             <th style="padding:8px 6px;">创建时间</th>
                             <th style="padding:8px 6px;">操作</th>
                         </tr>
@@ -2210,12 +2197,6 @@ export async function loadKeyManagement() {
                                 </td>
                                 <td style="padding:8px 6px;">
                                     <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;${k.is_active ? 'background:#dcfce7;color:#166534;' : 'background:#fee2e2;color:#991b1b;'}">${k.is_active ? '活跃' : '停用'}</span>
-                                </td>
-                                <td style="padding:8px 6px;">
-                                    ${k.has_api_key
-                                        ? '<span style="font-size:11px; color:var(--text-secondary);">已分配</span>'
-                                        : `<button class="btn btn-primary" data-key-id="${k.id}" data-user-name="${_esc(k.user_name)}" onclick="generateKeyForUser(this)" style="font-size:11px; padding:3px 8px;">生成 MCP Key</button>`
-                                    }
                                 </td>
                                 <td style="padding:8px 6px; font-size:12px; color:var(--text-secondary);">${_fmtDate(k.created_at)}</td>
                                 <td style="padding:8px 6px;">
@@ -2235,36 +2216,10 @@ export async function loadKeyManagement() {
     }
 }
 
-export async function generateKeyForUser(btn) {
-    const keyId = parseInt(btn.dataset.keyId, 10);
-    const userName = btn.dataset.userName || '';
-    try {
-        const result = await api('POST', `/api/v1/keys/${keyId}/generate`);
-        if (result.api_key) {
-            prompt(`用户 ${userName} 的 API Key（仅显示一次，请复制保存）`, result.api_key);
-            toast('API Key 已生成，请复制保存', 'success');
-            loadKeyManagement();
-        }
-    } catch (e) {
-        toast('生成失败: ' + ((e && e.message) || '未知错误'), 'error');
-    }
-}
-
 export async function approveUser(id) {
     try {
-        const genKeyEl = document.getElementById(`approve-gen-key-${id}`);
-        const generate_api_key = genKeyEl ? genKeyEl.checked : false;
-        const result = await api('PUT', `/api/v1/keys/${id}`, {
-            is_active: true,
-            generate_api_key,
-        });
-        if (result.api_key) {
-            const msg = `用户 ${result.user_name} 已审批通过。\n\nAPI Key（仅显示一次，请复制保存）：\n${result.api_key}`;
-            prompt('审批成功 - 请复制 API Key 分发给用户', result.api_key);
-            toast('审批成功，API Key 已生成', 'success');
-        } else {
-            toast('审批成功', 'success');
-        }
+        await api('PUT', `/api/v1/keys/${id}`, { is_active: true });
+        toast('审批成功', 'success');
         loadKeyManagement();
     } catch (e) {
         toast('审批失败: ' + e.message, 'error');
@@ -2286,23 +2241,16 @@ export async function createUserAdmin() {
     const username = document.getElementById('admin-new-username').value.trim();
     const role = document.getElementById('admin-new-role').value;
     const password = document.getElementById('admin-new-password').value;
-    const genKeyEl = document.getElementById('admin-new-generate-key');
-    const generate_api_key = genKeyEl ? genKeyEl.checked : false;
     if (!username) { toast('请输入用户名', 'error'); return; }
 
     try {
-        const body = { user_name: username, role, generate_api_key };
+        const body = { user_name: username, role };
         if (password) body.password = password;
-        const result = await api('POST', '/api/v1/keys', body);
-        if (result.api_key) {
-            prompt('用户创建成功 - 请复制 API Key 分发给用户', result.api_key);
-        }
+        await api('POST', '/api/v1/keys', body);
         toast('用户创建成功', 'success');
         document.getElementById('admin-create-user-form').style.display = 'none';
         document.getElementById('admin-new-username').value = '';
         document.getElementById('admin-new-password').value = '';
-        const genKeyEl = document.getElementById('admin-new-generate-key');
-        if (genKeyEl) genKeyEl.checked = false;
         loadKeyManagement();
     } catch (e) {
         toast('创建失败: ' + e.message, 'error');

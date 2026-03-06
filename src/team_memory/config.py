@@ -246,6 +246,8 @@ class WebConfig(BaseModel):
 
     host: str = "0.0.0.0"
     port: int = 9111
+    ssl_keyfile: str | None = None
+    ssl_certfile: str | None = None
 
 
 class InstallableCatalogConfig(BaseModel):

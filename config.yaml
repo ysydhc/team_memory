@@ -71,10 +71,13 @@ default_project: "team_memory"
 
 # ╔══════════════════════════════════════════════════════════╗
 # ║  [可选] Web 服务配置                                     ║
+# ║  若 Chrome 提示密码泄露，请启用 HTTPS（本地可用 mkcert）    ║
 # ╚══════════════════════════════════════════════════════════╝
 web:
   host: "0.0.0.0"
   port: 9111
+  # ssl_keyfile: null  # 本地: mkcert -install && mkcert -key-file key.pem -cert-file cert.pem localhost 127.0.0.1
+  # ssl_certfile: null # 或 env: TEAM_MEMORY_WEB_SSL_KEYFILE / TEAM_MEMORY_WEB_SSL_CERTFILE
 
 # ╔══════════════════════════════════════════════════════════╗
 # ║  [可选] 可安装规则/提示词目录与共享注册表                ║

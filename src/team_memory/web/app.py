@@ -1186,15 +1186,22 @@ def main():
     # Config.yaml defaults, env vars override
     host = os.environ.get("TEAM_MEMORY_WEB_HOST", settings.web.host)
     port = int(os.environ.get("TEAM_MEMORY_WEB_PORT", str(settings.web.port)))
-    print(f"Starting team_memory web server at http://{host}:{port}")
-    print(f"Open http://localhost:{port} in your browser")
-    uvicorn.run(
-        "team_memory.web.app:app",
-        host=host,
-        port=port,
-        reload=False,
-        log_level="info",
-    )
+    ssl_keyfile = os.environ.get("TEAM_MEMORY_WEB_SSL_KEYFILE") or settings.web.ssl_keyfile
+    ssl_certfile = os.environ.get("TEAM_MEMORY_WEB_SSL_CERTFILE") or settings.web.ssl_certfile
+    use_ssl = bool(ssl_keyfile and ssl_certfile)
+    scheme = "https" if use_ssl else "http"
+    print(f"Starting team_memory web server at {scheme}://{host}:{port}")
+    print(f"Open {scheme}://localhost:{port} in your browser")
+    run_kwargs = {
+        "host": host,
+        "port": port,
+        "reload": False,
+        "log_level": "info",
+    }
+    if use_ssl:
+        run_kwargs["ssl_keyfile"] = ssl_keyfile
+        run_kwargs["ssl_certfile"] = ssl_certfile
+    uvicorn.run("team_memory.web.app:app", **run_kwargs)
 
 
 if __name__ == "__main__":
