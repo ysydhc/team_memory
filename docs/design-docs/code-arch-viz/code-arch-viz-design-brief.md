@@ -11,7 +11,7 @@
 ## 2. 项目约束
 
 - **宿主项目**：team_memory（Python 后端、Web 前端、MCP 工具、经验库）。
-- **后续演进**（见 workflow-pm-final-three-solutions）：任务完成/改动代码时，将经验挂载到「架构节点」（文件/函数/模块），按位置检索与推荐。
+- **后续演进**（见 [workflow-pm-final-three-solutions](../../exec-plans/completed/workflow-pm-final-three-solutions.md)）：任务完成/改动代码时，将经验挂载到「架构节点」（文件/函数/模块），按位置检索与推荐。
 - **实现要求**：最简 — 可分期、可裁剪，先跑通核心价值再扩展。
 
 ## 3. 三视角分工（Composer 三 Agent）
