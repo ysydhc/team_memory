@@ -3405,3 +3405,29 @@ export async function saveUserExpansion() {
         toast('保存失败: ' + e.message, 'error');
     }
 }
+
+let _workflowViewerInited = false;
+
+export async function openWorkflowVisualizationModal() {
+    try {
+        const mod = await import('./workflow-viewer.js');
+        if (mod.initWorkflowViewer && !_workflowViewerInited) {
+            mod.initWorkflowViewer();
+            _workflowViewerInited = true;
+        }
+        const modal = document.getElementById('workflow-visualization-modal');
+        if (modal) modal.classList.remove('hidden');
+    } catch (e) {
+        console.error('openWorkflowVisualizationModal:', e);
+        const errEl = document.getElementById('workflow-error');
+        if (errEl) {
+            errEl.textContent = '加载工作流可视化失败: ' + e.message;
+            errEl.classList.remove('hidden');
+        }
+    }
+}
+
+export function closeWorkflowVisualizationModal() {
+    const modal = document.getElementById('workflow-visualization-modal');
+    if (modal) modal.classList.add('hidden');
+}

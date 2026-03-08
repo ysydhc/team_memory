@@ -558,6 +558,8 @@ window.handleImportFile = components.handleImportFile;
 window.doImport = components.doImport;
 window.openExportModal = components.openExportModal;
 window.closeExportModal = components.closeExportModal;
+window.openWorkflowVisualizationModal = pages.openWorkflowVisualizationModal;
+window.closeWorkflowVisualizationModal = pages.closeWorkflowVisualizationModal;
 window.doExport = components.doExport;
 
 // Key management exports

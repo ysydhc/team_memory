@@ -4098,6 +4098,11 @@
             ▸</h2>
           <div class="settings-group-body">
 
+            <div class="settings-card" style="margin-top:20px;cursor:pointer" onclick="openWorkflowVisualizationModal()">
+              <h2>工作流可视化 ▸</h2>
+              <p class="settings-desc" style="padding:0 20px 16px;margin:0">解析 YAML 工作流定义，可视化展示步骤与依赖关系。点击打开。</p>
+            </div>
+
             <div class="settings-card collapsed" style="margin-top:20px"
               onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
               <h2>经验质量打分规则</h2>
@@ -4742,6 +4747,52 @@
     </div>
   </div>
 
+  <!-- ===== Workflow Visualization Modal ===== -->
+  <div id="workflow-visualization-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeWorkflowVisualizationModal()">
+    <div class="modal" style="max-width:95vw;width:1100px;max-height:90vh;display:flex;flex-direction:column">
+      <div class="modal-header">
+        <h2>工作流可视化</h2>
+        <button class="modal-close" onclick="closeWorkflowVisualizationModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="workflow-viewer-container" style="flex:1;overflow:auto;padding:20px">
+        <div id="workflow-drop-zone" class="workflow-drop-zone"
+          style="border:2px dashed var(--border);border-radius:var(--radius);padding:48px;text-align:center;color:var(--text-muted);cursor:pointer;transition:border-color 0.2s,background 0.2s">
+          <div style="font-size:14px;margin-bottom:8px">拖入 YAML 或点击选择</div>
+          <div style="font-size:12px;margin-bottom:12px">支持单文件或文件夹（解析 $ref）</div>
+          <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+            <button type="button" class="btn btn-sm" style="background:var(--accent-glow);color:var(--accent)" id="workflow-btn-file">选择文件</button>
+            <button type="button" class="btn btn-sm" style="background:var(--accent-glow);color:var(--accent)" id="workflow-btn-dir">选择文件夹</button>
+          </div>
+          <input type="file" id="workflow-file-input" accept=".yaml,.yml" multiple style="display:none">
+          <input type="file" id="workflow-dir-input" webkitdirectory directory multiple style="display:none">
+        </div>
+        <div id="workflow-error" class="workflow-error hidden" style="margin-top:12px;padding:12px;background:var(--red-bg);color:var(--red);border-radius:var(--radius)"></div>
+        <div id="workflow-graph-wrapper" class="hidden" style="position:relative;margin-top:20px">
+          <div id="workflow-graph-inner" style="position:relative;height:600px">
+            <div id="workflow-graph-container" class="workflow-graph-canvas" style="position:relative;height:100%;border:1px solid var(--border);border-radius:var(--radius);background-image:radial-gradient(rgba(59,130,246,0.08) 1px, transparent 1px);background-size:24px 24px;background-color:var(--bg-secondary)"></div>
+            <div id="workflow-node-overlay" style="position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:50;overflow:visible"></div>
+          </div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:8px">点击节点或悬停后点「显示详情」可查看步骤详情</div>
+          <div id="workflow-graph-toolbar" style="position:absolute;top:12px;right:12px;z-index:100;display:flex;gap:8px;align-items:center;pointer-events:auto">
+            <button type="button" class="btn btn-sm" style="background:var(--accent-glow);color:var(--accent)" id="workflow-btn-reset" title="居中并展示全图">重置视图</button>
+            <button type="button" class="btn btn-sm" style="background:var(--accent-glow);color:var(--accent)" id="workflow-btn-orient" title="切换竖向/横向布局">切换布局</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Workflow Step Detail Modal ===== -->
+  <div id="workflow-step-detail-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeWorkflowStepDetailModal()">
+    <div class="modal" style="max-width:640px;max-height:85vh;display:flex;flex-direction:column">
+      <div class="modal-header">
+        <h2 id="workflow-step-detail-title">步骤详情</h2>
+        <button class="modal-close" onclick="closeWorkflowStepDetailModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="workflow-step-detail-body" style="flex:1;overflow:auto;white-space:pre-wrap;font-size:14px;line-height:1.6"></div>
+    </div>
+  </div>
+
   <!-- ===== Edit Installable Modal ===== -->
   <div id="edit-installable-modal" class="modal-overlay hidden"
     onclick="if(event.target===this)closeEditInstallableModal()">
@@ -4779,6 +4830,17 @@
   <div class="toast-container" id="toast-container"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/graphlib@2.1.8/dist/graphlib.min.js"></script>
+  <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/webcola@3.4.0/WebCola/cola.min.js"></script>
+  <script>window.webcola = window.webcola || window.cola;</script>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape-cola@2.5.1/cytoscape-cola.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/layout-base@2.0.1/layout-base.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cose-base@2.2.0/cose-base.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
   <script type="module" src="/static/js/app.js"></script>
 </body>
 
