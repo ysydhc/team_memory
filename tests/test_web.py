@@ -1104,3 +1104,18 @@ class TestSPA:
         assert resp.status_code == 200
         assert "TeamMemory" in resp.text
         assert "<!DOCTYPE html>" in resp.text
+
+    def test_workflow_viewer_page_and_js(self, client):
+        """Workflow viewer: nav entry, page container, and no duplicate collectFilesFromEntry in workflow-viewer.js."""
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "workflow-viewer" in resp.text
+        assert "工作流可视化" in resp.text
+        # Verify workflow-viewer.js has no duplicate collectFilesFromEntry (causes "already declared" error)
+        import os
+        wv_path = os.path.join(os.path.dirname(__file__), "..", "src", "team_memory", "web", "static", "js", "workflow-viewer.js")
+        wv_path = os.path.normpath(wv_path)
+        assert os.path.exists(wv_path), "workflow-viewer.js not found"
+        content = open(wv_path, encoding="utf-8").read()
+        count = content.count("async function collectFilesFromEntry")
+        assert count == 1, f"collectFilesFromEntry declared {count} times (expected 1)"
