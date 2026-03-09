@@ -1,6 +1,7 @@
 """Pydantic models for architecture API responses.
 
-Contract aligned with docs/design-docs/code-arch-viz/code-arch-viz-provider-interface.md.
+Contract aligned with docs/exec-plans/wait/code-arch-viz-gitnexus/
+code-arch-viz-provider-interface.md.
 """
 
 from __future__ import annotations
