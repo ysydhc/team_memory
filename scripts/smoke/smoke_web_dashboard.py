@@ -2,7 +2,7 @@
 """Smoke test: GET /health and GET /api/v1/stats to diagnose dashboard failure.
 
 Usage:
-  python scripts/smoke_web_dashboard.py [--api-key KEY] [--port PORT]
+  python scripts/smoke/smoke_web_dashboard.py [--api-key KEY] [--port PORT]
   Default API key from $TEAM_MEMORY_API_KEY env var; port 9111.
 
 Prints: health (including dashboard_stats), and /api/v1/stats response or error.
