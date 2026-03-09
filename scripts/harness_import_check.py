@@ -2,7 +2,7 @@
 """Import direction checker for team_memory architecture layers.
 
 Validates that imports respect the layer rules defined in
-docs/design-docs/architecture-layers.md.
+docs/design-docs/harness/project-extension.md.
 
 Usage:
   python scripts/harness_import_check.py [--root PATH]
@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Layer mapping (from docs/design-docs/architecture-layers.md)
+# Layer mapping (from docs/design-docs/harness/project-extension.md)
 # ---------------------------------------------------------------------------
 
 # (path_pattern, layer) - order matters for prefix matching

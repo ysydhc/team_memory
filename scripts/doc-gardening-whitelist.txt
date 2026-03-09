@@ -1,20 +1,28 @@
 # Doc gardening whitelist: path, path:line, path:line:rule_id, or path:rule_id
 # Lines starting with # are ignored
 
-# doc-gardening.md: example link (line 42) and stale marker examples (45, 68) in rule description
-docs/design-docs/doc-gardening.md:42:DOC_LINK_404
-docs/design-docs/doc-gardening.md:DOC_STALE_MARKER
+# doc-maintenance-guide.md: example links in scanning design section (rule description)
+docs/design-docs/harness/doc-maintenance-guide.md:DOC_LINK_404
+docs/design-docs/harness/doc-maintenance-guide.md:DOC_STALE_MARKER
 
 # code-arch-viz-operations.md line 123: HTML </a> tag in code example, parsed as angle link
-docs/design-docs/code-arch-viz/code-arch-viz-operations.md:123:DOC_LINK_BROKEN
+docs/exec-plans/wait/code-arch-viz-gitnexus/code-arch-viz-operations.md:123:DOC_LINK_BROKEN
 
-# index.md: intentionally lists archive docs for navigation
-docs/exec-plans/index.md:DOC_DEPRECATED_REF
+# index: intentionally lists archive docs for navigation
+docs/exec-plans/README.md:DOC_DEPRECATED_REF
 
-# archive/completed: historical docs with links to moved/deleted files
-docs/exec-plans/archive/workflow-writing-alternatives.md:DOC_LINK_404
-docs/exec-plans/completed/task-execution-workflow.md:DOC_LINK_404
-docs/exec-plans/completed/workflow-improvement-checklist.md:DOC_LINK_404
-docs/exec-plans/completed/workflow-optimization-tasks.md:DOC_STALE_MARKER
-docs/exec-plans/completed/workflow-optimization.md:DOC_LINK_404
-docs/exec-plans/harness-phase-4-implementation-plan.md:DOC_STALE_MARKER
+# completed/archive: historical docs with links to moved/deleted files
+docs/exec-plans/completed/archive/workflow-writing-alternatives.md:DOC_LINK_404
+docs/exec-plans/completed/workflow-optimization/task-execution-workflow-design.md:DOC_LINK_404
+docs/exec-plans/completed/workflow-optimization/workflow-guide.md:DOC_LINK_404
+docs/exec-plans/completed/workflow-optimization/workflow-optimization-tasks.md:DOC_STALE_MARKER
+docs/exec-plans/completed/workflow-optimization/workflow-optimization.md:DOC_LINK_404
+
+# debugMigration: contains 已过时 marker
+docs/exec-plans/wait/debug-migration/debug-migration-plan202503.md:DOC_STALE_MARKER
+
+# workflow-optimization: YAML/workflows paths moved or not yet migrated
+docs/exec-plans/completed/workflow-optimization/task-execution-workflow.md:3:DOC_LINK_404
+docs/exec-plans/completed/workflow-optimization/workflow-improvement-checklist.md:4:DOC_LINK_404
+docs/exec-plans/completed/workflow-optimization/workflow-improvement-checklist.md:6:DOC_LINK_404
+docs/exec-plans/completed/workflow-optimization/workflow-improvement-checklist.md:8:DOC_LINK_404

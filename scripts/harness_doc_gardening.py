@@ -21,7 +21,7 @@ import re
 import sys
 from pathlib import Path
 
-# Rule IDs (from docs/design-docs/doc-gardening.md)
+# Rule IDs (from docs/design-docs/harness/doc-maintenance-guide.md 第二章)
 RULE_LINK_404 = "DOC_LINK_404"
 RULE_LINK_BROKEN = "DOC_LINK_BROKEN"
 RULE_DEPRECATED_REF = "DOC_DEPRECATED_REF"

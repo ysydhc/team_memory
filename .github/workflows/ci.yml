@@ -90,7 +90,7 @@ jobs:
             curl -fsS http://localhost:9111/health >/dev/null && break
             sleep 1
           done
-          TEAM_MEMORY_API_KEY="$TEAM_MEMORY_API_KEY" python scripts/smoke_web_dashboard.py --api-key "$TEAM_MEMORY_API_KEY" --port 9111
+          TEAM_MEMORY_API_KEY="$TEAM_MEMORY_API_KEY" python scripts/smoke/smoke_web_dashboard.py --api-key "$TEAM_MEMORY_API_KEY" --port 9111
       - name: Coverage
         run: pytest --cov=team_memory --cov-report=xml
       - name: Upload coverage

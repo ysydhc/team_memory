@@ -22,7 +22,7 @@ mcp-name: io.github.ysydhc/team-memory
 | **初级使用者** | 在 Cursor/Claude 里接入 | [快速开始 → 二、初级使用者](#二初级使用者在-cursor--claude-里接入) |
 | **贡献者** | 改代码、提 PR | [开发](#开发) |
 
-**扩展功能**（任务管理、Skills、工作流）见 [EXTENDED.md](EXTENDED.md)。
+**扩展功能**（任务管理、Skills、工作流）见 [extended.md](extended.md)。
 
 ## 目录
 
@@ -171,7 +171,7 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 - **7 个 MCP Prompt**：对话摘要、文档提交、质量审核、故障排查、长文档分析、任务执行、项目恢复
 - **Web 管理界面**：浏览、搜索、审核、配置一站式管理
 
-任务、Skills、工作流等扩展工具见 [EXTENDED.md](EXTENDED.md)。
+任务、Skills、工作流等扩展工具见 [extended.md](extended.md)。
 
 ### 一键部署
 
@@ -463,7 +463,7 @@ AI 的行为（主动推荐）：
 | `tm_extract_artifacts` | 提取知识 artifact | 对话/文档 | 提取 decision/problem/pattern 等结构化知识 |
 | `tm_invalidate_search_cache` | 使搜索缓存失效 | 无 | 清空搜索缓存 |
 
-任务、Skills、工作流等扩展工具见 [EXTENDED.md](EXTENDED.md)。
+任务、Skills、工作流等扩展工具见 [extended.md](extended.md)。
 
 ### MCP 资源
 
@@ -497,7 +497,7 @@ AI 的行为（主动推荐）：
 | 去重检测 | 发现和合并相似经验 |
 | 系统设置 | 检索参数、搜索配置、缓存、Webhook、Schema 配置 |
 
-任务 Kanban、归档管理、使用统计等扩展页面见 [EXTENDED.md](EXTENDED.md)。
+任务 Kanban、归档管理、使用统计等扩展页面见 [extended.md](extended.md)。
 
 创建经验支持三种模式：
 - **手动填写**：逐字段填写标题、问题、方案
@@ -587,7 +587,7 @@ make lint          # 代码检查（ruff）
 | `make health` | 健康检查 | `./scripts/healthcheck.sh`（检测 DB、Web、Ollama 等） |
 | `make migrate` | 数据库迁移 | `alembic upgrade head` |
 | `make migrate-fts` | 补齐经验表 FTS 字段（存量迁移） | `python scripts/migrate_fts.py`；可用 `--dry-run` 预览待更新条数 |
-| `make hooks-install` | 安装 Git hooks（任务关联） | 复制 `scripts/post-commit-hook.sh` 到 `.git/hooks/post-commit`；任务扩展见 [EXTENDED](EXTENDED.md) |
+| `make hooks-install` | 安装 Git hooks（任务关联） | 复制 `scripts/post-commit-hook.sh` 到 `.git/hooks/post-commit`；任务扩展见 [EXTENDED](extended.md) |
 
 **说明**：`make dev` 与 `make web` 会在启动前自动释放 9111 端口（停止占用该端口的 Docker 容器或本机进程），因此可重复执行而不会出现「address already in use」。
 
@@ -601,7 +601,7 @@ make lint          # 代码检查（ruff）
    - 前端会把这些信息拼进错误提示；
    - 在服务端日志中按 `ops_error_id` 搜索可定位对应异常。
 
-3. **本地快速诊断**：`python scripts/smoke_web_dashboard.py [--api-key KEY]` 会请求 `/health` 和 `/api/v1/stats` 并打印结果，便于确认是数据库、配置还是鉴权问题。
+3. **本地快速诊断**：`python scripts/smoke/smoke_web_dashboard.py [--api-key KEY]` 会请求 `/health` 和 `/api/v1/stats` 并打印结果，便于确认是数据库、配置还是鉴权问题。
 
 ### 备份恢复
 

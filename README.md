@@ -62,6 +62,6 @@ make web
 
 ## 更多
 
-- **完整指南**：[docs/GETTING-STARTED.md](docs/GETTING-STARTED.md)
-- **文档结构**：设计文档 [docs/design-docs](docs/design-docs/)、执行计划 [docs/exec-plans](docs/exec-plans/)，详见 [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md)
-- **扩展功能**（任务、Skills、工作流）：[docs/EXTENDED.md](docs/EXTENDED.md)
+- **完整指南**：[docs/getting-started.md](docs/getting-started.md)
+- **文档结构**：设计文档 [docs/design-docs](docs/design-docs/)、执行计划 [docs/exec-plans](docs/exec-plans/)，详见 [docs/getting-started.md](docs/getting-started.md)
+- **扩展功能**（任务、Skills、工作流）：[docs/extended.md](docs/extended.md)

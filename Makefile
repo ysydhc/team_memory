@@ -4,7 +4,7 @@
 # ============================================================
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp test lint lint-fix harness-check harness-doc-check verify verify-web backup health clean migrate migrate-fts install-knowledge release-9111 hooks-install
+.PHONY: help setup dev web mcp test lint lint-fix lint-js harness-check harness-doc-check harness-plan-check verify verify-web backup health clean migrate migrate-fts install-knowledge release-9111 hooks-install
 
 help:           ## 显示所有可用命令
 	@echo ""
@@ -69,21 +69,29 @@ lint:           ## Ruff 代码检查
 lint-fix:       ## Ruff 代码检查并自动修复
 	ruff check src/ --fix
 
+lint-js:        ## Web 前端 JS 检查：重复声明、语法类问题
+	python scripts/lint_js_duplicates.py
+
 harness-doc-check:  ## Doc gardening：扫描 docs/design-docs、docs/exec-plans 链接与 deprecated 引用
 	python scripts/harness_doc_gardening.py
 
-harness-check:  ## Harness 门禁：import 方向检查 + ruff + harness_ref_verify
+harness-plan-check:  ## Plan 结构检查：扫描 exec-plans 下 wait/executing/completed 主题目录
+	python scripts/harness_plan_structure_check.py
+
+harness-check:  ## Harness 门禁：import 方向检查 + ruff + lint-js + harness_ref_verify
 	python scripts/harness_import_check.py
 	$(MAKE) lint
+	$(MAKE) lint-js
 	./scripts/harness_ref_verify.sh
 
 verify:         ## 标准验收：lint + 全量测试
 	@$(MAKE) lint
 	@$(MAKE) test
 
-verify-web:     ## Web 验收：lint + web测试 + health/stats smoke
+verify-web:     ## Web 验收：lint + lint-js + web测试 + health/stats smoke
 	@$(MAKE) -s release-9111 || true
 	@$(MAKE) lint
+	@$(MAKE) lint-js
 	pytest tests/test_web.py -v
 	@API_KEY=$${TEAM_MEMORY_API_KEY:-dev-key}; \
 	echo "  Starting Web for smoke on :9111 ..."; \
@@ -94,7 +102,7 @@ verify-web:     ## Web 验收：lint + web测试 + health/stats smoke
 	  curl -fsS http://localhost:9111/health >/dev/null 2>&1 && break; \
 	  sleep 1; \
 	done; \
-	TEAM_MEMORY_API_KEY=$$API_KEY python scripts/smoke_web_dashboard.py --api-key $$API_KEY --port 9111
+	TEAM_MEMORY_API_KEY=$$API_KEY python scripts/smoke/smoke_web_dashboard.py --api-key $$API_KEY --port 9111
 
 migrate:        ## 运行数据库迁移
 	alembic upgrade head

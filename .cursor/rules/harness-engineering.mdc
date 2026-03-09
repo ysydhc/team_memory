@@ -1,82 +1,66 @@
 ---
-description: Harness 原则、知识库结构、反馈回路
+description: Harness 原则、知识库、反馈回路、任务流程、分层架构
 globs:
 alwaysApply: true
 ---
 
-# harness-engineering：Harness 工程原则
+# harness-engineering
 
-本规则定义项目协作模式与知识库结构，Agent 执行任务时须遵守。
+## 原则（4 条）
+1. 人类掌舵：目标、优先级、验收由人定；Agent 执行产出
+2. Agent 执行：代码/文档/配置由 Agent 生成，人验收
+3. 尽量不手写：规则、工作流、MCP 驱动
+4. 先规划再执行：复杂任务先出计划，人确认后再做
 
----
+## 每次回复收口
+见 [extraction-state-update](extraction-state-update.mdc)。
 
-## 一、Harness 原则
-
-1. **人类掌舵**：人类负责目标设定、优先级、验收与关键决策；Agent 负责执行与产出。
-2. **Agent 执行**：代码、文档、配置等由 Agent 生成与修改，人类通过指令与验收把关。
-3. **尽量不手写**：优先通过规则、工作流、MCP 工具驱动 Agent 产出，减少人工重复劳动。
-4. **先规划再执行**：复杂任务（多文件、多步骤、涉及架构或迁移）须先输出实现计划，人工确认后再执行；不得在未确认计划的情况下直接动手实现。
-
----
-
-## 二、知识库结构
-
+## 知识库
 | 轨道 | 路径 | 用途 |
 |------|------|------|
-| 设计文档 | [docs/design-docs](../docs/design-docs/) | 架构、方案、设计决策 |
-| 执行计划 | [docs/exec-plans](../docs/exec-plans/) | 计划、任务、归档（completed/archive） |
+| 设计 | [docs/design-docs](../../docs/design-docs/) | 架构、方案、决策 |
+| 计划 | [docs/exec-plans](../../docs/exec-plans/) | 执行计划、归档 |
 
-- 新增设计或方案时，优先放入 `docs/design-docs/`。
-- 执行计划完成后，移入 `docs/exec-plans/completed/` 或 `archive/`。
-- 结构变更时，须同步更新主入口 README、AGENTS.md 等索引（见项目文档维护规则；tm 项目可叠加 tm-doc-maintenance）。
+- 文档与 Plan 规范见 [doc-maintenance-guide](../../docs/design-docs/harness/doc-maintenance-guide.md)、[plan-document-structure](../../docs/design-docs/harness/plan-document-structure.md)；
 
-### 架构约束（Phase 3）
+- Web 改动：`make lint-js` + 对应 pytest
 
-- 分层与依赖方向见 [architecture-layers](../docs/design-docs/architecture-layers.md)。
-- **提交前**须通过 `make harness-check`（import 方向检查 + ruff + harness_ref_verify）；CI 已接入，失败时阻断。
+## 分层架构
+Server/Web → Services → Storage → Models。见 [project-extension](../../docs/design-docs/harness/project-extension.md)、[architecture](../../docs/architecture.md)。
 
-### Phase 4 可观测性
+## 反馈回路
+1. 出错 → 更新 rules 或 docs，记根因
+2. 未追踪改动 → 关键内容写入规则/文档
+3. 可 `tm_save` / `tm_learn` 沉淀
 
-- **日志格式**：统一 JSON 行输出规范见 [logging-format](../docs/design-docs/logging-format.md)；生产/CI 建议 `LOG_FORMAT=json`。
-- **doc-gardening**：定期扫描 `docs/design-docs`、`docs/exec-plans` 下文档，检出断裂链接、deprecated 引用、过时标注；输出 `file:line: rule_id: message` 可被脚本与 Agent 解析；执行 `make harness-doc-check` 或由 CI 独立 job 运行。设计见 [doc-gardening](../docs/design-docs/doc-gardening.md)。
+## Plan 执行
+见 [harness-plan-execution](harness-plan-execution.mdc)。
 
-### Phase 5 收尾（2025-03-07）
+## 任务开始前
+1. 读 `AGENTS.md` 了解结构、命令、规范入口
+2. 读任务相关 docs（MCP → mcpPatterns.md，架构 → architecture.md，代码 → conventions.md）
+3. 确认「任务完成标准」再编码
 
-- **Phase 3 收尾**：architecture-layers 已知待修复已解决；`make harness-check` 零违规。
-- **Harness/tm 分离**：纯 Harness 主路径清晰，tm 叠加处均有「可选」标注；见 [harness-vs-tm-boundary](../docs/design-docs/harness-vs-tm-boundary.md)。
-- **feedback-loop 回溯**：Web 缓存、ruff 检查已移入「已完成」区。
+## 编码中
+- 遵守分层：Server/Web → Services → Storage → Models
+- 新函数必有类型注解；外部输入必 Pydantic 验证
+- 禁止 `print()`，用 `logger`；禁止硬编码密钥
 
----
+## 提交前
+```bash
+make lint
+make test
+make harness-check
+```
+失败须修复通过，不可跳过。
 
-## 三、反馈回路（纯 Harness）
+## 新增 MCP 工具
+1. 在 `docs/mcpPatterns.md` 登记
+2. 在 `server.py` 加 `@mcp.tool` + `@track_usage` 的 `async def tm_xxx(...)`
+3. 在 `tests/test_server.py` 写测试（正常 + 空结果 + 错误）
+4. `make verify` 全绿
 
-1. **出错时沉淀**：执行过程中遇到错误、修复、或可复用的排查路径时，应**更新 `.cursor/rules/` 或 `docs/`**，使同类错误不再发生；根因、修复、规则更新步骤须记录。
-2. **类型勿用 general**：若使用经验库沉淀，经验类型优先使用 bugfix、tech_design、best_practice、incident 等具体类型。
-3. **自包含**：若改动涉及未被 git 追踪的路径，须将关键内容写入规则或文档，不得仅写文件路径。
+详见 [mcp-tools](mcp-tools.mdc)。
 
-> **团队经验库叠加**：主路径为更新 rules/docs；若项目启用 team_memory MCP，可额外调用 `tm_save` 或 `tm_learn` 沉淀到经验库（见 feedback-loop）。
-
----
-
-## 四、Plan 执行与 Subagent 可观测性
-
-1. **Subagent 审计格式**：主 Agent 派发子 Agent 执行 Plan 任务时，须**在回复中**记录，格式：`[subagent] task-<N>: <摘要>`（N 为 Task 编号），便于 observer 与复盘解析；若与 tm_task 关联，可同时 tm_message。
-2. **关键节点监控埋点**：在 Plan 执行以下节点须做简要记录（同上格式或 `[plan] phase-<X> task-<N>: <摘要>`）：
-   - Phase 完成（如 Phase 0 完成、进入 Phase 1）
-   - 子 Agent 派发（task-N: 派发 generalPurpose 执行 xxx）
-   - 子 Agent 完成（task-N: 完成，xxx）
-3. **目的**：便于 observer 复盘、协作方式打分、可复用工作流总结。
-
----
-
-## 五、Plan 执行流程（工作流）
-
-> 完整约定见 [harness-workflow-execution](../docs/design-docs/harness-workflow-execution.md)。
-
-1. **摸底 step-0**：执行 Plan 前须先执行 step-0（摸底或确认 Plan 已加载、execute 已创建）；否则视为流程不规范，**中断并提醒**。
-2. **执行记录**：一个 Plan 对应 `docs/exec-plans/executing/{plan-id}-execute.md`；关键节点后须追加日志。
-3. **回复格式**：关键节点回复须含「Plan 执行记录已更新：xxx，状态：xxx，当前 Task：xxx」。
-4. **Agent 自动找文档**：执行 Plan 前，根据 Plan 内容自动加载 `docs/design-docs/` 下相关文档（如 feedback-loop、human-decision-points、architecture-layers）。
-5. **系统通知**：Plan 开始、人类决策点、中断、完成时调用 `./scripts/notify_plan_status.sh`；细则（4 个时机、best-effort 约定）见 [harness-plan-execution](harness-plan-execution.mdc) 与 [harness-workflow-execution](../docs/design-docs/harness-workflow-execution.md) 6.2。
-6. **流程自检**：step-0 已执行、人类决策点已确认、execute 已更新；不规范时停止执行、写入 execute、回复提示、发通知。
-7. **feedback-loop 回溯**：待完善项固化后，移入 feedback-loop 的「已完成」区。
+## 不确定时
+停下来问，不猜测。
