@@ -207,8 +207,8 @@ class SearchPipeline:
         )
 
         # Stage 1: Cache check (key includes current_user when per-user expansion)
+        # T8: cache_check logged at cache layer (SearchCache.get)
         if self._cache.enabled:
-            stage_begin = time.monotonic()
             cached = await self._cache.get(
                 request.query,
                 request.tags,
@@ -216,16 +216,6 @@ class SearchPipeline:
                 current_user=cache_user,
             )
             if cached is not None:
-                duration_ms = int((time.monotonic() - stage_begin) * 1000)
-                io_logger.log_internal(
-                    "cache_check",
-                    {
-                        "query": (request.query or "")[:50],
-                        "hit": True,
-                        "results": len(cached.results),
-                    },
-                    duration_ms=duration_ms,
-                )
                 cached.cached = True
                 cached.duration_ms = int((time.monotonic() - start) * 1000)
                 return cached
@@ -281,7 +271,7 @@ class SearchPipeline:
             if "workflow" in tags_lower:
                 effective_min_similarity = min(effective_min_similarity, 0.5)
 
-        # Stage 2: Embedding
+        # Stage 2: Embedding (T8: embedding logged at cache layer in get_or_compute_embedding)
         stage_begin = time.monotonic()
         query_embedding = None
         try:
@@ -291,14 +281,6 @@ class SearchPipeline:
         except Exception as e:
             logger.warning("Embedding failed, will use FTS only: %s", e)
         stage_metrics["embedding_ms"] = int((time.monotonic() - stage_begin) * 1000)
-        io_logger.log_internal(
-            "embedding",
-            {
-                "query": (retrieval_query or request.query or "")[:50],
-                "has_embedding": query_embedding is not None,
-            },
-            duration_ms=stage_metrics["embedding_ms"],
-        )
 
         # Stage 3 & 4: Retrieval + RRF Fusion
         stage_begin = time.monotonic()

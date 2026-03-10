@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from team_memory.embedding.base import EmbeddingProvider
 
+from team_memory import io_logger
+
 logger = logging.getLogger("team_memory.cache")
 
 
@@ -312,8 +314,12 @@ class SearchCache:
             return None
         key = self._make_key(query, tags, project, current_user)
         result = await self._result_cache.get(key)
+        query_preview = (query or "")[:50]
         if result is not None:
-            logger.debug("Cache hit for query: %s", query[:50])
+            io_logger.log_internal("cache_check", {"hit": True, "query_preview": query_preview})
+            logger.debug("Cache hit for query: %s", query_preview)
+        else:
+            io_logger.log_internal("cache_check", {"hit": False, "query_preview": query_preview})
         return result
 
     async def put(
@@ -345,19 +351,28 @@ class SearchCache:
             The embedding vector.
         """
         key = hashlib.md5(text.strip().lower().encode()).hexdigest()
+        text_preview = (text or "")[:50]
 
         if self.enabled:
             cached = await self._embedding_cache.get(key)
             if cached is not None:
-                logger.debug("Embedding cache hit for: %s", text[:50])
+                io_logger.log_internal("embedding", {"hit": True, "text_preview": text_preview})
+                logger.debug("Embedding cache hit for: %s", text_preview)
                 return cached
 
         # Compute embedding
+        t0 = time.monotonic()
         embedding = await embedding_provider.encode_single(text)
+        duration_ms = int((time.monotonic() - t0) * 1000)
 
         if self.enabled:
             await self._embedding_cache.put(key, embedding)
 
+        io_logger.log_internal(
+            "embedding",
+            {"hit": False, "text_preview": text_preview, "duration_ms": duration_ms},
+            duration_ms=float(duration_ms),
+        )
         return embedding
 
     async def clear(self) -> None:
