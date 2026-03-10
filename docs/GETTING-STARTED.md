@@ -685,6 +685,14 @@ docker compose up -d
 - 健康检查: `make health` 或 `GET /health`
 - 就绪探针: `GET /ready`
 
+### 可观测性 / 日志
+
+- **I/O 日志**：启用 `TEAM_MEMORY_LOG_IO_ENABLED=1` 可记录 MCP 工具调用、检索管道、服务层等内部节点日志，便于排查与性能分析。粒度由 `LOG_IO_DETAIL`（mcp/service/pipeline/full）控制。
+- **文件输出**：启用 `LOG_FILE_ENABLED` 或 `TEAM_MEMORY_LOGGING__FILE_ENABLED=1`，日志写入 `LOG_FILE_PATH`（默认 `logs/team_memory.log`），支持按大小轮转。
+- **热加载**：运行时通过 `GET /api/v1/config/logging` 查询、`PUT /api/v1/config/logging` 更新日志配置（需认证），无需重启即可生效；持久化需写入 config.yaml。
+
+更多配置项与格式规范见 [日志格式规范](design-docs/logging-format.md)、[日志系统设计](plans/2025-03-10-logging-system-design.md)。
+
 ## 技术栈
 
 | 层面 | 技术选型 |

@@ -207,3 +207,30 @@ class JsonFormatter(logging.Formatter):
 - [x] 开发/生产切换：`LOG_FORMAT=json` 或 config 开关，默认值已写明
 - [x] 敏感字段脱敏约定已写明
 - [x] 格式可被 Python structlog 或 logging 配置实现（含示例）
+
+---
+
+## 八、I/O 与内部节点日志
+
+I/O 日志（io_logger）与文件日志的完整设计、内部节点映射、QueueListener 架构等，见 [日志系统设计文档](../plans/2025-03-10-logging-system-design.md)。
+
+### 8.1 环境变量
+
+| 变量 | 说明 |
+|------|------|
+| `LOG_IO_ENABLED` | 是否启用 I/O 日志（io_logger）；环境变量前缀 `TEAM_MEMORY_LOG_IO_ENABLED` |
+| `LOG_IO_DETAIL` | 日志粒度：`mcp` / `service` / `pipeline` / `full` |
+| `LOG_IO_TRUNCATE` | 单条日志超过该字符数时截断（0=不截断），默认 300 |
+| `LOG_FILE_ENABLED` | 是否启用文件日志 |
+| `LOG_FILE_PATH` | 日志文件路径，默认 `logs/team_memory.log` |
+| `LOG_FILE_MAX_BYTES` | 单文件最大字节数（10M）；DEBUG 下不限制 |
+| `LOG_FILE_BACKUP_COUNT` | 轮转后保留的备份文件数 |
+
+环境变量可通过 `TEAM_MEMORY_LOG_IO_ENABLED`、`TEAM_MEMORY_LOG_FILE_PATH` 等覆盖；或在 config.yaml 的 `logging` 节配置。
+
+### 8.2 热加载 API
+
+运行时可通过 HTTP API 查询或更新日志配置（需认证）：
+
+- **GET** `/api/v1/config/logging` — 获取当前日志配置
+- **PUT** `/api/v1/config/logging` — 更新日志配置（内存生效，重启后需写入 config 才能持久化）
