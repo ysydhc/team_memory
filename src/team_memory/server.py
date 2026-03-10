@@ -2397,6 +2397,7 @@ async def tm_task(
     sediment_experience_id: str | None = None,
     acceptance_criteria: str | None = None,
     acceptance_met: bool | None = None,
+    changed_files: list[str] | None = None,
 ) -> str:
     """Manage personal tasks.
 
@@ -2419,6 +2420,8 @@ async def tm_task(
             task sediment and skip auto-sediment from summary (e.g. from subagent extraction).
         acceptance_criteria: Task-level acceptance criteria (links to workflow step).
         acceptance_met: Whether acceptance has been met (True/False/None).
+        changed_files: When completing, file paths to bind to sediment experience
+            (architecture bindings). Explicit only; Task 7b adds Git auto-parse.
     """
     import uuid as _uuid
     from datetime import datetime as _dt
@@ -2569,6 +2572,29 @@ async def tm_task(
                             sediment_id = str(learned.id)
                             if updated:
                                 updated.sediment_experience_id = learned.id
+                        if sediment_id:
+                            node_keys = [
+                                normalize_node_key(p)
+                                for p in (changed_files or [])
+                                if p
+                            ]
+                            if node_keys:
+                                from team_memory.storage.repository import (
+                                    ExperienceRepository,
+                                )
+
+                                exp_repo = ExperienceRepository(session)
+                                try:
+                                    await exp_repo.replace_architecture_bindings(
+                                        _uuid.UUID(sediment_id),
+                                        node_keys,
+                                        project=task.project,
+                                    )
+                                except Exception as e:
+                                    logger.warning(
+                                        "Failed to write architecture bindings: %s",
+                                        e,
+                                    )
                     except Exception as e:
                         logger.warning("Auto-sediment failed: %s", e)
 

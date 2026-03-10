@@ -261,6 +261,72 @@ class TestTmTaskUpdateGroupCompleted:
         assert data.get("group_completed") is not True
         assert "sediment_experience_id" in data
 
+    @pytest.mark.asyncio
+    async def test_update_completed_with_changed_files_writes_architecture_bindings(
+        self,
+    ):
+        """tm_task update completed + changed_files -> replace_architecture_bindings called."""
+        task_id = str(uuid.uuid4())
+        exp_id = uuid.uuid4()
+        task = _make_task_mock(task_id, group_id=None)
+        task.status = "wait"
+        task.project = "default"
+        updated = _make_task_mock(task_id, group_id=None, status="completed")
+
+        mock_repo = MagicMock()
+        mock_repo.get_task = AsyncMock(return_value=task)
+        mock_repo.update_task = AsyncMock(return_value=updated)
+        mock_repo.group_all_completed_or_cancelled = AsyncMock(return_value=False)
+
+        mock_exp_repo = MagicMock()
+        mock_exp_repo.replace_architecture_bindings = AsyncMock()
+
+        with (
+            patch("team_memory.server.get_session") as mock_get_session,
+            patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"),
+            patch("team_memory.server._resolve_project", return_value="default"),
+            patch("team_memory.server._get_current_user", return_value="alice"),
+            patch(
+                "team_memory.storage.repository.TaskRepository",
+                return_value=mock_repo,
+            ),
+            patch(
+                "team_memory.storage.repository.ExperienceRepository",
+                return_value=mock_exp_repo,
+            ),
+            patch("team_memory.server._get_service") as mock_svc,
+            patch("team_memory.server._create_reflection", AsyncMock(return_value=None)),
+            patch(
+                "team_memory.services.llm_parser.compute_quality_score",
+                return_value=0.8,
+            ),
+        ):
+            mock_svc.return_value.save = AsyncMock(
+                return_value=MagicMock(id=exp_id)
+            )
+            mock_session = MagicMock()
+            mock_session.commit = AsyncMock()
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            tools = await mcp.get_tools()
+            fn = tools["tm_task"].fn
+            result = await fn(
+                action="update",
+                task_id=task_id,
+                status="completed",
+                summary="Done",
+                changed_files=["src/foo.py", "./bar/baz.ts"],
+            )
+
+        data = json.loads(result)
+        assert data.get("error") is not True
+        mock_exp_repo.replace_architecture_bindings.assert_called_once()
+        call_args = mock_exp_repo.replace_architecture_bindings.call_args
+        assert call_args[0][0] == exp_id
+        assert call_args[0][1] == ["src/foo.py", "bar/baz.ts"]  # normalized
+        assert call_args[1]["project"] == "default"
+
 
 # ---------- tm_task list: group_progress when group_id given ----------
 
