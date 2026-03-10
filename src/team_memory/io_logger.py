@@ -38,11 +38,17 @@ _DETAIL_LEVELS: dict[str, str] = {
     "tm_invalidate_search_cache": "mcp",
     # Pipeline layer (SearchPipeline steps)
     "query_expansion": "pipeline",
+    "embedding": "pipeline",
+    "retrieve_fuse": "pipeline",
+    "adaptive_filter": "pipeline",
+    "pageindex_lite": "pipeline",
+    "rerank": "pipeline",
+    "context_trim": "pipeline",
     "vector_search": "pipeline",
     "fts_search": "pipeline",
-    "rerank": "pipeline",
     # Internal steps, only at full
     "cache_check": "full",
+    "cache_store": "full",
 }
 
 _DETAIL_RANK = {"mcp": 0, "service": 1, "pipeline": 2, "full": 3}

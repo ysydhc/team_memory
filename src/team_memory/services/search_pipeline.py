@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from team_memory import io_logger
 from team_memory.config import CacheConfig, PageIndexLiteConfig, RetrievalConfig, SearchConfig
 from team_memory.embedding.base import EmbeddingProvider
 from team_memory.reranker.base import RerankerProvider
@@ -207,6 +208,7 @@ class SearchPipeline:
 
         # Stage 1: Cache check (key includes current_user when per-user expansion)
         if self._cache.enabled:
+            stage_begin = time.monotonic()
             cached = await self._cache.get(
                 request.query,
                 request.tags,
@@ -214,12 +216,22 @@ class SearchPipeline:
                 current_user=cache_user,
             )
             if cached is not None:
-                duration_ms = int((time.monotonic() - start) * 1000)
+                duration_ms = int((time.monotonic() - stage_begin) * 1000)
+                io_logger.log_internal(
+                    "cache_check",
+                    {
+                        "query": (request.query or "")[:50],
+                        "hit": True,
+                        "results": len(cached.results),
+                    },
+                    duration_ms=duration_ms,
+                )
                 cached.cached = True
-                cached.duration_ms = duration_ms
+                cached.duration_ms = int((time.monotonic() - start) * 1000)
                 return cached
 
         # Query expansion (synonyms) for retrieval; per-user merged with global
+        stage_begin = time.monotonic()
         retrieval_query = _expand_query_synonyms(
             request.query, effective_synonyms
         )
@@ -244,6 +256,12 @@ class SearchPipeline:
                 retrieval_query = (
                     request.query.strip() + " " + expanded.strip()
                 ).strip()[:2000]
+        query_expansion_ms = int((time.monotonic() - stage_begin) * 1000)
+        io_logger.log_internal(
+            "query_expansion",
+            {"query": (request.query or "")[:50], "retrieval_query": (retrieval_query or "")[:50]},
+            duration_ms=query_expansion_ms,
+        )
 
         # Lower min_similarity for short queries to improve recall
         short_threshold = getattr(
@@ -273,6 +291,14 @@ class SearchPipeline:
         except Exception as e:
             logger.warning("Embedding failed, will use FTS only: %s", e)
         stage_metrics["embedding_ms"] = int((time.monotonic() - stage_begin) * 1000)
+        io_logger.log_internal(
+            "embedding",
+            {
+                "query": (retrieval_query or request.query or "")[:50],
+                "has_embedding": query_embedding is not None,
+            },
+            duration_ms=stage_metrics["embedding_ms"],
+        )
 
         # Stage 3 & 4: Retrieval + RRF Fusion
         stage_begin = time.monotonic()
@@ -289,6 +315,15 @@ class SearchPipeline:
             effective_min_similarity=effective_min_similarity,
         )
         stage_metrics["retrieve_fuse_ms"] = int((time.monotonic() - stage_begin) * 1000)
+        io_logger.log_internal(
+            "retrieve_fuse",
+            {
+                "query": (retrieval_query or request.query or "")[:50],
+                "mode": mode,
+                "candidates": len(candidates),
+            },
+            duration_ms=stage_metrics["retrieve_fuse_ms"],
+        )
 
         # Exact match boost (query == title or query in title; root + children)
         candidates = self._apply_exact_match_boost(candidates, request.query)
@@ -328,6 +363,15 @@ class SearchPipeline:
                 _had_target,
             )
         stage_metrics["adaptive_filter_ms"] = int((time.monotonic() - stage_begin) * 1000)
+        io_logger.log_internal(
+            "adaptive_filter",
+            {
+                "query": (request.query or "")[:50],
+                "before": before_adaptive,
+                "after": len(candidates),
+            },
+            duration_ms=stage_metrics["adaptive_filter_ms"],
+        )
 
         # Stage 5.5: PageIndex-Lite candidate enhancement
         stage_begin = time.monotonic()
@@ -339,6 +383,15 @@ class SearchPipeline:
                 candidates=candidates,
             )
         stage_metrics["pageindex_lite_ms"] = int((time.monotonic() - stage_begin) * 1000)
+        io_logger.log_internal(
+            "pageindex_lite",
+            {
+                "query": (request.query or "")[:50],
+                "candidates": len(candidates),
+                "tree_hits": tree_hits,
+            },
+            duration_ms=stage_metrics["pageindex_lite_ms"],
+        )
 
         # Stage 6: Reranking
         stage_begin = time.monotonic()
@@ -349,6 +402,15 @@ class SearchPipeline:
             )
             reranked = True
         stage_metrics["rerank_ms"] = int((time.monotonic() - stage_begin) * 1000)
+        io_logger.log_internal(
+            "rerank",
+            {
+                "query": (request.query or "")[:50],
+                "candidates": len(candidates),
+                "reranked": reranked,
+            },
+            duration_ms=stage_metrics["rerank_ms"],
+        )
 
         # Apply confidence labels (always, regardless of reranker)
         candidates = self._label_confidence(candidates)
@@ -357,6 +419,14 @@ class SearchPipeline:
         stage_begin = time.monotonic()
         candidates = await self._trimmer.trim(candidates)
         stage_metrics["trim_ms"] = int((time.monotonic() - stage_begin) * 1000)
+        io_logger.log_internal(
+            "context_trim",
+            {
+                "query": (request.query or "")[:50],
+                "results": len(candidates),
+            },
+            duration_ms=stage_metrics["trim_ms"],
+        )
 
         # Limit final results
         candidates = candidates[: request.max_results]
@@ -388,12 +458,22 @@ class SearchPipeline:
 
         # Stage 8: Cache store (key includes current_user when per-user expansion)
         if self._cache.enabled:
+            stage_begin = time.monotonic()
             await self._cache.put(
                 request.query,
                 request.tags,
                 pipeline_result,
                 project=request.project,
                 current_user=cache_user,
+            )
+            cache_store_ms = int((time.monotonic() - stage_begin) * 1000)
+            io_logger.log_internal(
+                "cache_store",
+                {
+                    "query": (request.query or "")[:50],
+                    "results": len(pipeline_result.results),
+                },
+                duration_ms=cache_store_ms,
             )
 
         return pipeline_result
