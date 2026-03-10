@@ -24,6 +24,7 @@ from team_memory import io_logger
 from team_memory.bootstrap import bootstrap, get_context
 from team_memory.services.context_trimmer import estimate_tokens
 from team_memory.storage.database import get_session
+from team_memory.utils.path_utils import normalize_node_key
 
 logger = logging.getLogger("team_memory")
 
@@ -520,6 +521,7 @@ mcp = FastMCP(
 async def tm_solve(
     problem: str,
     file_path: str | None = None,
+    file_paths: list[str] | None = None,
     language: str | None = None,
     framework: str | None = None,
     tags: list[str] | None = None,
@@ -536,11 +538,17 @@ async def tm_solve(
     Args:
         problem: Description of the problem to solve (required).
         file_path: Current file path for context enrichment.
+        file_paths: File paths for node boost (if file_path given and file_paths
+            is None, treated as file_paths=[file_path]).
         language: Programming language for filtering.
         framework: Framework for filtering.
         tags: Optional tags to filter by.
         max_results: Max solutions to return (default 3, focused).
     """
+    if file_path is not None and file_paths is None:
+        file_paths = [file_path]
+    node_keys = [normalize_node_key(p) for p in (file_paths or []) if p]
+
     service = _get_service()
     db_url = _get_db_url()
     user = await _get_current_user()
@@ -552,9 +560,10 @@ async def tm_solve(
         query_parts.append(f"language: {language}")
     if framework:
         query_parts.append(f"framework: {framework}")
-    if file_path:
+    effective_path = file_path or (file_paths[0] if file_paths else None)
+    if effective_path:
         # Extract meaningful parts from file path
-        p = PurePosixPath(file_path)
+        p = PurePosixPath(effective_path)
         query_parts.append(f"file: {p.name}")
     enhanced_query = " | ".join(query_parts)
 
@@ -584,6 +593,7 @@ async def tm_solve(
         top_k_children=2,
         use_pageindex_lite=use_pageindex_lite,
         project=resolved_project,
+        node_keys=node_keys if node_keys else None,
     )
 
     # Auto-increment use_count + quality score boost on best match
@@ -1010,6 +1020,7 @@ async def tm_extract_artifacts(
 @track_usage
 async def tm_suggest(
     file_path: str | None = None,
+    file_paths: list[str] | None = None,
     language: str | None = None,
     framework: str | None = None,
     error_message: str | None = None,
@@ -1023,19 +1034,26 @@ async def tm_suggest(
 
     Args:
         file_path: Current file path (extracts directory/filename hints).
+        file_paths: File paths for node boost (if file_path given and file_paths
+            is None, treated as file_paths=[file_path]).
         language: Programming language being used.
         framework: Framework being used.
         error_message: Error message encountered (if any).
         max_results: Maximum suggestions to return.
     """
+    if file_path is not None and file_paths is None:
+        file_paths = [file_path]
+    node_keys = [normalize_node_key(p) for p in (file_paths or []) if p]
+
     # Build context-based query
     query_parts = []
 
     if error_message:
         query_parts.append(error_message)
 
-    if file_path:
-        p = PurePosixPath(file_path)
+    effective_path = file_path or (file_paths[0] if file_paths else None)
+    if effective_path:
+        p = PurePosixPath(effective_path)
         # Extract meaningful directory hints
         parts_lower = [part.lower() for part in p.parts]
         context_hints = []
@@ -1089,6 +1107,7 @@ async def tm_suggest(
         top_k_children=1,
         use_pageindex_lite=use_pageindex_lite,
         project=resolved_project,
+        node_keys=node_keys if node_keys else None,
     )
 
     if not results:
@@ -1138,6 +1157,8 @@ async def tm_suggest(
 async def tm_search(
     query: str,
     tags: list[str] | None = None,
+    file_path: str | None = None,
+    file_paths: list[str] | None = None,
     max_results: int = 5,
     min_similarity: float = 0.6,
     grouped: bool = True,
@@ -1158,11 +1179,17 @@ async def tm_search(
     Args:
         query: The search query.
         tags: Optional tags to filter by.
+        file_path: Current file path for node boost (if file_paths is None).
+        file_paths: File paths for node boost.
         max_results: Maximum number of results (or groups when grouped=True).
         min_similarity: Minimum similarity threshold.
         grouped: Return results grouped by parent-child. Default True.
         top_k_children: Max children per group. Default 3.
     """
+    if file_path is not None and file_paths is None:
+        file_paths = [file_path]
+    node_keys = [normalize_node_key(p) for p in (file_paths or []) if p]
+
     service = _get_service()
     user = await _get_current_user()
     resolved_project = _resolve_project(project)
@@ -1178,6 +1205,7 @@ async def tm_search(
         top_k_children=top_k_children,
         use_pageindex_lite=use_pageindex_lite,
         project=resolved_project,
+        node_keys=node_keys if node_keys else None,
     )
 
     if not results:
@@ -1244,6 +1272,7 @@ async def tm_save(
     publish_status: str = "personal",
     skip_dedup: bool = False,
     project: str | None = None,
+    architecture_nodes: list[str] | None = None,
 ) -> str:
     """Quick-save a new experience to the team knowledge base.
 
@@ -1258,11 +1287,17 @@ async def tm_save(
         root_cause: Root cause analysis.
         publish_status: "personal" (default), "published", or "draft".
         skip_dedup: If True, skip duplicate detection check.
+        architecture_nodes: File paths to bind (normalized to node_key).
     """
     service = _get_service()
     db_url = _get_db_url()
     user = await _get_current_user()
     resolved_project = _resolve_project(project)
+    normalized_nodes = (
+        [k for k in (normalize_node_key(p) for p in architecture_nodes) if k]
+        if architecture_nodes
+        else None
+    )
 
     async with get_session(db_url) as session:
         result = await service.save(
@@ -1280,6 +1315,7 @@ async def tm_save(
             publish_status=publish_status,
             skip_dedup=skip_dedup,
             project=resolved_project,
+            architecture_nodes=normalized_nodes,
         )
 
     # Handle dedup detection
@@ -1340,6 +1376,7 @@ async def tm_save_typed(
     publish_status: str = "published",
     skip_dedup: bool = False,
     project: str | None = None,
+    architecture_nodes: list[str] | None = None,
 ) -> str:
     """Save a typed experience with full fields.
 
@@ -1361,11 +1398,17 @@ async def tm_save_typed(
         related_links: List of related links [{type, url, title}].
         publish_status: "published" (default) or "draft".
         skip_dedup: If True, skip duplicate detection check.
+        architecture_nodes: File paths to bind (normalized to node_key).
     """
     service = _get_service()
     db_url = _get_db_url()
     user = await _get_current_user()
     resolved_project = _resolve_project(project)
+    normalized_nodes = (
+        [k for k in (normalize_node_key(p) for p in architecture_nodes) if k]
+        if architecture_nodes
+        else None
+    )
 
     async with get_session(db_url) as session:
         result = await service.save(
@@ -1390,6 +1433,7 @@ async def tm_save_typed(
             git_refs=git_refs,
             related_links=related_links,
             project=resolved_project,
+            architecture_nodes=normalized_nodes,
         )
 
     if result.get("status") == "duplicate_detected":

@@ -235,6 +235,37 @@ class TestTdSearch:
         assert data["results"] == []
         assert "No matching" in data["message"]
 
+    @pytest.mark.asyncio
+    async def test_search_passes_node_keys_from_file_paths(self):
+        """tm_search with file_paths should pass node_keys to search for boost."""
+        with patch("team_memory.server._get_service") as mock_get_service, \
+             patch("team_memory.server.get_session") as mock_get_session, \
+             patch("team_memory.server._get_current_user", return_value="alice"), \
+             patch("team_memory.server._resolve_project", return_value="default"):
+
+            mock_service = MagicMock()
+            mock_service.search = AsyncMock(return_value=[])
+            mock_get_service.return_value = mock_service
+
+            mock_session = AsyncMock()
+            mock_get_session.return_value.__aenter__ = AsyncMock(
+                return_value=mock_session
+            )
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            tools = await mcp.get_tools()
+            search_fn = tools["tm_search"].fn
+            await search_fn(
+                query="test",
+                file_paths=["src/team_memory/server.py", "./tests/conftest.py"],
+            )
+
+        call_kwargs = mock_service.search.call_args.kwargs
+        assert call_kwargs.get("node_keys") == [
+            "src/team_memory/server.py",
+            "tests/conftest.py",
+        ]
+
 
 # ============================================================
 # tm_save (renamed from save_experience)
@@ -280,6 +311,85 @@ class TestTdSave:
         assert "experience" in data
         assert data["experience"]["id"] == exp_id
         assert "saved successfully" in data["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_save_with_architecture_nodes_normalizes_paths(self):
+        """tm_save with architecture_nodes normalizes paths and passes to save."""
+        exp_id = str(uuid.uuid4())
+        mock_result = {
+            "id": exp_id,
+            "title": "Fix",
+            "created_at": "2026-01-01T00:00:00+00:00",
+        }
+        with patch("team_memory.server._get_service") as mock_get_service, \
+             patch("team_memory.server.get_session") as mock_get_session, \
+             patch("team_memory.server._get_current_user", return_value="alice"):
+            mock_service = MagicMock()
+            mock_service.save = AsyncMock(return_value=mock_result)
+            mock_get_service.return_value = mock_service
+            mock_session = AsyncMock()
+            mock_get_session.return_value.__aenter__ = AsyncMock(
+                return_value=mock_session
+            )
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            tools = await mcp.get_tools()
+            save_fn = tools["tm_save"].fn
+            await save_fn(
+                title="Fix",
+                problem="Problem",
+                architecture_nodes=["./src/server.py", "/foo/bar.py"],
+            )
+            kwargs = mock_service.save.call_args.kwargs
+            assert kwargs.get("architecture_nodes") == [
+                "src/server.py",
+                "foo/bar.py",
+            ]
+
+
+# ============================================================
+# tm_save_typed
+# ============================================================
+
+
+class TestTdSaveTyped:
+    """Test tm_save_typed tool function."""
+
+    @pytest.mark.asyncio
+    async def test_save_typed_with_architecture_nodes_normalizes_paths(self):
+        """tm_save_typed with architecture_nodes normalizes paths and passes to save."""
+        exp_id = str(uuid.uuid4())
+        mock_result = {
+            "id": exp_id,
+            "title": "Fix",
+            "experience_type": "bugfix",
+            "created_at": "2026-01-01T00:00:00+00:00",
+        }
+        with patch("team_memory.server._get_service") as mock_get_service, \
+             patch("team_memory.server.get_session") as mock_get_session, \
+             patch("team_memory.server._get_current_user", return_value="alice"):
+            mock_service = MagicMock()
+            mock_service.save = AsyncMock(return_value=mock_result)
+            mock_get_service.return_value = mock_service
+            mock_session = AsyncMock()
+            mock_get_session.return_value.__aenter__ = AsyncMock(
+                return_value=mock_session
+            )
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            tools = await mcp.get_tools()
+            save_fn = tools["tm_save_typed"].fn
+            await save_fn(
+                title="Fix",
+                problem="Problem",
+                experience_type="bugfix",
+                architecture_nodes=["src\\utils\\path.py", "src/foo.py"],
+            )
+            kwargs = mock_service.save.call_args.kwargs
+            assert kwargs.get("architecture_nodes") == [
+                "src/utils/path.py",
+                "src/foo.py",
+            ]
 
 
 # ============================================================
@@ -405,6 +515,64 @@ class TestTdSolve:
         data = json.loads(result)
         assert data["results"] == []
         assert data["suggestion"] == "tm_save"
+
+    @pytest.mark.asyncio
+    async def test_solve_passes_node_keys_from_file_path(self):
+        """tm_solve with file_path should pass node_keys to search for boost."""
+        with patch("team_memory.server._get_service") as mock_get_service, \
+             patch("team_memory.server.get_session") as mock_get_session, \
+             patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
+             patch("team_memory.server._get_current_user", return_value="alice"), \
+             patch("team_memory.server._resolve_project", return_value="default"):
+
+            mock_service = MagicMock()
+            mock_service.search = AsyncMock(return_value=[])
+            mock_get_service.return_value = mock_service
+
+            mock_session = AsyncMock()
+            mock_get_session.return_value.__aenter__ = AsyncMock(
+                return_value=mock_session
+            )
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            tools = await mcp.get_tools()
+            solve_fn = tools["tm_solve"].fn
+            await solve_fn(
+                problem="test",
+                file_path="./src/team_memory/server.py",
+            )
+
+        call_kwargs = mock_service.search.call_args.kwargs
+        assert call_kwargs.get("node_keys") == ["src/team_memory/server.py"]
+
+    @pytest.mark.asyncio
+    async def test_solve_passes_node_keys_from_file_paths(self):
+        """tm_solve with file_paths should pass normalized node_keys to search."""
+        with patch("team_memory.server._get_service") as mock_get_service, \
+             patch("team_memory.server.get_session") as mock_get_session, \
+             patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
+             patch("team_memory.server._get_current_user", return_value="alice"), \
+             patch("team_memory.server._resolve_project", return_value="default"):
+
+            mock_service = MagicMock()
+            mock_service.search = AsyncMock(return_value=[])
+            mock_get_service.return_value = mock_service
+
+            mock_session = AsyncMock()
+            mock_get_session.return_value.__aenter__ = AsyncMock(
+                return_value=mock_session
+            )
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            tools = await mcp.get_tools()
+            solve_fn = tools["tm_solve"].fn
+            await solve_fn(
+                problem="test",
+                file_paths=["src/foo.py", "tests\\bar.py"],
+            )
+
+        call_kwargs = mock_service.search.call_args.kwargs
+        assert call_kwargs.get("node_keys") == ["src/foo.py", "tests/bar.py"]
 
     @pytest.mark.asyncio
     async def test_solve_builds_enhanced_query(self):
@@ -567,6 +735,31 @@ class TestTdSuggest:
         # Should include directory hint + filename + language
         assert "test" in query.lower()
         assert "python" in query.lower()
+
+    @pytest.mark.asyncio
+    async def test_suggest_passes_node_keys_from_file_path(self):
+        """tm_suggest with file_path should pass node_keys to search for boost."""
+        with patch("team_memory.server._get_service") as mock_get_service, \
+             patch("team_memory.server.get_session") as mock_get_session, \
+             patch("team_memory.server._get_current_user", return_value="alice"), \
+             patch("team_memory.server._resolve_project", return_value="default"):
+
+            mock_service = MagicMock()
+            mock_service.search = AsyncMock(return_value=[])
+            mock_get_service.return_value = mock_service
+
+            mock_session = AsyncMock()
+            mock_get_session.return_value.__aenter__ = AsyncMock(
+                return_value=mock_session
+            )
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            tools = await mcp.get_tools()
+            suggest_fn = tools["tm_suggest"].fn
+            await suggest_fn(file_path="src/team_memory/server.py")
+
+        call_kwargs = mock_service.search.call_args.kwargs
+        assert call_kwargs.get("node_keys") == ["src/team_memory/server.py"]
 
     @pytest.mark.asyncio
     async def test_suggest_no_context_error(self):
