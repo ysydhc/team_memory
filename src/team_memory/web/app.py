@@ -1086,6 +1086,34 @@ class MemoryConfigUpdate(BaseModel):
 
 
 # ============================================================
+# Logging Config Routes (hot reload)
+# ============================================================
+class LoggingConfigUpdate(BaseModel):
+    """Update model for logging config hot reload."""
+
+    log_io_enabled: bool | None = None
+    log_io_detail: str | None = None
+    log_io_truncate: int | None = None
+    log_file_enabled: bool | None = None
+    log_file_path: str | None = None
+    log_file_max_bytes: int | None = None
+    log_file_backup_count: int | None = None
+
+
+def _logging_config_dict(cfg) -> dict:
+    """Serialize logging config to JSON-safe dict."""
+    return {
+        "log_io_enabled": cfg.log_io_enabled,
+        "log_io_detail": cfg.log_io_detail,
+        "log_io_truncate": cfg.log_io_truncate,
+        "log_file_enabled": cfg.log_file_enabled,
+        "log_file_path": cfg.log_file_path,
+        "log_file_max_bytes": cfg.log_file_max_bytes,
+        "log_file_backup_count": cfg.log_file_backup_count,
+    }
+
+
+# ============================================================
 # Import / Export Routes (B4)
 # ============================================================
 # ============================================================

@@ -15,6 +15,7 @@ from team_memory.web.app import (
     CacheConfigUpdate,
     DefaultProjectConfigUpdate,
     LifecycleConfigUpdate,
+    LoggingConfigUpdate,
     MemoryConfigUpdate,
     PageIndexLiteConfigUpdate,
     RerankerConfigUpdate,
@@ -22,6 +23,7 @@ from team_memory.web.app import (
     ReviewConfigUpdate,
     SearchConfigUpdate,
     _all_config_dict,
+    _logging_config_dict,
     _pageindex_lite_config_dict,
     _retrieval_config_dict,
     get_current_user,
@@ -381,6 +383,56 @@ async def update_memory_config(
     if _svc():
         _svc()._memory_config = s.memory
     return {"message": "Memory config updated"}
+
+
+@router.get("/config/logging")
+async def get_logging_config(
+    user: User = Depends(require_role("read")),
+):
+    """Get current logging configuration (view or admin)."""
+    from team_memory.config import LoggingConfig
+
+    cfg = _cfg().logging if _cfg() else LoggingConfig()
+    return _logging_config_dict(cfg)
+
+
+@router.put("/config/logging")
+async def update_logging_config(
+    req: LoggingConfigUpdate,
+    user: User = Depends(require_role("admin")),
+):
+    """Update logging configuration in-memory (hot reload, no restart)."""
+    if not _cfg():
+        raise HTTPException(status_code=500, detail="Settings not initialized")
+    if req.log_io_detail is not None and req.log_io_detail not in (
+        "mcp",
+        "service",
+        "pipeline",
+        "full",
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="log_io_detail must be 'mcp', 'service', 'pipeline', or 'full'",
+        )
+    cfg = app_module._settings.logging
+    if req.log_io_enabled is not None:
+        cfg.log_io_enabled = req.log_io_enabled
+    if req.log_io_detail is not None:
+        cfg.log_io_detail = req.log_io_detail
+    if req.log_io_truncate is not None:
+        cfg.log_io_truncate = req.log_io_truncate
+    if req.log_file_enabled is not None:
+        cfg.log_file_enabled = req.log_file_enabled
+    if req.log_file_path is not None:
+        cfg.log_file_path = req.log_file_path
+    if req.log_file_max_bytes is not None:
+        cfg.log_file_max_bytes = req.log_file_max_bytes
+    if req.log_file_backup_count is not None:
+        cfg.log_file_backup_count = req.log_file_backup_count
+    return {
+        "message": "Logging config updated (hot reload)",
+        "config": _logging_config_dict(cfg),
+    }
 
 
 # ── Scoring config ──────────────────────────────────────────────────

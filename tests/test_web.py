@@ -93,6 +93,15 @@ def setup_app():
         provider="gitnexus",
         gitnexus=MagicMock(bridge_url=""),
     )
+    web_module._settings.logging = MagicMock(
+        log_io_enabled=False,
+        log_io_detail="mcp",
+        log_io_truncate=300,
+        log_file_enabled=False,
+        log_file_path="./logs/team_memory.log",
+        log_file_max_bytes=10 * 1024 * 1024,
+        log_file_backup_count=5,
+    )
 
     mock_service = MagicMock()
     mock_service.search = AsyncMock(return_value=[])
@@ -544,6 +553,49 @@ class TestPageIndexConfig:
         )
         assert resp.status_code == 200
         assert resp.json()["config"]["tree_weight"] == 0.2
+
+
+class TestLoggingConfig:
+    """Logging config hot reload API."""
+
+    def test_get_logging_config(self, client, auth_headers):
+        resp = client.get("/api/v1/config/logging", headers=auth_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "log_io_enabled" in data
+        assert "log_io_detail" in data
+        assert data["log_io_detail"] == "mcp"
+        assert data["log_io_truncate"] == 300
+        assert "log_file_path" in data
+
+    def test_get_logging_config_requires_auth(self, client):
+        resp = client.get("/api/v1/config/logging")
+        assert resp.status_code in (401, 403)
+
+    def test_update_logging_config_admin(self, client, auth_headers):
+        resp = client.put(
+            "/api/v1/config/logging",
+            headers=auth_headers,
+            json={
+                "log_io_enabled": True,
+                "log_io_detail": "service",
+                "log_io_truncate": 500,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["message"] == "Logging config updated (hot reload)"
+        assert data["config"]["log_io_enabled"] is True
+        assert data["config"]["log_io_detail"] == "service"
+        assert data["config"]["log_io_truncate"] == 500
+
+    def test_update_logging_config_invalid_detail(self, client, auth_headers):
+        resp = client.put(
+            "/api/v1/config/logging",
+            headers=auth_headers,
+            json={"log_io_detail": "invalid"},
+        )
+        assert resp.status_code == 422
 
 
 class TestArchitecture:
