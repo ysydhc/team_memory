@@ -4,7 +4,7 @@
 # ============================================================
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp test lint lint-fix lint-js harness-check harness-doc-check harness-plan-check verify verify-web backup health clean migrate migrate-fts install-knowledge release-9111 hooks-install
+.PHONY: help setup dev web mcp test lint lint-fix lint-js harness-check harness-doc-check harness-plan-check verify verify-web backup health clean migrate migrate-fts install-knowledge release-9111 hooks-install gitnexus-restart
 
 help:           ## 显示所有可用命令
 	@echo ""
@@ -13,6 +13,12 @@ help:           ## 显示所有可用命令
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 	  awk 'BEGIN {FS = ":.*?## "}; {printf "  make %-18s %s\n", $$1, $$2}'
 	@echo ""
+
+gitnexus-restart: ## 重启 GitNexus Bridge（释放 9321 后启动，后台运行）
+	@lsof -i :9321 -t 2>/dev/null | xargs kill -9 2>/dev/null || true
+	@sleep 1
+	@nohup node tools/gitnexus-bridge/server.js > /tmp/gitnexus-bridge.log 2>&1 &
+	@echo "  ✔ GitNexus Bridge restarted (port 9321, log: /tmp/gitnexus-bridge.log)"
 
 release-9111:   ## 释放 9111 端口（删容器+杀进程+等待）；供 dev/web 内部使用，也可单独执行
 	@docker compose rm -fs team-memory-web 2>/dev/null || true

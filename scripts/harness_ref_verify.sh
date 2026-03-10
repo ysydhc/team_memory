@@ -8,11 +8,11 @@ cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 FAIL=0
 
-# 1. docs/exec-plans/wait/code-arch-viz-gitnexus/*.md (provider-interface 等)
-if [ -d "$ROOT/docs/exec-plans/wait/code-arch-viz-gitnexus" ] && [ -f "$ROOT/docs/exec-plans/wait/code-arch-viz-gitnexus/code-arch-viz-provider-interface.md" ]; then
-  echo "OK: docs/exec-plans/wait/code-arch-viz-gitnexus/*.md"
+# 1. docs/exec-plans/completed/code-arch-viz-gitnexus/*.md (provider-interface 等)
+if [ -d "$ROOT/docs/exec-plans/completed/code-arch-viz-gitnexus" ] && [ -f "$ROOT/docs/exec-plans/completed/code-arch-viz-gitnexus/code-arch-viz-provider-interface.md" ]; then
+  echo "OK: docs/exec-plans/completed/code-arch-viz-gitnexus/*.md"
 else
-  echo "FAIL: docs/exec-plans/wait/code-arch-viz-gitnexus/ - path missing or provider-interface not found"
+  echo "FAIL: docs/exec-plans/completed/code-arch-viz-gitnexus/ - path missing or provider-interface not found"
   FAIL=1
 fi
 
@@ -25,7 +25,7 @@ else
 fi
 
 # 3. schemas_architecture.py docstring -> docs/exec-plans/ (provider-interface 契约)
-if grep -q "docs/exec-plans/wait/code-arch-viz-gitnexus" "$ROOT/src/team_memory/schemas_architecture.py" 2>/dev/null; then
+if grep -q "docs/exec-plans/.*code-arch-viz-gitnexus" "$ROOT/src/team_memory/schemas_architecture.py" 2>/dev/null; then
   echo "OK: schemas_architecture.py docstring -> docs/exec-plans/"
 else
   echo "FAIL: schemas_architecture.py docstring does not point to provider-interface"
@@ -33,7 +33,7 @@ else
 fi
 
 # 4. base.py docstring -> docs/exec-plans/ (provider-interface 契约)
-if grep -q "docs/exec-plans/wait/code-arch-viz-gitnexus" "$ROOT/src/team_memory/architecture/base.py" 2>/dev/null; then
+if grep -q "docs/exec-plans/.*code-arch-viz-gitnexus" "$ROOT/src/team_memory/architecture/base.py" 2>/dev/null; then
   echo "OK: base.py docstring -> docs/exec-plans/"
 else
   echo "FAIL: base.py docstring does not point to provider-interface"
