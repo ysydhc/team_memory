@@ -317,6 +317,8 @@ class LoggingConfig(BaseModel):
     log_io_detail: str = "mcp"  # Granularity: mcp / service / pipeline / full
     log_io_truncate: int = 300  # Truncate single log entry beyond this (0 = no truncate)
     log_file_enabled: bool = False  # Enable file logging
+    log_file_path: str = "./logs/team_memory.log"
+    log_file_backup_count: int = 5
     log_file_max_bytes: int = 10 * 1024 * 1024  # Max bytes per file (10M)
 
 

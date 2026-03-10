@@ -11,8 +11,10 @@ import asyncio
 import json
 import logging
 import os
+import queue
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from logging.handlers import QueueHandler, QueueListener, TimedRotatingFileHandler
 from pathlib import Path
 
 # Load .env into os.environ so TEAM_MEMORY_API_KEY etc. are available for auth and config
@@ -95,8 +97,23 @@ class _JsonFormatter(logging.Formatter):
         return json.dumps(log_record, ensure_ascii=False)
 
 
-def _configure_logging(settings: Settings) -> None:
-    """Configure team_memory loggers per config.LOG_FORMAT (L3 only)."""
+class NonBlockingQueueHandler(QueueHandler):
+    """QueueHandler that uses put(block=False); on queue.Full logs a warning and drops."""
+
+    def enqueue(self, record: logging.LogRecord) -> None:
+        try:
+            self.queue.put(record, block=False)
+        except queue.Full:
+            logger = logging.getLogger("team_memory.bootstrap")
+            logger.warning("Log queue full, dropping record: %s", record.getMessage())
+
+
+def _configure_logging(settings: Settings) -> QueueListener | None:
+    """Configure team_memory loggers per config.LOG_FORMAT (L3 only).
+
+    When log_file_enabled, adds QueueHandler + QueueListener + TimedRotatingFileHandler
+    for async file logging. Returns the QueueListener for lifecycle management.
+    """
     use_json = getattr(settings, "log_format", "human") == "json"
     root = logging.getLogger("team_memory")
     root.setLevel(logging.INFO)
@@ -112,11 +129,37 @@ def _configure_logging(settings: Settings) -> None:
             logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
         )
     root.addHandler(handler)
+
+    log_listener: QueueListener | None = None
+    if getattr(settings, "logging", None) and getattr(
+        settings.logging, "log_file_enabled", False
+    ):
+        log_cfg = settings.logging
+        log_path = getattr(log_cfg, "log_file_path", "./logs/team_memory.log")
+        backup_count = getattr(log_cfg, "log_file_backup_count", 5)
+        Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+        log_queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=10000)
+        file_handler = TimedRotatingFileHandler(
+            log_path, when="midnight", backupCount=backup_count
+        )
+        file_handler.setLevel(logging.INFO)
+        if use_json:
+            file_handler.setFormatter(_JsonFormatter())
+        else:
+            file_handler.setFormatter(
+                logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
+            )
+        log_listener = QueueListener(log_queue, file_handler, respect_handler_level=True)
+        log_listener.start()
+        root.addHandler(NonBlockingQueueHandler(log_queue))
+
     # request_logger: remove app.py hardcoded handler, inherit from team_memory
     req_log = logging.getLogger("team_memory.web.request")
     for h in req_log.handlers[:]:
         req_log.removeHandler(h)
     req_log.propagate = True
+
+    return log_listener
 
 
 @dataclass
@@ -133,6 +176,7 @@ class AppContext:
     service: ExperienceService
     embedding_queue: EmbeddingQueue | None = None
     webhook_service: WebhookService | None = None
+    _log_listener: QueueListener | None = None
     _stale_scanner_task: asyncio.Task | None = None
 
 
@@ -262,7 +306,7 @@ def bootstrap(
         return _instance
 
     settings = load_settings(config_path)
-    _configure_logging(settings)
+    log_listener = _configure_logging(settings)
     db_url = _resolve_db_url(settings)
     embedding = _create_embedding_provider(settings)
     auth = _configure_auth(settings)
@@ -355,7 +399,12 @@ def bootstrap(
         service=service,
         embedding_queue=embedding_queue,
         webhook_service=webhook_service,
+        _log_listener=log_listener,
     )
+
+    from team_memory import io_logger
+
+    io_logger._settings_provider = lambda: get_context().settings
 
     logger.info(
         "AppContext created (background=%s, embedding=%s)",
