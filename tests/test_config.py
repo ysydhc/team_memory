@@ -154,3 +154,16 @@ class TestLoadSettings:
 
         settings = load_settings(config_file)
         assert settings.web.port == 9555
+
+
+def test_logging_config_defaults():
+    from team_memory.config import load_settings
+
+    s = load_settings()
+    assert hasattr(s, "logging")
+    lg = s.logging
+    assert lg.log_io_enabled is False
+    assert lg.log_io_detail == "mcp"
+    assert lg.log_io_truncate == 300
+    assert lg.log_file_enabled is False
+    assert lg.log_file_max_bytes == 10 * 1024 * 1024

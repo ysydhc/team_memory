@@ -307,6 +307,19 @@ class MCPConfig(BaseModel):
     include_code_snippets: bool = True  # Whether to include code_snippets in results
 
 
+class LoggingConfig(BaseModel):
+    """Logging configuration for io_logger and file logging.
+
+    See docs/plans/2025-03-10-logging-system-design.md for design details.
+    """
+
+    log_io_enabled: bool = False  # Enable I/O logging (io_logger)
+    log_io_detail: str = "mcp"  # Granularity: mcp / service / pipeline / full
+    log_io_truncate: int = 300  # Truncate single log entry beyond this (0 = no truncate)
+    log_file_enabled: bool = False  # Enable file logging
+    log_file_max_bytes: int = 10 * 1024 * 1024  # Max bytes per file (10M)
+
+
 # ====================== Schema Configuration ======================
 
 
@@ -437,6 +450,7 @@ class Settings(BaseSettings):
     review: ReviewConfig = Field(default_factory=ReviewConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     installable_catalog: InstallableCatalogConfig = Field(
         default_factory=InstallableCatalogConfig
     )
