@@ -18,28 +18,60 @@ def _reset_settings() -> None:
     reset_settings()
 
 
-def test_trim_log_files_to_max_bytes_deletes_oldest(tmp_path: Path) -> None:
-    """_trim_log_files_to_max_bytes deletes oldest files until total <= max_bytes."""
-    from team_memory.bootstrap import _trim_log_files_to_max_bytes
-
-    (tmp_path / "a.log").write_bytes(b"x" * 100)
-    (tmp_path / "b.log").write_bytes(b"x" * 100)
-    (tmp_path / "c.log").write_bytes(b"x" * 100)
-    _trim_log_files_to_max_bytes(tmp_path, max_bytes=150)
-    remaining = sorted(tmp_path.glob("*.log"))
-    assert len(remaining) == 1
-    assert remaining[0].name == "c.log"
-
-
-def test_trim_log_files_skips_when_debug(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """_trim_log_files_to_max_bytes skips when TEAM_MEMORY_DEBUG=1."""
-    from team_memory.bootstrap import _trim_log_files_to_max_bytes
+def test_is_debug_mode_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """_is_debug_mode returns True when TEAM_MEMORY_DEBUG=1."""
+    from team_memory.bootstrap import _is_debug_mode
 
     monkeypatch.setenv("TEAM_MEMORY_DEBUG", "1")
-    (tmp_path / "a.log").write_bytes(b"x" * 100)
-    (tmp_path / "b.log").write_bytes(b"x" * 100)
-    _trim_log_files_to_max_bytes(tmp_path, max_bytes=50)
-    assert len(list(tmp_path.glob("*.log"))) == 2
+    assert _is_debug_mode() is True
+    monkeypatch.setenv("TEAM_MEMORY_DEBUG", "0")
+    assert _is_debug_mode() is False
+
+
+def test_is_debug_mode_logger_level(tmp_path: Path) -> None:
+    """_is_debug_mode returns True when team_memory logger effective level is DEBUG."""
+    from team_memory.bootstrap import _is_debug_mode
+
+    root = logging.getLogger("team_memory")
+    root.setLevel(logging.DEBUG)
+    try:
+        assert _is_debug_mode() is True
+    finally:
+        root.setLevel(logging.INFO)
+
+
+def test_configure_logging_uses_rotating_handler_when_not_debug(tmp_path: Path) -> None:
+    """When not DEBUG, _configure_logging uses RotatingFileHandler."""
+    from logging.handlers import RotatingFileHandler
+
+    from team_memory.bootstrap import _configure_logging
+
+    settings = load_settings()
+    settings.logging.log_file_enabled = True
+    settings.logging.log_file_path = str(tmp_path / "app.log")
+    listener = _configure_logging(settings)
+    assert listener is not None
+    assert len(listener.handlers) == 1
+    assert isinstance(listener.handlers[0], RotatingFileHandler)
+
+
+def test_configure_logging_uses_file_handler_when_debug(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When TEAM_MEMORY_DEBUG=1, _configure_logging uses FileHandler (no size limit)."""
+    from logging.handlers import RotatingFileHandler
+
+    from team_memory.bootstrap import _configure_logging
+
+    monkeypatch.setenv("TEAM_MEMORY_DEBUG", "1")
+    settings = load_settings()
+    settings.logging.log_file_enabled = True
+    settings.logging.log_file_path = str(tmp_path / "app.log")
+    listener = _configure_logging(settings)
+    assert listener is not None
+    assert len(listener.handlers) == 1
+    assert isinstance(listener.handlers[0], logging.FileHandler)
+    assert not isinstance(listener.handlers[0], RotatingFileHandler)
 
 
 @pytest.mark.asyncio

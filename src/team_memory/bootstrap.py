@@ -14,7 +14,7 @@ import os
 import queue
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from logging.handlers import QueueHandler, QueueListener, TimedRotatingFileHandler
+from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 from pathlib import Path
 
 # Load .env into os.environ so TEAM_MEMORY_API_KEY etc. are available for auth and config
@@ -97,54 +97,16 @@ class _JsonFormatter(logging.Formatter):
         return json.dumps(log_record, ensure_ascii=False)
 
 
-def _trim_log_files_to_max_bytes(log_dir: Path, max_bytes: int) -> None:
-    """Trim log files in log_dir so total size <= max_bytes.
+def _is_debug_mode() -> bool:
+    """True if TEAM_MEMORY_DEBUG=1 or team_memory logger effective level is DEBUG.
 
-    Lists *.log and *.log.* files, sorts by mtime (oldest first), deletes from
-    oldest until total size <= max_bytes. Skips entirely if TEAM_MEMORY_DEBUG=1.
+    Per docs/plans/2025-03-10-logging-system-design.md: when debug, LOG_FILE_MAX_BYTES
+    does not apply (no size limit for local debugging).
     """
-    if os.environ.get("TEAM_MEMORY_DEBUG") == "1":
-        return
-    log_files: list[Path] = []
-    for p in log_dir.iterdir():
-        if not p.is_file():
-            continue
-        name = p.name
-        if name.endswith(".log") or ".log." in name:
-            log_files.append(p)
-    if not log_files:
-        return
-    log_files.sort(key=lambda p: p.stat().st_mtime)
-    total = sum(p.stat().st_size for p in log_files)
-    for p in log_files:
-        if total <= max_bytes:
-            break
-        try:
-            size = p.stat().st_size
-            p.unlink()
-            total -= size
-        except OSError:
-            pass
-
-
-class _SizeLimitedTimedRotatingFileHandler(TimedRotatingFileHandler):
-    """TimedRotatingFileHandler that trims total log size after each rollover."""
-
-    def __init__(
-        self,
-        filename: str,
-        when: str = "midnight",
-        backup_count: int = 5,
-        max_bytes: int = 10 * 1024 * 1024,
-        **kwargs: object,
-    ) -> None:
-        super().__init__(filename, when=when, backupCount=backup_count, **kwargs)
-        self._trim_max_bytes = max_bytes
-
-    def doRollover(self) -> None:  # noqa: N802
-        super().doRollover()
-        log_dir = Path(self.baseFilename).parent
-        _trim_log_files_to_max_bytes(log_dir, self._trim_max_bytes)
+    if os.environ.get("TEAM_MEMORY_DEBUG", "0") == "1":
+        return True
+    tm_logger = logging.getLogger("team_memory")
+    return tm_logger.getEffectiveLevel() == logging.DEBUG
 
 
 class NonBlockingQueueHandler(QueueHandler):
@@ -155,15 +117,17 @@ class NonBlockingQueueHandler(QueueHandler):
             self.queue.put(record, block=False)
         except queue.Full:
             logger = logging.getLogger("team_memory.bootstrap")
-            logger.warning("Log queue full, dropping record: %s", record.getMessage())
+            logger.warning("io_log queue full, dropping log record")
 
 
 def _configure_logging(settings: Settings) -> QueueListener | None:
     """Configure team_memory loggers per config.LOG_FORMAT (L3 only).
 
-    When log_file_enabled, adds QueueHandler + QueueListener + TimedRotatingFileHandler
-    for async file logging. Returns the QueueListener for lifecycle management.
+    When log_file_enabled, adds QueueHandler + QueueListener + FileHandler/RotatingFileHandler
+    for async file logging. Uses RotatingFileHandler (size-based) unless DEBUG mode.
+    Returns the QueueListener for lifecycle management.
     """
+    is_debug = _is_debug_mode()  # Check before modifying logger level
     use_json = getattr(settings, "log_format", "human") == "json"
     root = logging.getLogger("team_memory")
     root.setLevel(logging.INFO)
@@ -185,17 +149,20 @@ def _configure_logging(settings: Settings) -> QueueListener | None:
         settings.logging, "log_file_enabled", False
     ):
         log_cfg = settings.logging
-        log_path = getattr(log_cfg, "log_file_path", "./logs/team_memory.log")
+        log_path = getattr(log_cfg, "log_file_path", "logs/team_memory.log")
         backup_count = getattr(log_cfg, "log_file_backup_count", 5)
         max_bytes = getattr(log_cfg, "log_file_max_bytes", 10 * 1024 * 1024)
         Path(log_path).parent.mkdir(parents=True, exist_ok=True)
         log_queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=10000)
-        file_handler = _SizeLimitedTimedRotatingFileHandler(
-            log_path,
-            when="midnight",
-            backup_count=backup_count,
-            max_bytes=max_bytes,
-        )
+        if is_debug:
+            file_handler = logging.FileHandler(log_path, encoding="utf-8")
+        else:
+            file_handler = RotatingFileHandler(
+                log_path,
+                maxBytes=max_bytes,
+                backupCount=backup_count,
+                encoding="utf-8",
+            )
         file_handler.setLevel(logging.INFO)
         if use_json:
             file_handler.setFormatter(_JsonFormatter())
