@@ -164,6 +164,49 @@ TEAM_MEMORY_API_KEY=0D5007FEF6A90F5A99ED521327C9A698 \
 .venv/bin/python -m team_memory.web.app
 ```
 
+## 10. 架构页显示「未配置或不可用」
+
+**症状**：Web 主导航「架构」进入后提示未配置或不可用。
+
+```bash
+# 1. 检查 config.yaml 中 architecture 配置
+grep -A5 "architecture:" config.yaml
+# 需有 provider: gitnexus 且 bridge_url 非空
+
+# 2. 检查 Bridge 是否启动（默认 9321）
+curl -s http://127.0.0.1:9321/context
+
+# 3. 若 Bridge 未启动，从项目根目录执行
+node tools/gitnexus-bridge/server.js
+
+# 4. 确认目标仓库已索引（在目标仓库根目录）
+npx gitnexus analyze
+
+# 5. 验证 TM 架构 API
+curl -s http://localhost:9111/api/v1/architecture/context \
+  -H "Authorization: Bearer 你的API_KEY"
+```
+
+## 11. 架构搜索返回空结果（200 OK 但无节点）
+
+**症状**：架构页「图」Tab 搜索返回 200 OK，但结果列表为空或显示「未找到匹配节点」。
+
+**原因**：Bridge 未启动或不可达时，Provider 会返回空；现已改为返回 503，前端会提示「架构服务未配置」。
+
+**排查**：
+
+```bash
+# 1. 确认 Bridge 已启动（默认 9321）
+curl -s "http://127.0.0.1:9321/search?q=OllamaLLMRerankerProvider&scope=global"
+# 应返回 {"nodes":[...]}，若 connection refused 则 Bridge 未启动
+
+# 2. 启动 Bridge（从项目根目录）
+node tools/gitnexus-bridge/server.js
+
+# 3. 确认 GitNexus 已索引
+npx gitnexus analyze
+```
+
 ## 速查：服务状态一览
 
 ```bash
@@ -175,4 +218,6 @@ echo ""
 echo "=== Port 9111 (Web) ===" && lsof -i :9111 2>/dev/null || echo "Not in use"
 echo ""
 echo "=== Ollama ===" && ollama list 2>/dev/null || echo "Ollama not running"
+echo ""
+echo "=== Port 9321 (GitNexus Bridge) ===" && curl -s http://127.0.0.1:9321/context >/dev/null 2>&1 && echo "Bridge running" || echo "Bridge not running"
 ```

@@ -495,9 +495,23 @@ AI 的行为（主动推荐）：
 | 草稿箱 | 查看 AI 自动提取的待审核草稿 |
 | 审核队列 | 审核团队成员提交的经验 |
 | 去重检测 | 发现和合并相似经验 |
+| **架构** | 代码架构可视化：概览、集群、依赖图、影响面；经验可挂载到架构节点 |
 | 系统设置 | 检索参数、搜索配置、缓存、Webhook、Schema 配置 |
 
 任务 Kanban、归档管理、使用统计等扩展页面见 [extended.md](extended.md)。
+
+### 架构可视化
+
+在主导航点击「架构」可预览项目代码架构（概览、集群、依赖图、影响面），无需跳转外部工具。架构数据由 **GitNexus** 提供，通过 Bridge 服务接入。
+
+**功能概览**：
+- **概览**：symbols、relationships、processes 数量及索引是否过期
+- **集群**：按模块/目录分组的代码集群列表及成员
+- **依赖图**：节点与边的可视化，支持按集群筛选、按文件聚焦
+- **影响面**：选中节点后查看上游/下游依赖
+- **经验挂载**：经验可挂载到架构节点；节点侧栏可查看关联经验
+
+**配置与启动**：见 [架构可视化配置](#架构可视化配置)。
 
 创建经验支持三种模式：
 - **手动填写**：逐字段填写标题、问题、方案
@@ -555,6 +569,45 @@ embedding:
 ```
 
 支持 Ollama（默认，本地运行，无需 API Key）、OpenAI API、本地 sentence-transformers 模型、generic 自定义端点。
+
+### 架构可视化配置
+
+架构页展示项目代码架构（概览、集群、依赖图、影响面），数据由 GitNexus 通过 Bridge 提供。
+
+**1. 配置 `config.yaml`**
+
+```yaml
+architecture:
+  provider: gitnexus  # gitnexus | builtin
+  gitnexus:
+    bridge_url: "http://127.0.0.1:9321"  # 空则架构不可用
+```
+
+**2. 启动 GitNexus Bridge**
+
+在项目根目录（或含 `.gitnexus/meta.json` 的目录）执行：
+
+```bash
+# 从 team_doc 根目录
+node tools/gitnexus-bridge/server.js
+
+# 或从 bridge 目录
+cd tools/gitnexus-bridge && npm start
+```
+
+环境变量：`PORT`（默认 9321）、`GITNEXUS_REPO_PATH`（默认自动检测）。
+
+**3. 运行 GitNexus 索引**
+
+首次使用或代码变更后，在**目标仓库**根目录执行：
+
+```bash
+npx gitnexus analyze
+```
+
+**4. 架构页入口**
+
+启动 TM Web 后，主导航点击「架构」。有 Bridge 且索引就绪时展示概览、集群、图、影响面；无 Bridge 或 `bridge_url` 为空时显示「未配置或不可用」。
 
 ## 运维
 

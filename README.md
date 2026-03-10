@@ -60,6 +60,10 @@ make web
 
 本机直连数据库时需要配 `TEAM_MEMORY_DB_URL`；从源码跑且项目里已有 config 的，可以不配。
 
+## 架构可视化（可选）
+
+在 Web 主导航点击「架构」可预览项目代码结构（概览、集群、依赖图、影响面）。需配置 `architecture.gitnexus.bridge_url` 并启动 `tools/gitnexus-bridge/`，详见 [完整指南 - 架构可视化配置](docs/getting-started.md#架构可视化配置)。
+
 ## 更多
 
 - **完整指南**：[docs/getting-started.md](docs/getting-started.md)

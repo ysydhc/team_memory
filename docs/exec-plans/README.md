@@ -14,23 +14,6 @@ Plan 生命周期（wait / executing / completed）详见 [doc-maintenance-guide
 
 ## wait/
 
-### code-arch-viz-gitnexus/
-
-GitNexus 配合代码架构可视化（1-research/2-plan 规范结构）。
-
-| 文档 | 说明 |
-|------|------|
-| [1-research/brief.md](wait/code-arch-viz-gitnexus/1-research/brief.md) | 调研任务书、问题定义、三视角分工 |
-| [1-research/assessment.md](wait/code-arch-viz-gitnexus/1-research/assessment.md) | 评估（范围、风险、技术选型、数据映射） |
-| [1-research/options.md](wait/code-arch-viz-gitnexus/1-research/options.md) | 方案对比与选型（均衡方案、GitNexus 接入） |
-| [2-plan/plan.md](wait/code-arch-viz-gitnexus/2-plan/plan.md) | 实施计划（任务列表、验收标准） |
-| [2-plan/execute.md](wait/code-arch-viz-gitnexus/2-plan/execute.md) | 执行记录（待执行） |
-| [code-arch-viz-operations.md](wait/code-arch-viz-gitnexus/code-arch-viz-operations.md) | 操作步骤（参考） |
-| [code-arch-viz-provider-interface.md](wait/code-arch-viz-gitnexus/code-arch-viz-provider-interface.md) | Provider 接口契约（参考） |
-| [code-arch-viz-gitnexus-integration.md](wait/code-arch-viz-gitnexus/code-arch-viz-gitnexus-integration.md) | GitNexus 集成方案（参考） |
-| [code-arch-viz-gitnexus-data-mapping.md](wait/code-arch-viz-gitnexus/code-arch-viz-gitnexus-data-mapping.md) | 数据映射（参考） |
-| [code-arch-viz-balanced-solution.md](wait/code-arch-viz-gitnexus/code-arch-viz-balanced-solution.md) | 均衡方案（参考） |
-
 ### debug-migration/
 
 .debug 文档迁移。
@@ -50,6 +33,29 @@ GitNexus 配合代码架构可视化（1-research/2-plan 规范结构）。
 ---
 
 ## completed/
+
+### arch-node-search/
+
+架构节点搜索功能（图 Tab 搜索、子串匹配、结果列表、图中高亮、范围切换）。
+
+| 文档 | 说明 |
+|------|------|
+| [2-plan/plan.md](completed/arch-node-search/2-plan/plan.md) | 实施计划（来源 .cursor/plans） |
+| [2-plan/execute.md](completed/arch-node-search/2-plan/execute.md) | 执行记录 |
+| [3-retro/retro.md](completed/arch-node-search/3-retro/retro.md) | 项目复盘 |
+
+### code-arch-viz-gitnexus/
+
+GitNexus 配合代码架构可视化（1-research/2-plan/3-retro 规范结构）。
+
+| 文档 | 说明 |
+|------|------|
+| [1-research/brief.md](completed/code-arch-viz-gitnexus/1-research/brief.md) | 调研任务书、问题定义、三视角分工 |
+| [1-research/assessment.md](completed/code-arch-viz-gitnexus/1-research/assessment.md) | 评估（范围、风险、技术选型、数据映射） |
+| [1-research/options.md](completed/code-arch-viz-gitnexus/1-research/options.md) | 方案对比与选型（均衡方案、GitNexus 接入） |
+| [2-plan/plan.md](completed/code-arch-viz-gitnexus/2-plan/plan.md) | 实施计划（任务列表、验收标准） |
+| [2-plan/execute.md](completed/code-arch-viz-gitnexus/2-plan/execute.md) | 执行记录 |
+| [3-retro/retro.md](completed/code-arch-viz-gitnexus/3-retro/retro.md) | 项目复盘 |
 
 ### harness-phase/
 
