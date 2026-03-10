@@ -132,6 +132,43 @@ class TestExperienceServiceUnit:
         mock_repo_instance.search_by_vector.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_search_with_node_keys_boosts_bound_experiences(self, service):
+        """When node_keys is provided, experiences bound to those nodes get +0.15 score boost."""
+        bound_id = "exp-bound-123"
+        unbound_id = "exp-unbound-456"
+        mock_session = AsyncMock()
+        mock_repo_instance = MagicMock()
+        mock_repo_instance.search_by_vector = AsyncMock(return_value=[
+            {"id": unbound_id, "title": "Unbound", "similarity": 0.90},
+            {"id": bound_id, "title": "Bound to node", "similarity": 0.85},
+        ])
+        mock_repo_instance.list_experiences_by_nodes = AsyncMock(return_value=[
+            {"experience_id": bound_id, "title": "Bound", "node": "arch:service:a"},
+        ])
+        mock_repo_instance.log_query = AsyncMock()
+        mock_repo_instance.get_related_experience_ids = AsyncMock(return_value=[])
+
+        @asynccontextmanager
+        async def mock_get_session(_db_url):
+            yield mock_session
+
+        with patch("team_memory.storage.database.get_session", mock_get_session), \
+             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
+            mock_repo.return_value = mock_repo_instance
+            results = await service.search(
+                query="test query",
+                max_results=5,
+                node_keys=["arch:service:a"],
+            )
+
+        assert len(results) == 2
+        bound_result = next(r for r in results if r["id"] == bound_id)
+        unbound_result = next(r for r in results if r["id"] == unbound_id)
+        assert bound_result["score"] == 0.85 + 0.15
+        assert unbound_result.get("score", unbound_result.get("similarity")) == 0.90
+        assert results[0]["id"] == bound_id
+
+    @pytest.mark.asyncio
     async def test_feedback_success(self, service):
         """Test successful feedback submission."""
         mock_session = AsyncMock()

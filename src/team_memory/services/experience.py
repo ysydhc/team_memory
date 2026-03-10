@@ -133,6 +133,26 @@ class ExperienceService:
         """Authenticate a user."""
         return await self._auth.authenticate(credentials)
 
+    async def _apply_node_keys_boost(
+        self,
+        results: list[dict],
+        node_keys: list[str],
+        project: str | None,
+        user_name: str,
+        repo: ExperienceRepository,
+    ) -> None:
+        """Boost score by 0.15 for experiences bound to any of the given nodes."""
+        rows = await repo.list_experiences_by_nodes(
+            node_keys, project=project, current_user=user_name
+        )
+        bound_ids = {r["experience_id"] for r in rows}
+        for r in results:
+            eid = r.get("group_id") or r.get("id")
+            if eid and str(eid) in bound_ids:
+                base = r.get("score", r.get("similarity", 0))
+                r["score"] = base + 0.15
+        results.sort(key=lambda x: x.get("score", x.get("similarity", 0)), reverse=True)
+
     async def search(
         self,
         query: str,
@@ -147,6 +167,7 @@ class ExperienceService:
         rating_weight: float = 0.3,
         use_pageindex_lite: bool | None = None,
         project: str | None = None,
+        node_keys: list[str] | None = None,
     ) -> list[dict]:
         async with self._session() as session:
             """Search experiences using the enhanced search pipeline.
@@ -223,6 +244,14 @@ class ExperienceService:
                             r["related_experience_ids"] = []
                     else:
                         r["related_experience_ids"] = []
+                if node_keys:
+                    await self._apply_node_keys_boost(
+                        pipeline_result.results,
+                        node_keys,
+                        project,
+                        user_name,
+                        repo,
+                    )
                 return pipeline_result.results
 
             # Legacy fallback: direct vector/FTS search (reuse session)
@@ -250,6 +279,11 @@ class ExperienceService:
                 },
                 duration_ms=duration_ms,
             )
+            if node_keys:
+                repo = ExperienceRepository(session)
+                await self._apply_node_keys_boost(
+                    results, node_keys, project, user_name, repo
+                )
             return results
 
     async def _legacy_search(
