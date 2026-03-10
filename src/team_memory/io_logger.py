@@ -18,7 +18,6 @@ logger = logging.getLogger("team_memory.io")
 # Order: mcp < service < pipeline < full.
 _DETAIL_LEVELS: dict[str, str] = {
     # MCP layer (tool names)
-    "search": "mcp",
     "tm_search": "mcp",
     "save": "mcp",
     "tm_save": "mcp",
@@ -46,9 +45,15 @@ _DETAIL_LEVELS: dict[str, str] = {
     "context_trim": "pipeline",
     "vector_search": "pipeline",
     "fts_search": "pipeline",
+    # Service layer (ExperienceService)
+    "save_prepare": "service",
+    "save_persist": "service",
+    "search": "service",
+    "solve_query_build": "service",
     # Internal steps, only at full
     "cache_check": "full",
     "cache_store": "full",
+    "solve_reflection": "full",
 }
 
 _DETAIL_RANK = {"mcp": 0, "service": 1, "pipeline": 2, "full": 3}

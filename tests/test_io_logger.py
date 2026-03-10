@@ -7,7 +7,8 @@ def test_should_log_node_mcp_level():
     from team_memory.io_logger import _should_log_node
 
     assert _should_log_node("mcp", "cache_check") is False
-    assert _should_log_node("mcp", "search") is True
+    assert _should_log_node("mcp", "tm_search") is True
+    assert _should_log_node("mcp", "search") is False  # search is service-level
 
 
 def test_should_log_node_pipeline_level():

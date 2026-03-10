@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from team_memory import io_logger
 from team_memory.auth.provider import AuthProvider, User
 from team_memory.embedding.base import EmbeddingProvider
 from team_memory.services.event_bus import EventBus, Events
@@ -158,6 +159,7 @@ class ExperienceService:
                 grouped: If True, return results grouped by root experience.
                 top_k_children: Max children per group (only when grouped=True).
             """
+            search_start = time.monotonic()
             # Use enhanced pipeline if available
             if self._search_pipeline is not None:
                 from team_memory.services.search_pipeline import SearchRequest
@@ -179,6 +181,16 @@ class ExperienceService:
                 )
                 pipeline_result = await self._search_pipeline.search(
                     session, request
+                )
+                duration_ms = int((time.monotonic() - search_start) * 1000)
+                io_logger.log_internal(
+                    "search",
+                    {
+                        "query": (query or "")[:50],
+                        "result_count": len(pipeline_result.results),
+                        "search_type": pipeline_result.search_type,
+                    },
+                    duration_ms=duration_ms,
                 )
 
                 # Log the query
@@ -214,7 +226,7 @@ class ExperienceService:
                 return pipeline_result.results
 
             # Legacy fallback: direct vector/FTS search (reuse session)
-            return await self._legacy_search(
+            results = await self._legacy_search(
                 session,
                 query=query,
                 tags=tags,
@@ -228,6 +240,17 @@ class ExperienceService:
                 rating_weight=rating_weight,
                 project=project,
             )
+            duration_ms = int((time.monotonic() - search_start) * 1000)
+            io_logger.log_internal(
+                "search",
+                {
+                    "query": (query or "")[:50],
+                    "result_count": len(results),
+                    "search_type": "legacy",
+                },
+                duration_ms=duration_ms,
+            )
+            return results
 
     async def _legacy_search(
         self,
@@ -551,6 +574,7 @@ class ExperienceService:
                 validate_structured_data,
             )
 
+            prepare_start = time.monotonic()
             repo = ExperienceRepository(session)
 
             # Validate JSONB fields
@@ -624,6 +648,17 @@ class ExperienceService:
                 publish_status = "draft"
                 review_status = "pending"
 
+            prepare_duration_ms = int((time.monotonic() - prepare_start) * 1000)
+            io_logger.log_internal(
+                "save_prepare",
+                {
+                    "title": (title or "")[:50],
+                    "embedding_status": embedding_status,
+                },
+                duration_ms=prepare_duration_ms,
+            )
+
+            persist_start = time.monotonic()
             experience = await repo.create(
                 title=title,
                 description=problem,
@@ -696,6 +731,15 @@ class ExperienceService:
                 "embedding_status": embedding_status,
                 "publish_status": publish_status,
             })
+            persist_duration_ms = int((time.monotonic() - persist_start) * 1000)
+            io_logger.log_internal(
+                "save_persist",
+                {
+                    "experience_id": str(experience.id),
+                    "title": (title or "")[:50],
+                },
+                duration_ms=persist_duration_ms,
+            )
             return experience.to_dict()
 
     async def publish_experience(

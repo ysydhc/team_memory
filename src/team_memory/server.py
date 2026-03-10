@@ -13,6 +13,7 @@ import functools
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
@@ -564,6 +565,14 @@ async def tm_solve(
     if framework and framework.lower() not in combined_tags:
         combined_tags.append(framework.lower())
 
+    io_logger.log_internal(
+        "solve_query_build",
+        {
+            "enhanced_query": (enhanced_query or "")[:80],
+            "combined_tags": combined_tags[:10],
+        },
+    )
+
     results = await service.search(
         query=enhanced_query,
         tags=combined_tags or None,
@@ -579,6 +588,7 @@ async def tm_solve(
 
     # Auto-increment use_count + quality score boost on best match
     if results:
+        reflection_start = time.monotonic()
         async with get_session(db_url) as session:
             from team_memory.storage.repository import ExperienceRepository
             repo = ExperienceRepository(session)
@@ -607,6 +617,15 @@ async def tm_solve(
                         await session.commit()
                 except Exception:
                     logger.debug("Failed to apply reference boost", exc_info=True)
+        reflection_duration_ms = int((time.monotonic() - reflection_start) * 1000)
+        io_logger.log_internal(
+            "solve_reflection",
+            {
+                "best_id": str(best_id) if best_id else None,
+                "result_count": len(results),
+            },
+            duration_ms=reflection_duration_ms,
+        )
 
     if not results:
         return json.dumps(
