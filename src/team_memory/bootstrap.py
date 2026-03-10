@@ -97,6 +97,56 @@ class _JsonFormatter(logging.Formatter):
         return json.dumps(log_record, ensure_ascii=False)
 
 
+def _trim_log_files_to_max_bytes(log_dir: Path, max_bytes: int) -> None:
+    """Trim log files in log_dir so total size <= max_bytes.
+
+    Lists *.log and *.log.* files, sorts by mtime (oldest first), deletes from
+    oldest until total size <= max_bytes. Skips entirely if TEAM_MEMORY_DEBUG=1.
+    """
+    if os.environ.get("TEAM_MEMORY_DEBUG") == "1":
+        return
+    log_files: list[Path] = []
+    for p in log_dir.iterdir():
+        if not p.is_file():
+            continue
+        name = p.name
+        if name.endswith(".log") or ".log." in name:
+            log_files.append(p)
+    if not log_files:
+        return
+    log_files.sort(key=lambda p: p.stat().st_mtime)
+    total = sum(p.stat().st_size for p in log_files)
+    for p in log_files:
+        if total <= max_bytes:
+            break
+        try:
+            size = p.stat().st_size
+            p.unlink()
+            total -= size
+        except OSError:
+            pass
+
+
+class _SizeLimitedTimedRotatingFileHandler(TimedRotatingFileHandler):
+    """TimedRotatingFileHandler that trims total log size after each rollover."""
+
+    def __init__(
+        self,
+        filename: str,
+        when: str = "midnight",
+        backup_count: int = 5,
+        max_bytes: int = 10 * 1024 * 1024,
+        **kwargs: object,
+    ) -> None:
+        super().__init__(filename, when=when, backupCount=backup_count, **kwargs)
+        self._trim_max_bytes = max_bytes
+
+    def doRollover(self) -> None:  # noqa: N802
+        super().doRollover()
+        log_dir = Path(self.baseFilename).parent
+        _trim_log_files_to_max_bytes(log_dir, self._trim_max_bytes)
+
+
 class NonBlockingQueueHandler(QueueHandler):
     """QueueHandler that uses put(block=False); on queue.Full logs a warning and drops."""
 
@@ -137,10 +187,14 @@ def _configure_logging(settings: Settings) -> QueueListener | None:
         log_cfg = settings.logging
         log_path = getattr(log_cfg, "log_file_path", "./logs/team_memory.log")
         backup_count = getattr(log_cfg, "log_file_backup_count", 5)
+        max_bytes = getattr(log_cfg, "log_file_max_bytes", 10 * 1024 * 1024)
         Path(log_path).parent.mkdir(parents=True, exist_ok=True)
         log_queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=10000)
-        file_handler = TimedRotatingFileHandler(
-            log_path, when="midnight", backupCount=backup_count
+        file_handler = _SizeLimitedTimedRotatingFileHandler(
+            log_path,
+            when="midnight",
+            backup_count=backup_count,
+            max_bytes=max_bytes,
         )
         file_handler.setLevel(logging.INFO)
         if use_json:
@@ -458,6 +512,13 @@ async def stop_background_tasks(ctx: AppContext) -> None:
     """Gracefully stop background tasks."""
     if ctx.embedding_queue:
         await ctx.embedding_queue.stop()
+    if ctx._log_listener is not None:
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(ctx._log_listener.stop), timeout=5
+            )
+        except asyncio.TimeoutError:
+            logger.warning("QueueListener.stop() timed out after 5s")
     if ctx._stale_scanner_task:
         ctx._stale_scanner_task.cancel()
         try:
