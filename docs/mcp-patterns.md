@@ -110,3 +110,16 @@ raise HTTPException(...)  # 在 MCP 工具层禁止
 | `tm_preflight` | 任务预检，返回经验推荐 | ✅ |
 
 > **新增工具时，先在此表登记，再开始编码。**
+
+## 经验-节点 binding 相关参数
+
+以下参数用于将经验与代码/架构节点绑定，便于按上下文检索与沉淀。
+
+| 工具 | 参数 | 类型 | 说明 |
+|------|------|------|------|
+| `tm_solve` | `file_paths` | `list[str]` | 文件路径列表，用于按节点 boost 检索结果；若仅传 `file_path` 则视为 `file_paths=[file_path]` |
+| `tm_search` | `file_paths` | `list[str]` | 同上 |
+| `tm_suggest` | `file_paths` | `list[str]` | 同上 |
+| `tm_save` | `architecture_nodes` | `list[str]` | 文件路径列表，保存时绑定到架构节点（会归一化为 node_key） |
+| `tm_save_typed` | `architecture_nodes` | `list[str]` | 同上 |
+| `tm_task` | `changed_files` | `list[str]` | 任务完成时用于 binding 的文件路径；**当为空且 `project_paths` 已配置时，自动通过 Git 解析变更文件** |
