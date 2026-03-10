@@ -1036,6 +1036,144 @@ export async function rollbackVersion(expId, versionId, verNum) {
     }
 }
 
+// ===== Architecture =====
+export async function loadArchitecture() {
+    const container = document.getElementById('architecture-content');
+    if (!container) return;
+    state.architectureBackStack = [];
+    import('./architecture-viewer.js').then((mod) => {
+        mod.resetArchitectureViewerState?.();
+        mod.updateArchitectureBackButtonVisibility?.();
+    }).catch(() => {});
+    // Show layout with graph loading immediately to avoid double loading UI
+    container.innerHTML = `
+            <div class="mode-tabs" style="margin-bottom:16px">
+                <button class="mode-tab active" onclick="switchArchitectureTab('graph',this)">图</button>
+                <button class="mode-tab" onclick="switchArchitectureTab('impact',this)">影响面</button>
+            </div>
+            <div id="architecture-tab-graph">
+                <div class="architecture-graph-wrapper" style="position:relative;display:flex;flex-direction:column;min-height:0">
+                    <div id="architecture-graph-main" style="position:absolute;inset:0;display:flex;flex-direction:column;gap:8px">
+                        <div style="flex:1;position:relative;min-height:0">
+                            <div class="architecture-graph-loading" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10"><div style="display:flex;flex-direction:column;align-items:center;gap:8px"><div class="spinner"></div><span style="font-size:12px;color:var(--text-muted)">加载全项目图约 5 秒</span></div></div>
+                            <div id="architecture-graph-container" style="height:100%;min-height:0;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-secondary)"></div>
+                        </div>
+                    </div>
+                    <div class="architecture-float-btn-group architecture-float-btn-left" style="position:absolute;left:12px;top:12px;display:flex;align-items:center;gap:6px;z-index:5">
+                        <button type="button" class="architecture-float-btn" id="architecture-search-float-btn" onclick="toggleArchitectureSearchPanel()" title="搜索" aria-label="搜索">🔍</button>
+                        <button type="button" class="architecture-float-btn hidden" id="architecture-back-float-btn" onclick="architectureBack()" title="返回上一级视图" aria-label="返回">↩</button>
+                    </div>
+                    <div class="architecture-search-panel architecture-float-panel architecture-float-panel-left collapsed" id="architecture-search-panel">
+                        <div style="padding:12px;display:flex;flex-direction:column;gap:10px">
+                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                                <button type="button" class="btn btn-secondary btn-sm" id="architecture-cluster-select-btn" onclick="openArchitectureClusterSelector()" style="white-space:nowrap">选择集群</button>
+                                <span id="architecture-cluster-label" style="font-size:12px;color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title=""></span>
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="clearArchitectureSearch()" style="font-size:12px;white-space:nowrap">清空</button>
+                            </div>
+                            <div class="architecture-filter-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                                <span style="font-size:12px;color:var(--text-muted);flex-shrink:0">隐藏节点</span>
+                                <input type="text" id="architecture-filter-input" placeholder="如 test_ 隐藏以 test_ 开头的节点" style="flex:1;min-width:120px;padding:6px 16px;font-size:12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-secondary);color:var(--text-primary)">
+                                <button type="button" class="btn btn-secondary btn-sm" id="architecture-filter-apply-btn" onclick="applyArchitectureFilter()" style="font-size:12px;white-space:nowrap">应用</button>
+                            </div>
+                            <div class="architecture-search-scope-row" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                                <span class="architecture-search-scope-label" style="font-size:12px;color:var(--text-muted);flex-shrink:0">搜索范围</span>
+                                <div class="architecture-search-scope-segmented" role="group" aria-label="搜索范围">
+                                    <button type="button" class="architecture-scope-option active" data-scope="global" aria-pressed="true" title="在整个代码库中搜索">全局</button>
+                                    <button type="button" class="architecture-scope-option" data-scope="cluster" aria-pressed="false" title="仅在当前选中的集群中搜索">当前集群</button>
+                                </div>
+                            </div>
+                            <div style="display:flex;gap:6px">
+                                <input type="text" id="architecture-search-input" placeholder="文件路径、函数名、类名" style="flex:1;min-width:0;padding:8px 10px;font-size:13px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-secondary);color:var(--text-primary)">
+                                <button type="button" class="btn btn-primary btn-sm" id="architecture-search-btn" onclick="runArchitectureSearch()">搜索</button>
+                            </div>
+                            <div class="architecture-search-results-body" style="flex:1;overflow:auto;min-height:100px;max-height:280px;font-size:12px"></div>
+                        </div>
+                    </div>
+                    <button type="button" class="architecture-float-btn architecture-float-btn-right hidden" id="architecture-sidebar-float-btn" onclick="toggleArchitectureSidebarPanel()" title="节点详情" aria-label="节点详情">📋</button>
+                    <div class="architecture-node-sidebar architecture-float-panel architecture-float-panel-right hidden" id="architecture-node-sidebar">
+                        <div class="architecture-sidebar-content">
+                            <div class="architecture-sidebar-header" style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+                                <h4 class="architecture-sidebar-title" style="flex:1;margin:0;font-size:14px;word-break:break-all;user-select:none"></h4>
+                                <button type="button" class="architecture-sidebar-pin-btn" onclick="toggleArchitecturePin()" title="固定显示（可拖动、可打开多个）" aria-label="固定">📌</button>
+                            </div>
+                            <div class="architecture-sidebar-impact"></div>
+                            <div class="architecture-sidebar-experiences"></div>
+                        </div>
+                    </div>
+                    <div id="architecture-pinned-panels" class="architecture-pinned-panels hidden"></div>
+                </div>
+            </div>
+            <div id="architecture-tab-impact" class="hidden">
+                <p style="color:var(--text-muted)">影响面（T7 实现）</p>
+            </div>
+        `;
+    try {
+        const ctx = await api('GET', '/api/v1/architecture/context');
+        state.architectureDefaultClusters = ctx.default_clusters || [];
+        if (!ctx.available) {
+            const overviewEl = document.getElementById('architecture-overview-compact');
+            if (overviewEl) overviewEl.textContent = '';
+            container.innerHTML = `
+                <div class="empty-state" style="padding:48px 24px">
+                    <div class="icon" style="font-size:48px">🏗️</div>
+                    <h3>架构服务未配置或不可用</h3>
+                    <p style="color:var(--text-muted);max-width:400px;margin:12px auto 0">
+                        ${esc(ctx.reason || '')} 请配置 bridge_url 或运行 <code>npx gitnexus analyze</code> 以启用代码架构视图。
+                    </p>
+                </div>
+            `;
+            return;
+        }
+        const sym = ctx.symbols ?? 0;
+        const rel = ctx.relationships ?? 0;
+        const proc = ctx.processes ?? 0;
+        const overviewEl = document.getElementById('architecture-overview-compact');
+        if (overviewEl) overviewEl.textContent = `${sym} 符号 · ${rel} 关系 · ${proc} 进程`;
+        // Layout already rendered above; no second innerHTML overwrite to avoid double loading UI
+        import('./architecture-viewer.js').then((m) => {
+            console.log('[Arch] module loaded, setupArchitectureClickOutside', !!m.setupArchitectureClickOutside);
+            m.setupArchitectureClickOutside?.();
+            m.setupArchitectureScopeSelector?.();
+            m.setupArchitectureFilter?.();
+            const graphLoaded = m.isArchitectureGraphLoaded?.();
+            console.log('[Arch] isArchitectureGraphLoaded', graphLoaded);
+            if (m.loadArchitectureGraph && !graphLoaded) {
+                const saved = typeof localStorage !== 'undefined' && localStorage.getItem('architecture_default_clusters');
+                const defaultClusters = saved ? JSON.parse(saved || '[]') : (state.architectureDefaultClusters || []);
+                const toLoad = defaultClusters.length ? defaultClusters : null;
+                console.log('[Arch] calling loadArchitectureGraph', { toLoad });
+                m.loadArchitectureGraph(toLoad, null);
+            }
+        }).catch((e) => {
+            console.error('[Arch] module import failed', e);
+        });
+    } catch (e) {
+        const overviewEl = document.getElementById('architecture-overview-compact');
+        if (overviewEl) overviewEl.textContent = '';
+        container.innerHTML = `
+            <div class="empty-state" style="padding:48px 24px">
+                <div class="icon" style="font-size:48px">⚠️</div>
+                <h3>加载失败</h3>
+                <p style="color:var(--text-muted)">${esc(e.message || '')}</p>
+            </div>
+        `;
+    }
+}
+
+export async function switchArchitectureTab(tab, btn) {
+    document.querySelectorAll('#architecture-content .mode-tab').forEach((t) => t.classList.toggle('active', t === btn));
+    document.querySelectorAll('#architecture-tab-graph, #architecture-tab-impact').forEach((el) => {
+        if (el) el.classList.toggle('hidden', el.id !== 'architecture-tab-' + tab);
+    });
+    if (tab === 'graph') {
+        const mod = await import('./architecture-viewer.js');
+        if (mod.loadArchitectureGraph && !mod.isArchitectureGraphLoaded()) {
+            const clusters = state.architectureCurrentClusters;
+            mod.loadArchitectureGraph(clusters && clusters.length ? clusters : null, null);
+        }
+    }
+}
+
 // ===== Usage Stats =====
 export async function loadUsageStats() {
     const container = document.getElementById('usage-content');

@@ -156,6 +156,11 @@ export function hideSearchHistoryDropdownSoon() {
 export function openCreateModal() {
     document.getElementById('create-modal').classList.remove('hidden');
     state.createMode = 'manual';
+    if (state.architectureMountNode) {
+        const el = document.getElementById('create-architecture-nodes');
+        if (el) el.value = state.architectureMountNode;
+        state.architectureMountNode = null;
+    }
     if (state.cachedTemplates.length === 0) {
         api('GET', '/api/v1/templates').then((r) => {
             state.cachedTemplates = r.templates || [];
@@ -216,7 +221,7 @@ export function closeCreateModal(force = false) {
         }
     }
     document.getElementById('create-modal').classList.add('hidden');
-    ['create-title', 'create-problem', 'create-solution', 'create-tags', 'create-language', 'create-framework', 'create-code', 'create-git-refs', 'create-related-links', 'create-project'].forEach((id) => {
+    ['create-title', 'create-problem', 'create-solution', 'create-tags', 'create-language', 'create-framework', 'create-code', 'create-git-refs', 'create-related-links', 'create-project', 'create-architecture-nodes'].forEach((id) => {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
@@ -450,6 +455,10 @@ export async function doCreate() {
         gitRefs = parseGitRefsFromTextarea(document.getElementById('create-git-refs')?.value);
         relatedLinks = parseRelatedLinksFromTextarea(document.getElementById('create-related-links')?.value);
     }
+    const architectureNodesEl = document.getElementById('create-architecture-nodes');
+    const architectureNodes = architectureNodesEl?.value
+        ? architectureNodesEl.value.split('\n').map((s) => s.trim()).filter(Boolean)
+        : [];
 
     const saveAsDraft = document.getElementById('create-draft-checkbox')?.checked || false;
     const publishStatus = saveAsDraft ? 'draft' : 'published';
@@ -468,6 +477,7 @@ export async function doCreate() {
         if (structuredData) body.structured_data = structuredData;
         if (gitRefs) body.git_refs = gitRefs;
         if (relatedLinks) body.related_links = relatedLinks;
+        if (architectureNodes.length > 0) body.architecture_nodes = architectureNodes;
 
         const opts = {
             method: 'POST',
@@ -496,6 +506,7 @@ export async function doCreate() {
                 if (structuredData) retryBody.structured_data = structuredData;
                 if (gitRefs) retryBody.git_refs = gitRefs;
                 if (relatedLinks) retryBody.related_links = relatedLinks;
+                if (architectureNodes.length > 0) retryBody.architecture_nodes = architectureNodes;
                 await api('POST', '/api/v1/experiences', retryBody);
                 toast(saveAsDraft ? '经验已保存为草稿' : '经验保存成功', 'success');
                 closeCreateModal(true);
@@ -581,6 +592,7 @@ export async function openEditModal(expId) {
         document.getElementById('edit-project').value = exp.project || '';
         document.getElementById('edit-git-refs').value = editGitRefsToText(exp.git_refs);
         document.getElementById('edit-related-links').value = editRelatedLinksToText(exp.related_links);
+        document.getElementById('edit-architecture-nodes').value = (exp.architecture_nodes || []).join('\n');
 
         onEditTypeChange();
 
@@ -679,6 +691,10 @@ export async function submitEdit() {
     const progress_status = document.getElementById('edit-progress-status')?.value || null;
     const gitRefs = parseGitRefsFromTextarea(document.getElementById('edit-git-refs')?.value);
     const relatedLinks = parseRelatedLinksFromTextarea(document.getElementById('edit-related-links')?.value);
+    const architectureNodesEl = document.getElementById('edit-architecture-nodes');
+    const architectureNodes = architectureNodesEl?.value
+        ? architectureNodesEl.value.split('\n').map((s) => s.trim()).filter(Boolean)
+        : [];
 
     const tpl = (state.cachedTemplates || []).find((t) => (t.experience_type || t.id) === experience_type) || {};
     let structured_data = null;
@@ -739,6 +755,9 @@ export async function submitEdit() {
     if (gitRefs !== null && JSON.stringify(gitRefs) !== JSON.stringify(orig?.git_refs || [])) body.git_refs = gitRefs;
     if (relatedLinks !== null && JSON.stringify(relatedLinks) !== JSON.stringify(orig?.related_links || [])) {
         body.related_links = relatedLinks;
+    }
+    if (JSON.stringify(architectureNodes) !== JSON.stringify(orig?.architecture_nodes || [])) {
+        body.architecture_nodes = architectureNodes;
     }
     if (children) body.children = children;
 
