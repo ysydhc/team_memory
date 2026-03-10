@@ -1,0 +1,17 @@
+{
+  "name": "gitnexus-bridge",
+  "version": "1.0.0",
+  "description": "HTTP bridge for GitNexus — exposes context, clusters, impact, graph for TM architecture API",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
