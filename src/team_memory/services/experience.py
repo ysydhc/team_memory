@@ -525,6 +525,7 @@ class ExperienceService:
         related_links: list | None = None,
         project: str | None = None,
         quality_score: int = 0,
+        architecture_nodes: list[str] | None = None,
         *,
         session=None,  # noqa: ANN001 - for internal reuse (e.g. hard_delete_and_rebuild)
     ) -> dict:
@@ -672,6 +673,21 @@ class ExperienceService:
                     await self._embedding_queue.enqueue(experience.id, embed_text)
                 except Exception:
                     logger.warning("Failed to enqueue embedding task for %s", experience.id)
+
+            # T8: Architecture bindings
+            if architecture_nodes:
+                try:
+                    await repo.replace_architecture_bindings(
+                        experience.id,
+                        architecture_nodes,
+                        project=project or "default",
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to save architecture bindings for %s",
+                        experience.id,
+                        exc_info=True,
+                    )
 
             await self._event_bus.emit(Events.EXPERIENCE_CREATED, {
                 "experience_id": str(experience.id),
@@ -828,6 +844,9 @@ class ExperienceService:
             if experience is None:
                 return None
 
+            # T8: architecture_nodes is handled separately (binding table, not Experience)
+            architecture_nodes = kwargs.pop("architecture_nodes", None)
+
             # Save version snapshot before editing
             try:
                 await repo.save_version(
@@ -919,7 +938,7 @@ class ExperienceService:
                     etype, has_solution=bool(final_solution)
                 )
 
-            if not updates:
+            if not updates and architecture_nodes is None:
                 return experience.to_dict()
 
             # Re-generate embedding if content fields changed (include children for groups)
@@ -946,28 +965,46 @@ class ExperienceService:
                 except Exception:
                     logger.warning("Failed to regenerate embedding during update")
 
-            updated = await repo.update(exp_uuid, **updates)
+            updated = await repo.update(exp_uuid, **updates) if updates else experience
             if updated:
-                try:
-                    await self._maybe_build_tree_nodes(
-                        repo,
-                        updated.id,
-                        problem=updates.get("description", updated.description),
-                        solution=updates.get("solution", updated.solution),
-                        root_cause=updates.get("root_cause", updated.root_cause),
-                        code_snippets=updates.get("code_snippets", updated.code_snippets),
-                    )
-                except Exception:
-                    logger.warning(
-                        "Failed to rebuild PageIndex-Lite nodes for %s",
-                        updated.id,
-                        exc_info=True,
-                    )
-                await self._event_bus.emit(Events.EXPERIENCE_UPDATED, {
-                    "experience_id": experience_id,
-                    "fields_updated": list(updates.keys()),
-                    "user": user,
-                })
+                # T8: Architecture bindings
+                if architecture_nodes is not None:
+                    try:
+                        await repo.replace_architecture_bindings(
+                            exp_uuid,
+                            architecture_nodes,
+                            project=updated.project or "default",
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to update architecture bindings for %s",
+                            experience_id,
+                            exc_info=True,
+                        )
+                if updates:
+                    try:
+                        await self._maybe_build_tree_nodes(
+                            repo,
+                            updated.id,
+                            problem=updates.get("description", updated.description),
+                            solution=updates.get("solution", updated.solution),
+                            root_cause=updates.get("root_cause", updated.root_cause),
+                            code_snippets=updates.get("code_snippets", updated.code_snippets),
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to rebuild PageIndex-Lite nodes for %s",
+                            updated.id,
+                            exc_info=True,
+                        )
+                    fields_updated = list(updates.keys())
+                    if architecture_nodes is not None:
+                        fields_updated.append("architecture_nodes")
+                    await self._event_bus.emit(Events.EXPERIENCE_UPDATED, {
+                        "experience_id": experience_id,
+                        "fields_updated": fields_updated,
+                        "user": user,
+                    })
             return updated.to_dict() if updated else None
 
     async def review(

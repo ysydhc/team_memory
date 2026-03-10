@@ -293,6 +293,8 @@ async def get_experience(
         data = exp.to_dict()
         data["feedbacks"] = [fb.to_dict() for fb in exp.feedbacks]
         data["children"] = [c.to_dict() for c in (exp.children or [])]
+        bindings = await repo.get_architecture_bindings(exp.id)
+        data["architecture_nodes"] = [b["node_key"] for b in bindings]
         return data
 
 
@@ -340,6 +342,7 @@ async def create_experience(
             git_refs=req.git_refs,
             related_links=req.related_links,
             project=resolved_project,
+            architecture_nodes=req.architecture_nodes,
         )
         if result.get("status") == "duplicate_detected":
             return JSONResponse(status_code=409, content=result)
@@ -443,6 +446,8 @@ async def update_experience_route(
         kwargs["visibility"] = raw["visibility"]
     if "project" in raw:
         kwargs["project"] = raw["project"]
+    if "architecture_nodes" in raw:
+        kwargs["architecture_nodes"] = raw["architecture_nodes"]
 
     result = await _svc().update(
         experience_id=experience_id,

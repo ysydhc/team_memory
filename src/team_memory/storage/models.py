@@ -967,6 +967,46 @@ class UserExpansionConfig(Base):
         }
 
 
+class ExperienceArchitectureBinding(Base):
+    """Binding between experiences and architecture nodes (GitNexus filePath).
+
+    Links TM experiences to code graph nodes for architecture visualization.
+    node_key aligns with GitNexus filePath (e.g. src/team_memory/server.py).
+    """
+
+    __tablename__ = "experience_architecture_bindings"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    experience_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("experiences.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    node_key: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    project: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "experience_id", "node_key", name="uq_exp_arch_binding_exp_node"
+        ),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "experience_id": str(self.experience_id),
+            "node_key": self.node_key,
+            "project": self.project,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class CustomInstallableContent(Base):
     """User custom content for installed rules/prompts. Stored in DB, optionally synced to file."""
 

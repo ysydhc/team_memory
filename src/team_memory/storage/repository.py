@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from team_memory.storage.models import (
     DocumentTreeNode,
     Experience,
+    ExperienceArchitectureBinding,
     ExperienceFeedback,
     ExperienceLink,
     ExperienceVersion,
@@ -307,6 +308,87 @@ class ExperienceRepository:
             )
             out.append(str(other))
         return out
+
+    async def list_experiences_by_node(
+        self,
+        node_key: str,
+        project: str | None = None,
+        current_user: str | None = None,
+    ) -> list[dict]:
+        """List experiences bound to an architecture node (GitNexus filePath).
+
+        Returns published, non-deleted experiences. Filters by project when given.
+        Each result has experience_id, title, node (node_key).
+        """
+        if not node_key or not node_key.strip():
+            return []
+        proj = self._project_value(project) if project else None
+        query = (
+            select(Experience.id, Experience.title, ExperienceArchitectureBinding.node_key)
+            .join(
+                ExperienceArchitectureBinding,
+                ExperienceArchitectureBinding.experience_id == Experience.id,
+            )
+            .where(ExperienceArchitectureBinding.node_key == node_key.strip())
+            .where(Experience.is_deleted == False)  # noqa: E712
+            .where(Experience.exp_status == "published")
+        )
+        if proj:
+            query = query.where(Experience.project == proj)
+        for f in self._active_filter(current_user):
+            query = query.where(f)
+        query = query.order_by(Experience.updated_at.desc())
+        result = await self._session.execute(query)
+        rows = result.all()
+        return [
+            {
+                "experience_id": str(row[0]),
+                "title": row[1],
+                "node": row[2],
+            }
+            for row in rows
+        ]
+
+    async def get_architecture_bindings(
+        self, experience_id: uuid.UUID
+    ) -> list[dict]:
+        """Get all architecture bindings for an experience."""
+        result = await self._session.execute(
+            select(ExperienceArchitectureBinding)
+            .where(ExperienceArchitectureBinding.experience_id == experience_id)
+            .order_by(ExperienceArchitectureBinding.node_key.asc())
+        )
+        return [row.to_dict() for row in result.scalars().all()]
+
+    async def replace_architecture_bindings(
+        self,
+        experience_id: uuid.UUID,
+        node_keys: list[str],
+        project: str | None = None,
+    ) -> None:
+        """Replace all architecture bindings for an experience.
+
+        Deletes existing bindings, then inserts new ones for each node_key.
+        Empty node_keys list clears all bindings.
+        """
+        await self._session.execute(
+            delete(ExperienceArchitectureBinding).where(
+                ExperienceArchitectureBinding.experience_id == experience_id
+            )
+        )
+        proj = self._project_value(project) if project else None
+        for nk in node_keys:
+            nk = (nk or "").strip()
+            if not nk:
+                continue
+            self._session.add(
+                ExperienceArchitectureBinding(
+                    experience_id=experience_id,
+                    node_key=nk,
+                    project=proj,
+                )
+            )
+        await self._session.flush()
 
     async def list_root_ids_with_children(
         self, project: str | None = None
