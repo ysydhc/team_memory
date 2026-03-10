@@ -2578,6 +2578,37 @@ async def tm_task(
                                 for p in (changed_files or [])
                                 if p
                             ]
+                            # Task 7b: node_keys empty + task.project -> Git auto-parse
+                            if not node_keys and task.project:
+                                from team_memory.utils.git_utils import (
+                                    get_changed_files,
+                                )
+                                from team_memory.web.routes.analytics import (
+                                    _get_scan_config,
+                                )
+
+                                cfg = _get_scan_config()
+                                paths = cfg.get("project_paths", {})
+                                if task.project in paths:
+                                    git_paths, err = get_changed_files(
+                                        paths, task.project
+                                    )
+                                    if err:
+                                        logger.warning(
+                                            "tm_task Git auto-parse failed (project=%s): %s",
+                                            task.project,
+                                            err,
+                                        )
+                                    else:
+                                        node_keys = [
+                                            normalize_node_key(p)
+                                            for p in git_paths
+                                        ]
+                                else:
+                                    logger.debug(
+                                        "tm_task project %s not in project_paths, skip binding",
+                                        task.project,
+                                    )
                             if node_keys:
                                 from team_memory.storage.repository import (
                                     ExperienceRepository,
