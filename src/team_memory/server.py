@@ -19,6 +19,7 @@ from pathlib import Path, PurePosixPath
 import yaml
 from fastmcp import FastMCP
 
+from team_memory import io_logger
 from team_memory.bootstrap import bootstrap, get_context
 from team_memory.services.context_trimmer import estimate_tokens
 from team_memory.storage.database import get_session
@@ -54,6 +55,13 @@ def track_usage(func):
         except Exception:
             pass
 
+        # io_logger: log input when enabled (independent of mcp_debug_log)
+        try:
+            if io_logger.is_io_enabled():
+                io_logger.log_mcp_io(tool_name, "in", kwargs)
+        except Exception:
+            pass
+
         pre_ctx = HookContext(
             event=HookEvent.PRE_TOOL_CALL,
             tool_name=tool_name,
@@ -74,6 +82,11 @@ def track_usage(func):
                     await mcp_debug_log.log_mcp_io_async(tool_name, "out", result)
             except Exception:
                 pass
+            try:
+                if io_logger.is_io_enabled():
+                    io_logger.log_mcp_io(tool_name, "out", result)
+            except Exception:
+                pass
             return result
         except Exception as e:
             success = False
@@ -85,6 +98,11 @@ def track_usage(func):
                     await mcp_debug_log.log_mcp_io_async(
                         tool_name, "out", {"error": error_msg}
                     )
+            except Exception:
+                pass
+            try:
+                if io_logger.is_io_enabled():
+                    io_logger.log_mcp_io(tool_name, "out", {"error": error_msg})
             except Exception:
                 pass
             raise

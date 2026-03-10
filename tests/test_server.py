@@ -783,6 +783,30 @@ class TestTryExtractAndSavePersonalMemory:
 
 
 # ============================================================
+# io_logger integration in track_usage (LOG_IO_ENABLED=1)
+# ============================================================
+
+
+class TestTrackUsageIoLogger:
+    """When LOG_IO_ENABLED=1, track_usage should call io_logger.log_mcp_io."""
+
+    @pytest.mark.asyncio
+    async def test_io_logger_called_when_enabled(self):
+        """With io_logger enabled, calling a tm_ tool invokes log_mcp_io."""
+        with patch("team_memory.server.io_logger.is_io_enabled", return_value=True), \
+             patch("team_memory.server.io_logger.log_mcp_io") as mock_log:
+
+            tools = await mcp.get_tools()
+            feedback_fn = tools["tm_feedback"].fn
+            await feedback_fn(
+                experience_id=str(uuid.uuid4()),
+                rating=0,
+            )
+
+            assert mock_log.call_count > 0
+
+
+# ============================================================
 # Task 5: User expansion auto-maintain from tm_search
 # ============================================================
 
