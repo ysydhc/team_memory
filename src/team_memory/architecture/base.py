@@ -1,6 +1,6 @@
 """Architecture provider protocol and factory.
 
-Contract aligned with docs/exec-plans/wait/code-arch-viz-gitnexus/
+Contract aligned with docs/exec-plans/completed/code-arch-viz-gitnexus/
 code-arch-viz-provider-interface.md.
 """
 
@@ -13,6 +13,7 @@ from team_memory.schemas_architecture import (
     ArchitectureGraph,
     ClusterMembers,
     ClusterSummary,
+    GraphNode,
     ImpactResult,
 )
 
@@ -35,8 +36,9 @@ class ArchitectureProvider(ABC):
         repo: str | None = None,
         cluster: str | None = None,
         file_path: str | None = None,
+        max_depth: int = 2,
     ) -> ArchitectureGraph:
-        """Return nodes and edges for visualization; focus_node_id when file_path given."""
+        """Return nodes and edges; when no cluster, expand from roots by max_depth hops."""
         ...
 
     @abstractmethod
@@ -57,4 +59,15 @@ class ArchitectureProvider(ABC):
         repo: str | None = None,
     ) -> ImpactResult:
         """Return upstream/downstream impact for the given path."""
+        ...
+
+    @abstractmethod
+    async def search_nodes(
+        self,
+        q: str,
+        scope: str = "global",
+        clusters: list[str] | None = None,
+        repo: str | None = None,
+    ) -> list[GraphNode]:
+        """Search nodes by name or filePath. scope: global|cluster. clusters: multi-select."""
         ...

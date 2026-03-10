@@ -389,6 +389,10 @@ class ArchitectureGitnexusConfig(BaseModel):
     """GitNexus bridge or MCP connection for architecture data."""
 
     bridge_url: str = ""  # e.g. http://127.0.0.1:9321; empty = unavailable
+    default_clusters: list[str] = Field(
+        default_factory=list,
+        description="Default clusters to show (project entry points). Empty = top 5 by size.",
+    )
 
 
 class ArchitectureBuiltinConfig(BaseModel):

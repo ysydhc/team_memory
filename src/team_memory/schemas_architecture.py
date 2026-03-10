@@ -1,6 +1,6 @@
 """Pydantic models for architecture API responses.
 
-Contract aligned with docs/exec-plans/wait/code-arch-viz-gitnexus/
+Contract aligned with docs/exec-plans/completed/code-arch-viz-gitnexus/
 code-arch-viz-provider-interface.md.
 """
 
@@ -22,6 +22,10 @@ class ArchitectureContext(BaseModel):
     stale: bool | None = None
     provider: Literal["gitnexus", "builtin"] | None = None
     reason: str | None = None
+    default_clusters: list[str] = Field(
+        default_factory=list,
+        description="Default clusters for graph (project entry points from config).",
+    )
 
 
 class GraphNode(BaseModel):
@@ -95,3 +99,9 @@ class ExperienceRef(BaseModel):
     experience_id: str
     title: str | None = None
     node: str | None = None
+
+
+class SearchNodesResponse(BaseModel):
+    """Response for architecture node search."""
+
+    nodes: list[GraphNode] = Field(default_factory=list)

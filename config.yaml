@@ -84,7 +84,7 @@ web:
 # ╚══════════════════════════════════════════════════════════╝
 installable_catalog:
   sources: ["local"] # local | registry
-  local_base_dir: "docs/res"  # 可安装 rules/prompts 来源
+  local_base_dir: "docs/res" # 可安装 rules/prompts 来源
   registry_manifest_url: "" # 示例: https://example.com/team-memory-manifest.json
   target_rules_dir: ".cursor/rules"
   target_prompts_dir: ".cursor/prompts"
@@ -266,7 +266,9 @@ tag_synonyms:
 architecture:
   provider: gitnexus # gitnexus | builtin
   gitnexus:
-    bridge_url: "" # e.g. http://127.0.0.1:9321; empty = architecture unavailable
+    bridge_url: "http://127.0.0.1:9321" # e.g. http://127.0.0.1:9321; empty = architecture unavailable
+    # default_clusters: []  # 默认展示的集群（项目入口），如 ["Server","Routes"]；空则用 top 5
+
   builtin:
     repo_path: null
     index_command: "make index-architecture"
