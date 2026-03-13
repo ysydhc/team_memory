@@ -5,9 +5,6 @@
 docs/design-docs/harness/doc-maintenance-guide.md:DOC_LINK_404
 docs/design-docs/harness/doc-maintenance-guide.md:DOC_STALE_MARKER
 
-# code-arch-viz-operations.md line 123: HTML </a> tag in code example, parsed as angle link
-docs/exec-plans/wait/code-arch-viz-gitnexus/code-arch-viz-operations.md:123:DOC_LINK_BROKEN
-
 # index: intentionally lists archive docs for navigation
 docs/exec-plans/README.md:DOC_DEPRECATED_REF
 

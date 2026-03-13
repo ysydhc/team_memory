@@ -259,16 +259,3 @@ tag_synonyms:
   ts: TypeScript
   py: Python
   k8s: Kubernetes
-
-# ╔══════════════════════════════════════════════════════════╗
-# ║  [可选] 架构可视化 — GitNexus 或自研，预留切换             ║
-# ╚══════════════════════════════════════════════════════════╝
-architecture:
-  provider: gitnexus # gitnexus | builtin
-  gitnexus:
-    bridge_url: "http://127.0.0.1:9321" # e.g. http://127.0.0.1:9321; empty = architecture unavailable
-    # default_clusters: []  # 默认展示的集群（项目入口），如 ["Server","Routes"]；空则用 top 5
-
-  builtin:
-    repo_path: null
-    index_command: "make index-architecture"

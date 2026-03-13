@@ -313,7 +313,6 @@ const HASH_TO_PAGE = {
     search: 'search',
     settings: 'settings',
     usage: 'usage',
-    architecture: 'architecture',
     dedup: 'dedup',
     'personal-memory': 'personal-memory',
     'user-expansion': 'user-expansion',
@@ -343,7 +342,6 @@ function navigate(page) {
     const target = document.getElementById(`page-${page}`);
     if (target) target.classList.remove('hidden');
     const mainContent = document.querySelector('.main-content');
-    if (mainContent) mainContent.classList.toggle('architecture-fullwidth', page === 'architecture');
     document.querySelectorAll('.topbar-nav a').forEach((a) => {
         a.classList.toggle('active', a.dataset.page === page);
     });
@@ -365,7 +363,6 @@ function navigate(page) {
     else if (page === 'tasks') pages.loadTasks();
     else if (page === 'search') { }
     else if (page === 'usage') pages.loadUsageStats();
-    else if (page === 'architecture') pages.loadArchitecture();
     else if (page === 'dedup') { }
     else if (page === 'personal-memory') pages.loadPersonalMemoryList();
     else if (page === 'user-expansion') pages.loadUserExpansion();
@@ -471,42 +468,6 @@ window.doMerge = pages.doMerge;
 window.toggleDupDiff = pages.toggleDupDiff;
 window.scanStale = pages.scanStale;
 window.loadUsageStats = pages.loadUsageStats;
-window.loadArchitecture = pages.loadArchitecture;
-window.switchArchitectureTab = pages.switchArchitectureTab;
-window.runArchitectureSearch = async () => {
-    const m = await import('./architecture-viewer.js');
-    return m.runArchitectureSearch?.();
-};
-window.clearArchitectureSearch = async () => {
-    const m = await import('./architecture-viewer.js');
-    return m.clearArchitectureSearch?.();
-};
-window.openArchitectureClusterSelector = async () => {
-    const m = await import('./architecture-viewer.js');
-    return m.openArchitectureClusterSelector?.();
-};
-window.applyArchitectureFilter = () => {
-    import('./architecture-viewer.js').then((m) => m.applyArchitectureFilter?.());
-};
-window.architectureBack = () => {
-    import('./architecture-viewer.js').then((m) => m.architectureBack?.());
-};
-window.toggleArchitecturePin = () => {
-    import('./architecture-viewer.js').then((m) => m.toggleArchitecturePin?.());
-};
-window.toggleArchitectureSearchPanel = () => {
-    const panel = document.getElementById('architecture-search-panel');
-    const btn = document.getElementById('architecture-search-float-btn');
-    if (!panel || !btn) return;
-    const wasCollapsed = panel.classList.contains('collapsed');
-    panel.classList.toggle('collapsed', !wasCollapsed);
-    btn.classList.toggle('hidden', wasCollapsed);
-};
-window.toggleArchitectureSidebarPanel = () => {
-    const sidebar = document.getElementById('architecture-node-sidebar');
-    if (!sidebar || sidebar.classList.contains('hidden')) return;
-    sidebar.classList.toggle('collapsed');
-};
 window.appendTag = pages.appendTag;
 window.toggleVersionHistory = pages.toggleVersionHistory;
 window.viewVersionSnapshot = pages.viewVersionSnapshot;

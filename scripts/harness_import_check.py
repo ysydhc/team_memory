@@ -23,14 +23,12 @@ from pathlib import Path
 # (path_pattern, layer) - order matters for prefix matching
 LAYER_MAP: list[tuple[str, str]] = [
     ("src/team_memory/schemas.py", "L0"),
-    ("src/team_memory/schemas_architecture.py", "L0"),
     ("src/team_memory/config.py", "L0"),
     ("src/team_memory/storage/", "L1"),
     ("src/team_memory/services/", "L2"),
     ("src/team_memory/auth/", "L2"),
     ("src/team_memory/embedding/", "L2"),
     ("src/team_memory/reranker/", "L2"),
-    ("src/team_memory/architecture/", "L2"),
     ("src/team_memory/web/", "L3"),
     ("src/team_memory/server.py", "L3"),
     ("src/team_memory/bootstrap.py", "L3"),

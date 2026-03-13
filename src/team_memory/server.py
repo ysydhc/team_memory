@@ -9,6 +9,10 @@ identify TeamMemory capabilities (e.g. tm_search, tm_save, tm_solve).
 
 from __future__ import annotations
 
+import warnings
+
+warnings.filterwarnings("ignore", category=DeprecationWarning, append=False)
+
 import functools
 import json
 import logging
@@ -24,8 +28,6 @@ from team_memory import io_logger
 from team_memory.bootstrap import bootstrap, get_context
 from team_memory.services.context_trimmer import estimate_tokens
 from team_memory.storage.database import get_session
-from team_memory.utils.path_utils import normalize_node_key
-
 logger = logging.getLogger("team_memory")
 
 
@@ -547,7 +549,6 @@ async def tm_solve(
     """
     if file_path is not None and file_paths is None:
         file_paths = [file_path]
-    node_keys = [normalize_node_key(p) for p in (file_paths or []) if p]
 
     service = _get_service()
     db_url = _get_db_url()
@@ -593,7 +594,6 @@ async def tm_solve(
         top_k_children=2,
         use_pageindex_lite=use_pageindex_lite,
         project=resolved_project,
-        node_keys=node_keys if node_keys else None,
     )
 
     # Auto-increment use_count + quality score boost on best match
@@ -1043,7 +1043,6 @@ async def tm_suggest(
     """
     if file_path is not None and file_paths is None:
         file_paths = [file_path]
-    node_keys = [normalize_node_key(p) for p in (file_paths or []) if p]
 
     # Build context-based query
     query_parts = []
@@ -1107,7 +1106,6 @@ async def tm_suggest(
         top_k_children=1,
         use_pageindex_lite=use_pageindex_lite,
         project=resolved_project,
-        node_keys=node_keys if node_keys else None,
     )
 
     if not results:
@@ -1188,7 +1186,6 @@ async def tm_search(
     """
     if file_path is not None and file_paths is None:
         file_paths = [file_path]
-    node_keys = [normalize_node_key(p) for p in (file_paths or []) if p]
 
     service = _get_service()
     user = await _get_current_user()
@@ -1205,7 +1202,6 @@ async def tm_search(
         top_k_children=top_k_children,
         use_pageindex_lite=use_pageindex_lite,
         project=resolved_project,
-        node_keys=node_keys if node_keys else None,
     )
 
     if not results:
@@ -1272,7 +1268,6 @@ async def tm_save(
     publish_status: str = "personal",
     skip_dedup: bool = False,
     project: str | None = None,
-    architecture_nodes: list[str] | None = None,
 ) -> str:
     """Quick-save a new experience to the team knowledge base.
 
@@ -1287,17 +1282,12 @@ async def tm_save(
         root_cause: Root cause analysis.
         publish_status: "personal" (default), "published", or "draft".
         skip_dedup: If True, skip duplicate detection check.
-        architecture_nodes: File paths to bind (normalized to node_key).
+        project: Project scope.
     """
     service = _get_service()
     db_url = _get_db_url()
     user = await _get_current_user()
     resolved_project = _resolve_project(project)
-    normalized_nodes = (
-        [k for k in (normalize_node_key(p) for p in architecture_nodes) if k]
-        if architecture_nodes
-        else None
-    )
 
     async with get_session(db_url) as session:
         result = await service.save(
@@ -1315,7 +1305,6 @@ async def tm_save(
             publish_status=publish_status,
             skip_dedup=skip_dedup,
             project=resolved_project,
-            architecture_nodes=normalized_nodes,
         )
 
     # Handle dedup detection
@@ -1376,7 +1365,6 @@ async def tm_save_typed(
     publish_status: str = "published",
     skip_dedup: bool = False,
     project: str | None = None,
-    architecture_nodes: list[str] | None = None,
 ) -> str:
     """Save a typed experience with full fields.
 
@@ -1398,17 +1386,12 @@ async def tm_save_typed(
         related_links: List of related links [{type, url, title}].
         publish_status: "published" (default) or "draft".
         skip_dedup: If True, skip duplicate detection check.
-        architecture_nodes: File paths to bind (normalized to node_key).
+        project: Project scope.
     """
     service = _get_service()
     db_url = _get_db_url()
     user = await _get_current_user()
     resolved_project = _resolve_project(project)
-    normalized_nodes = (
-        [k for k in (normalize_node_key(p) for p in architecture_nodes) if k]
-        if architecture_nodes
-        else None
-    )
 
     async with get_session(db_url) as session:
         result = await service.save(
@@ -1433,7 +1416,6 @@ async def tm_save_typed(
             git_refs=git_refs,
             related_links=related_links,
             project=resolved_project,
-            architecture_nodes=normalized_nodes,
         )
 
     if result.get("status") == "duplicate_detected":
@@ -2572,60 +2554,6 @@ async def tm_task(
                             sediment_id = str(learned.id)
                             if updated:
                                 updated.sediment_experience_id = learned.id
-                        if sediment_id:
-                            node_keys = [
-                                normalize_node_key(p)
-                                for p in (changed_files or [])
-                                if p
-                            ]
-                            # Task 7b: node_keys empty + task.project -> Git auto-parse
-                            if not node_keys and task.project:
-                                from team_memory.utils.git_utils import (
-                                    get_changed_files,
-                                )
-                                from team_memory.web.routes.analytics import (
-                                    _get_scan_config,
-                                )
-
-                                cfg = _get_scan_config()
-                                paths = cfg.get("project_paths", {})
-                                if task.project in paths:
-                                    git_paths, err = get_changed_files(
-                                        paths, task.project
-                                    )
-                                    if err:
-                                        logger.warning(
-                                            "tm_task Git auto-parse failed (project=%s): %s",
-                                            task.project,
-                                            err,
-                                        )
-                                    else:
-                                        node_keys = [
-                                            normalize_node_key(p)
-                                            for p in git_paths
-                                        ]
-                                else:
-                                    logger.debug(
-                                        "tm_task project %s not in project_paths, skip binding",
-                                        task.project,
-                                    )
-                            if node_keys:
-                                from team_memory.storage.repository import (
-                                    ExperienceRepository,
-                                )
-
-                                exp_repo = ExperienceRepository(session)
-                                try:
-                                    await exp_repo.replace_architecture_bindings(
-                                        _uuid.UUID(sediment_id),
-                                        node_keys,
-                                        project=task.project,
-                                    )
-                                except Exception as e:
-                                    logger.warning(
-                                        "Failed to write architecture bindings: %s",
-                                        e,
-                                    )
                     except Exception as e:
                         logger.warning("Auto-sediment failed: %s", e)
 

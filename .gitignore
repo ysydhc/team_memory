@@ -31,8 +31,6 @@ htmlcov/
 # Debug / operations docs (personal)
 .debug/
 
-# Node (gitnexus-bridge)
-tools/gitnexus-bridge/node_modules/
 
 # OS
 .DS_Store
@@ -49,4 +47,3 @@ Thumbs.db
 
 # Internal docs (not for public repo)
 pm.md
-.gitnexus

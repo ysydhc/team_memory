@@ -668,7 +668,6 @@ class ExperienceCreate(BaseModel):
     git_refs: list | None = None
     related_links: list | None = None
     project: str | None = None
-    architecture_nodes: list[str] | None = None
 
 
 class ExperienceUpdate(BaseModel):
@@ -700,7 +699,6 @@ class ExperienceUpdate(BaseModel):
     project: str | None = None
     # Legacy append mode
     solution_addendum: str | None = None
-    architecture_nodes: list[str] | None = None
 
 
 class FeedbackCreate(BaseModel):

@@ -133,26 +133,6 @@ class ExperienceService:
         """Authenticate a user."""
         return await self._auth.authenticate(credentials)
 
-    async def _apply_node_keys_boost(
-        self,
-        results: list[dict],
-        node_keys: list[str],
-        project: str | None,
-        user_name: str,
-        repo: ExperienceRepository,
-    ) -> None:
-        """Boost score by 0.15 for experiences bound to any of the given nodes."""
-        rows = await repo.list_experiences_by_nodes(
-            node_keys, project=project, current_user=user_name
-        )
-        bound_ids = {r["experience_id"] for r in rows}
-        for r in results:
-            eid = r.get("group_id") or r.get("id")
-            if eid and str(eid) in bound_ids:
-                base = r.get("score", r.get("similarity", 0))
-                r["score"] = base + 0.15
-        results.sort(key=lambda x: x.get("score", x.get("similarity", 0)), reverse=True)
-
     async def search(
         self,
         query: str,
@@ -167,7 +147,6 @@ class ExperienceService:
         rating_weight: float = 0.3,
         use_pageindex_lite: bool | None = None,
         project: str | None = None,
-        node_keys: list[str] | None = None,
     ) -> list[dict]:
         async with self._session() as session:
             """Search experiences using the enhanced search pipeline.
@@ -244,14 +223,6 @@ class ExperienceService:
                             r["related_experience_ids"] = []
                     else:
                         r["related_experience_ids"] = []
-                if node_keys:
-                    await self._apply_node_keys_boost(
-                        pipeline_result.results,
-                        node_keys,
-                        project,
-                        user_name,
-                        repo,
-                    )
                 return pipeline_result.results
 
             # Legacy fallback: direct vector/FTS search (reuse session)
@@ -279,11 +250,6 @@ class ExperienceService:
                 },
                 duration_ms=duration_ms,
             )
-            if node_keys:
-                repo = ExperienceRepository(session)
-                await self._apply_node_keys_boost(
-                    results, node_keys, project, user_name, repo
-                )
             return results
 
     async def _legacy_search(
@@ -582,7 +548,6 @@ class ExperienceService:
         related_links: list | None = None,
         project: str | None = None,
         quality_score: int = 0,
-        architecture_nodes: list[str] | None = None,
         *,
         session=None,  # noqa: ANN001 - for internal reuse (e.g. hard_delete_and_rebuild)
     ) -> dict:
@@ -742,21 +707,6 @@ class ExperienceService:
                     await self._embedding_queue.enqueue(experience.id, embed_text)
                 except Exception:
                     logger.warning("Failed to enqueue embedding task for %s", experience.id)
-
-            # T8: Architecture bindings
-            if architecture_nodes:
-                try:
-                    await repo.replace_architecture_bindings(
-                        experience.id,
-                        architecture_nodes,
-                        project=project or "default",
-                    )
-                except Exception:
-                    logger.warning(
-                        "Failed to save architecture bindings for %s",
-                        experience.id,
-                        exc_info=True,
-                    )
 
             await self._event_bus.emit(Events.EXPERIENCE_CREATED, {
                 "experience_id": str(experience.id),
@@ -922,9 +872,6 @@ class ExperienceService:
             if experience is None:
                 return None
 
-            # T8: architecture_nodes is handled separately (binding table, not Experience)
-            architecture_nodes = kwargs.pop("architecture_nodes", None)
-
             # Save version snapshot before editing
             try:
                 await repo.save_version(
@@ -1016,7 +963,7 @@ class ExperienceService:
                     etype, has_solution=bool(final_solution)
                 )
 
-            if not updates and architecture_nodes is None:
+            if not updates:
                 return experience.to_dict()
 
             # Re-generate embedding if content fields changed (include children for groups)
@@ -1045,20 +992,6 @@ class ExperienceService:
 
             updated = await repo.update(exp_uuid, **updates) if updates else experience
             if updated:
-                # T8: Architecture bindings
-                if architecture_nodes is not None:
-                    try:
-                        await repo.replace_architecture_bindings(
-                            exp_uuid,
-                            architecture_nodes,
-                            project=updated.project or "default",
-                        )
-                    except Exception:
-                        logger.warning(
-                            "Failed to update architecture bindings for %s",
-                            experience_id,
-                            exc_info=True,
-                        )
                 if updates:
                     try:
                         await self._maybe_build_tree_nodes(
@@ -1076,8 +1009,6 @@ class ExperienceService:
                             exc_info=True,
                         )
                     fields_updated = list(updates.keys())
-                    if architecture_nodes is not None:
-                        fields_updated.append("architecture_nodes")
                     await self._event_bus.emit(Events.EXPERIENCE_UPDATED, {
                         "experience_id": experience_id,
                         "fields_updated": fields_updated,

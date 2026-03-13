@@ -6,7 +6,6 @@ from fastapi import APIRouter
 
 from team_memory.web.routes import (
     analytics,
-    architecture,
     auth,
     config,
     experiences,
@@ -33,7 +32,6 @@ def mount_all(parent_router: APIRouter) -> None:
     parent_router.include_router(tasks.router)
     parent_router.include_router(auth.router)
     parent_router.include_router(search.router)
-    parent_router.include_router(architecture.router)
     parent_router.include_router(config.router)
     parent_router.include_router(personal_memory.router)
     parent_router.include_router(user_expansion.router)
