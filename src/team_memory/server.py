@@ -1252,6 +1252,8 @@ async def tm_search(
         "Quick-save a simple experience (title + problem required, solution optional). "
         "Use this for fast knowledge capture — solution can be added later. "
         "For typed experiences with full fields, use tm_save_typed instead. "
+        "Optional file_locations: list of dicts, each may have path, start_line, end_line, "
+        "and optionally snippet, file_mtime, file_content_hash. "
         "Returns ~100-200 tokens."
     ),
 )
@@ -1268,6 +1270,7 @@ async def tm_save(
     publish_status: str = "personal",
     skip_dedup: bool = False,
     project: str | None = None,
+    file_locations: list[dict] | None = None,
 ) -> str:
     """Quick-save a new experience to the team knowledge base.
 
@@ -1283,6 +1286,8 @@ async def tm_save(
         publish_status: "personal" (default), "published", or "draft".
         skip_dedup: If True, skip duplicate detection check.
         project: Project scope.
+        file_locations: Optional list of file location dicts (path, start_line, end_line;
+            optionally snippet, file_mtime, file_content_hash).
     """
     service = _get_service()
     db_url = _get_db_url()
@@ -1305,6 +1310,7 @@ async def tm_save(
             publish_status=publish_status,
             skip_dedup=skip_dedup,
             project=resolved_project,
+            file_locations=file_locations,
         )
 
     # Handle dedup detection
@@ -1342,6 +1348,8 @@ async def tm_save(
         "Save a typed experience with full fields (experience_type, severity, "
         "category, structured_data, git_refs, related_links, progress_status). "
         "Types: general, feature, bugfix, tech_design, incident, best_practice, learning. "
+        "Optional file_locations: list of dicts, each may have path, start_line, end_line, "
+        "and optionally snippet, file_mtime, file_content_hash. "
         "Returns ~200-400 tokens."
     ),
 )
@@ -1365,6 +1373,7 @@ async def tm_save_typed(
     publish_status: str = "published",
     skip_dedup: bool = False,
     project: str | None = None,
+    file_locations: list[dict] | None = None,
 ) -> str:
     """Save a typed experience with full fields.
 
@@ -1387,6 +1396,8 @@ async def tm_save_typed(
         publish_status: "published" (default) or "draft".
         skip_dedup: If True, skip duplicate detection check.
         project: Project scope.
+        file_locations: Optional list of file location dicts (path, start_line, end_line;
+            optionally snippet, file_mtime, file_content_hash).
     """
     service = _get_service()
     db_url = _get_db_url()
@@ -1416,6 +1427,7 @@ async def tm_save_typed(
             git_refs=git_refs,
             related_links=related_links,
             project=resolved_project,
+            file_locations=file_locations,
         )
 
     if result.get("status") == "duplicate_detected":

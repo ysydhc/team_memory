@@ -286,6 +286,8 @@ class TestTdSave:
 
         with patch("team_memory.server._get_service") as mock_get_service, \
              patch("team_memory.server.get_session") as mock_get_session, \
+             patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
+             patch("team_memory.server._resolve_project", return_value="default"), \
              patch("team_memory.server._get_current_user", return_value="alice"):
 
             mock_service = MagicMock()
@@ -313,16 +315,21 @@ class TestTdSave:
         assert "saved successfully" in data["message"].lower()
 
     @pytest.mark.asyncio
-    async def test_save_with_architecture_nodes_normalizes_paths(self):
-        """tm_save with architecture_nodes normalizes paths and passes to save."""
+    async def test_save_with_file_locations_passes_through(self):
+        """tm_save with file_locations passes them through to save."""
         exp_id = str(uuid.uuid4())
         mock_result = {
             "id": exp_id,
             "title": "Fix",
             "created_at": "2026-01-01T00:00:00+00:00",
         }
+        file_locs = [
+            {"path": "src/server.py", "start_line": 10, "end_line": 20},
+        ]
         with patch("team_memory.server._get_service") as mock_get_service, \
              patch("team_memory.server.get_session") as mock_get_session, \
+             patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
+             patch("team_memory.server._resolve_project", return_value="default"), \
              patch("team_memory.server._get_current_user", return_value="alice"):
             mock_service = MagicMock()
             mock_service.save = AsyncMock(return_value=mock_result)
@@ -338,13 +345,61 @@ class TestTdSave:
             await save_fn(
                 title="Fix",
                 problem="Problem",
-                architecture_nodes=["./src/server.py", "/foo/bar.py"],
+                file_locations=file_locs,
             )
             kwargs = mock_service.save.call_args.kwargs
-            assert kwargs.get("architecture_nodes") == [
-                "src/server.py",
-                "foo/bar.py",
-            ]
+            assert kwargs.get("file_locations") == file_locs
+
+    @pytest.mark.asyncio
+    async def test_save_with_file_locations_binding_exists(self):
+        """tm_save with file_locations forwards to save so bindings are created."""
+        exp_id = str(uuid.uuid4())
+        mock_result = {
+            "id": exp_id,
+            "title": "Fix",
+            "created_at": "2026-01-01T00:00:00+00:00",
+        }
+        file_locs = [
+            {
+                "path": "src/team_memory/server.py",
+                "start_line": 1,
+                "end_line": 5,
+                "snippet": "def tm_save",
+                "file_mtime": "2026-01-01T00:00:00Z",
+                "file_content_hash": "abc123",
+            },
+        ]
+        with patch("team_memory.server._get_service") as mock_get_service, \
+             patch("team_memory.server.get_session") as mock_get_session, \
+             patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
+             patch("team_memory.server._resolve_project", return_value="default"), \
+             patch("team_memory.server._get_current_user", return_value="alice"):
+            mock_service = MagicMock()
+            mock_service.save = AsyncMock(return_value=mock_result)
+            mock_get_service.return_value = mock_service
+            mock_session = AsyncMock()
+            mock_get_session.return_value.__aenter__ = AsyncMock(
+                return_value=mock_session
+            )
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            tools = await mcp.get_tools()
+            save_fn = tools["tm_save"].fn
+            await save_fn(
+                title="Fix",
+                problem="Problem",
+                file_locations=file_locs,
+            )
+            kwargs = mock_service.save.call_args.kwargs
+            assert kwargs.get("file_locations") == file_locs
+            assert len(kwargs["file_locations"]) == 1
+            binding = kwargs["file_locations"][0]
+            assert binding["path"] == "src/team_memory/server.py"
+            assert binding["start_line"] == 1
+            assert binding["end_line"] == 5
+            assert binding.get("snippet") == "def tm_save"
+            assert binding.get("file_mtime") == "2026-01-01T00:00:00Z"
+            assert binding.get("file_content_hash") == "abc123"
 
 
 # ============================================================
@@ -356,8 +411,8 @@ class TestTdSaveTyped:
     """Test tm_save_typed tool function."""
 
     @pytest.mark.asyncio
-    async def test_save_typed_with_architecture_nodes_normalizes_paths(self):
-        """tm_save_typed with architecture_nodes normalizes paths and passes to save."""
+    async def test_save_typed_with_file_locations_passes_through(self):
+        """tm_save_typed with file_locations passes them through to save."""
         exp_id = str(uuid.uuid4())
         mock_result = {
             "id": exp_id,
@@ -365,8 +420,14 @@ class TestTdSaveTyped:
             "experience_type": "bugfix",
             "created_at": "2026-01-01T00:00:00+00:00",
         }
+        file_locs = [
+            {"path": "src/utils/path.py", "start_line": 1, "end_line": 10},
+            {"path": "src/foo.py", "start_line": 5, "end_line": 15},
+        ]
         with patch("team_memory.server._get_service") as mock_get_service, \
              patch("team_memory.server.get_session") as mock_get_session, \
+             patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
+             patch("team_memory.server._resolve_project", return_value="default"), \
              patch("team_memory.server._get_current_user", return_value="alice"):
             mock_service = MagicMock()
             mock_service.save = AsyncMock(return_value=mock_result)
@@ -383,13 +444,10 @@ class TestTdSaveTyped:
                 title="Fix",
                 problem="Problem",
                 experience_type="bugfix",
-                architecture_nodes=["src\\utils\\path.py", "src/foo.py"],
+                file_locations=file_locs,
             )
             kwargs = mock_service.save.call_args.kwargs
-            assert kwargs.get("architecture_nodes") == [
-                "src/utils/path.py",
-                "src/foo.py",
-            ]
+            assert kwargs.get("file_locations") == file_locs
 
 
 # ============================================================
