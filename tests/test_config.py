@@ -167,3 +167,27 @@ def test_logging_config_defaults():
     assert lg.log_io_truncate == 300
     assert lg.log_file_enabled is False
     assert lg.log_file_max_bytes == 10 * 1024 * 1024
+
+
+class TestSearchAndFileLocationConfig:
+    """Test SearchConfig.location_weight and file_location binding defaults."""
+
+    def test_search_location_weight_default(self):
+        """Default location_weight is 0.15 (file position weight in final score)."""
+        settings = Settings()
+        assert settings.search.location_weight == 0.15
+
+    def test_file_location_ttl_days_default(self):
+        """Default file_location_ttl_days is 30."""
+        settings = Settings()
+        assert settings.file_location_binding.file_location_ttl_days == 30
+
+    def test_file_location_cleanup_enabled_default(self):
+        """Default file_location_cleanup_enabled is True."""
+        settings = Settings()
+        assert settings.file_location_binding.file_location_cleanup_enabled is True
+
+    def test_file_location_cleanup_interval_hours_default(self):
+        """Default file_location_cleanup_interval_hours is 24."""
+        settings = Settings()
+        assert settings.file_location_binding.file_location_cleanup_interval_hours == 24

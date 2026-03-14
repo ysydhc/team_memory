@@ -173,6 +173,22 @@ class RerankerConfig(BaseModel):
     jina: JinaRerankerConfig = Field(default_factory=JinaRerankerConfig)
 
 
+# ====================== File Location Binding Configuration ======================
+
+
+class FileLocationBindingConfig(BaseModel):
+    """File location binding TTL and cleanup configuration.
+
+    Controls how long experience–file bindings are kept and when they are refreshed
+    or cleaned up.
+    """
+
+    file_location_ttl_days: int = 30  # Days until a binding is considered expired
+    file_location_refresh_on_access: bool = True  # Refresh TTL when binding is used
+    file_location_cleanup_enabled: bool = True  # Run periodic cleanup of expired bindings
+    file_location_cleanup_interval_hours: int = 24  # How often cleanup runs (hours)
+
+
 # ====================== Search Configuration ======================
 
 
@@ -183,6 +199,10 @@ class SearchConfig(BaseModel):
     rrf_k: int = 60  # RRF constant (standard value)
     vector_weight: float = 0.7  # Weight for vector results in RRF
     fts_weight: float = 0.3  # Weight for FTS results in RRF
+    location_weight: float = Field(
+        0.15,
+        description="文件位置匹配在最终得分中的权重，推荐 0.1～0.25，默认即可一般无需调整",
+    )
     adaptive_filter: bool = True  # Enable adaptive score filtering
     score_gap_threshold: float = 0.15  # Gap threshold for elbow detection
     min_confidence_ratio: float = 0.6  # Min ratio vs top-1 for dynamic threshold
@@ -413,6 +433,9 @@ class Settings(BaseSettings):
     pageindex_lite: PageIndexLiteConfig = Field(default_factory=PageIndexLiteConfig)
     reranker: RerankerConfig = Field(default_factory=RerankerConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
+    file_location_binding: FileLocationBindingConfig = Field(
+        default_factory=FileLocationBindingConfig
+    )
     cache: CacheConfig = Field(default_factory=CacheConfig)
     vector: VectorConfig = Field(default_factory=VectorConfig)
     web: WebConfig = Field(default_factory=WebConfig)
