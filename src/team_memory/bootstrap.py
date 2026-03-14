@@ -373,6 +373,7 @@ def bootstrap(
         memory_config=settings.memory,
         llm_config=settings.llm,
         pageindex_lite_config=settings.pageindex_lite,
+        file_location_config=settings.file_location_binding,
         db_url=db_url,
     )
 

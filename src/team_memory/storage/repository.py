@@ -24,6 +24,13 @@ from team_memory.storage.models import (
     TaskMessage,
     UserExpansionConfig,
 )
+from team_memory.utils.location_fingerprint import (
+    LOCATION_SCORE_EXACT,
+    LOCATION_SCORE_SAME_FILE,
+)
+from team_memory.utils.location_fingerprint import (
+    lines_overlap as lines_overlap_range,
+)
 
 
 def _utcnow() -> datetime:
@@ -433,9 +440,6 @@ class ExperienceRepository:
 
     # ======================== FILE LOCATION BINDINGS ========================
 
-    LOCATION_SCORE_EXACT = 1.0
-    LOCATION_SCORE_SAME_FILE = 0.7
-
     def _binding_to_dict(self, row: ExperienceFileLocation) -> dict:
         """Convert ExperienceFileLocation to dict for API responses."""
         return {
@@ -453,13 +457,6 @@ class ExperienceRepository:
                 row.last_accessed_at.isoformat() if row.last_accessed_at else None
             ),
         }
-
-    @staticmethod
-    def _lines_overlap(
-        a_start: int, a_end: int, b_start: int, b_end: int
-    ) -> bool:
-        """True if ranges [a_start, a_end] and [b_start, b_end] overlap."""
-        return not (a_end < b_start or b_end < a_start)
 
     async def replace_file_location_bindings(
         self,
@@ -570,12 +567,12 @@ class ExperienceRepository:
         best_per_exp: dict[uuid.UUID, float] = {}
         to_refresh: list[ExperienceFileLocation] = []
         for b in bindings:
-            if self._lines_overlap(
+            if lines_overlap_range(
                 b.start_line, b.end_line, start_line, end_line
             ):
-                score = self.LOCATION_SCORE_EXACT
+                score = LOCATION_SCORE_EXACT
             else:
-                score = self.LOCATION_SCORE_SAME_FILE
+                score = LOCATION_SCORE_SAME_FILE
             if b.experience_id not in best_per_exp or score > best_per_exp[b.experience_id]:
                 best_per_exp[b.experience_id] = score
             if refresh_on_access and score > 0:

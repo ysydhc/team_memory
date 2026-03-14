@@ -13,7 +13,7 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from team_memory import io_logger
@@ -49,6 +49,7 @@ class ExperienceService:
         memory_config=None,
         llm_config=None,
         pageindex_lite_config=None,
+        file_location_config=None,
         db_url: str = "",
     ):
         self._db_url = db_url
@@ -62,6 +63,7 @@ class ExperienceService:
         self._memory_config = memory_config
         self._llm_config = llm_config
         self._pageindex_lite_config = pageindex_lite_config
+        self._file_location_config = file_location_config
         self._pageindex_builder = PageIndexLiteBuilder(
             min_doc_chars=getattr(pageindex_lite_config, "min_doc_chars", 800),
             max_tree_depth=getattr(pageindex_lite_config, "max_tree_depth", 4),
@@ -548,6 +550,7 @@ class ExperienceService:
         related_links: list | None = None,
         project: str | None = None,
         quality_score: int = 0,
+        file_locations: list[dict] | None = None,
         *,
         session=None,  # noqa: ANN001 - for internal reuse (e.g. hard_delete_and_rebuild)
     ) -> dict:
@@ -700,6 +703,53 @@ class ExperienceService:
                     experience.id,
                     exc_info=True,
                 )
+
+            # File location bindings: content_fingerprint from snippet only; expires_at from config
+            if file_locations:
+                ttl_days = 30
+                if self._file_location_config is not None:
+                    ttl_days = self._file_location_config.file_location_ttl_days
+                from team_memory.utils.location_fingerprint import (
+                    content_fingerprint,
+                    normalize_snippet_for_fingerprint,
+                )
+
+                now = datetime.now(timezone.utc)
+                expires_at = now + timedelta(days=ttl_days)
+                bindings: list[dict] = []
+                for loc in file_locations:
+                    path = loc.get("path")
+                    if not path:
+                        continue
+                    start_line = int(loc.get("start_line", 1))
+                    end_line = int(loc.get("end_line", 1))
+                    snippet = loc.get("snippet")
+                    content_fp = None
+                    if snippet is not None:
+                        content_fp = content_fingerprint(
+                            normalize_snippet_for_fingerprint(snippet)
+                        )
+                    bindings.append({
+                        "path": path,
+                        "start_line": start_line,
+                        "end_line": end_line,
+                        "content_fingerprint": content_fp,
+                        "snippet": loc.get("snippet"),
+                        "file_mtime_at_bind": loc.get("file_mtime"),
+                        "file_content_hash_at_bind": loc.get("file_content_hash"),
+                        "expires_at": expires_at,
+                    })
+                if bindings:
+                    try:
+                        await repo.replace_file_location_bindings(
+                            experience.id, bindings
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to replace file location bindings for %s",
+                            experience.id,
+                            exc_info=True,
+                        )
 
             # Enqueue background embedding task if async mode
             if embedding_status == "pending" and self._embedding_queue is not None:

@@ -102,6 +102,74 @@ class TestExperienceServiceUnit:
         mock_repo_instance.create.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_save_with_file_locations_stores_bindings(self, mock_embedding, no_auth):
+        """Save with file_locations calls replace_file_location_bindings; assert count and path."""
+        from team_memory.config import FileLocationBindingConfig
+
+        file_location_config = FileLocationBindingConfig(file_location_ttl_days=14)
+        service = ExperienceService(
+            embedding_provider=mock_embedding,
+            auth_provider=no_auth,
+            file_location_config=file_location_config,
+            db_url="sqlite+aiosqlite://",
+        )
+        mock_session = AsyncMock()
+        mock_repo_instance = MagicMock()
+        exp_id = uuid.uuid4()
+        mock_experience = MagicMock()
+        mock_experience.id = exp_id
+        mock_experience.to_dict.return_value = {
+            "id": str(exp_id),
+            "title": "Loc binding",
+            "created_at": "2026-01-01T00:00:00",
+        }
+        mock_repo_instance.create = AsyncMock(return_value=mock_experience)
+        mock_repo_instance.replace_file_location_bindings = AsyncMock(return_value=2)
+        mock_repo_instance.get_file_location_bindings = AsyncMock(return_value=[])
+
+        @asynccontextmanager
+        async def mock_get_session(_db_url):
+            yield mock_session
+
+        with patch("team_memory.storage.database.get_session", mock_get_session), \
+             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
+            mock_repo.return_value = mock_repo_instance
+            result = await service.save(
+                title="Loc binding",
+                problem="P",
+                solution="S",
+                created_by="alice",
+                file_locations=[
+                    {
+                        "path": "src/a.py",
+                        "start_line": 10,
+                        "end_line": 20,
+                        "snippet": "def foo(): pass",
+                    },
+                    {"path": "src/b.py"},
+                ],
+            )
+
+        assert result.get("id") == str(exp_id)
+        mock_repo_instance.replace_file_location_bindings.assert_called_once()
+        call_args = mock_repo_instance.replace_file_location_bindings.call_args
+        assert call_args[0][0] == exp_id
+        bindings = call_args[0][1]
+        assert len(bindings) == 2
+        paths = {b["path"] for b in bindings}
+        assert paths == {"src/a.py", "src/b.py"}
+        # With snippet -> content_fingerprint set; without snippet -> None
+        b_a = next(b for b in bindings if b["path"] == "src/a.py")
+        assert b_a.get("content_fingerprint") is not None
+        b_b = next(b for b in bindings if b["path"] == "src/b.py")
+        assert b_b.get("content_fingerprint") is None
+        # Query bindings (mock returns what we pass; real impl uses repo.get_file_location_bindings)
+        mock_repo_instance.get_file_location_bindings.return_value = bindings
+        got = await mock_repo_instance.get_file_location_bindings(exp_id)
+        assert len(got) == 2
+        assert {b["path"] for b in got} == {"src/a.py", "src/b.py"}
+
+    @pytest.mark.asyncio
     async def test_search_calls_embedding_and_repo(self, service, mock_embedding):
         """Verify that search generates query embedding and calls repo."""
         mock_session = AsyncMock()
