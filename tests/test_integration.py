@@ -16,9 +16,22 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from team_memory.auth.provider import NoAuth
+from team_memory.config import (
+    CacheConfig,
+    FileLocationBindingConfig,
+    PageIndexLiteConfig,
+    RetrievalConfig,
+    SearchConfig,
+)
+from team_memory.reranker.noop_provider import NoopRerankerProvider
 from team_memory.services.experience import ExperienceService
+from team_memory.services.search_pipeline import SearchPipeline
 from team_memory.storage.models import Base
 from team_memory.storage.repository import ExperienceRepository
+from team_memory.utils.location_fingerprint import (
+    LOCATION_SCORE_EXACT,
+    LOCATION_SCORE_SAME_FILE,
+)
 from tests.conftest import MockEmbeddingProvider
 
 # Skip all tests if DB is not available
@@ -342,6 +355,33 @@ class TestServiceIntegration:
             db_url=DB_URL,
         )
 
+    @pytest.fixture
+    def service_with_pipeline(self, mock_embed):
+        """ExperienceService with SearchPipeline so search applies location_boost."""
+        pipeline = SearchPipeline(
+            embedding_provider=mock_embed,
+            reranker_provider=NoopRerankerProvider(),
+            search_config=SearchConfig(location_weight=0.15),
+            retrieval_config=RetrievalConfig(),
+            cache_config=CacheConfig(enabled=False),
+            pageindex_lite_config=PageIndexLiteConfig(enabled=False),
+            file_location_config=FileLocationBindingConfig(
+                file_location_ttl_days=30,
+                file_location_refresh_on_access=False,
+            ),
+            db_url=DB_URL,
+        )
+        return ExperienceService(
+            embedding_provider=mock_embed,
+            auth_provider=NoAuth(),
+            search_pipeline=pipeline,
+            file_location_config=FileLocationBindingConfig(
+                file_location_ttl_days=30,
+                file_location_refresh_on_access=False,
+            ),
+            db_url=DB_URL,
+        )
+
     @pytest.mark.asyncio
     async def test_save_and_search_flow(self, service, session):
         """End-to-end: save an experience, then search for it."""
@@ -412,3 +452,84 @@ class TestServiceIntegration:
         assert "Additional approach" in updated["solution"]
         # In-place update replaces tags (not merge)
         assert "operations" in updated["tags"]
+
+    @pytest.mark.asyncio
+    async def test_file_locations_e2e_location_score_and_final_score(
+        self, service_with_pipeline, session
+    ):
+        """E2E: save with file_locations; search with overlapping current_file_locations
+        yields location_score >= LOCATION_SCORE_EXACT and higher final score than
+        same query without current_file_locations. Optional: same path non-overlap
+        yields LOCATION_SCORE_SAME_FILE.
+        """
+        # (1) Save experience with file_locations (path, start_line, end_line, optional snippet)
+        file_path = "src/team_memory/file_locations_e2e.py"
+        result = await service_with_pipeline.save(
+            session=session,
+            title="E2E file location binding helper pattern",
+            problem="Need to bind experience to a file region for retrieval boost.",
+            solution="Use file_locations with path, start_line, end_line when saving.",
+            created_by="e2e",
+            tags=["e2e", "file_locations"],
+            file_locations=[
+                {
+                    "path": file_path,
+                    "start_line": 10,
+                    "end_line": 25,
+                    "snippet": "def bind_location(): ...",
+                }
+            ],
+        )
+        await session.commit()
+        assert "id" in result
+        exp_id = result["id"]
+
+        # (2) Search with same path and overlapping line range -> experience in results,
+        #     location_score >= LOCATION_SCORE_EXACT (1.0)
+        results_with_loc = await service_with_pipeline.search(
+            query="file location binding retrieval boost",
+            min_similarity=0.0,
+            current_file_locations=[
+                {"path": file_path, "start_line": 12, "end_line": 20}
+            ],
+        )
+        found_with_loc = next(
+            (r for r in results_with_loc if r.get("id") == exp_id), None
+        )
+        assert found_with_loc is not None, (
+            "Expected experience in results when current_file_locations overlap"
+        )
+        loc_score = found_with_loc.get("location_score", 0.0)
+        assert loc_score >= LOCATION_SCORE_EXACT, (
+            f"location_score should be >= {LOCATION_SCORE_EXACT}, got {loc_score}"
+        )
+        score_with_loc = found_with_loc.get("score", 0.0)
+
+        # (3) Same query without current_file_locations -> same experience has lower score
+        results_no_loc = await service_with_pipeline.search(
+            query="file location binding retrieval boost",
+            min_similarity=0.0,
+        )
+        found_no_loc = next(
+            (r for r in results_no_loc if r.get("id") == exp_id), None
+        )
+        assert found_no_loc is not None
+        score_no_loc = found_no_loc.get("score", 0.0)
+        assert score_with_loc > score_no_loc, (
+            f"With location boost score ({score_with_loc}) should be > "
+            f"without ({score_no_loc})"
+        )
+
+        # (4) Optional: same path, non-overlapping lines -> location_score == LOCATION_SCORE_SAME_FILE
+        results_same_file = await service_with_pipeline.search(
+            query="file location binding retrieval boost",
+            min_similarity=0.0,
+            current_file_locations=[
+                {"path": file_path, "start_line": 100, "end_line": 110}
+            ],
+        )
+        found_same_file = next(
+            (r for r in results_same_file if r.get("id") == exp_id), None
+        )
+        assert found_same_file is not None
+        assert found_same_file.get("location_score") == LOCATION_SCORE_SAME_FILE
