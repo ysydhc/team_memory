@@ -516,6 +516,7 @@ mcp = FastMCP(
         "Smart problem solving: search the team experience database, "
         "auto-format the best solution, and mark it as used. "
         "Call this FIRST when encountering a technical problem. "
+        "Optional current_file_locations (path, start_line, end_line, etc.) for location boost. "
         "Returns ~500-2000 tokens (focused on top matches)."
     ),
 )
@@ -530,6 +531,7 @@ async def tm_solve(
     max_results: int = 3,
     use_pageindex_lite: bool | None = None,
     project: str | None = None,
+    current_file_locations: list[dict] | None = None,
 ) -> str:
     """Solve a problem by searching team experiences with enhanced context.
 
@@ -546,6 +548,8 @@ async def tm_solve(
         framework: Framework for filtering.
         tags: Optional tags to filter by.
         max_results: Max solutions to return (default 3, focused).
+        current_file_locations: Optional list of dicts with path, start_line, end_line;
+            optional file_content, file_mtime, file_content_hash for location_score boost.
     """
     if file_path is not None and file_paths is None:
         file_paths = [file_path]
@@ -594,6 +598,7 @@ async def tm_solve(
         top_k_children=2,
         use_pageindex_lite=use_pageindex_lite,
         project=resolved_project,
+        current_file_locations=current_file_locations,
     )
 
     # Auto-increment use_count + quality score boost on best match
@@ -1148,6 +1153,7 @@ async def tm_suggest(
         "Search the team experience database for relevant solutions. "
         "Call this BEFORE starting to solve a technical problem to check "
         "if the team already has a solution. "
+        "Optional current_file_locations (path, start_line, end_line, etc.) for location boost. "
         "Returns ~1000-4000 tokens depending on result count."
     ),
 )
@@ -1163,6 +1169,7 @@ async def tm_search(
     top_k_children: int = 3,
     use_pageindex_lite: bool | None = None,
     project: str | None = None,
+    current_file_locations: list[dict] | None = None,
 ) -> str:
     """Search team experiences by semantic similarity.
 
@@ -1183,6 +1190,8 @@ async def tm_search(
         min_similarity: Minimum similarity threshold.
         grouped: Return results grouped by parent-child. Default True.
         top_k_children: Max children per group. Default 3.
+        current_file_locations: Optional list of dicts with path, start_line, end_line;
+            optional file_content, file_mtime, file_content_hash for location_score boost.
     """
     if file_path is not None and file_paths is None:
         file_paths = [file_path]
@@ -1202,6 +1211,7 @@ async def tm_search(
         top_k_children=top_k_children,
         use_pageindex_lite=use_pageindex_lite,
         project=resolved_project,
+        current_file_locations=current_file_locations,
     )
 
     if not results:

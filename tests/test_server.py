@@ -236,8 +236,12 @@ class TestTdSearch:
         assert "No matching" in data["message"]
 
     @pytest.mark.asyncio
-    async def test_search_passes_node_keys_from_file_paths(self):
-        """tm_search with file_paths should pass node_keys to search for boost."""
+    async def test_search_passes_current_file_locations(self):
+        """tm_search with current_file_locations should pass them to search for location boost."""
+        locs = [
+            {"path": "src/team_memory/server.py", "start_line": 1, "end_line": 10},
+            {"path": "tests/conftest.py"},
+        ]
         with patch("team_memory.server._get_service") as mock_get_service, \
              patch("team_memory.server.get_session") as mock_get_session, \
              patch("team_memory.server._get_current_user", return_value="alice"), \
@@ -257,14 +261,11 @@ class TestTdSearch:
             search_fn = tools["tm_search"].fn
             await search_fn(
                 query="test",
-                file_paths=["src/team_memory/server.py", "./tests/conftest.py"],
+                current_file_locations=locs,
             )
 
         call_kwargs = mock_service.search.call_args.kwargs
-        assert call_kwargs.get("node_keys") == [
-            "src/team_memory/server.py",
-            "tests/conftest.py",
-        ]
+        assert call_kwargs.get("current_file_locations") == locs
 
 
 # ============================================================
@@ -575,8 +576,9 @@ class TestTdSolve:
         assert data["suggestion"] == "tm_save"
 
     @pytest.mark.asyncio
-    async def test_solve_passes_node_keys_from_file_path(self):
-        """tm_solve with file_path should pass node_keys to search for boost."""
+    async def test_solve_passes_current_file_locations_from_file_path(self):
+        """tm_solve with current_file_locations should pass them to search for location boost."""
+        locs = [{"path": "src/team_memory/server.py", "start_line": 1, "end_line": 5}]
         with patch("team_memory.server._get_service") as mock_get_service, \
              patch("team_memory.server.get_session") as mock_get_session, \
              patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
@@ -597,15 +599,16 @@ class TestTdSolve:
             solve_fn = tools["tm_solve"].fn
             await solve_fn(
                 problem="test",
-                file_path="./src/team_memory/server.py",
+                current_file_locations=locs,
             )
 
         call_kwargs = mock_service.search.call_args.kwargs
-        assert call_kwargs.get("node_keys") == ["src/team_memory/server.py"]
+        assert call_kwargs.get("current_file_locations") == locs
 
     @pytest.mark.asyncio
-    async def test_solve_passes_node_keys_from_file_paths(self):
-        """tm_solve with file_paths should pass normalized node_keys to search."""
+    async def test_solve_passes_current_file_locations_from_file_paths(self):
+        """tm_solve with current_file_locations should pass them to search for location boost."""
+        locs = [{"path": "src/foo.py"}, {"path": "tests/bar.py"}]
         with patch("team_memory.server._get_service") as mock_get_service, \
              patch("team_memory.server.get_session") as mock_get_session, \
              patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
@@ -626,11 +629,11 @@ class TestTdSolve:
             solve_fn = tools["tm_solve"].fn
             await solve_fn(
                 problem="test",
-                file_paths=["src/foo.py", "tests\\bar.py"],
+                current_file_locations=locs,
             )
 
         call_kwargs = mock_service.search.call_args.kwargs
-        assert call_kwargs.get("node_keys") == ["src/foo.py", "tests/bar.py"]
+        assert call_kwargs.get("current_file_locations") == locs
 
     @pytest.mark.asyncio
     async def test_solve_builds_enhanced_query(self):
@@ -795,8 +798,8 @@ class TestTdSuggest:
         assert "python" in query.lower()
 
     @pytest.mark.asyncio
-    async def test_suggest_passes_node_keys_from_file_path(self):
-        """tm_suggest with file_path should pass node_keys to search for boost."""
+    async def test_suggest_calls_search_with_context_query(self):
+        """tm_suggest with file_path should call search with context-derived query."""
         with patch("team_memory.server._get_service") as mock_get_service, \
              patch("team_memory.server.get_session") as mock_get_session, \
              patch("team_memory.server._get_current_user", return_value="alice"), \
@@ -817,7 +820,10 @@ class TestTdSuggest:
             await suggest_fn(file_path="src/team_memory/server.py")
 
         call_kwargs = mock_service.search.call_args.kwargs
-        assert call_kwargs.get("node_keys") == ["src/team_memory/server.py"]
+        assert "query" in call_kwargs
+        assert "server.py" in call_kwargs["query"]
+        # tm_suggest does not take current_file_locations (only tm_search/tm_solve do)
+        assert call_kwargs.get("current_file_locations") is None
 
     @pytest.mark.asyncio
     async def test_suggest_no_context_error(self):
