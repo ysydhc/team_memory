@@ -293,6 +293,8 @@ async def get_experience(
         data = exp.to_dict()
         data["feedbacks"] = [fb.to_dict() for fb in exp.feedbacks]
         data["children"] = [c.to_dict() for c in (exp.children or [])]
+        bindings = await repo.get_file_location_bindings(exp.id)
+        data["file_locations"] = bindings
         return data
 
 
@@ -339,6 +341,7 @@ async def create_experience(
             structured_data=req.structured_data,
             git_refs=req.git_refs,
             related_links=req.related_links,
+            file_locations=req.file_locations,
             project=resolved_project,
         )
         if result.get("status") == "duplicate_detected":
@@ -435,6 +438,8 @@ async def update_experience_route(
         kwargs["git_refs"] = raw["git_refs"]
     if "related_links" in raw:
         kwargs["related_links"] = raw["related_links"]
+    if "file_locations" in raw:
+        kwargs["file_locations"] = raw["file_locations"]
     if "publish_status" in raw:
         kwargs["publish_status"] = raw["publish_status"]
     if "solution_addendum" in raw:

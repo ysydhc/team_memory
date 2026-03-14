@@ -922,6 +922,8 @@ class ExperienceService:
             if experience is None:
                 return None
 
+            file_locations = kwargs.pop("file_locations", None)
+
             # Save version snapshot before editing
             try:
                 await repo.save_version(
@@ -1013,7 +1015,7 @@ class ExperienceService:
                     etype, has_solution=bool(final_solution)
                 )
 
-            if not updates:
+            if not updates and file_locations is None:
                 return experience.to_dict()
 
             # Re-generate embedding if content fields changed (include children for groups)
@@ -1041,6 +1043,50 @@ class ExperienceService:
                     logger.warning("Failed to regenerate embedding during update")
 
             updated = await repo.update(exp_uuid, **updates) if updates else experience
+
+            if file_locations is not None:
+                ttl_days = 30
+                if self._file_location_config is not None:
+                    ttl_days = self._file_location_config.file_location_ttl_days
+                now = datetime.now(timezone.utc)
+                expires_at = now + timedelta(days=ttl_days)
+                bindings: list[dict] = []
+                for loc in file_locations:
+                    path = loc.get("path")
+                    if not path:
+                        continue
+                    start_line = int(loc.get("start_line", 1))
+                    end_line = int(loc.get("end_line", 1))
+                    snippet = loc.get("snippet")
+                    content_fp = None
+                    if snippet is not None:
+                        from team_memory.utils.location_fingerprint import (
+                            content_fingerprint,
+                            normalize_snippet_for_fingerprint,
+                        )
+                        content_fp = content_fingerprint(
+                            normalize_snippet_for_fingerprint(snippet)
+                        )
+                    bindings.append({
+                        "path": path,
+                        "start_line": start_line,
+                        "end_line": end_line,
+                        "content_fingerprint": content_fp,
+                        "snippet": loc.get("snippet"),
+                        "file_mtime_at_bind": loc.get("file_mtime"),
+                        "file_content_hash_at_bind": loc.get("file_content_hash"),
+                        "expires_at": expires_at,
+                    })
+                if bindings:
+                    try:
+                        await repo.replace_file_location_bindings(exp_uuid, bindings)
+                    except Exception:
+                        logger.warning(
+                            "Failed to replace file location bindings for %s",
+                            experience_id,
+                            exc_info=True,
+                        )
+
             if updated:
                 if updates:
                     try:

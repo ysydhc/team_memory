@@ -667,6 +667,7 @@ class ExperienceCreate(BaseModel):
     structured_data: dict | None = None
     git_refs: list | None = None
     related_links: list | None = None
+    file_locations: list[dict] | None = None
     project: str | None = None
 
 
@@ -693,6 +694,7 @@ class ExperienceUpdate(BaseModel):
     structured_data: dict | None = None
     git_refs: list | None = None
     related_links: list | None = None
+    file_locations: list[dict] | None = None
     publish_status: str | None = None
     # New status model
     visibility: str | None = None

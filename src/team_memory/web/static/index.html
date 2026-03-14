@@ -4552,6 +4552,11 @@
               <textarea id="create-related-links" placeholder="https://example.com/doc&#10;https://wiki...|相关文档标题"
                 style="min-height:50px;font-family:var(--font-mono);font-size:12px"></textarea>
             </div>
+            <div class="form-group">
+              <label>文件位置（可选，每行一条：path 或 path:行号 或 path:起始行-结束行）</label>
+              <textarea id="create-file-locations" placeholder="src/foo.py&#10;src/bar.js:10&#10;src/baz.go:5-20"
+                style="min-height:50px;font-family:var(--font-mono);font-size:12px"></textarea>
+            </div>
           </div>
         </div>
       </div>
@@ -4639,6 +4644,11 @@
         <div class="form-group">
           <label>相关链接（每行一个，格式: url 或 url|标题）</label>
           <textarea id="edit-related-links" placeholder="https://..."
+            style="min-height:50px;font-family:var(--font-mono);font-size:12px"></textarea>
+        </div>
+        <div class="form-group">
+          <label>文件位置（可选，每行一条：path 或 path:行号 或 path:起始行-结束行）</label>
+          <textarea id="edit-file-locations" placeholder="src/foo.py&#10;src/bar.js:10"
             style="min-height:50px;font-family:var(--font-mono);font-size:12px"></textarea>
         </div>
         <div id="edit-children-section" class="form-group hidden">

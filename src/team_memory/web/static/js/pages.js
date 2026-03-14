@@ -673,6 +673,28 @@ export async function showDetail(id, opts = {}) {
       </div>`
                 : '';
 
+        const fileLocationsHtml =
+            exp.file_locations && exp.file_locations.length > 0
+                ? `
+      <div class="detail-section">
+        <h3>关联位置</h3>
+        <div class="content">
+          <ul style="list-style:none;padding:0;margin:0">
+            ${exp.file_locations
+                .map((loc) => {
+                    const path = loc.path || '';
+                    const start = loc.start_line;
+                    const end = loc.end_line;
+                    const range = start != null && end != null && start !== end ? `:${start}-${end}` : start != null ? `:${start}` : '';
+                    const text = path + range;
+                    return `<li style="margin-bottom:6px;font-family:var(--font-mono);font-size:13px"><code class="file-loc-copy" data-copy-text="${esc(text)}" style="background:var(--bg-input);padding:2px 6px;border-radius:4px;cursor:pointer" title="点击复制">${esc(text)}</code></li>`;
+                })
+                .join('')}
+          </ul>
+        </div>
+      </div>`
+                : '';
+
         const linkTypeLabels = { related: '相关', supersedes: '取代', derived_from: '衍生自' };
         const experienceLinksHtml =
             links.length > 0
@@ -744,6 +766,7 @@ export async function showDetail(id, opts = {}) {
           ${sdHtml}
           ${gitRefsHtml}
           ${relatedLinksHtml}
+          ${fileLocationsHtml}
           ${exp.code_snippets ? `
           <div class="detail-section">
             <h3>代码示例</h3>
@@ -826,6 +849,12 @@ export async function showDetail(id, opts = {}) {
       </div>
     `;
         bindCopyDropdowns(page);
+        page.querySelectorAll('.file-loc-copy').forEach((el) => {
+            el.addEventListener('click', () => {
+                const t = el.getAttribute('data-copy-text');
+                if (t) copyTextToClipboard(t).then((ok) => { if (ok) toast('已复制', 'success'); else toast('复制失败', 'error'); });
+            });
+        });
     } catch (e) {
         page.innerHTML = `<div class="empty-state"><h3>加载失败</h3><p>${e.message}</p></div>`;
     }

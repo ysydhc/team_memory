@@ -210,3 +210,53 @@ export function editRelatedLinksToText(links) {
     if (!links || links.length === 0) return '';
     return links.map((l) => (l.title ? l.url + '|' + l.title : l.url)).join('\n');
 }
+
+/**
+ * Parse file locations textarea: each line path or path:start_line or path:start_line-end_line.
+ * Returns list of { path, start_line, end_line } or null.
+ */
+export function parseFileLocationsFromTextarea(text) {
+    if (!text || !text.trim()) return null;
+    const lines = text.trim().split('\n').map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 0) return null;
+    const locs = [];
+    for (const line of lines) {
+        const colon = line.indexOf(':');
+        if (colon < 0) {
+            locs.push({ path: line, start_line: 1, end_line: 1 });
+            continue;
+        }
+        const path = line.slice(0, colon).trim();
+        const rest = line.slice(colon + 1).trim();
+        if (!path) continue;
+        const dash = rest.indexOf('-');
+        if (dash < 0) {
+            const start = parseInt(rest, 10) || 1;
+            locs.push({ path, start_line: start, end_line: start });
+        } else {
+            const start = parseInt(rest.slice(0, dash).trim(), 10) || 1;
+            const end = parseInt(rest.slice(dash + 1).trim(), 10) || start;
+            locs.push({ path, start_line: start, end_line: end });
+        }
+    }
+    return locs.length ? locs : null;
+}
+
+/**
+ * Format file_locations (API binding list with path, start_line, end_line) for textarea.
+ */
+export function editFileLocationsToText(locs) {
+    if (!locs || locs.length === 0) return '';
+    return locs
+        .map((b) => {
+            const path = b.path || '';
+            const start = b.start_line;
+            const end = b.end_line;
+            if (start == null && end == null) return path;
+            if (start != null && end != null && start === end) return `${path}:${start}`;
+            if (start != null && end != null) return `${path}:${start}-${end}`;
+            if (start != null) return `${path}:${start}`;
+            return path;
+        })
+        .join('\n');
+}

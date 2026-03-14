@@ -417,6 +417,37 @@ class TestCreateExperience:
             assert kwargs["created_by"] == "test_admin"
             assert kwargs["source"] == "web"
 
+    def test_create_experience_with_file_locations(self, client, auth_headers, setup_app):
+        """Create experience with file_locations; service.save receives file_locations."""
+        with patch("team_memory.web.app.get_session") as mock_gs:
+            mock_sess = AsyncMock()
+            mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
+            mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            resp = client.post(
+                "/api/v1/experiences",
+                headers=auth_headers,
+                json={
+                    "title": "Location-bound experience",
+                    "problem": "Problem",
+                    "solution": "Solution",
+                    "file_locations": [
+                        {"path": "src/foo.py", "start_line": 1, "end_line": 1},
+                        {"path": "src/bar.js", "start_line": 10, "end_line": 20},
+                    ],
+                },
+            )
+            assert resp.status_code == 200
+            assert "id" in resp.json()
+
+            setup_app.save.assert_called_once()
+            kwargs = setup_app.save.call_args.kwargs
+            assert kwargs.get("file_locations") == [
+                {"path": "src/foo.py", "start_line": 1, "end_line": 1},
+                {"path": "src/bar.js", "start_line": 10, "end_line": 20},
+            ]
+
+
 class TestDeleteExperience:
     def test_delete_requires_auth(self, client):
         resp = client.delete(f"/api/v1/experiences/{uuid.uuid4()}")

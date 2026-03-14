@@ -13,8 +13,10 @@ import {
     onEditTypeChange,
     parseGitRefsFromTextarea,
     parseRelatedLinksFromTextarea,
+    parseFileLocationsFromTextarea,
     editGitRefsToText,
     editRelatedLinksToText,
+    editFileLocationsToText,
 } from './schema.js';
 import { populateTagSuggestions } from './pages.js';
 
@@ -422,6 +424,7 @@ export async function doCreate() {
     let structuredData = null;
     let gitRefs = null;
     let relatedLinks = null;
+    let fileLocations = null;
 
     if (!quickMode) {
         const sevEl = document.getElementById('create-severity');
@@ -449,6 +452,7 @@ export async function doCreate() {
         }
         gitRefs = parseGitRefsFromTextarea(document.getElementById('create-git-refs')?.value);
         relatedLinks = parseRelatedLinksFromTextarea(document.getElementById('create-related-links')?.value);
+        fileLocations = parseFileLocationsFromTextarea(document.getElementById('create-file-locations')?.value);
     }
 
     const saveAsDraft = document.getElementById('create-draft-checkbox')?.checked || false;
@@ -468,6 +472,7 @@ export async function doCreate() {
         if (structuredData) body.structured_data = structuredData;
         if (gitRefs) body.git_refs = gitRefs;
         if (relatedLinks) body.related_links = relatedLinks;
+        if (fileLocations) body.file_locations = fileLocations;
 
         const opts = {
             method: 'POST',
@@ -496,6 +501,7 @@ export async function doCreate() {
                 if (structuredData) retryBody.structured_data = structuredData;
                 if (gitRefs) retryBody.git_refs = gitRefs;
                 if (relatedLinks) retryBody.related_links = relatedLinks;
+                if (fileLocations) retryBody.file_locations = fileLocations;
                 await api('POST', '/api/v1/experiences', retryBody);
                 toast(saveAsDraft ? '经验已保存为草稿' : '经验保存成功', 'success');
                 closeCreateModal(true);
@@ -581,6 +587,7 @@ export async function openEditModal(expId) {
         document.getElementById('edit-project').value = exp.project || '';
         document.getElementById('edit-git-refs').value = editGitRefsToText(exp.git_refs);
         document.getElementById('edit-related-links').value = editRelatedLinksToText(exp.related_links);
+        document.getElementById('edit-file-locations').value = editFileLocationsToText(exp.file_locations);
 
         onEditTypeChange();
 
@@ -679,6 +686,7 @@ export async function submitEdit() {
     const progress_status = document.getElementById('edit-progress-status')?.value || null;
     const gitRefs = parseGitRefsFromTextarea(document.getElementById('edit-git-refs')?.value);
     const relatedLinks = parseRelatedLinksFromTextarea(document.getElementById('edit-related-links')?.value);
+    const fileLocations = parseFileLocationsFromTextarea(document.getElementById('edit-file-locations')?.value);
 
     const tpl = (state.cachedTemplates || []).find((t) => (t.experience_type || t.id) === experience_type) || {};
     let structured_data = null;
@@ -740,6 +748,9 @@ export async function submitEdit() {
     if (relatedLinks !== null && JSON.stringify(relatedLinks) !== JSON.stringify(orig?.related_links || [])) {
         body.related_links = relatedLinks;
     }
+    const origFileLocs = (orig?.file_locations || []).map((b) => ({ path: b.path, start_line: b.start_line, end_line: b.end_line }));
+    const newFileLocs = fileLocations || [];
+    if (JSON.stringify(newFileLocs) !== JSON.stringify(origFileLocs)) body.file_locations = newFileLocs;
     if (children) body.children = children;
 
     if (Object.keys(body).length === 0) {
