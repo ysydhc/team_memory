@@ -149,6 +149,7 @@ class ExperienceService:
         rating_weight: float = 0.3,
         use_pageindex_lite: bool | None = None,
         project: str | None = None,
+        current_file_locations: list[dict] | None = None,
     ) -> list[dict]:
         async with self._session() as session:
             """Search experiences using the enhanced search pipeline.
@@ -160,6 +161,8 @@ class ExperienceService:
             Args:
                 grouped: If True, return results grouped by root experience.
                 top_k_children: Max children per group (only when grouped=True).
+                current_file_locations: Optional list of {path, start_line, end_line, ...}
+                    for location_score boost.
             """
             search_start = time.monotonic()
             # Use enhanced pipeline if available
@@ -180,6 +183,7 @@ class ExperienceService:
                     rating_weight=rating_weight,
                     use_pageindex_lite=use_pageindex_lite,
                     project=project,
+                    current_file_locations=current_file_locations,
                 )
                 pipeline_result = await self._search_pipeline.search(
                     session, request

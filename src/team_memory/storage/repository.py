@@ -537,6 +537,36 @@ class ExperienceRepository:
             out.setdefault(r.path, []).append(self._binding_to_dict(r))
         return out
 
+    async def refresh_file_location_bindings(
+        self,
+        binding_ids: list[uuid.UUID] | list[str],
+        ttl_days: int = 30,
+    ) -> int:
+        """Batch update last_accessed_at and expires_at for hit bindings (e.g. location boost)."""
+        if not binding_ids:
+            return 0
+        now = _utcnow()
+        new_expires = now + timedelta(days=ttl_days)
+        ids: list[uuid.UUID] = []
+        for i in binding_ids:
+            if isinstance(i, str):
+                try:
+                    ids.append(uuid.UUID(i))
+                except ValueError:
+                    continue
+            else:
+                ids.append(i)
+        if not ids:
+            return 0
+        stmt = (
+            update(ExperienceFileLocation)
+            .where(ExperienceFileLocation.id.in_(ids))
+            .values(last_accessed_at=now, expires_at=new_expires)
+        )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return result.rowcount or 0
+
     async def find_experience_ids_by_location(
         self,
         path: str,

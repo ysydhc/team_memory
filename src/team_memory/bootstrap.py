@@ -346,6 +346,7 @@ def bootstrap(
         llm_config=settings.llm,
         tag_synonyms=getattr(settings, "tag_synonyms", None) or {},
         db_url=db_url,
+        file_location_config=settings.file_location_binding,
     )
 
     event_bus = EventBus()

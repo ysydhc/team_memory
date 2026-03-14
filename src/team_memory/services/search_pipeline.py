@@ -21,13 +21,26 @@ from dataclasses import dataclass, field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from team_memory import io_logger
-from team_memory.config import CacheConfig, PageIndexLiteConfig, RetrievalConfig, SearchConfig
+from team_memory.config import (
+    CacheConfig,
+    FileLocationBindingConfig,
+    PageIndexLiteConfig,
+    RetrievalConfig,
+    SearchConfig,
+)
 from team_memory.embedding.base import EmbeddingProvider
 from team_memory.reranker.base import RerankerProvider
 from team_memory.services.cache import SearchCache
 from team_memory.services.context_trimmer import ContextTrimmer
 from team_memory.storage.database import get_session
 from team_memory.storage.repository import ExperienceRepository, UserExpansionRepository
+from team_memory.utils.location_fingerprint import (
+    LOCATION_SCORE_EXACT,
+    LOCATION_SCORE_SAME_FILE,
+    find_fingerprint_in_lines,
+    lines_overlap,
+    overlap_score,
+)
 
 logger = logging.getLogger("team_memory.search_pipeline")
 
@@ -52,6 +65,9 @@ class SearchRequest:
     rating_weight: float = 0.3
     use_pageindex_lite: bool | None = None
     project: str | None = None
+    # File location binding: optional current editor locations for location_score boost
+    # path, start_line, end_line; optional file_content, file_mtime, file_content_hash
+    current_file_locations: list[dict] | None = None
 
 
 @dataclass
@@ -156,6 +172,7 @@ class SearchPipeline:
         llm_config=None,
         tag_synonyms: dict[str, str] | None = None,
         db_url: str | None = None,
+        file_location_config: FileLocationBindingConfig | None = None,
     ):
         self._embedding = embedding_provider
         self._db_url = db_url
@@ -165,6 +182,7 @@ class SearchPipeline:
         self._pageindex_lite_config = pageindex_lite_config
         self._llm_config = llm_config
         self._tag_synonyms = tag_synonyms or {}
+        self._file_location_config = file_location_config
         self._cache = SearchCache(
             max_size=cache_config.max_size,
             ttl_seconds=cache_config.ttl_seconds,
@@ -310,6 +328,9 @@ class SearchPipeline:
         # Exact match boost (query == title or query in title; root + children)
         candidates = self._apply_exact_match_boost(candidates, request.query)
 
+        # Location boost: one batch list_bindings_by_paths, in-memory location_score
+        candidates = await self._apply_location_boost(session, request, repo, candidates)
+
         total_candidates = len(candidates)
         if _SEARCH_DEBUG:
             _ids = [
@@ -413,11 +434,15 @@ class SearchPipeline:
         # Limit final results
         candidates = candidates[: request.max_results]
 
-        # Build final result dicts
+        # Build final result dicts (score = primary score + location_weight * location_score)
+        location_weight = getattr(self._search_config, "location_weight", 0.15)
         result_dicts = []
         for item in candidates:
             d = item.data.copy()
-            d["score"] = round(item.score, 4)
+            loc_score = d.get("location_score", 0.0)
+            final_score = float(item.score) + location_weight * loc_score
+            d["score"] = round(final_score, 4)
+            d["location_score"] = loc_score  # for debugging
             d["similarity"] = round(item.similarity, 4)
             d["confidence"] = item.confidence
             d["reranked"] = item.reranked
@@ -804,6 +829,130 @@ class SearchPipeline:
                 data["exact_title_match"] = ""
 
         candidates.sort(key=lambda x: x.score, reverse=True)
+        return candidates
+
+    async def _apply_location_boost(
+        self,
+        session: AsyncSession,
+        request: SearchRequest,
+        repo: ExperienceRepository,
+        candidates: list[SearchResultItem],
+    ) -> list[SearchResultItem]:
+        """Apply file-location score boost: one batch list_bindings_by_paths, in-memory scoring.
+
+        If current_file_locations is None or empty, skip. Otherwise: collect paths, call
+        repo.list_bindings_by_paths once, compute location_score per candidate (max over positions),
+        set item.data['location_score'], sort by final_score; optionally batch-refresh hit bindings.
+        """
+        import time
+
+        locs = request.current_file_locations
+        if not locs:
+            return candidates
+
+        location_weight = getattr(self._search_config, "location_weight", 0.15)
+        fl_config = self._file_location_config
+        ttl_days = getattr(fl_config, "file_location_ttl_days", 30) if fl_config else 30
+        refresh_on_access = (
+            getattr(fl_config, "file_location_refresh_on_access", True) if fl_config else True
+        )
+
+        stage_start = time.monotonic()
+        paths = list(dict.fromkeys(p for loc in locs for p in [loc.get("path")] if p))
+        bindings_by_path: dict[str, list[dict]] = {}
+        hit_binding_ids: set[str] = set()
+
+        try:
+            bindings_by_path = await repo.list_bindings_by_paths(paths, ttl_days=ttl_days)
+        except Exception as e:
+            logger.warning(
+                "list_bindings_by_paths failed, location_score=0 for all: %s",
+                e,
+                exc_info=True,
+            )
+            for item in candidates:
+                item.data["location_score"] = 0.0
+            return candidates
+
+        total_bindings = sum(len(b) for b in bindings_by_path.values())
+        candidates_with_boost = 0
+
+        for item in candidates:
+            exp_id = str(item.data.get("id") or item.data.get("group_id") or "")
+            if not exp_id:
+                item.data["location_score"] = 0.0
+                continue
+            best = 0.0
+            for loc in locs:
+                path = loc.get("path")
+                if not path:
+                    continue
+                bindings = bindings_by_path.get(path, [])
+                loc_start = loc.get("start_line")
+                loc_end = loc.get("end_line")
+                file_content = loc.get("file_content")
+                for b in bindings:
+                    if str(b.get("experience_id")) != exp_id:
+                        continue
+                    b_start = b.get("start_line")
+                    b_end = b.get("end_line")
+                    fingerprint = b.get("content_fingerprint")
+                    score = 0.0
+                    if file_content and fingerprint:
+                        lines = file_content.splitlines() if isinstance(file_content, str) else []
+                        found = find_fingerprint_in_lines(lines, fingerprint)
+                        if found:
+                            s, e = found
+                            if loc_start is not None and loc_end is not None:
+                                score = overlap_score(s, e, loc_start, loc_end)
+                            else:
+                                score = LOCATION_SCORE_SAME_FILE
+                        else:
+                            score = LOCATION_SCORE_SAME_FILE
+                    else:
+                        if (
+                            loc_start is not None
+                            and loc_end is not None
+                            and b_start is not None
+                            and b_end is not None
+                        ):
+                            if lines_overlap(b_start, b_end, loc_start, loc_end):
+                                score = LOCATION_SCORE_EXACT
+                            else:
+                                score = LOCATION_SCORE_SAME_FILE
+                        else:
+                            score = LOCATION_SCORE_SAME_FILE
+                    if score > best:
+                        best = score
+                    if score > 0 and b.get("id"):
+                        hit_binding_ids.add(str(b["id"]))
+            item.data["location_score"] = round(best, 4)
+            if best > 0:
+                candidates_with_boost += 1
+
+        candidates.sort(
+            key=lambda x: float(x.score) + location_weight * x.data.get("location_score", 0.0),
+            reverse=True,
+        )
+
+        if refresh_on_access and hit_binding_ids:
+            try:
+                await repo.refresh_file_location_bindings(list(hit_binding_ids), ttl_days)
+            except Exception as e:
+                logger.warning(
+                    "refresh_file_location_bindings failed (non-fatal): %s",
+                    e,
+                    exc_info=True,
+                )
+
+        stage_ms = int((time.monotonic() - stage_start) * 1000)
+        logger.info(
+            "location_boost step: locs=%d bindings=%d boosted=%d duration_ms=%d",
+            len(locs),
+            total_bindings,
+            candidates_with_boost,
+            stage_ms,
+        )
         return candidates
 
     def _apply_adaptive_filter(
