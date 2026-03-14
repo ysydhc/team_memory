@@ -199,6 +199,7 @@ class AppContext:
     webhook_service: WebhookService | None = None
     _log_listener: QueueListener | None = None
     _stale_scanner_task: asyncio.Task | None = None
+    _file_location_cleanup_task: asyncio.Task | None = None
 
 
 _instance: AppContext | None = None
@@ -470,10 +471,18 @@ def _register_cache_invalidation(event_bus: EventBus, service: ExperienceService
 
 
 async def start_background_tasks(ctx: AppContext) -> None:
-    """Start embedding queue worker and stale scanner."""
+    """Start embedding queue worker, stale scanner, and file location cleanup (if enabled)."""
     if ctx.embedding_queue:
         await ctx.embedding_queue.start()
     ctx._stale_scanner_task = asyncio.create_task(_stale_scanner_loop(ctx))
+    if ctx.settings.file_location_binding.file_location_cleanup_enabled:
+        ctx._file_location_cleanup_task = asyncio.create_task(
+            _file_location_cleanup_loop(ctx)
+        )
+        logger.info(
+            "File location cleanup task started (interval=%s h)",
+            ctx.settings.file_location_binding.file_location_cleanup_interval_hours,
+        )
     logger.info("Background tasks started (embedding queue + stale scanner)")
 
 
@@ -492,6 +501,12 @@ async def stop_background_tasks(ctx: AppContext) -> None:
         ctx._stale_scanner_task.cancel()
         try:
             await ctx._stale_scanner_task
+        except asyncio.CancelledError:
+            pass
+    if ctx._file_location_cleanup_task:
+        ctx._file_location_cleanup_task.cancel()
+        try:
+            await ctx._file_location_cleanup_task
         except asyncio.CancelledError:
             pass
     logger.info("Background tasks stopped")
@@ -518,3 +533,59 @@ async def _stale_scanner_loop(ctx: AppContext) -> None:
                     )
         except Exception:
             logger.warning("Stale scanner error", exc_info=True)
+
+
+async def _file_location_cleanup_loop(ctx: AppContext) -> None:
+    """Periodically delete expired file location bindings when cleanup is enabled."""
+    from team_memory.storage.database import get_session
+    from team_memory.storage.repository import ExperienceRepository
+
+    batch_size = 500
+    cfg = ctx.settings.file_location_binding
+    if not cfg.file_location_cleanup_enabled:
+        return
+    interval_seconds = cfg.file_location_cleanup_interval_hours * 3600
+
+    while True:
+        await asyncio.sleep(interval_seconds)
+        if not ctx.settings.file_location_binding.file_location_cleanup_enabled:
+            continue
+        round_num = 0
+        total_deleted = 0
+        run_start = datetime.now(timezone.utc)
+        try:
+            async with get_session(ctx.db_url) as session:
+                repo = ExperienceRepository(session)
+                while True:
+                    round_num += 1
+                    round_start = datetime.now(timezone.utc)
+                    n = await repo.delete_expired_file_location_bindings(
+                        batch_size=batch_size
+                    )
+                    round_elapsed = (datetime.now(timezone.utc) - round_start).total_seconds()
+                    total_deleted += n
+                    logger.info(
+                        "file_location_cleanup round=%s deleted=%s duration_seconds=%.2f",
+                        round_num,
+                        n,
+                        round_elapsed,
+                        extra={"round": round_num, "deleted": n, "duration_seconds": round_elapsed},
+                    )
+                    if n == 0 or n < batch_size:
+                        break
+            run_elapsed = (datetime.now(timezone.utc) - run_start).total_seconds()
+            logger.info(
+                "file_location_cleanup run completed total_deleted=%s total_duration_seconds=%.2f",
+                total_deleted,
+                run_elapsed,
+                extra={"total_deleted": total_deleted, "total_duration_seconds": run_elapsed},
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning(
+                "file_location_cleanup error (round=%s, total_deleted=%s)",
+                round_num,
+                total_deleted,
+                exc_info=True,
+            )
