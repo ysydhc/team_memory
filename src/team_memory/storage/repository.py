@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import Float, delete, desc, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,7 @@ from team_memory.storage.models import (
     DocumentTreeNode,
     Experience,
     ExperienceFeedback,
+    ExperienceFileLocation,
     ExperienceLink,
     ExperienceVersion,
     PersonalMemory,
@@ -429,6 +430,186 @@ class ExperienceRepository:
             )
 
         return grouped
+
+    # ======================== FILE LOCATION BINDINGS ========================
+
+    LOCATION_SCORE_EXACT = 1.0
+    LOCATION_SCORE_SAME_FILE = 0.7
+
+    def _binding_to_dict(self, row: ExperienceFileLocation) -> dict:
+        """Convert ExperienceFileLocation to dict for API responses."""
+        return {
+            "id": str(row.id),
+            "experience_id": str(row.experience_id),
+            "path": row.path,
+            "start_line": row.start_line,
+            "end_line": row.end_line,
+            "content_fingerprint": row.content_fingerprint,
+            "snippet": row.snippet,
+            "file_mtime_at_bind": row.file_mtime_at_bind,
+            "file_content_hash_at_bind": row.file_content_hash_at_bind,
+            "expires_at": row.expires_at.isoformat() if row.expires_at else None,
+            "last_accessed_at": (
+                row.last_accessed_at.isoformat() if row.last_accessed_at else None
+            ),
+        }
+
+    @staticmethod
+    def _lines_overlap(
+        a_start: int, a_end: int, b_start: int, b_end: int
+    ) -> bool:
+        """True if ranges [a_start, a_end] and [b_start, b_end] overlap."""
+        return not (a_end < b_start or b_end < a_start)
+
+    async def replace_file_location_bindings(
+        self,
+        experience_id: uuid.UUID,
+        bindings: list[dict],
+    ) -> int:
+        """Replace all file location bindings for an experience.
+
+        Deletes existing bindings for this experience, then inserts the new list.
+        Each dict must have path, start_line, end_line, expires_at (caller-provided).
+        Optional: content_fingerprint, snippet, file_mtime_at_bind,
+        file_content_hash_at_bind, last_accessed_at. content_fingerprint is not
+        computed here; caller must pass it.
+        """
+        await self._session.execute(
+            delete(ExperienceFileLocation).where(
+                ExperienceFileLocation.experience_id == experience_id
+            )
+        )
+        now = _utcnow()
+        created = 0
+        for b in bindings:
+            expires_at = b.get("expires_at")
+            if expires_at is None:
+                expires_at = now + timedelta(days=30)
+            self._session.add(
+                ExperienceFileLocation(
+                    id=uuid.uuid4(),
+                    experience_id=experience_id,
+                    path=b["path"],
+                    start_line=int(b["start_line"]),
+                    end_line=int(b["end_line"]),
+                    content_fingerprint=b.get("content_fingerprint"),
+                    snippet=b.get("snippet"),
+                    file_mtime_at_bind=b.get("file_mtime_at_bind"),
+                    file_content_hash_at_bind=b.get("file_content_hash_at_bind"),
+                    expires_at=expires_at,
+                    last_accessed_at=b.get("last_accessed_at"),
+                )
+            )
+            created += 1
+        await self._session.flush()
+        return created
+
+    async def get_file_location_bindings(
+        self, experience_id: uuid.UUID
+    ) -> list[dict]:
+        """Get all file location bindings for an experience."""
+        result = await self._session.execute(
+            select(ExperienceFileLocation).where(
+                ExperienceFileLocation.experience_id == experience_id
+            )
+        )
+        rows = result.scalars().all()
+        return [self._binding_to_dict(r) for r in rows]
+
+    async def list_bindings_by_paths(
+        self,
+        paths: list[str],
+        ttl_days: int = 30,
+    ) -> dict[str, list[dict]]:
+        """Batch query bindings by path; only unexpired (expires_at > now).
+
+        Returns:
+            path -> list of binding dicts for that path.
+        """
+        if not paths:
+            return {}
+        now = _utcnow()
+        result = await self._session.execute(
+            select(ExperienceFileLocation)
+            .where(ExperienceFileLocation.path.in_(paths))
+            .where(ExperienceFileLocation.expires_at > now)
+        )
+        rows = result.scalars().all()
+        out: dict[str, list[dict]] = {p: [] for p in paths}
+        for r in rows:
+            out.setdefault(r.path, []).append(self._binding_to_dict(r))
+        return out
+
+    async def find_experience_ids_by_location(
+        self,
+        path: str,
+        start_line: int,
+        end_line: int,
+        *,
+        refresh_on_access: bool = False,
+        ttl_days: int = 30,
+    ) -> list[tuple[uuid.UUID, float]]:
+        """Find experiences with a binding for this path/range.
+
+        Returns list of (experience_id, location_score).
+        Score: LOCATION_SCORE_EXACT (1.0) when line range overlaps;
+        LOCATION_SCORE_SAME_FILE (0.7) when same path but no overlap.
+        If refresh_on_access, updates last_accessed_at and expires_at for hits.
+        """
+        now = _utcnow()
+        result = await self._session.execute(
+            select(ExperienceFileLocation).where(
+                ExperienceFileLocation.path == path,
+                ExperienceFileLocation.expires_at > now,
+            )
+        )
+        bindings = list(result.scalars().all())
+        if not bindings:
+            return []
+
+        best_per_exp: dict[uuid.UUID, float] = {}
+        to_refresh: list[ExperienceFileLocation] = []
+        for b in bindings:
+            if self._lines_overlap(
+                b.start_line, b.end_line, start_line, end_line
+            ):
+                score = self.LOCATION_SCORE_EXACT
+            else:
+                score = self.LOCATION_SCORE_SAME_FILE
+            if b.experience_id not in best_per_exp or score > best_per_exp[b.experience_id]:
+                best_per_exp[b.experience_id] = score
+            if refresh_on_access and score > 0:
+                to_refresh.append(b)
+
+        if refresh_on_access and to_refresh:
+            new_expires = now + timedelta(days=ttl_days)
+            for b in to_refresh:
+                b.last_accessed_at = now
+                b.expires_at = new_expires
+            await self._session.flush()
+
+        return [(eid, s) for eid, s in best_per_exp.items()]
+
+    async def delete_expired_file_location_bindings(
+        self, batch_size: int = 500
+    ) -> int:
+        """Delete bindings with expires_at < now, up to batch_size. Returns count deleted."""
+        now = _utcnow()
+        ids_result = await self._session.execute(
+            select(ExperienceFileLocation.id).where(
+                ExperienceFileLocation.expires_at < now
+            ).limit(batch_size)
+        )
+        ids = [row[0] for row in ids_result.all()]
+        if not ids:
+            return 0
+        result = await self._session.execute(
+            delete(ExperienceFileLocation).where(
+                ExperienceFileLocation.id.in_(ids)
+            )
+        )
+        await self._session.flush()
+        return result.rowcount or 0
 
     async def list_recent(
         self,
