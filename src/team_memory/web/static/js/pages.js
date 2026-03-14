@@ -1714,9 +1714,20 @@ export async function loadAllConfig() {
         document.getElementById('cfg-rrf-k').value = s.rrf_k || 60;
         document.getElementById('cfg-vector-weight').value = s.vector_weight || 0.7;
         document.getElementById('cfg-fts-weight').value = s.fts_weight || 0.3;
+        const locWeightEl = document.getElementById('cfg-location-weight');
+        if (locWeightEl) locWeightEl.value = s.location_weight != null ? s.location_weight : 0.15;
         document.getElementById('cfg-adaptive-filter').value = s.adaptive_filter !== false ? 'true' : 'false';
         document.getElementById('cfg-score-gap').value = s.score_gap_threshold || 0.15;
         document.getElementById('cfg-min-confidence').value = s.min_confidence_ratio || 0.6;
+        const fl = all.file_location_binding || {};
+        const flTtl = document.getElementById('cfg-fl-ttl-days');
+        if (flTtl) flTtl.value = fl.file_location_ttl_days != null ? fl.file_location_ttl_days : 30;
+        const flRefresh = document.getElementById('cfg-fl-refresh-on-access');
+        if (flRefresh) flRefresh.value = fl.file_location_refresh_on_access !== false ? 'true' : 'false';
+        const flCleanup = document.getElementById('cfg-fl-cleanup-enabled');
+        if (flCleanup) flCleanup.value = fl.file_location_cleanup_enabled !== false ? 'true' : 'false';
+        const flInterval = document.getElementById('cfg-fl-cleanup-interval');
+        if (flInterval) flInterval.value = fl.file_location_cleanup_interval_hours != null ? fl.file_location_cleanup_interval_hours : 24;
         const rr = all.reranker || {};
         document.getElementById('cfg-reranker-provider').value = rr.provider || 'none';
         const c = all.cache || {};
@@ -1956,11 +1967,13 @@ export async function saveScanDirsConfig() {
 }
 
 export async function saveSearchConfig() {
+    const locWeightEl = document.getElementById('cfg-location-weight');
     const body = {
         mode: document.getElementById('cfg-search-mode').value,
         rrf_k: parseInt(document.getElementById('cfg-rrf-k').value, 10) || 60,
         vector_weight: parseFloat(document.getElementById('cfg-vector-weight').value) || 0.7,
         fts_weight: parseFloat(document.getElementById('cfg-fts-weight').value) || 0.3,
+        location_weight: locWeightEl ? (parseFloat(locWeightEl.value) || 0.15) : 0.15,
         adaptive_filter: document.getElementById('cfg-adaptive-filter').value === 'true',
         score_gap_threshold: parseFloat(document.getElementById('cfg-score-gap').value) || 0.15,
         min_confidence_ratio: parseFloat(document.getElementById('cfg-min-confidence').value) || 0.6,
@@ -1968,6 +1981,21 @@ export async function saveSearchConfig() {
     try {
         await api('PUT', '/api/v1/config/search', body);
         toast('搜索管线配置已保存', 'success');
+    } catch (e) {
+        toast('保存失败: ' + e.message, 'error');
+    }
+}
+
+export async function saveFileLocationBindingConfig() {
+    const body = {
+        file_location_ttl_days: parseInt(document.getElementById('cfg-fl-ttl-days').value, 10) || 30,
+        file_location_refresh_on_access: document.getElementById('cfg-fl-refresh-on-access').value === 'true',
+        file_location_cleanup_enabled: document.getElementById('cfg-fl-cleanup-enabled').value === 'true',
+        file_location_cleanup_interval_hours: parseInt(document.getElementById('cfg-fl-cleanup-interval').value, 10) || 24,
+    };
+    try {
+        await api('PUT', '/api/v1/config/file-location-binding', body);
+        toast('文件位置绑定配置已保存', 'success');
     } catch (e) {
         toast('保存失败: ' + e.message, 'error');
     }

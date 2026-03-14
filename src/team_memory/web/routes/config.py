@@ -14,6 +14,7 @@ from team_memory.web import app as app_module
 from team_memory.web.app import (
     CacheConfigUpdate,
     DefaultProjectConfigUpdate,
+    FileLocationBindingConfigUpdate,
     LifecycleConfigUpdate,
     LoggingConfigUpdate,
     MemoryConfigUpdate,
@@ -23,6 +24,7 @@ from team_memory.web.app import (
     ReviewConfigUpdate,
     SearchConfigUpdate,
     _all_config_dict,
+    _file_location_binding_config_dict,
     _logging_config_dict,
     _pageindex_lite_config_dict,
     _retrieval_config_dict,
@@ -165,10 +167,41 @@ async def update_search_config(
     cfg.rrf_k = req.rrf_k
     cfg.vector_weight = req.vector_weight
     cfg.fts_weight = req.fts_weight
+    cfg.location_weight = req.location_weight
     cfg.adaptive_filter = req.adaptive_filter
     cfg.score_gap_threshold = req.score_gap_threshold
     cfg.min_confidence_ratio = req.min_confidence_ratio
     return {"message": "Search config updated"}
+
+
+@router.get("/config/file-location-binding")
+async def get_file_location_binding_config(
+    user: User | None = Depends(get_optional_user),
+):
+    """Get file location binding (TTL, refresh, cleanup) configuration."""
+    from team_memory.config import FileLocationBindingConfig
+
+    cfg = _cfg().file_location_binding if _cfg() else FileLocationBindingConfig()
+    return _file_location_binding_config_dict(cfg)
+
+
+@router.put("/config/file-location-binding")
+async def update_file_location_binding_config(
+    req: FileLocationBindingConfigUpdate,
+    user: User = Depends(require_role("admin")),
+):
+    """Update file location binding configuration in-memory."""
+    if not _cfg():
+        raise HTTPException(status_code=500, detail="Settings not initialized")
+    cfg = _cfg().file_location_binding
+    cfg.file_location_ttl_days = req.file_location_ttl_days
+    cfg.file_location_refresh_on_access = req.file_location_refresh_on_access
+    cfg.file_location_cleanup_enabled = req.file_location_cleanup_enabled
+    cfg.file_location_cleanup_interval_hours = req.file_location_cleanup_interval_hours
+    return {
+        "message": "File location binding config updated",
+        "config": _file_location_binding_config_dict(cfg),
+    }
 
 
 @router.put("/config/cache")

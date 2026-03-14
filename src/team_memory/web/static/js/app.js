@@ -488,6 +488,7 @@ window.saveDefaultProjectConfig = pages.saveDefaultProjectConfig;
 window.saveScanDirsConfig = pages.saveScanDirsConfig;
 window.loadScanDirsConfig = pages.loadScanDirsConfig;
 window.saveSearchConfig = pages.saveSearchConfig;
+window.saveFileLocationBindingConfig = pages.saveFileLocationBindingConfig;
 window.saveRerankerConfig = pages.saveRerankerConfig;
 window.saveCacheConfig = pages.saveCacheConfig;
 window.savePageIndexLiteConfig = pages.savePageIndexLiteConfig;

@@ -968,6 +968,16 @@ def _installable_catalog_config_dict(cfg) -> dict:
     }
 
 
+def _file_location_binding_config_dict(cfg) -> dict:
+    """Serialize file location binding config to JSON-safe dict."""
+    return {
+        "file_location_ttl_days": cfg.file_location_ttl_days,
+        "file_location_refresh_on_access": cfg.file_location_refresh_on_access,
+        "file_location_cleanup_enabled": cfg.file_location_cleanup_enabled,
+        "file_location_cleanup_interval_hours": cfg.file_location_cleanup_interval_hours,
+    }
+
+
 # ============================================================
 # Extended Config Routes (reranker, search, cache)
 # ============================================================
@@ -1007,10 +1017,14 @@ def _all_config_dict() -> dict:
             "rrf_k": _settings.search.rrf_k,
             "vector_weight": _settings.search.vector_weight,
             "fts_weight": _settings.search.fts_weight,
+            "location_weight": _settings.search.location_weight,
             "adaptive_filter": _settings.search.adaptive_filter,
             "score_gap_threshold": _settings.search.score_gap_threshold,
             "min_confidence_ratio": _settings.search.min_confidence_ratio,
         },
+        "file_location_binding": _file_location_binding_config_dict(
+            _settings.file_location_binding
+        ),
         "cache": {
             "enabled": _settings.cache.enabled,
             "ttl_seconds": _settings.cache.ttl_seconds,
@@ -1025,6 +1039,7 @@ class SearchConfigUpdate(BaseModel):
     rrf_k: int = 60
     vector_weight: float = 0.7
     fts_weight: float = 0.3
+    location_weight: float = 0.15
     adaptive_filter: bool = True
     score_gap_threshold: float = 0.15
     min_confidence_ratio: float = 0.6
@@ -1035,6 +1050,15 @@ class CacheConfigUpdate(BaseModel):
     ttl_seconds: int = 300
     max_size: int = 100
     embedding_cache_size: int = 200
+
+
+class FileLocationBindingConfigUpdate(BaseModel):
+    """Update model for file location binding TTL and cleanup."""
+
+    file_location_ttl_days: int = 30
+    file_location_refresh_on_access: bool = True
+    file_location_cleanup_enabled: bool = True
+    file_location_cleanup_interval_hours: int = 24
 
 
 class RerankerConfigUpdate(BaseModel):

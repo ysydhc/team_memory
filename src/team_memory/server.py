@@ -1817,6 +1817,7 @@ async def tm_config() -> str:
                 "rrf_k": settings.search.rrf_k,
                 "vector_weight": settings.search.vector_weight,
                 "fts_weight": settings.search.fts_weight,
+                "location_weight": settings.search.location_weight,
                 "adaptive_filter": settings.search.adaptive_filter,
                 "score_gap_threshold": settings.search.score_gap_threshold,
                 "min_confidence_ratio": settings.search.min_confidence_ratio,

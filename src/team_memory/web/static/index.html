@@ -3940,6 +3940,11 @@
                 <label>fts_weight <span class="hint">(全文搜索权重)</span></label>
                 <input type="number" id="cfg-fts-weight" placeholder="0.3" min="0" max="1" step="0.05">
               </div>
+              <div class="form-group full-width">
+                <label>location_weight <span class="hint">(默认即可)</span></label>
+                <input type="number" id="cfg-location-weight" placeholder="0.15" min="0" max="1" step="0.05">
+                <p class="settings-desc" style="margin-top:6px">文件位置匹配在检索得分中的权重。推荐 0.1～0.25，默认 0.15 即可，一般无需调整。</p>
+              </div>
               <div class="form-group">
                 <label>adaptive_filter <span class="hint">(自适应过滤)</span></label>
                 <select id="cfg-adaptive-filter">
@@ -3958,6 +3963,41 @@
             </div>
             <div class="settings-actions">
               <button class="btn btn-primary" onclick="saveSearchConfig()">保存搜索配置</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-card collapsed" style="margin-top:20px"
+          onclick="if(event.target.tagName==='H2'||event.target.parentElement?.tagName==='H2')this.classList.toggle('collapsed')">
+          <h2>文件位置绑定</h2>
+          <div class="settings-card-body" style="max-height:2000px">
+            <p class="settings-desc">经验与文件路径绑定的 TTL、访问刷新与定时清理。可按环境调整或关闭访问刷新/清理。</p>
+            <div class="settings-grid">
+              <div class="form-group">
+                <label>file_location_ttl_days <span class="hint">(绑定过期天数)</span></label>
+                <input type="number" id="cfg-fl-ttl-days" placeholder="30" min="1" step="1">
+              </div>
+              <div class="form-group">
+                <label>file_location_refresh_on_access <span class="hint">(访问时刷新 TTL)</span></label>
+                <select id="cfg-fl-refresh-on-access">
+                  <option value="true">启用</option>
+                  <option value="false">禁用</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>file_location_cleanup_enabled <span class="hint">(定时清理过期绑定)</span></label>
+                <select id="cfg-fl-cleanup-enabled">
+                  <option value="true">启用</option>
+                  <option value="false">禁用</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>file_location_cleanup_interval_hours <span class="hint">(清理间隔，小时)</span></label>
+                <input type="number" id="cfg-fl-cleanup-interval" placeholder="24" min="1" step="1">
+              </div>
+            </div>
+            <div class="settings-actions">
+              <button class="btn btn-primary" onclick="saveFileLocationBindingConfig()">保存文件位置绑定配置</button>
             </div>
           </div>
         </div>
