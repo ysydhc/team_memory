@@ -120,6 +120,7 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 - **PageIndex-Lite**：长文档自动分块建立节点索引，支持节点级精准检索
 - **个人扩写**：per-user tag_synonyms 在检索前生效（词表替换 + LLM 扩写），MCP 搜索返回后自动维护；Web 设置 → 个人扩写
 - **个人记忆**：按 user 隔离的偏好与习惯，tm_learn 自动提炼、拉取时按 scope + current_context 语义返回；Web 设置 → 个人记忆
+- **文件位置绑定**：保存经验时可传 `file_locations`（路径 + 行范围，可选 snippet/file_mtime/file_content_hash）；检索时可传 `current_file_locations`，与当前编辑位置匹配的经验会获得 location 加分，详见 [经验文件位置绑定与过期](design-docs/experience-file-line-binding-and-expiration.md)。
 
 ### 三层作用域
 

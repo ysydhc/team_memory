@@ -115,6 +115,19 @@ raise HTTPException(...)  # 在 MCP 工具层禁止
 
 以下参数用于将经验与代码/架构节点绑定，便于按上下文检索与沉淀。
 
+### 文件位置绑定（file_locations / current_file_locations）
+
+经验可与「文件路径 + 行范围」绑定，检索时传入当前编辑位置可对匹配经验加分。字段约定见 [experience-file-line-binding-and-expiration](design-docs/experience-file-line-binding-and-expiration.md)。
+
+| 工具 | 参数 | 类型 | 说明 |
+|------|------|------|------|
+| `tm_save` | `file_locations` | `list[dict]` | 可选。每项：必填 `path`；可选 `start_line`、`end_line`、`snippet`、`file_mtime`、`file_content_hash`。保存时写入 `experience_file_locations`，用于检索时按位置加分。 |
+| `tm_save_typed` | `file_locations` | `list[dict]` | 同上 |
+| `tm_search` | `current_file_locations` | `list[dict]` | 可选。每项：必填 `path`；可选 `start_line`、`end_line`、`file_content`、`file_mtime`、`file_content_hash`。表示当前编辑/关注位置，与绑定重叠的经验获得 location_score 加分并参与 final_score 排序。 |
+| `tm_solve` | `current_file_locations` | `list[dict]` | 同上 |
+
+### 架构节点（file_paths / architecture_nodes）
+
 | 工具 | 参数 | 类型 | 说明 |
 |------|------|------|------|
 | `tm_solve` | `file_paths` | `list[str]` | 文件路径列表，用于按节点 boost 检索结果；若仅传 `file_path` 则视为 `file_paths=[file_path]` |
