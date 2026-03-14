@@ -517,8 +517,13 @@ class ExperienceRepository:
         self,
         paths: list[str],
         ttl_days: int = 30,
+        *,
+        refresh_on_access: bool = False,
     ) -> dict[str, list[dict]]:
         """Batch query bindings by path; only unexpired (expires_at > now).
+
+        When refresh_on_access is True, updates last_accessed_at and expires_at
+        (now + ttl_days) for each returned binding.
 
         Returns:
             path -> list of binding dicts for that path.
@@ -532,6 +537,18 @@ class ExperienceRepository:
             .where(ExperienceFileLocation.expires_at > now)
         )
         rows = result.scalars().all()
+        if refresh_on_access and rows:
+            new_expires = now + timedelta(days=ttl_days)
+            ids = [r.id for r in rows]
+            await self._session.execute(
+                update(ExperienceFileLocation)
+                .where(ExperienceFileLocation.id.in_(ids))
+                .values(last_accessed_at=now, expires_at=new_expires)
+            )
+            await self._session.flush()
+            for r in rows:
+                r.last_accessed_at = now
+                r.expires_at = new_expires
         out: dict[str, list[dict]] = {p: [] for p in paths}
         for r in rows:
             out.setdefault(r.path, []).append(self._binding_to_dict(r))

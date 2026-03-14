@@ -233,6 +233,53 @@ async def test_list_bindings_by_paths_key_per_requested_path(session):
     assert result_empty["nonexistent.py"] == []
 
 
+@pytest.mark.asyncio
+async def test_list_bindings_by_paths_expired_binding_not_returned(session):
+    """When all bindings for a path are expired, that path returns empty list."""
+    repo = ExperienceRepository(session)
+    exp = await repo.create(title="E", description="D", solution="S", created_by="u")
+    await session.flush()
+    past = _utcnow() - timedelta(days=1)
+    await repo.replace_file_location_bindings(
+        exp.id,
+        [{"path": "expired.py", "start_line": 1, "end_line": 2, "expires_at": past}],
+    )
+    await session.commit()
+
+    result = await repo.list_bindings_by_paths(["expired.py"], ttl_days=30)
+    assert result["expired.py"] == []
+
+
+@pytest.mark.asyncio
+async def test_list_bindings_by_paths_refresh_on_access_extends_expires_at(session):
+    """refresh_on_access=True: returned bindings get last_accessed_at and expires_at updated."""
+    repo = ExperienceRepository(session)
+    exp = await repo.create(title="E", description="D", solution="S", created_by="u")
+    await session.flush()
+    now = _utcnow()
+    soon = now + timedelta(days=1)  # would expire in 1 day
+    await repo.replace_file_location_bindings(
+        exp.id,
+        [{"path": "refresh.py", "start_line": 1, "end_line": 2, "expires_at": soon}],
+    )
+    await session.commit()
+
+    await repo.list_bindings_by_paths(
+        ["refresh.py"], ttl_days=7, refresh_on_access=True
+    )
+    await session.commit()
+
+    bindings = await repo.get_file_location_bindings(exp.id)
+    assert len(bindings) == 1
+    # expires_at should be extended to ~now + 7 days (was soon = now+1day)
+    exp_at = datetime.fromisoformat(
+        bindings[0]["expires_at"].replace("Z", "+00:00")
+    )
+    assert exp_at > soon, "expires_at should be extended past original soon"
+    assert exp_at <= now + timedelta(days=8), "expires_at should be ~now+7d"
+    assert bindings[0].get("last_accessed_at") is not None
+
+
 # --- find_experience_ids_by_location ---
 
 
@@ -294,6 +341,60 @@ async def test_find_experience_ids_by_location_no_match(session):
         path="other.py", start_line=10, end_line=20
     )
     assert pairs == []
+
+
+@pytest.mark.asyncio
+async def test_find_experience_ids_by_location_expired_not_returned(session):
+    """When binding is expired (expires_at <= now), find returns no result."""
+    repo = ExperienceRepository(session)
+    exp = await repo.create(title="E", description="D", solution="S", created_by="u")
+    await session.flush()
+    past = _utcnow() - timedelta(days=1)
+    await repo.replace_file_location_bindings(
+        exp.id,
+        [{"path": "exp.py", "start_line": 10, "end_line": 20, "expires_at": past}],
+    )
+    await session.commit()
+
+    pairs = await repo.find_experience_ids_by_location(
+        path="exp.py", start_line=12, end_line=18
+    )
+    assert pairs == []
+
+
+@pytest.mark.asyncio
+async def test_find_experience_ids_by_location_refresh_on_access_extends_expires_at(
+    session,
+):
+    """With refresh_on_access=True, hit bindings get last_accessed_at and expires_at updated."""
+    repo = ExperienceRepository(session)
+    exp = await repo.create(title="E", description="D", solution="S", created_by="u")
+    await session.flush()
+    now = _utcnow()
+    soon = now + timedelta(days=1)
+    await repo.replace_file_location_bindings(
+        exp.id,
+        [{"path": "r.py", "start_line": 10, "end_line": 25, "expires_at": soon}],
+    )
+    await session.commit()
+
+    await repo.find_experience_ids_by_location(
+        path="r.py",
+        start_line=12,
+        end_line=18,
+        refresh_on_access=True,
+        ttl_days=7,
+    )
+    await session.commit()
+
+    bindings = await repo.get_file_location_bindings(exp.id)
+    assert len(bindings) == 1
+    exp_at = datetime.fromisoformat(
+        bindings[0]["expires_at"].replace("Z", "+00:00")
+    )
+    assert exp_at > soon
+    assert exp_at <= now + timedelta(days=8)
+    assert bindings[0].get("last_accessed_at") is not None
 
 
 # --- delete_expired_file_location_bindings ---
