@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -199,6 +200,10 @@ class Experience(Base):
         back_populates="experience",
         cascade="all, delete-orphan",
         order_by="DocumentTreeNode.node_order",
+    )
+    file_locations: Mapped[list[ExperienceFileLocation]] = relationship(
+        back_populates="experience",
+        cascade="all, delete-orphan",
     )
 
     @property
@@ -402,6 +407,53 @@ class ExperienceFeedback(Base):
             "feedback_by": self.feedback_by,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class ExperienceFileLocation(Base):
+    """File/line binding for an experience (e.g. code location or doc path).
+
+    Supports expiration (expires_at) and optional content fingerprint for
+    staleness checks. Downgrade of this table drops all data.
+    """
+
+    __tablename__ = "experience_file_locations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    experience_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("experiences.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    path: Mapped[str] = mapped_column(String(1000), nullable=False, index=True)
+    start_line: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_line: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_fingerprint: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    file_mtime_at_bind: Mapped[float | None] = mapped_column(Float, nullable=True)
+    file_content_hash_at_bind: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    last_accessed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        Index("ix_exp_file_locations_exp_id_path", "experience_id", "path"),
+        Index(
+            "ix_exp_file_locations_path_fingerprint",
+            "path",
+            "content_fingerprint",
+        ),
+    )
+
+    experience: Mapped[Experience] = relationship(back_populates="file_locations")
 
 
 class TaskGroup(Base):
