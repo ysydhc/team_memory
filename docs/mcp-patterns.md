@@ -89,6 +89,8 @@ raise HTTPException(...)  # 在 MCP 工具层禁止
 | `tm_save` | 快速保存单条经验 | ✅ |
 | `tm_save_typed` | 保存带类型和结构化字段的经验 | ✅ |
 | `tm_save_group` | 保存关联经验组 | ✅ |
+| `tm_archive_save` | 保存档案馆条目（会话/计划级摘要） | ✅ |
+| `tm_get_archive` | 按 id 获取档案馆 L2 详情（solution_doc、overview、attachments） | ✅ |
 | `tm_feedback` | 对搜索结果评分（影响排序） | ✅ |
 | `tm_update` | 更新已有经验 | ✅ |
 | `tm_claim` | 认领经验，声明正在处理 | ✅ |
@@ -125,6 +127,8 @@ raise HTTPException(...)  # 在 MCP 工具层禁止
 | `tm_save_typed` | `file_locations` | `list[dict]` | 同上 |
 | `tm_search` | `current_file_locations` | `list[dict]` | 可选。每项：必填 `path`；可选 `start_line`、`end_line`、`file_content`、`file_mtime`、`file_content_hash`。表示当前编辑/关注位置，与绑定重叠的经验获得 location_score 加分并参与 final_score 排序。 |
 | `tm_solve` | `current_file_locations` | `list[dict]` | 同上 |
+| `tm_search` | `include_archives` | `bool` | 默认 `False`。为 `True` 时检索结果中混合返回档案馆条目（L0/L1：id、title、solution_preview 约 300–500 字、score、linked_experience_ids、attachment_count、type='archive'）；详情用 `tm_get_archive(archive_id)` 拉取 L2。 |
+| `tm_solve` | `include_archives` | `bool` | 同上，与 tm_search 一致。 |
 
 ### 架构节点（file_paths / architecture_nodes）
 
