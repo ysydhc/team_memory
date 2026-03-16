@@ -37,7 +37,7 @@ class TestToolNamespace:
         """All expected tools should be present."""
         tools = await mcp.get_tools()
         expected = {
-            "tm_search", "tm_save", "tm_save_group",
+            "tm_search", "tm_save", "tm_save_group", "tm_archive_save",
             "tm_feedback", "tm_update",
             "tm_solve", "tm_learn", "tm_suggest",
         }
@@ -401,6 +401,40 @@ class TestTdSave:
             assert binding.get("snippet") == "def tm_save"
             assert binding.get("file_mtime") == "2026-01-01T00:00:00Z"
             assert binding.get("file_content_hash") == "abc123"
+
+
+# ============================================================
+# tm_archive_save
+# ============================================================
+
+
+class TestTmArchiveSave:
+    """Test tm_archive_save tool function."""
+
+    @pytest.mark.asyncio
+    async def test_tm_archive_save_returns_archive_id(self):
+        """tm_archive_save returns JSON with archive_id."""
+        archive_id = str(uuid.uuid4())
+        with patch("team_memory.server._get_archive_service") as mock_get_archive_svc, \
+             patch("team_memory.server._get_current_user", return_value="alice"), \
+             patch("team_memory.server._resolve_project", return_value="default"):
+            mock_svc = MagicMock()
+            mock_svc.archive_save = AsyncMock(return_value=uuid.UUID(archive_id))
+            mock_get_archive_svc.return_value = mock_svc
+
+            tools = await mcp.get_tools()
+            assert "tm_archive_save" in tools
+            save_fn = tools["tm_archive_save"].fn
+            result = await save_fn(
+                title="T",
+                solution_doc="D",
+                created_by="u",
+            )
+
+        data = json.loads(result)
+        assert "archive_id" in data
+        assert data["archive_id"] == archive_id
+        assert "saved successfully" in data.get("message", "").lower()
 
 
 # ============================================================

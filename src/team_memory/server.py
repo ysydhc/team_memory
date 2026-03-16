@@ -135,6 +135,14 @@ def _get_service():
         return bootstrap(enable_background=False).service
 
 
+def _get_archive_service():
+    """Get ArchiveService from the shared AppContext (lazy-init on first call)."""
+    try:
+        return get_context().archive_service
+    except RuntimeError:
+        return bootstrap(enable_background=False).archive_service
+
+
 def _get_settings():
     """Get Settings from the shared AppContext (lazy-init on first call)."""
     try:
@@ -1353,6 +1361,70 @@ async def tm_save(
                 "created_at": result.get("created_at"),
             },
         },
+        ensure_ascii=False,
+    )
+
+
+@mcp.tool(
+    name="tm_archive_save",
+    description=(
+        "Save an archive entry (session/plan-level summary doc). "
+        "Required: title, solution_doc, created_by (or omit to use current user). "
+        "Optional: overview, conversation_summary, scope, scope_ref, project, "
+        "linked_experience_ids (list of experience UUIDs), attachments (list of dicts with kind, path?, content_snapshot?, snippet?, git_commit?, git_refs?). "
+        "Returns archive_id."
+    ),
+)
+@track_usage
+async def tm_archive_save(
+    title: str,
+    solution_doc: str,
+    created_by: str | None = None,
+    project: str | None = None,
+    scope: str = "session",
+    scope_ref: str | None = None,
+    overview: str | None = None,
+    conversation_summary: str | None = None,
+    linked_experience_ids: list[str] | None = None,
+    attachments: list[dict] | None = None,
+) -> str:
+    """Save an archive to the team knowledge base."""
+    archive_svc = _get_archive_service()
+    user = (created_by or (await _get_current_user())).strip() or "anonymous"
+    resolved_project = _resolve_project(project)
+
+    import uuid as _uuid
+
+    linked_uuids = []
+    if linked_experience_ids:
+        for s in linked_experience_ids:
+            try:
+                linked_uuids.append(_uuid.UUID(s))
+            except (ValueError, TypeError):
+                pass
+
+    try:
+        archive_id = await archive_svc.archive_save(
+            title=title,
+            solution_doc=solution_doc,
+            created_by=user,
+            project=resolved_project or None,
+            scope=scope,
+            scope_ref=scope_ref,
+            overview=overview,
+            conversation_summary=conversation_summary,
+            linked_experience_ids=linked_uuids if linked_uuids else None,
+            attachments=attachments,
+        )
+    except Exception as e:
+        logger.exception("tm_archive_save failed: %s", e)
+        return json.dumps(
+            {"error": str(e), "code": 400},
+            ensure_ascii=False,
+        )
+
+    return json.dumps(
+        {"message": "Archive saved successfully.", "archive_id": str(archive_id)},
         ensure_ascii=False,
     )
 

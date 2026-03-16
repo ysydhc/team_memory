@@ -32,6 +32,7 @@ from team_memory.auth.provider import AuthProvider, create_auth_provider
 from team_memory.config import Settings, load_settings
 from team_memory.embedding.base import EmbeddingProvider
 from team_memory.schemas import init_schema_registry
+from team_memory.services.archive import ArchiveService
 from team_memory.services.event_bus import EventBus, Events
 from team_memory.services.experience import ExperienceService
 
@@ -195,6 +196,7 @@ class AppContext:
     schema_registry: SchemaRegistry
     search_pipeline: SearchPipeline
     service: ExperienceService
+    archive_service: ArchiveService
     embedding_queue: EmbeddingQueue | None = None
     webhook_service: WebhookService | None = None
     _log_listener: QueueListener | None = None
@@ -379,6 +381,11 @@ def bootstrap(
         db_url=db_url,
     )
 
+    archive_service = ArchiveService(
+        embedding_provider=embedding,
+        db_url=db_url,
+    )
+
     schema_registry = init_schema_registry(settings.custom_schema)
 
     webhook_service: WebhookService | None = None
@@ -421,6 +428,7 @@ def bootstrap(
         schema_registry=schema_registry,
         search_pipeline=search_pipeline,
         service=service,
+        archive_service=archive_service,
         embedding_queue=embedding_queue,
         webhook_service=webhook_service,
         _log_listener=log_listener,
