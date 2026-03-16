@@ -12,11 +12,53 @@
 
 | 字段 | 值 |
 |------|-----|
-| 状态 | 进行中 |
-| 当前 Task | Task 4（待派发） |
-| 最后节点 | Task 3 验收完成 |
+| 状态 | 已完成 |
+| 当前 Task | 全部完成（Task 1-9） |
+| 最后节点 | Task 9 验收完成 + lint/test 全量修复 |
 
 ## 执行日志（按时间倒序，最新在上）
+
+### 2025-03-16 — Task 5-9 全部完成 + lint/test 修复
+
+- **Task 5+6（SearchRequest + SearchPipeline）**：
+  - `SearchRequest` 增加 `include_archives: bool = False`
+  - `ExperienceService.search` 透传 `include_archives`
+  - `SearchPipeline.search` 在 include_archives=True 时查询 ArchiveRepository、合并 L0/L1 结果、按 score 排序截断
+  - `SearchCache` key 纳入 include_archives 防止缓存串扰
+  - 提交: `feat(search): add include_archives to SearchRequest and pipeline merge`
+
+- **Task 7+7.5（MCP 工具）**：
+  - `tm_search`/`tm_solve` 增加 `include_archives` 参数，archive 结果跳过 use_count 递增
+  - 新增 `tm_get_archive(archive_id)`: 返回 L2 详情含 attachments[]，404 处理
+  - 测试：TestTmArchiveSave + TestTmGetArchive（4 用例）
+  - 提交: `feat(mcp): tm_search/tm_solve accept include_archives; add tm_get_archive`
+
+- **Task 8（经验状态变更回写 archive）**：
+  - `ArchiveRepository.recompute_archive_status_for_linked_experience`: 重算关联 archive 状态
+  - `ArchiveService.update_archive_status_for_experience`: 会话包装
+  - `ExperienceService`: 注入 archive_service，在 publish/review 后调用回写
+  - `bootstrap`: ArchiveService 在 ExperienceService 之前创建并注入
+  - Web 路由 `change_status`/`publish_experience` 调用 archive 状态回写
+  - 提交: `feat(archive): derive archive status from linked experiences on exp change`
+
+- **Task 9（文档）**：
+  - `docs/mcp-patterns.md` 登记 `tm_archive_save`、`tm_get_archive`、`include_archives` 参数
+  - 提交: `docs(mcp-patterns): register tm_archive_save, tm_get_archive; document include_archives`
+
+- **lint/test 修复**：
+  - `pyproject.toml`: server.py per-file-ignores E402
+  - `__init__.py`: _StderrFilter 长行拆分 (E501)
+  - `test_logging_json.py`: patch _load_dotenv_if_available 防止 .env 干扰
+  - `test_task_group_completed.py`: 移除 2 个 obsolete 用例 (replace_architecture_bindings 已在 c0c8c69 移除)
+  - `make lint` 零报错，`make test` 516 passed / 37 skipped / 0 failed
+  - 提交: `fix: resolve all lint and test failures`
+
+### 2025-03-16 — Task 4 验收完成
+
+- **动作**：实现 ArchiveService（archive_save 含 overview、embedding 生成、linked_experience_ids、attachments；get_archive）；bootstrap 注册 archive_service；server 注册 tm_archive_save；test_tm_archive_save_returns_archive_id 通过。
+- **产出**：`src/team_memory/services/archive.py`、bootstrap.AppContext.archive_service、server.tm_archive_save、tests；已提交 `feat(mcp): add tm_archive_save and ArchiveService`。
+- **下一步**：派发 Task 5（SearchRequest 与 ExperienceService.search 增加 include_archives）。
+- **Subagent**：task-4 主 Agent 实现并提交，task-4 完成。
 
 ### 2025-03-16 — Task 3 验收完成
 
