@@ -26,6 +26,8 @@ from team_memory.storage.repository import ExperienceRepository
 if TYPE_CHECKING:
     from team_memory.services.embedding_queue import EmbeddingQueue
 
+from team_memory.services.archive import ArchiveService
+
 logger = logging.getLogger("team_memory.service")
 
 
@@ -51,6 +53,7 @@ class ExperienceService:
         pageindex_lite_config=None,
         file_location_config=None,
         db_url: str = "",
+        archive_service: ArchiveService | None = None,
     ):
         self._db_url = db_url
         self._embedding = embedding_provider
@@ -58,6 +61,7 @@ class ExperienceService:
         self._search_pipeline = search_pipeline
         self._event_bus = event_bus or EventBus()
         self._embedding_queue = embedding_queue
+        self._archive_service = archive_service
         self._lifecycle_config = lifecycle_config
         self._review_config = review_config
         self._memory_config = memory_config
@@ -150,6 +154,7 @@ class ExperienceService:
         use_pageindex_lite: bool | None = None,
         project: str | None = None,
         current_file_locations: list[dict] | None = None,
+        include_archives: bool = False,
     ) -> list[dict]:
         async with self._session() as session:
             """Search experiences using the enhanced search pipeline.
@@ -184,6 +189,7 @@ class ExperienceService:
                     use_pageindex_lite=use_pageindex_lite,
                     project=project,
                     current_file_locations=current_file_locations,
+                    include_archives=include_archives,
                 )
                 pipeline_result = await self._search_pipeline.search(
                     session, request
@@ -812,6 +818,8 @@ class ExperienceService:
                     "experience_id": experience_id,
                     "published_by": user,
                 })
+                if self._archive_service:
+                    await self._archive_service.update_archive_status_for_experience(exp_uuid)
             return updated.to_dict() if updated else None
 
     async def publish_to_team(
@@ -827,6 +835,8 @@ class ExperienceService:
         async with self._session() as session:
             repo = ExperienceRepository(session)
             experience = await repo.publish_to_team(experience_id, is_admin=is_admin)
+            if experience and self._archive_service:
+                await self._archive_service.update_archive_status_for_experience(experience_id)
             return experience.to_dict() if experience else None
 
     async def publish_personal(
@@ -837,6 +847,8 @@ class ExperienceService:
         async with self._session() as session:
             repo = ExperienceRepository(session)
             experience = await repo.publish_personal(experience_id)
+            if experience and self._archive_service:
+                await self._archive_service.update_archive_status_for_experience(experience_id)
             return experience.to_dict() if experience else None
 
     async def get_drafts(
@@ -1160,6 +1172,8 @@ class ExperienceService:
                     "review_status": review_status,
                     "reviewed_by": reviewed_by,
                 })
+                if self._archive_service:
+                    await self._archive_service.update_archive_status_for_experience(exp_uuid)
             return experience.to_dict() if experience else None
 
     async def soft_delete(

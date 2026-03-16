@@ -32,6 +32,7 @@ from team_memory.embedding.base import EmbeddingProvider
 from team_memory.reranker.base import RerankerProvider
 from team_memory.services.cache import SearchCache
 from team_memory.services.context_trimmer import ContextTrimmer
+from team_memory.storage.archive_repository import ArchiveRepository
 from team_memory.storage.database import get_session
 from team_memory.storage.repository import ExperienceRepository, UserExpansionRepository
 from team_memory.utils.location_fingerprint import (
@@ -68,6 +69,8 @@ class SearchRequest:
     # File location binding: optional current editor locations for location_score boost
     # path, start_line, end_line; optional file_content, file_mtime, file_content_hash
     current_file_locations: list[dict] | None = None
+    # Include archives in search results (L0/L1) when True
+    include_archives: bool = False
 
 
 @dataclass
@@ -232,6 +235,7 @@ class SearchPipeline:
                 request.tags,
                 project=request.project,
                 current_user=cache_user,
+                include_archives=request.include_archives,
             )
             if cached is not None:
                 cached.cached = True
@@ -450,6 +454,26 @@ class SearchPipeline:
                 d["rerank_score"] = round(item.rerank_score, 4)
             result_dicts.append(d)
 
+        # Include archives when requested: search archives, merge by score, truncate
+        if request.include_archives and query_embedding is not None:
+            archive_repo = ArchiveRepository(session)
+            archive_limit = max(request.max_results * 2, 20)
+            archive_hits = await archive_repo.search_archives(
+                query_embedding,
+                project=request.project,
+                limit=archive_limit,
+                min_similarity=effective_min_similarity,
+                current_user=request.current_user,
+            )
+            for row in archive_hits:
+                d = dict(row)
+                d.setdefault("confidence", "medium")
+                d.setdefault("reranked", False)
+                d.setdefault("location_score", 0.0)
+                result_dicts.append(d)
+            result_dicts.sort(key=lambda x: float(x.get("score", 0)), reverse=True)
+            result_dicts = result_dicts[: request.max_results]
+
         duration_ms = int((time.monotonic() - start) * 1000)
 
         pipeline_result = SearchPipelineResult(
@@ -472,6 +496,7 @@ class SearchPipeline:
                 pipeline_result,
                 project=request.project,
                 current_user=cache_user,
+                include_archives=request.include_archives,
             )
             cache_store_ms = int((time.monotonic() - stage_begin) * 1000)
             io_logger.log_internal(
