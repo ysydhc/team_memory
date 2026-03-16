@@ -93,3 +93,16 @@ class ArchiveService:
             repo = ArchiveRepository(session)
             out = await repo.get_archive_by_id(archive_id)
             return out
+
+    async def update_archive_status_for_experience(
+        self, experience_id: uuid.UUID
+    ) -> None:
+        """Recompute status of all archives linking this experience and persist.
+
+        Call after any change to an experience's exp_status (e.g. change_status,
+        publish_to_team, publish_personal, review).
+        """
+        async with get_session(self._db_url) as session:
+            repo = ArchiveRepository(session)
+            await repo.recompute_archive_status_for_linked_experience(experience_id)
+            await session.commit()

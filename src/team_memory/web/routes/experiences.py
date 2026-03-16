@@ -806,7 +806,13 @@ async def change_experience_status(
             vis_labels = {"private": "仅自己", "project": "项目内", "global": "全局"}
             msg += f"，可见范围：{vis_labels.get(new_visibility, new_visibility)}"
 
-        return {"message": msg, "experience": result.to_dict()}
+    if new_status and result is not None:
+        try:
+            from team_memory.bootstrap import get_context
+            await get_context().archive_service.update_archive_status_for_experience(exp_uuid)
+        except Exception:
+            pass
+    return {"message": msg, "experience": result.to_dict()}
 
 
 @router.post("/experiences/{experience_id}/publish")
@@ -856,6 +862,11 @@ async def publish_experience(
 
     if result is None:
         raise HTTPException(status_code=404, detail="Experience not found")
+    try:
+        from team_memory.bootstrap import get_context
+        await get_context().archive_service.update_archive_status_for_experience(exp_uuid)
+    except Exception:
+        pass
     db_url = _get_db_url()
     async with app_module.get_session(db_url) as session:
         ip = request.client.host if request.client else None

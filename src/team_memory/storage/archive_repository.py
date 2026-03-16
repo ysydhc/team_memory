@@ -184,6 +184,48 @@ class ArchiveRepository:
             })
         return out
 
+    async def recompute_archive_status_for_linked_experience(
+        self, experience_id: uuid.UUID
+    ) -> None:
+        """Recompute and update status of all archives that link this experience.
+
+        For each such archive: if all its linked experiences have exp_status='published',
+        set archive.status='published'; otherwise set 'draft'.
+        """
+        # Archives that link this experience
+        link_q = (
+            select(ArchiveExperienceLink.archive_id)
+            .where(ArchiveExperienceLink.experience_id == experience_id)
+            .distinct()
+        )
+        result = await self._session.execute(link_q)
+        archive_ids = [row[0] for row in result.all()]
+        if not archive_ids:
+            return
+
+        for archive_id in archive_ids:
+            # Linked experience ids for this archive
+            link_ids_q = (
+                select(ArchiveExperienceLink.experience_id).where(
+                    ArchiveExperienceLink.archive_id == archive_id
+                )
+            )
+            r2 = await self._session.execute(link_ids_q)
+            exp_ids = [row[0] for row in r2.all()]
+            if not exp_ids:
+                await self._session.execute(
+                    update(Archive).where(Archive.id == archive_id).values(status="draft")
+                )
+                continue
+            stmt = select(Experience.exp_status).where(Experience.id.in_(exp_ids))
+            r3 = await self._session.execute(stmt)
+            statuses = [row[0] for row in r3.all()]
+            all_pub = statuses and all(s == "published" for s in statuses)
+            new_status = "published" if all_pub else "draft"
+            await self._session.execute(
+                update(Archive).where(Archive.id == archive_id).values(status=new_status)
+            )
+
     async def get_archive_by_id(
         self,
         archive_id: uuid.UUID,

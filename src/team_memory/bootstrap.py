@@ -366,6 +366,11 @@ def bootstrap(
             event_bus=event_bus,
         )
 
+    archive_service = ArchiveService(
+        embedding_provider=embedding,
+        db_url=db_url,
+    )
+
     service = ExperienceService(
         embedding_provider=embedding,
         auth_provider=auth,
@@ -379,11 +384,7 @@ def bootstrap(
         pageindex_lite_config=settings.pageindex_lite,
         file_location_config=settings.file_location_binding,
         db_url=db_url,
-    )
-
-    archive_service = ArchiveService(
-        embedding_provider=embedding,
-        db_url=db_url,
+        archive_service=archive_service,
     )
 
     schema_registry = init_schema_registry(settings.custom_schema)
