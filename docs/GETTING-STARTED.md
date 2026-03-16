@@ -341,7 +341,7 @@ pip install team_memory
 }
 ```
 
-- **从源码运行**（本地有仓库、用项目 venv 和 config）：替换路径为你的项目根目录：
+- **从源码运行**（本地有仓库、用项目 venv 和 config）：替换路径为你的项目根目录。`env` 中建议加上 **TEAM_MEMORY_USER**（你的 Web 账号）和 **TEAM_MEMORY_PROJECT**（经验归属项目名），这样 MCP 写入的经验明确归到你名下：
 
 ```json
 {
@@ -351,7 +351,9 @@ pip install team_memory
       "args": ["-m", "team_memory.server"],
       "cwd": "/path/to/team_memory",
       "env": {
-        "TEAM_MEMORY_API_KEY": "你的 API Key"
+        "TEAM_MEMORY_API_KEY": "你的 API Key",
+        "TEAM_MEMORY_USER": "admin",
+        "TEAM_MEMORY_PROJECT": "team_memory"
       }
     }
   }
@@ -398,10 +400,13 @@ pip install team_memory
 |------|------|------|
 | `TEAM_MEMORY_DB_URL` | 是（或由 config 提供） | PostgreSQL 连接串，`postgresql+asyncpg://...`，库需启用 pgvector |
 | `TEAM_MEMORY_API_KEY` | 推荐 | 与 Web 同账号的 API Key；MCP 据此解析为当前用户，与 Web 身份统一 |
-| `TEAM_MEMORY_USER` | 否 | 仅在不设 API Key 或解析失败时作为回退，默认 `anonymous` |
+| `TEAM_MEMORY_USER` | 否 | 项目级 mcp.json 中配置：写入经验的归属用户（你的 Web 账号），避免「不知谁写入」；不设 API Key 时也作回退，默认 `anonymous` |
+| `TEAM_MEMORY_PROJECT` | 否 | 项目级 mcp.json 中配置：写入经验的归属项目名；不设则用服务端 default_project |
 | `TEAM_MEMORY_CONFIG_PATH` | 否 | 配置文件路径，设置则优先从该文件加载 |
 
 **MCP 身份与 Web 统一**：MCP 的当前用户（current_user）优先由 **TEAM_MEMORY_API_KEY** 经服务端 AuthProvider 解析得到，与 Web 使用同一套用户体系。配置与 Web 同账号的 API Key 后，在 Cursor 里写入的 personal 经验在同一 Cursor 会话内可被检索到，且 Web 用该账号登录后也能看到。推荐只配置 `TEAM_MEMORY_API_KEY`（与 Web 同账号的 Key），无需再设 `TEAM_MEMORY_USER`。
+
+**项目级 mcp.json 配置用户名与项目名**：在**你项目**的 `.cursor/mcp.json` 里，给 team_memory 的 `env` 增加 **TEAM_MEMORY_USER**（你的 Web 登录账号）和 **TEAM_MEMORY_PROJECT**（经验归属的项目名）。这样 MCP 工具写入的经验会明确归到该用户、该项目，并在 Web 端可见，避免「不知道是谁写入的」。未配置时回退为 `anonymous` / 服务端 default_project。
 
 **Docker/Helm**：若通过容器或编排部署，在配置中注入上述环境变量；生产环境禁止使用占位或默认 Key（如 `changeme`）。
 

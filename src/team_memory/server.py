@@ -157,7 +157,8 @@ async def _get_current_user() -> str:
             logger.warning("MCP get_context failed, using fallback user")
         except Exception as e:
             logger.warning("MCP auth error: %s", type(e).__name__, exc_info=False)
-    return os.environ.get("TEAM_MEMORY_USER", "anonymous")
+    # Fallback: 项目级 mcp.json 的 env 中配置 TEAM_MEMORY_USER，写入的经验归到该用户
+    return (os.environ.get("TEAM_MEMORY_USER", "") or "anonymous").strip() or "anonymous"
 
 
 def _normalize_project_name(project: str | None) -> str:
@@ -1303,6 +1304,10 @@ async def tm_save(
     db_url = _get_db_url()
     user = await _get_current_user()
     resolved_project = _resolve_project(project)
+    # 项目级 mcp.json 配置了 TEAM_MEMORY_USER 时，默认 published 以便在 Web 端看到写入的经验
+    effective_publish = (
+        "published" if (publish_status == "personal" and user != "anonymous") else publish_status
+    )
 
     async with get_session(db_url) as session:
         result = await service.save(
@@ -1317,7 +1322,7 @@ async def tm_save(
             framework=framework,
             source="auto_extract",
             root_cause=root_cause,
-            publish_status=publish_status,
+            publish_status=effective_publish,
             skip_dedup=skip_dedup,
             project=resolved_project,
             file_locations=file_locations,
