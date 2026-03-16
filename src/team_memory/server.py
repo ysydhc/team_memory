@@ -28,6 +28,7 @@ from team_memory import io_logger
 from team_memory.bootstrap import bootstrap, get_context
 from team_memory.services.context_trimmer import estimate_tokens
 from team_memory.storage.database import get_session
+
 logger = logging.getLogger("team_memory")
 
 
@@ -541,6 +542,7 @@ async def tm_solve(
     use_pageindex_lite: bool | None = None,
     project: str | None = None,
     current_file_locations: list[dict] | None = None,
+    include_archives: bool = False,
 ) -> str:
     """Solve a problem by searching team experiences with enhanced context.
 
@@ -608,17 +610,18 @@ async def tm_solve(
         use_pageindex_lite=use_pageindex_lite,
         project=resolved_project,
         current_file_locations=current_file_locations,
+        include_archives=include_archives,
     )
 
-    # Auto-increment use_count + quality score boost on best match
+    # Auto-increment use_count + quality score boost on best match (skip when top result is archive)
     if results:
         reflection_start = time.monotonic()
-        async with get_session(db_url) as session:
-            from team_memory.storage.repository import ExperienceRepository
-            repo = ExperienceRepository(session)
-            best = results[0]
-            best_id = best.get("group_id") or best.get("id")
-            if best_id:
+        best = results[0]
+        best_id = best.get("group_id") or best.get("id")
+        if best_id and best.get("type") != "archive":
+            async with get_session(db_url) as session:
+                from team_memory.storage.repository import ExperienceRepository
+                repo = ExperienceRepository(session)
                 try:
                     import uuid as _uuid
                     await repo.increment_use_count(_uuid.UUID(best_id))
@@ -1179,6 +1182,7 @@ async def tm_search(
     use_pageindex_lite: bool | None = None,
     project: str | None = None,
     current_file_locations: list[dict] | None = None,
+    include_archives: bool = False,
 ) -> str:
     """Search team experiences by semantic similarity.
 
@@ -1221,6 +1225,7 @@ async def tm_search(
         use_pageindex_lite=use_pageindex_lite,
         project=resolved_project,
         current_file_locations=current_file_locations,
+        include_archives=include_archives,
     )
 
     if not results:
@@ -1232,10 +1237,10 @@ async def tm_search(
     # Task 5: auto-update per-user tag_synonyms from query + result tags
     await _try_update_user_expansion_from_search(query, results, user)
 
-    # Auto-increment use_count on top-1 result (mirrors tm_solve behavior)
+    # Auto-increment use_count on top-1 result (mirrors tm_solve behavior); skip for archives
     best = results[0]
     best_id = best.get("group_id") or best.get("id")
-    if best_id:
+    if best_id and best.get("type") != "archive":
         try:
             import uuid as _uuid
 
@@ -1371,7 +1376,9 @@ async def tm_save(
         "Save an archive entry (session/plan-level summary doc). "
         "Required: title, solution_doc, created_by (or omit to use current user). "
         "Optional: overview, conversation_summary, scope, scope_ref, project, "
-        "linked_experience_ids (list of experience UUIDs), attachments (list of dicts with kind, path?, content_snapshot?, snippet?, git_commit?, git_refs?). "
+        "linked_experience_ids (list of experience UUIDs), "
+        "attachments (list of dicts with kind, path?, snippet?, "
+        "content_snapshot?, git_commit?, git_refs?). "
         "Returns archive_id."
     ),
 )
@@ -1427,6 +1434,38 @@ async def tm_archive_save(
         {"message": "Archive saved successfully.", "archive_id": str(archive_id)},
         ensure_ascii=False,
     )
+
+
+@mcp.tool(
+    name="tm_get_archive",
+    description=(
+        "Get full archive by id (L2: solution_doc, overview, attachments). "
+        "Returns 404 when archive does not exist or id is invalid."
+    ),
+)
+@track_usage
+async def tm_get_archive(archive_id: str) -> str:
+    """Return L2 archive by id; 404 when not found."""
+    import uuid as _uuid
+
+    try:
+        aid = _uuid.UUID(archive_id)
+    except (ValueError, TypeError):
+        return json.dumps(
+            {"error": "archive not found", "code": 404},
+            ensure_ascii=False,
+        )
+
+    archive_svc = _get_archive_service()
+    out = await archive_svc.get_archive(aid)
+    if out is None:
+        return json.dumps(
+            {"error": "archive not found", "code": 404},
+            ensure_ascii=False,
+        )
+    if "attachments" not in out or out["attachments"] is None:
+        out = {**out, "attachments": []}
+    return json.dumps(out, ensure_ascii=False)
 
 
 @mcp.tool(

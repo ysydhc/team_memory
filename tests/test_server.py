@@ -37,7 +37,7 @@ class TestToolNamespace:
         """All expected tools should be present."""
         tools = await mcp.get_tools()
         expected = {
-            "tm_search", "tm_save", "tm_save_group", "tm_archive_save",
+            "tm_search", "tm_save", "tm_save_group", "tm_archive_save", "tm_get_archive",
             "tm_feedback", "tm_update",
             "tm_solve", "tm_learn", "tm_suggest",
         }
@@ -435,6 +435,78 @@ class TestTmArchiveSave:
         assert "archive_id" in data
         assert data["archive_id"] == archive_id
         assert "saved successfully" in data.get("message", "").lower()
+
+
+class TestTmGetArchive:
+    """Test tm_get_archive tool function."""
+
+    @pytest.mark.asyncio
+    async def test_tm_get_archive_returns_l2_with_attachments(self):
+        """tm_get_archive returns L2 dict with attachments array."""
+        archive_id = str(uuid.uuid4())
+        l2 = {
+            "id": archive_id,
+            "title": "T",
+            "solution_doc": "D",
+            "overview": "O",
+            "attachments": [{"id": "a1", "kind": "file", "path": "p"}],
+        }
+        with patch("team_memory.server._get_archive_service") as mock_get_svc:
+            mock_svc = MagicMock()
+            mock_svc.get_archive = AsyncMock(return_value=l2)
+            mock_get_svc.return_value = mock_svc
+
+            tools = await mcp.get_tools()
+            get_fn = tools["tm_get_archive"].fn
+            result = await get_fn(archive_id=archive_id)
+
+        data = json.loads(result)
+        assert data["id"] == archive_id
+        assert data["title"] == "T"
+        assert data["attachments"] == [{"id": "a1", "kind": "file", "path": "p"}]
+
+    @pytest.mark.asyncio
+    async def test_tm_get_archive_404_invalid_id(self):
+        """tm_get_archive returns 404 for invalid UUID."""
+        tools = await mcp.get_tools()
+        get_fn = tools["tm_get_archive"].fn
+        result = await get_fn(archive_id="not-a-uuid")
+        data = json.loads(result)
+        assert data.get("code") == 404
+        assert "not found" in data.get("error", "").lower()
+
+    @pytest.mark.asyncio
+    async def test_tm_get_archive_404_not_found(self):
+        """tm_get_archive returns 404 when archive does not exist."""
+        archive_id = str(uuid.uuid4())
+        with patch("team_memory.server._get_archive_service") as mock_get_svc:
+            mock_svc = MagicMock()
+            mock_svc.get_archive = AsyncMock(return_value=None)
+            mock_get_svc.return_value = mock_svc
+
+            tools = await mcp.get_tools()
+            get_fn = tools["tm_get_archive"].fn
+            result = await get_fn(archive_id=archive_id)
+
+        data = json.loads(result)
+        assert data.get("code") == 404
+
+    @pytest.mark.asyncio
+    async def test_tm_get_archive_attachments_default_empty(self):
+        """tm_get_archive ensures attachments is [] when missing."""
+        archive_id = str(uuid.uuid4())
+        l2 = {"id": archive_id, "title": "T", "solution_doc": "D"}
+        with patch("team_memory.server._get_archive_service") as mock_get_svc:
+            mock_svc = MagicMock()
+            mock_svc.get_archive = AsyncMock(return_value=l2)
+            mock_get_svc.return_value = mock_svc
+
+            tools = await mcp.get_tools()
+            get_fn = tools["tm_get_archive"].fn
+            result = await get_fn(archive_id=archive_id)
+
+        data = json.loads(result)
+        assert data.get("attachments") == []
 
 
 # ============================================================
