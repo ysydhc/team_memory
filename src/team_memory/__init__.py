@@ -22,7 +22,9 @@ class _StderrFilter:
         if "DeprecationWarning" in line:
             self._skip_continuation = True
             return True
-        if "pkg_resources" in line and ("deprecated" in line.lower() or "declare_namespace" in line):
+        if "pkg_resources" in line and (
+            "deprecated" in line.lower() or "declare_namespace" in line
+        ):
             return True
         if "declare_namespace" in line or "Implementing implicit namespace" in line:
             return True

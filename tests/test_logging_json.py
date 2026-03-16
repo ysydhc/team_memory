@@ -175,6 +175,10 @@ class TestLogFormatConfig:
 
     def test_log_format_default_human(self) -> None:
         """When LOG_FORMAT unset, default is human."""
+        from unittest.mock import patch
+
         os.environ.pop("LOG_FORMAT", None)
-        settings = load_settings()
+        os.environ.pop("TEAM_MEMORY_LOG_FORMAT", None)
+        with patch("team_memory.config._load_dotenv_if_available"):
+            settings = load_settings()
         assert settings.log_format == "human"
