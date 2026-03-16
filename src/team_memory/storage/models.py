@@ -1039,3 +1039,100 @@ class CustomInstallableContent(Base):
     __table_args__ = (
         UniqueConstraint("project", "item_id", name="uq_custom_installable_project_item"),
     )
+
+
+class Archive(Base):
+    """Archive entry: session/plan-level summary doc and attachments."""
+
+    __tablename__ = "archives"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    scope: Mapped[str] = mapped_column(String(20), nullable=False, server_default="session")
+    scope_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    solution_doc: Mapped[str] = mapped_column(Text, nullable=False)
+    overview: Mapped[str | None] = mapped_column(Text, nullable=True)
+    conversation_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    project: Mapped[str] = mapped_column(String(100), nullable=False, server_default="default")
+    created_by: Mapped[str] = mapped_column(String(100), nullable=False)
+    visibility: Mapped[str] = mapped_column(String(20), nullable=False, server_default="project")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="draft")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+    embedding = mapped_column(Vector(768), nullable=True)
+
+    experience_links: Mapped[list["ArchiveExperienceLink"]] = relationship(
+        "ArchiveExperienceLink",
+        back_populates="archive",
+        cascade="all, delete-orphan",
+    )
+    attachments: Mapped[list["ArchiveAttachment"]] = relationship(
+        "ArchiveAttachment",
+        back_populates="archive",
+        cascade="all, delete-orphan",
+    )
+
+
+class ArchiveExperienceLink(Base):
+    """Many-to-many link between Archive and Experience."""
+
+    __tablename__ = "archive_experience_links"
+
+    archive_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("archives.id", ondelete="CASCADE"),
+        nullable=False,
+        primary_key=True,
+    )
+    experience_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("experiences.id", ondelete="CASCADE"),
+        nullable=False,
+        primary_key=True,
+    )
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "archive_id",
+            "experience_id",
+            name="uq_archive_experience_links_archive_exp",
+        ),
+    )
+
+    archive: Mapped[Archive] = relationship(back_populates="experience_links")
+
+
+class ArchiveAttachment(Base):
+    """Document/code snapshot or reference attached to an archive."""
+
+    __tablename__ = "archive_attachments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    archive_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("archives.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    content_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    git_commit: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    git_refs: Mapped[dict | list | None] = mapped_column(JSONB, nullable=True)
+    snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    archive: Mapped[Archive] = relationship(back_populates="attachments")
