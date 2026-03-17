@@ -66,7 +66,7 @@ class Experience(Base):
     severity: Mapped[str | None] = mapped_column(String(10), nullable=True)
     # Classification (frontend / backend / database / infra / performance / security / other)
     category: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    # Business progress (separate from publish_status which controls visibility)
+    # Business progress (separate from exp_status which controls visibility)
     # bugfix: open/investigating/fixed/verified
     # feature: planning/developing/testing/released
     # tech_design: researching/reviewing/implementing/completed
@@ -109,11 +109,6 @@ class Experience(Base):
     # Owner
     created_by: Mapped[str] = mapped_column(String(100), nullable=False)
 
-    # Scope: global (cross-project), team (project-bound), personal (creator-only)
-    scope: Mapped[str] = mapped_column(
-        String(20), default="team", nullable=False, server_default="team"
-    )  # global, team, personal
-
     # Project isolation: experiences belong to a project (P4-1)
     project: Mapped[str] = mapped_column(
         String(100), default="default", nullable=False, server_default="default"
@@ -124,24 +119,10 @@ class Experience(Base):
     visibility: Mapped[str] = mapped_column(
         String(20), default="project", nullable=False, server_default="project"
     )  # private, project, global
-    # Workflow status (draft/review/published/rejected)
+    # Workflow status (draft | published only; review/rejected removed)
     exp_status: Mapped[str] = mapped_column(
         String(20), default="draft", nullable=False, server_default="draft"
-    )  # draft, review, published, rejected
-
-    # --- Legacy fields (kept for backward compatibility during migration) ---
-    # Review / publish workflow
-    publish_status: Mapped[str] = mapped_column(
-        String(20), default="personal", nullable=False
-    )  # personal, draft, pending_team, published, rejected
-    review_status: Mapped[str] = mapped_column(
-        String(20), default="approved", nullable=False
-    )  # pending, approved, rejected
-    reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    reviewed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    )  # draft, published
 
     # Soft delete
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -265,11 +246,7 @@ class Experience(Base):
             "created_by": self.created_by,
             "visibility": self.visibility,
             "status": self.exp_status,
-            "scope": self.scope,
             "project": self.project,
-            "publish_status": self.publish_status,
-            "review_status": self.review_status,
-            "reviewed_at": self.reviewed_at.isoformat() if self.reviewed_at else None,
             "is_deleted": self.is_deleted,
             "embedding_status": self.embedding_status,
             "view_count": self.view_count,
@@ -828,35 +805,6 @@ class ExperienceLink(Base):
             "link_type": self.link_type,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "created_by": self.created_by,
-        }
-
-
-class ReviewHistory(Base):
-    """History of review actions on experiences."""
-
-    __tablename__ = "review_history"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    experience_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("experiences.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    reviewer: Mapped[str] = mapped_column(String(100), nullable=False)
-    action: Mapped[str] = mapped_column(String(20), nullable=False)  # approved, rejected
-    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow
-    )
-
-    def to_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "experience_id": str(self.experience_id),
-            "reviewer": self.reviewer,
-            "action": self.action,
-            "comment": self.comment,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
 

@@ -436,7 +436,7 @@ export function renderExpList(containerId, experiences) {
     <div class="exp-card" onclick="showDetail('${cardId}')">
       <div class="exp-card-header">
         <div class="exp-card-title">
-          <span class="type-icon">${typeIcon}</span>${esc(view.title)}${tierBadge(view)}${pinBadge(view)}${isStale ? '<span class="stale-badge">疑似过时</span>' : ''}${view.status === 'draft' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--accent-glow);color:var(--accent);margin-left:6px">草稿</span>' : ''}${view.status === 'review' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--yellow-bg);color:var(--yellow);margin-left:6px">审核中</span>' : ''}${view.status === 'rejected' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--red-bg);color:var(--red);margin-left:6px">已拒绝</span>' : ''}${view.visibility === 'private' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--green-bg,#e8f5e9);color:var(--green,#2e7d32);margin-left:6px">仅自己</span>' : ''}${view.visibility === 'global' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:#e0f2fe;color:#0369a1;margin-left:6px">全局</span>' : ''}
+          <span class="type-icon">${typeIcon}</span>${esc(view.title)}${tierBadge(view)}${pinBadge(view)}${isStale ? '<span class="stale-badge">疑似过时</span>' : ''}${view.status === 'draft' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--accent-glow);color:var(--accent);margin-left:6px">草稿</span>' : ''}${view.visibility === 'private' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--green-bg,#e8f5e9);color:var(--green,#2e7d32);margin-left:6px">仅自己</span>' : ''}${view.visibility === 'global' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:#e0f2fe;color:#0369a1;margin-left:6px">全局</span>' : ''}
         </div>
         <div class="exp-card-meta">
           ${projectTag}
@@ -467,9 +467,10 @@ export async function loadDashboard() {
 }
 
 // ===== List Sub-tab State =====
-let _listSubTab = 'all'; // 'all' | 'draft' | 'review'
+let _listSubTab = 'all'; // 'all' | 'draft'
 
 export function switchListSubTab(tab) {
+    if (tab === 'review') tab = 'all'; // review tab removed, fall back to all
     _listSubTab = tab;
     document.querySelectorAll('#page-list .mode-tab').forEach((el) => el.classList.remove('active'));
     const tabEl = document.getElementById(`list-tab-${tab}`);
@@ -477,7 +478,6 @@ export function switchListSubTab(tab) {
     const statusFilter = document.getElementById('list-status-filter');
     if (statusFilter) {
         if (tab === 'draft') statusFilter.value = 'draft';
-        else if (tab === 'review') statusFilter.value = 'review';
         else statusFilter.value = '';
     }
     loadList(1);
@@ -503,7 +503,6 @@ export async function loadList(page = 1) {
         const el = (id) => document.getElementById(id);
         if (el('stat-total')) el('stat-total').textContent = stats.total_experiences || 0;
         if (el('stat-recent')) el('stat-recent').textContent = stats.recent_7days || 0;
-        if (el('stat-pending')) el('stat-pending').textContent = stats.pending_reviews || 0;
         const tags = stats.tag_distribution || {};
         if (el('stat-tags')) el('stat-tags').textContent = Object.keys(tags).length;
     } catch (_) { /* stats load failure is non-blocking */ }
@@ -715,7 +714,7 @@ export async function showDetail(id, opts = {}) {
                 : '';
 
         const backPage = state.detailReferrer || 'list';
-        const backLabels = { reviews: '审核队列', drafts: '草稿箱', list: '经验列表', search: '语义搜索', dashboard: '仪表盘' };
+        const backLabels = { reviews: '经验列表', drafts: '草稿箱', list: '经验列表', search: '语义搜索', dashboard: '仪表盘' };
         const backLabel = backLabels[backPage] || '列表';
         const hasBackStack = (state.detailBackStack || []).length > 0;
         const backBtnLabel = hasBackStack ? '返回上一经验' : `返回${backLabel}`;
@@ -726,9 +725,7 @@ export async function showDetail(id, opts = {}) {
         <div class="detail-header">
           <h1>${typeBadges} ${esc(exp.title)}
             ${exp.status === 'draft' ? '<span style="font-size:13px;padding:2px 10px;border-radius:4px;background:var(--accent-glow);color:var(--accent);margin-left:12px;vertical-align:middle">草稿</span>' : ''}
-            ${exp.status === 'review' ? '<span style="font-size:13px;padding:2px 10px;border-radius:4px;background:var(--yellow-bg);color:var(--yellow);margin-left:12px;vertical-align:middle">审核中</span>' : ''}
             ${exp.status === 'published' ? '<span style="font-size:13px;padding:2px 10px;border-radius:4px;background:var(--green-bg,#e8f5e9);color:var(--green,#2e7d32);margin-left:12px;vertical-align:middle">已发布</span>' : ''}
-            ${exp.status === 'rejected' ? '<span style="font-size:13px;padding:2px 10px;border-radius:4px;background:var(--red-bg);color:var(--red);margin-left:12px;vertical-align:middle">已拒绝</span>' : ''}
             ${exp.visibility === 'private' ? '<span style="font-size:11px;padding:1px 8px;border-radius:3px;background:#f3e8ff;color:#7c3aed;margin-left:6px;vertical-align:middle">仅自己</span>' : ''}
             ${exp.visibility === 'global' ? '<span style="font-size:11px;padding:1px 8px;border-radius:3px;background:#e0f2fe;color:#0369a1;margin-left:6px;vertical-align:middle">全局</span>' : ''}
             ${exp.visibility === 'project' ? '<span style="font-size:11px;padding:1px 8px;border-radius:3px;background:#fef3c7;color:#92400e;margin-left:6px;vertical-align:middle">项目内</span>' : ''}
@@ -830,13 +827,7 @@ export async function showDetail(id, opts = {}) {
         </div>
         <div class="detail-actions">
           ${exp.status === 'draft' ? `
-            <button class="btn btn-sm" style="background:var(--yellow);color:#fff" onclick="changeExpStatus('${exp.id}','review')">提交审核</button>
             <button class="btn btn-sm" style="background:var(--green);color:#fff;margin-left:4px" onclick="changeExpStatus('${exp.id}','published')">直接发布</button>` : ''}
-          ${exp.status === 'review' ? `
-            <button class="btn btn-sm" style="background:var(--green);color:#fff" onclick="changeExpStatus('${exp.id}','published')">批准发布</button>
-            <button class="btn btn-sm" style="background:var(--red-bg);color:var(--red);margin-left:4px" onclick="changeExpStatus('${exp.id}','rejected')">拒绝</button>` : ''}
-          ${exp.status === 'rejected' ? `
-            <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="changeExpStatus('${exp.id}','draft')">退回草稿</button>` : ''}
           ${exp.status === 'published' ? `
             <button class="btn btn-sm" style="background:var(--accent-glow);color:var(--accent)" onclick="changeExpStatus('${exp.id}','draft')">撤回到草稿</button>` : ''}
           <button class="btn btn-primary btn-sm" onclick="openEditModal('${exp.id}')">✏️ 编辑</button>
@@ -902,7 +893,7 @@ export async function loadDrafts() {
 }
 
 export async function changeExpStatus(id, newStatus, newVisibility = null) {
-    const labels = { draft: '草稿', review: '审核中', published: '已发布', rejected: '已拒绝' };
+    const labels = { draft: '草稿', published: '已发布' };
     const label = labels[newStatus] || newStatus;
     if (!confirm(`确定要将状态改为「${label}」吗？`)) return;
     try {
@@ -917,7 +908,7 @@ export async function changeExpStatus(id, newStatus, newVisibility = null) {
 }
 
 export async function publishDraft(id, target = 'personal') {
-    const newStatus = target === 'team' ? 'review' : 'published';
+    const newStatus = target === 'team' ? 'published' : 'published';
     const newVis = target === 'team' ? 'project' : 'private';
     await changeExpStatus(id, newStatus, newVis);
 }

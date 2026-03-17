@@ -173,14 +173,6 @@ lifecycle:
   dedup_on_save_threshold: 0.90 # Similarity threshold for save-time dedup
 
 # ╔══════════════════════════════════════════════════════════╗
-# ║  [可选] 审核工作流                                       ║
-# ╚══════════════════════════════════════════════════════════╝
-review:
-  enabled: true # Enable review workflow
-  auto_publish_threshold: 0.0 # Auto-publish if avg_rating >= this (0 = disabled)
-  require_review_for_ai: true # AI-created experiences require review
-
-# ╔══════════════════════════════════════════════════════════╗
 # ║  [高级] 记忆压缩与摘要生成                                ║
 # ╚══════════════════════════════════════════════════════════╝
 memory:

@@ -2,7 +2,6 @@
 
 Covers:
   - P0-1: Draft mode (create draft, list drafts, publish)
-  - P0-2: Review gate (pending review, approve, reject)
   - P0-3: Dedup-on-save (duplicate detection, skip dedup)
   - P0-4: Summary generation (single, batch)
 """
@@ -16,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from team_memory.auth.provider import ApiKeyAuth
-from team_memory.config import LifecycleConfig, MemoryConfig, ReviewConfig
+from team_memory.config import LifecycleConfig, MemoryConfig
 from team_memory.web import app as web_module
 from team_memory.web.app import app
 
@@ -33,7 +32,6 @@ def setup_app():
     web_module._settings = MagicMock()
     web_module._settings.database.url = "postgresql+asyncpg://test:test@localhost:5432/team_memory"
     web_module._settings.lifecycle = LifecycleConfig(dedup_on_save=True, dedup_on_save_threshold=0.90)
-    web_module._settings.review = ReviewConfig(require_review_for_ai=True)
     web_module._settings.memory = MemoryConfig(auto_summarize=True, summary_threshold_tokens=500)
     web_module._settings.retrieval = MagicMock()
     web_module._settings.retrieval.max_count = 20
@@ -46,7 +44,8 @@ def setup_app():
     mock_service.save = AsyncMock(return_value={
         "id": exp_id,
         "title": "Test Exp",
-        "publish_status": "published",
+        "exp_status": "published",
+        "visibility": "project",
         "created_at": "2026-01-01T00:00:00+00:00",
     })
     mock_service.search = AsyncMock(return_value=[])
@@ -58,18 +57,12 @@ def setup_app():
         "pending_reviews": 1,
         "stale_count": 0,
     })
-    mock_service.get_pending_reviews = AsyncMock(return_value=[])
     mock_service.get_drafts = AsyncMock(return_value=[])
     mock_service.publish_experience = AsyncMock(return_value={
         "id": exp_id,
         "title": "Test Exp",
-        "publish_status": "published",
-    })
-    mock_service.review = AsyncMock(return_value={
-        "id": exp_id,
-        "title": "Reviewed",
-        "review_status": "approved",
-        "publish_status": "published",
+        "exp_status": "published",
+        "visibility": "project",
     })
     mock_service.generate_summary = AsyncMock(return_value={
         "id": exp_id,
@@ -125,26 +118,26 @@ class TestDraftMode:
     """Test draft creation, listing, and publishing."""
 
     def test_create_experience_as_draft(self, client, auth_headers, setup_app):
-        """Creating with publish_status=draft should work."""
+        """Creating with status=draft should work."""
         setup_app.save.return_value = {
             "id": str(uuid.uuid4()),
             "title": "Draft Exp",
-            "publish_status": "draft",
+            "exp_status": "draft",
+            "visibility": "project",
             "created_at": "2026-01-01T00:00:00+00:00",
         }
         resp = client.post("/api/v1/experiences", json={
             "title": "Draft Exp",
             "problem": "Test problem",
             "solution": "Test solution",
-            "publish_status": "draft",
+            "status": "draft",
         }, headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
-        assert data.get("publish_status") == "draft"
-        # Verify the service was called with draft status
+        assert data.get("exp_status") == "draft"
         setup_app.save.assert_called_once()
         call_kwargs = setup_app.save.call_args
-        assert call_kwargs.kwargs.get("publish_status") == "draft"
+        assert call_kwargs.kwargs.get("exp_status") == "draft"
 
     def test_create_experience_default_published(self, client, auth_headers, setup_app):
         """Creating without explicit status should default to published."""
@@ -155,12 +148,12 @@ class TestDraftMode:
         }, headers=auth_headers)
         assert resp.status_code == 200
         call_kwargs = setup_app.save.call_args
-        assert call_kwargs.kwargs.get("publish_status") == "published"
+        assert call_kwargs.kwargs.get("exp_status") == "published"
 
     def test_list_drafts(self, client, auth_headers, setup_app):
         """GET /api/v1/experiences/drafts should return drafts."""
         setup_app.get_drafts.return_value = [
-            {"id": str(uuid.uuid4()), "title": "My Draft", "publish_status": "draft"},
+            {"id": str(uuid.uuid4()), "title": "My Draft", "exp_status": "draft"},
         ]
         resp = client.get("/api/v1/experiences/drafts", headers=auth_headers)
         assert resp.status_code == 200
@@ -173,7 +166,7 @@ class TestDraftMode:
         exp_id = str(uuid.uuid4())
         mock_repo = MagicMock()
         mock_exp = MagicMock()
-        mock_exp.to_dict.return_value = {"id": exp_id, "publish_status": "published"}
+        mock_exp.to_dict.return_value = {"id": exp_id, "exp_status": "published"}
         mock_repo.change_status = AsyncMock(return_value=mock_exp)
         mock_repo.get_by_id = AsyncMock(return_value=MagicMock())
         mock_session_ctx = MagicMock()
@@ -221,82 +214,6 @@ class TestDraftMode:
 
 
 # ============================================================
-# P0-2: Review Gate
-# ============================================================
-
-class TestReviewGate:
-    """Test review workflow."""
-
-    def test_review_approve(self, client, auth_headers, setup_app):
-        """POST /api/v1/experiences/{id}/review with approved should work."""
-        exp_id = str(uuid.uuid4())
-        mock_session_ctx = MagicMock()
-        mock_session_ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-        mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
-        with patch("team_memory.web.routes.experiences.app_module.get_session", return_value=mock_session_ctx), \
-             patch("team_memory.web.routes.experiences.write_audit_log", new_callable=AsyncMock):
-            resp = client.post(f"/api/v1/experiences/{exp_id}/review", json={
-                "review_status": "approved",
-            }, headers=auth_headers)
-        assert resp.status_code == 200
-        setup_app.review.assert_called_once()
-        call_kwargs = setup_app.review.call_args.kwargs
-        assert call_kwargs["review_status"] == "approved"
-
-    def test_review_reject(self, client, auth_headers, setup_app):
-        """POST /api/v1/experiences/{id}/review with rejected should work."""
-        exp_id = str(uuid.uuid4())
-        setup_app.review.return_value = {
-            "id": exp_id,
-            "review_status": "rejected",
-            "publish_status": "rejected",
-        }
-        mock_session_ctx = MagicMock()
-        mock_session_ctx.__aenter__ = AsyncMock(return_value=MagicMock())
-        mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
-        with patch("team_memory.web.routes.experiences.app_module.get_session", return_value=mock_session_ctx), \
-             patch("team_memory.web.routes.experiences.write_audit_log", new_callable=AsyncMock):
-            resp = client.post(f"/api/v1/experiences/{exp_id}/review", json={
-                "review_status": "rejected",
-                "review_note": "内容不够详细",
-            }, headers=auth_headers)
-        assert resp.status_code == 200
-        call_kwargs = setup_app.review.call_args.kwargs
-        assert call_kwargs["review_note"] == "内容不够详细"
-
-    def test_review_invalid_status(self, client, auth_headers):
-        """Invalid review_status should return 400."""
-        resp = client.post(f"/api/v1/experiences/{uuid.uuid4()}/review", json={
-            "review_status": "maybe",
-        }, headers=auth_headers)
-        assert resp.status_code == 400
-
-    def test_pending_reviews_list(self, client, auth_headers, setup_app):
-        """GET /api/v1/reviews/pending should return pending reviews."""
-        resp = client.get("/api/v1/reviews/pending", headers=auth_headers)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "experiences" in data
-
-    def test_review_config_crud(self, client, auth_headers):
-        """GET and PUT /api/v1/config/review should work."""
-        # GET
-        resp = client.get("/api/v1/config/review", headers=auth_headers)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "enabled" in data
-        assert data["require_review_for_ai"] is True
-
-        # PUT
-        resp = client.put("/api/v1/config/review", json={
-            "enabled": False,
-            "auto_publish_threshold": 4.0,
-            "require_review_for_ai": False,
-        }, headers=auth_headers)
-        assert resp.status_code == 200
-
-
-# ============================================================
 # P0-3: Dedup-on-Save
 # ============================================================
 
@@ -328,7 +245,8 @@ class TestDedupOnSave:
         setup_app.save.return_value = {
             "id": str(uuid.uuid4()),
             "title": "Force Saved",
-            "publish_status": "published",
+            "exp_status": "published",
+            "visibility": "project",
             "created_at": "2026-01-01T00:00:00+00:00",
         }
         resp = client.post("/api/v1/experiences", json={
@@ -404,12 +322,6 @@ class TestSummary:
 class TestConfigClasses:
     """Test P0 config classes."""
 
-    def test_review_config_defaults(self):
-        cfg = ReviewConfig()
-        assert cfg.enabled is True
-        assert cfg.auto_publish_threshold == 0.0
-        assert cfg.require_review_for_ai is True
-
     def test_memory_config_defaults(self):
         cfg = MemoryConfig()
         assert cfg.auto_summarize is True
@@ -435,7 +347,6 @@ class TestEventBusP0:
         assert hasattr(Events, "EXPERIENCE_PUBLISHED")
         assert Events.EXPERIENCE_PUBLISHED == "experience.published"
 
-    def test_reviewed_event_exists(self):
+    def test_reviewed_event_constant_exists(self):
         from team_memory.services.event_bus import Events
         assert hasattr(Events, "EXPERIENCE_REVIEWED")
-        assert Events.EXPERIENCE_REVIEWED == "experience.reviewed"

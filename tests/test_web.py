@@ -121,13 +121,6 @@ def setup_app():
     })
     mock_service.soft_delete = AsyncMock(return_value=True)
     mock_service.restore = AsyncMock(return_value=True)
-    mock_service.review = AsyncMock(return_value={
-        "id": str(uuid.uuid4()),
-        "title": "Reviewed",
-        "review_status": "approved",
-        "publish_status": "published",
-    })
-    mock_service.get_pending_reviews = AsyncMock(return_value=[])
     mock_service.get_query_logs = AsyncMock(return_value=[])
     mock_service.get_query_stats = AsyncMock(return_value={
         "total_queries": 0,
@@ -763,41 +756,20 @@ class TestFeedback:
 # Review Tests
 # ============================================================
 
-class TestReview:
-    def test_list_pending_requires_auth(self, client):
-        resp = client.get("/api/v1/reviews/pending")
-        assert resp.status_code == 401
+class TestReviewRemoved:
+    """Review routes have been removed; verify they return 404/405."""
 
-    def test_list_pending(self, client, auth_headers, setup_app):
-        with patch("team_memory.web.app.get_session") as mock_gs:
-            mock_sess = AsyncMock()
-            mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
-            mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
+    def test_review_pending_removed(self, client, auth_headers):
+        resp = client.get("/api/v1/reviews/pending", headers=auth_headers)
+        assert resp.status_code in (404, 405)
 
-            resp = client.get("/api/v1/reviews/pending", headers=auth_headers)
-            assert resp.status_code == 200
-            assert "experiences" in resp.json()
-
-    def test_review_experience(self, client, auth_headers, setup_app):
-        with patch("team_memory.web.app.get_session") as mock_gs:
-            mock_sess = AsyncMock()
-            mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
-            mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            resp = client.post(
-                f"/api/v1/experiences/{uuid.uuid4()}/review",
-                headers=auth_headers,
-                json={"review_status": "approved", "review_note": "LGTM"},
-            )
-            assert resp.status_code == 200
-
-    def test_review_invalid_status(self, client, auth_headers):
+    def test_review_experience_removed(self, client, auth_headers):
         resp = client.post(
             f"/api/v1/experiences/{uuid.uuid4()}/review",
             headers=auth_headers,
-            json={"review_status": "invalid"},
+            json={"review_status": "approved"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code in (404, 405, 422)
 
 
 # ============================================================

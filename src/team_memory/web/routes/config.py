@@ -21,7 +21,6 @@ from team_memory.web.app import (
     PageIndexLiteConfigUpdate,
     RerankerConfigUpdate,
     RetrievalConfigUpdate,
-    ReviewConfigUpdate,
     SearchConfigUpdate,
     _all_config_dict,
     _file_location_binding_config_dict,
@@ -354,36 +353,6 @@ async def update_lifecycle_config(
     s.lifecycle.dedup_on_save = req.dedup_on_save
     s.lifecycle.dedup_on_save_threshold = req.dedup_on_save_threshold
     return {"message": "Lifecycle config updated"}
-
-
-@router.get("/config/review")
-async def get_review_config(user: User | None = Depends(get_optional_user)):
-    """Get review workflow configuration."""
-    if not _cfg():
-        return {}
-    c = _cfg()
-    return {
-        "enabled": c.review.enabled,
-        "auto_publish_threshold": c.review.auto_publish_threshold,
-        "require_review_for_ai": c.review.require_review_for_ai,
-    }
-
-
-@router.put("/config/review")
-async def update_review_config(
-    req: ReviewConfigUpdate,
-    user: User = Depends(require_role("admin")),
-):
-    """Update review configuration in-memory."""
-    if not _cfg():
-        raise HTTPException(status_code=500, detail="Settings not initialized")
-    s = app_module._settings
-    s.review.enabled = req.enabled
-    s.review.auto_publish_threshold = req.auto_publish_threshold
-    s.review.require_review_for_ai = req.require_review_for_ai
-    if _svc():
-        _svc()._review_config = s.review
-    return {"message": "Review config updated"}
 
 
 @router.get("/config/memory")

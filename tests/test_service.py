@@ -330,38 +330,31 @@ class TestPhase2Fixes:
     """Regression tests for phase-2 reliability fixes.
 
     Covers:
-    - personal publish_status not overridden to draft
+    - visibility=private not overridden
     - feedback() callable without external session
     - update() callable without external session
     """
 
     @pytest.fixture
-    def service_with_review(self, mock_embedding, no_auth):
-        """Service with require_review_for_ai=True (the risky config)."""
-        from team_memory.config import ReviewConfig
-        review_cfg = ReviewConfig(
-            enabled=True,
-            require_review_for_ai=True,
-            auto_publish_threshold=0.0,
-        )
+    def service_simple(self, mock_embedding, no_auth):
+        """Service with default config (no review)."""
         return ExperienceService(
             embedding_provider=mock_embedding,
             auth_provider=no_auth,
-            review_config=review_cfg,
             db_url="sqlite+aiosqlite://",
         )
 
     @pytest.mark.asyncio
-    async def test_personal_status_preserved_with_ai_review(self, service_with_review):
-        """publish_status='personal' must NOT be overridden to 'draft' even when
-        require_review_for_ai=True and source='auto_extract'."""
+    async def test_private_visibility_preserved(self, service_simple):
+        """exp_status=published, visibility=private should be preserved."""
         mock_session = AsyncMock()
         mock_repo_instance = MagicMock()
         mock_experience = MagicMock()
         mock_experience.to_dict.return_value = {
             "id": str(uuid.uuid4()),
             "title": "Test",
-            "publish_status": "personal",
+            "status": "published",
+            "visibility": "private",
             "created_at": "2026-01-01T00:00:00",
         }
         mock_repo_instance.create = AsyncMock(return_value=mock_experience)
@@ -373,29 +366,30 @@ class TestPhase2Fixes:
         with patch("team_memory.storage.database.get_session", mock_get_session), \
              patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
             mock_repo.return_value = mock_repo_instance
-            await service_with_review.save(
+            await service_simple.save(
                 title="Personal experience",
                 problem="Should stay personal",
                 created_by="user",
                 source="auto_extract",
-                publish_status="personal",
+                exp_status="published",
+                visibility="private",
             )
 
         call_kwargs = mock_repo_instance.create.call_args
-        assert call_kwargs.kwargs["publish_status"] == "personal", \
-            "personal status must not be overridden to draft"
+        assert call_kwargs.kwargs.get("exp_status") == "published"
+        assert call_kwargs.kwargs.get("visibility") == "private"
 
     @pytest.mark.asyncio
-    async def test_published_status_becomes_draft_with_ai_review(self, service_with_review):
-        """publish_status='published' SHOULD be overridden to 'draft' when
-        require_review_for_ai=True and source='auto_extract'."""
+    async def test_published_status_save_as_publish(self, service_simple):
+        """exp_status=published, visibility=project should be preserved."""
         mock_session = AsyncMock()
         mock_repo_instance = MagicMock()
         mock_experience = MagicMock()
         mock_experience.to_dict.return_value = {
             "id": str(uuid.uuid4()),
             "title": "Test",
-            "publish_status": "draft",
+            "status": "published",
+            "visibility": "project",
             "created_at": "2026-01-01T00:00:00",
         }
         mock_repo_instance.create = AsyncMock(return_value=mock_experience)
@@ -407,20 +401,21 @@ class TestPhase2Fixes:
         with patch("team_memory.storage.database.get_session", mock_get_session), \
              patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
             mock_repo.return_value = mock_repo_instance
-            await service_with_review.save(
+            await service_simple.save(
                 title="Published experience",
-                problem="Should become draft for review",
+                problem="Save as published",
                 created_by="user",
                 source="auto_extract",
-                publish_status="published",
+                exp_status="published",
+                visibility="project",
             )
 
         call_kwargs = mock_repo_instance.create.call_args
-        assert call_kwargs.kwargs["publish_status"] == "draft", \
-            "published status should be overridden to draft for AI review"
+        assert call_kwargs.kwargs.get("exp_status") == "published"
+        assert call_kwargs.kwargs.get("visibility") == "project"
 
     @pytest.mark.asyncio
-    async def test_feedback_without_session(self, service_with_review):
+    async def test_feedback_without_session(self, service_simple):
         """feedback() must work without passing session= (it manages its own)."""
         mock_session = AsyncMock()
         mock_repo_instance = MagicMock()
@@ -435,7 +430,7 @@ class TestPhase2Fixes:
         with patch("team_memory.storage.database.get_session", mock_get_session), \
              patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
             mock_repo.return_value = mock_repo_instance
-            result = await service_with_review.feedback(
+            result = await service_simple.feedback(
                 experience_id=str(uuid.uuid4()),
                 rating=4,
                 feedback_by="reviewer",
@@ -444,7 +439,7 @@ class TestPhase2Fixes:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_feedback_accepts_extra_kwargs(self, service_with_review):
+    async def test_feedback_accepts_extra_kwargs(self, service_simple):
         """feedback() must accept MCP-injected session and extras via **kwargs without raising."""
         mock_session = AsyncMock()
         mock_repo_instance = MagicMock()
@@ -457,7 +452,7 @@ class TestPhase2Fixes:
         with patch("team_memory.storage.database.get_session", mock_get_session), \
              patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
             mock_repo.return_value = mock_repo_instance
-            result = await service_with_review.feedback(
+            result = await service_simple.feedback(
                 experience_id=str(uuid.uuid4()),
                 rating=4,
                 feedback_by="reviewer",
@@ -468,7 +463,7 @@ class TestPhase2Fixes:
         assert result is False  # experience not found
 
     @pytest.mark.asyncio
-    async def test_update_without_session(self, service_with_review):
+    async def test_update_without_session(self, service_simple):
         """update() must work without passing session= (it manages its own)."""
         mock_session = AsyncMock()
         mock_repo_instance = MagicMock()
@@ -491,7 +486,7 @@ class TestPhase2Fixes:
         with patch("team_memory.storage.database.get_session", mock_get_session), \
              patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
             mock_repo.return_value = mock_repo_instance
-            result = await service_with_review.update(
+            result = await service_simple.update(
                 experience_id=str(uuid.uuid4()),
                 solution_addendum="Addendum",
             )

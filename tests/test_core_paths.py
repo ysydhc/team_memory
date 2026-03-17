@@ -43,90 +43,84 @@ class TestActiveFilter:
 
 
 class TestPublishStatusDefaults:
-    """Tests for publish_status default values."""
+    """Tests for exp_status and visibility."""
 
-    def test_experience_model_defaults_to_personal(self):
-        """Experience model should default to 'personal' publish_status."""
-        assert Experience.publish_status.property.columns[0].default.arg == "personal"
+    def test_experience_model_defaults(self):
+        """Experience model defaults: exp_status=draft, visibility=project."""
+        assert Experience.exp_status.property.columns[0].default.arg == "draft"
+        assert Experience.visibility.property.columns[0].default.arg == "project"
 
     def test_experience_valid_statuses(self):
-        """Verify the documented status values are valid."""
-        valid = {"personal", "draft", "pending_team", "published", "rejected"}
+        """Only draft and published are valid exp_status."""
+        valid = {"draft", "published"}
         exp = Experience(
-            title="test", description="test", publish_status="personal"
+            title="test", description="test", exp_status="published", visibility="project"
         )
-        assert exp.publish_status in valid
+        assert exp.exp_status in valid
 
 
 class TestPublishToTeam:
-    """Tests for publish_to_team and publish_personal repository methods."""
+    """Tests for publish_to_team and publish_personal (now change_status wrappers)."""
 
     @pytest.mark.asyncio
-    async def test_publish_to_team_non_admin_sets_pending(self):
-        """Non-admin should set pending_team status."""
+    async def test_publish_to_team_sets_published(self):
+        """publish_to_team calls change_status(published)."""
         from team_memory.storage.repository import ExperienceRepository
 
         mock_session = AsyncMock()
         repo = ExperienceRepository(mock_session)
-
         mock_exp = MagicMock(spec=Experience)
-        mock_exp.publish_status = "personal"
-        mock_exp.review_status = "approved"
+        mock_exp.exp_status = "published"
+        mock_exp.visibility = "project"
 
-        with patch.object(repo, "get_by_id", return_value=mock_exp):
-            result = await repo.publish_to_team(
-                experience_id="test-id", is_admin=False
-            )
-        assert result.publish_status == "pending_team"
-        assert result.review_status == "pending"
+        with patch.object(repo, "change_status", new_callable=AsyncMock, return_value=mock_exp):
+            result = await repo.publish_to_team(experience_id="test-id", is_admin=False)
+        assert result.exp_status == "published"
 
     @pytest.mark.asyncio
     async def test_publish_to_team_admin_sets_published(self):
-        """Admin should directly set published status."""
+        """Admin also gets published (no pending_team)."""
         from team_memory.storage.repository import ExperienceRepository
 
         mock_session = AsyncMock()
         repo = ExperienceRepository(mock_session)
-
         mock_exp = MagicMock(spec=Experience)
-        mock_exp.publish_status = "personal"
+        mock_exp.exp_status = "published"
 
-        with patch.object(repo, "get_by_id", return_value=mock_exp):
-            result = await repo.publish_to_team(
-                experience_id="test-id", is_admin=True
-            )
-        assert result.publish_status == "published"
-        assert result.review_status == "approved"
+        with patch.object(repo, "change_status", new_callable=AsyncMock, return_value=mock_exp):
+            result = await repo.publish_to_team(experience_id="test-id", is_admin=True)
+        assert result.exp_status == "published"
 
     @pytest.mark.asyncio
     async def test_publish_personal_from_draft(self):
-        """Draft -> personal transition should work."""
+        """Draft -> visibility=private (personal)."""
         from team_memory.storage.repository import ExperienceRepository
 
         mock_session = AsyncMock()
         repo = ExperienceRepository(mock_session)
-
         mock_exp = MagicMock(spec=Experience)
-        mock_exp.publish_status = "draft"
+        mock_exp.exp_status = "draft"
+        mock_exp.visibility = "private"
 
-        with patch.object(repo, "get_by_id", return_value=mock_exp):
+        with patch.object(repo, "get_by_id", return_value=mock_exp), patch.object(
+            repo, "change_status", new_callable=AsyncMock, return_value=mock_exp
+        ):
             result = await repo.publish_personal(experience_id="test-id")
-        assert result.publish_status == "personal"
+        assert result.visibility == "private"
 
     @pytest.mark.asyncio
     async def test_publish_personal_noop_if_not_draft(self):
-        """publish_personal should be a no-op if already personal."""
+        """publish_personal returns exp unchanged if not draft."""
         from team_memory.storage.repository import ExperienceRepository
 
         mock_session = AsyncMock()
         repo = ExperienceRepository(mock_session)
-
         mock_exp = MagicMock(spec=Experience)
-        mock_exp.publish_status = "personal"
+        mock_exp.exp_status = "published"
 
         with patch.object(repo, "get_by_id", return_value=mock_exp):
             result = await repo.publish_personal(experience_id="test-id")
-        assert result.publish_status == "personal"
+        assert result.exp_status == "published"
 
     @pytest.mark.asyncio
     async def test_publish_to_team_not_found(self):
@@ -141,51 +135,6 @@ class TestPublishToTeam:
                 experience_id="nonexistent", is_admin=False
             )
         assert result is None
-
-
-class TestReviewWorkflow:
-    """Tests for the review approve/reject workflow."""
-
-    @pytest.mark.asyncio
-    async def test_review_approve_sets_published(self):
-        """Approving should set publish_status to published."""
-        from team_memory.storage.repository import ExperienceRepository
-
-        mock_session = AsyncMock()
-        repo = ExperienceRepository(mock_session)
-
-        mock_exp = MagicMock(spec=Experience)
-        mock_exp.publish_status = "pending_team"
-        mock_exp.review_status = "pending"
-
-        with patch.object(repo, "get_by_id", return_value=mock_exp):
-            result = await repo.review(
-                experience_id="test-id",
-                review_status="approved",
-                reviewed_by="admin",
-            )
-        assert result.publish_status == "published"
-
-    @pytest.mark.asyncio
-    async def test_review_reject_sets_rejected(self):
-        """Rejecting should set publish_status to rejected."""
-        from team_memory.storage.repository import ExperienceRepository
-
-        mock_session = AsyncMock()
-        repo = ExperienceRepository(mock_session)
-
-        mock_exp = MagicMock(spec=Experience)
-        mock_exp.publish_status = "pending_team"
-        mock_exp.review_status = "pending"
-
-        with patch.object(repo, "get_by_id", return_value=mock_exp):
-            result = await repo.review(
-                experience_id="test-id",
-                review_status="rejected",
-                reviewed_by="admin",
-                review_note="Not relevant",
-            )
-        assert result.publish_status == "rejected"
 
 
 class TestHooksAndTracking:

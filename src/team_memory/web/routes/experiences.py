@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from team_memory.auth.provider import User
 from team_memory.storage.audit import write_audit_log
-from team_memory.storage.models import Experience, ExperienceLink, ReviewHistory
+from team_memory.storage.models import Experience, ExperienceLink
 from team_memory.web import app as app_module
 from team_memory.web.app import (
     ExperienceCreate,
@@ -20,7 +20,6 @@ from team_memory.web.app import (
     ExperienceLinkCreate,
     ExperienceUpdate,
     FeedbackCreate,
-    ReviewRequest,
     _get_db_url,
     _resolve_project,
     get_current_user,
@@ -70,7 +69,12 @@ async def list_experiences(
     )
     resolved_project = _resolve_project(project.split(",")[0] if project else project)
     effective_visibility = visibility or scope
-    include_all = status in ("all", "draft", "review", "rejected")
+    if status in ("review", "rejected"):
+        raise HTTPException(
+            status_code=400,
+            detail="status=review and status=rejected are no longer supported",
+        )
+    include_all = status in ("all", "draft")
     current_user = user.name if user else None
 
     def _project_filter(q):
@@ -126,9 +130,6 @@ async def list_experiences(
             total = await repo.count_drafts(
                 project=resolved_project, created_by=current_user
             )
-        elif status == "review":
-            experiences = await repo.list_pending_review(limit=page_size)
-            total = len(experiences)
         elif (
             tag or experience_type or severity or category
             or progress_status or status or quality_tier
@@ -332,7 +333,8 @@ async def create_experience(
             framework=req.framework,
             source="web",
             root_cause=req.root_cause,
-            publish_status=req.publish_status,
+            exp_status=req.status,
+            visibility=req.visibility,
             skip_dedup=req.skip_dedup_check,
             experience_type=req.experience_type,
             severity=req.severity,
@@ -440,8 +442,8 @@ async def update_experience_route(
         kwargs["related_links"] = raw["related_links"]
     if "file_locations" in raw:
         kwargs["file_locations"] = raw["file_locations"]
-    if "publish_status" in raw:
-        kwargs["publish_status"] = raw["publish_status"]
+    if "exp_status" in raw:
+        kwargs["exp_status"] = raw["exp_status"]
     if "solution_addendum" in raw:
         kwargs["solution_addendum"] = raw["solution_addendum"]
     if "visibility" in raw:
@@ -504,14 +506,13 @@ async def promote_experience(
         exp = result.scalar_one_or_none()
         if exp is None:
             raise HTTPException(status_code=404, detail="Experience not found")
-        if exp.scope == "team":
-            return {"message": "Already team scope"}
-        exp.scope = "team"
-        if _cfg() and _cfg().review.enabled:
-            exp.review_status = "pending"
-            exp.publish_status = "draft"
+        if exp.visibility == "project":
+            return {"message": "Already project visibility"}
+        exp.visibility = "project"
+        if exp.exp_status == "draft":
+            exp.exp_status = "published"
         await session.commit()
-        return {"message": "Experience promoted to team scope", "experience": exp.to_dict()}
+        return {"message": "Experience promoted to team", "experience": exp.to_dict()}
 
 
 @router.post("/experiences/{experience_id}/links")
@@ -604,23 +605,6 @@ async def delete_experience_link(
         return {"message": "Link deleted"}
 
 
-@router.get("/experiences/{experience_id}/review-history")
-async def get_review_history(
-    experience_id: str,
-    user: User = Depends(get_current_user),
-):
-    """Get review history for an experience."""
-    db_url = _get_db_url()
-    async with app_module.get_session(db_url) as session:
-        result = await session.execute(
-            select(ReviewHistory)
-            .where(ReviewHistory.experience_id == uuid.UUID(experience_id))
-            .order_by(ReviewHistory.created_at.desc())
-        )
-        history = result.scalars().all()
-        return {"history": [h.to_dict() for h in history]}
-
-
 @router.post("/experiences/{experience_id}/restore")
 async def restore_experience(
     experience_id: str,
@@ -695,49 +679,6 @@ async def rollback_to_version(
     return {"message": "Rollback successful", "experience": result}
 
 
-@router.get("/reviews/pending")
-async def list_pending_reviews(
-    user: User = Depends(get_current_user),
-):
-    """List experiences pending review (requires auth, admin recommended)."""
-    results = await _svc().get_pending_reviews()
-    return {"experiences": results, "total": len(results)}
-
-
-@router.post("/experiences/{experience_id}/review")
-async def review_experience(
-    request: Request,
-    experience_id: str,
-    req: ReviewRequest,
-    user: User = Depends(require_role("review")),
-):
-    """Review an experience: approve or reject (requires review permission)."""
-    if req.review_status not in ("approved", "rejected"):
-        raise HTTPException(
-            status_code=400, detail="review_status must be 'approved' or 'rejected'"
-        )
-    result = await _svc().review(
-        experience_id=experience_id,
-        review_status=req.review_status,
-        reviewed_by=user.name,
-        review_note=req.review_note,
-    )
-    if result is None:
-        raise HTTPException(status_code=404, detail="Experience not found")
-    db_url = _get_db_url()
-    async with app_module.get_session(db_url) as session:
-        ip = request.client.host if request.client else None
-        await write_audit_log(
-            session,
-            user_name=user.name,
-            action="review",
-            target_type="experience",
-            target_id=experience_id,
-            detail={"review_status": req.review_status},
-            ip_address=ip,
-        )
-    return result
-
 
 @router.post("/experiences/{experience_id}/status")
 async def change_experience_status(
@@ -759,6 +700,11 @@ async def change_experience_status(
     new_status = body.get("status")
     new_visibility = body.get("visibility")
 
+    if new_status and new_status not in ("draft", "published"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only status=draft or status=published is allowed",
+        )
     if not new_status and not new_visibility:
         raise HTTPException(status_code=400, detail="Must provide status or visibility")
 
@@ -797,9 +743,7 @@ async def change_experience_status(
         )
         status_messages = {
             "draft": "已退回草稿",
-            "review": "已提交审核",
             "published": "已发布",
-            "rejected": "已拒绝",
         }
         msg = status_messages.get(new_status, "状态已更新")
         if new_visibility:

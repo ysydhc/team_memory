@@ -140,15 +140,17 @@ async def batch_action(
             result = await session.execute(
                 update(Experience)
                 .where(Experience.id.in_(uuids))
-                .values(publish_status="published")
+                .values(exp_status="published")
             )
             affected = result.rowcount
 
         elif req.action == "set_scope" and req.scope:
+            vis_map = {"personal": "private", "team": "project", "global": "global"}
+            vis = vis_map.get(req.scope, "project")
             result = await session.execute(
                 update(Experience)
                 .where(Experience.id.in_(uuids))
-                .values(scope=req.scope)
+                .values(visibility=vis)
             )
             affected = result.rowcount
 

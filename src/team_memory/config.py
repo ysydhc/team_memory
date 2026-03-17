@@ -284,16 +284,6 @@ class InstallableCatalogConfig(BaseModel):
     request_timeout_seconds: int = 8
 
 
-class ReviewConfig(BaseModel):
-    """Experience review workflow configuration."""
-
-    enabled: bool = True  # Enable review workflow
-    auto_publish_threshold: float = (
-        0.0  # Auto-publish if avg_rating >= this (0 = disabled)
-    )
-    require_review_for_ai: bool = True  # AI-created experiences require review
-
-
 class MemoryConfig(BaseModel):
     """Memory compaction / summary configuration."""
 
@@ -440,7 +430,6 @@ class Settings(BaseSettings):
     vector: VectorConfig = Field(default_factory=VectorConfig)
     web: WebConfig = Field(default_factory=WebConfig)
     lifecycle: LifecycleConfig = Field(default_factory=LifecycleConfig)
-    review: ReviewConfig = Field(default_factory=ReviewConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)

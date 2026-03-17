@@ -378,7 +378,6 @@ def bootstrap(
         event_bus=event_bus,
         embedding_queue=embedding_queue,
         lifecycle_config=settings.lifecycle,
-        review_config=settings.review,
         memory_config=settings.memory,
         llm_config=settings.llm,
         pageindex_lite_config=settings.pageindex_lite,

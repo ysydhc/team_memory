@@ -91,12 +91,10 @@ class ExperienceRepository:
 
     # ======================== CREATE ========================
 
-    # Valid status transitions: {from_status: [allowed_to_statuses]}
+    # Valid status transitions: draft <-> published only (review/rejected removed)
     VALID_STATUS_TRANSITIONS = {
-        "draft": ["review", "published"],
-        "review": ["published", "rejected"],
+        "draft": ["published"],
         "published": ["draft"],
-        "rejected": ["draft"],
     }
 
     async def create(
@@ -113,8 +111,6 @@ class ExperienceRepository:
         source: str = "manual",
         source_context: str | None = None,
         root_cause: str | None = None,
-        publish_status: str = "published",
-        review_status: str = "approved",
         parent_id: uuid.UUID | None = None,
         embedding_status: str = "ready",
         summary: str | None = None,
@@ -128,29 +124,11 @@ class ExperienceRepository:
         related_links: list | None = None,
         project: str = "default",
         quality_score: int = 0,
-        # New status model (v2)
-        visibility: str | None = None,
-        exp_status: str | None = None,
+        # Status (draft | published) and visibility (private | project | global)
+        visibility: str = "project",
+        exp_status: str = "published",
     ) -> Experience:
         """Create a new experience record."""
-        # Derive new fields from old if not explicitly provided
-        if visibility is None:
-            scope_to_vis = {"global": "global", "personal": "private", "team": "project"}
-            visibility = scope_to_vis.get(publish_status, "project")
-            if publish_status == "personal":
-                visibility = "private"
-            elif publish_status in ("published", "pending_team", "draft", "rejected"):
-                visibility = "project"
-        if exp_status is None:
-            ps_to_status = {
-                "draft": "draft",
-                "personal": "published",
-                "pending_team": "review",
-                "published": "published",
-                "rejected": "rejected",
-            }
-            exp_status = ps_to_status.get(publish_status, "draft")
-
         fts_fields = _fts_tokenized_fields(title, description, solution)
         experience = Experience(
             id=uuid.uuid4(),
@@ -169,8 +147,6 @@ class ExperienceRepository:
             embedding=embedding,
             source=source,
             source_context=source_context,
-            publish_status=publish_status,
-            review_status=review_status,
             parent_id=parent_id,
             embedding_status=embedding_status,
             summary=summary,
@@ -730,17 +706,6 @@ class ExperienceRepository:
         result = await self._session.execute(query)
         return result.scalar() or 0
 
-    async def list_pending_review(self, limit: int = 50) -> list[Experience]:
-        """List experiences pending review (exp_status='review')."""
-        result = await self._session.execute(
-            select(Experience)
-            .where(Experience.is_deleted == False)  # noqa: E712
-            .where(Experience.exp_status == "review")
-            .order_by(desc(Experience.created_at))
-            .limit(limit)
-        )
-        return list(result.scalars().all())
-
     async def count(
         self,
         include_deleted: bool = False,
@@ -925,9 +890,9 @@ class ExperienceRepository:
                 "total_children": len(children),
             }
             for key in ("title", "solution", "problem", "description",
-                        "tags", "experience_type", "project", "scope",
+                        "tags", "experience_type", "project",
                         "created_by", "created_at", "view_count", "use_count",
-                        "root_cause", "category", "publish_status"):
+                        "root_cause", "category"):
                 if key in parent_dict:
                     result_entry[key] = parent_dict[key]
             grouped_results.append(result_entry)
@@ -1044,6 +1009,9 @@ class ExperienceRepository:
             return None
 
         current_status = experience.exp_status
+        # Treat legacy review/rejected as draft for transition purposes
+        if current_status not in ("draft", "published"):
+            current_status = "draft"
         allowed = self.VALID_STATUS_TRANSITIONS.get(current_status, [])
 
         if is_admin and current_status == "draft" and new_status == "published":
@@ -1054,32 +1022,9 @@ class ExperienceRepository:
                 f"Allowed: {allowed}"
             )
 
-        # Sync old fields for backward compatibility
-        status_to_publish = {
-            "draft": "draft",
-            "review": "pending_team",
-            "published": "published",
-            "rejected": "rejected",
-        }
-        status_to_review = {
-            "draft": "approved",
-            "review": "pending",
-            "published": "approved",
-            "rejected": "rejected",
-        }
         experience.exp_status = new_status
-        experience.publish_status = status_to_publish.get(new_status, new_status)
-        experience.review_status = status_to_review.get(new_status, "approved")
-
-        if new_status in ("published", "rejected"):
-            experience.reviewed_by = changed_by
-            experience.reviewed_at = _utcnow()
-
         if visibility is not None:
             experience.visibility = visibility
-            vis_to_scope = {"private": "personal", "project": "team", "global": "global"}
-            experience.scope = vis_to_scope.get(visibility, "team")
-
         experience.updated_at = _utcnow()
         await self._session.flush()
         return experience
@@ -1192,66 +1137,25 @@ class ExperienceRepository:
         await self._session.flush()
         return experience
 
-    async def review(
-        self,
-        experience_id: uuid.UUID,
-        review_status: str,
-        reviewed_by: str,
-        review_note: str | None = None,
-    ) -> Experience | None:
-        """Review an experience: approve or reject."""
-        experience = await self.get_by_id(experience_id, include_deleted=True)
-        if experience is None:
-            return None
-
-        experience.review_status = review_status
-        experience.reviewed_by = reviewed_by
-        experience.review_note = review_note
-
-        if review_status == "approved":
-            experience.publish_status = "published"
-        elif review_status == "rejected":
-            experience.publish_status = "rejected"
-
-        experience.updated_at = datetime.now(timezone.utc)
-        await self._session.flush()
-        return experience
-
     async def publish_to_team(
         self,
         experience_id: uuid.UUID,
         is_admin: bool = False,
     ) -> Experience | None:
-        """Request publishing an experience to the team.
-
-        Admin users go directly to 'published'; others go to 'pending_team'.
-        """
-        experience = await self.get_by_id(experience_id, include_deleted=False)
-        if experience is None:
-            return None
-        if is_admin:
-            experience.publish_status = "published"
-            experience.review_status = "approved"
-        else:
-            experience.publish_status = "pending_team"
-            experience.review_status = "pending"
-        experience.updated_at = _utcnow()
-        await self._session.flush()
-        return experience
+        """Publish experience to team (draft -> published)."""
+        return await self.change_status(experience_id, "published")
 
     async def publish_personal(
         self,
         experience_id: uuid.UUID,
     ) -> Experience | None:
-        """Move a draft experience to personal (visible to creator)."""
-        experience = await self.get_by_id(experience_id, include_deleted=False)
-        if experience is None:
-            return None
-        if experience.publish_status == "draft":
-            experience.publish_status = "personal"
-            experience.updated_at = _utcnow()
-            await self._session.flush()
-        return experience
+        """Make draft visible only to creator (visibility=private)."""
+        exp = await self.get_by_id(experience_id, include_deleted=False)
+        if exp is None or exp.exp_status != "draft":
+            return exp
+        return await self.change_status(
+            experience_id, "draft", visibility="private"
+        )
 
     async def increment_use_count(self, experience_id: uuid.UUID) -> None:
         """Increment the use_count of an experience and update last_used_at."""

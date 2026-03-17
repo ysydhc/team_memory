@@ -456,13 +456,14 @@ export async function doCreate() {
     }
 
     const saveAsDraft = document.getElementById('create-draft-checkbox')?.checked || false;
-    const publishStatus = saveAsDraft ? 'draft' : 'published';
+    const expStatus = saveAsDraft ? 'draft' : 'published';
 
     try {
         const body = {
             title, problem, solution, tags,
             language, framework, code_snippets: code,
-            publish_status: publishStatus,
+            status: expStatus,
+            visibility: 'project',
             experience_type: experienceType,
             project,
         };
@@ -492,7 +493,8 @@ export async function doCreate() {
             if (proceed) {
                 const retryBody = {
                     title, problem, solution, tags, language, framework,
-                    code_snippets: code, publish_status: publishStatus,
+                    code_snippets: code, status: expStatus,
+                    visibility: 'project',
                     experience_type: experienceType, project, skip_dedup_check: true,
                 };
                 if (severity) retryBody.severity = severity;

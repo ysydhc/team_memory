@@ -34,8 +34,8 @@ def _mock_experience(**overrides):
     exp.code_snippets = overrides.get("code_snippets", None)
     exp.source = overrides.get("source", "manual")
     exp.created_by = overrides.get("created_by", "tester")
-    exp.publish_status = overrides.get("publish_status", "published")
-    exp.review_status = overrides.get("review_status", "approved")
+    exp.exp_status = overrides.get("exp_status", "published")
+    exp.visibility = overrides.get("visibility", "project")
     exp.is_deleted = overrides.get("is_deleted", False)
     exp.deleted_at = None
     exp.view_count = overrides.get("view_count", 0)
@@ -61,8 +61,8 @@ def _mock_experience(**overrides):
         "code_snippets": exp.code_snippets,
         "source": exp.source,
         "created_by": exp.created_by,
-        "publish_status": exp.publish_status,
-        "review_status": exp.review_status,
+        "exp_status": exp.exp_status,
+        "visibility": exp.visibility,
         "is_deleted": exp.is_deleted,
         "view_count": exp.view_count,
         "avg_rating": exp.avg_rating,

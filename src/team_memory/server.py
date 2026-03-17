@@ -718,7 +718,7 @@ def _get_template_by_id(template_id: str) -> dict | None:
         "Use when the user pastes a doc, chat log, or incident report. "
         "Parameters: conversation (required), as_group=True for multi-step content, "
         "tags to add, template=bugfix|feature|tech_design|... to apply workflow template, "
-        "save_as_draft=True for review. Returns ~200-500 tokens."
+        "save_as_draft=True to save as draft. Returns ~200-500 tokens."
     ),
 )
 @track_usage
@@ -757,7 +757,7 @@ async def tm_learn(
     user = await _get_current_user()
     resolved_project = _resolve_project(project)
 
-    publish_status = "draft" if save_as_draft else "published"
+    status = "draft" if save_as_draft else "published"
 
     # Parse content with LLM (quality gate and retry from extraction config)
     ext = getattr(settings, "extraction", None)
@@ -808,9 +808,7 @@ async def tm_learn(
 
         child_count = len(parsed["children"])
         draft_note = (
-            " (已保存为草稿，需通过 Web UI 审核后发布)"
-            if publish_status == "draft"
-            else ""
+            " (已保存为草稿)" if status == "draft" else ""
         )
         await _try_extract_and_save_personal_memory(conversation, user, settings)
         return json.dumps(
@@ -820,7 +818,7 @@ async def tm_learn(
                     f"Title: {parsed['parent'].get('title', 'N/A')}{draft_note}"
                 ),
                 "group": result,
-                "publish_status": publish_status,
+                "status": status,
             },
             ensure_ascii=False,
         )
@@ -847,7 +845,8 @@ async def tm_learn(
                 framework=parsed.get("framework"),
                 root_cause=parsed.get("root_cause"),
                 source="auto_extract",
-                publish_status=publish_status,
+                exp_status=status,
+                visibility="project",
                 experience_type=experience_type,
                 severity=parsed.get("severity"),
                 category=parsed.get("category"),
@@ -872,8 +871,8 @@ async def tm_learn(
             )
 
         draft_note = (
-            " (已保存为草稿，需通过 Web UI 审核后发布)"
-            if result.get("publish_status") == "draft"
+            " (已保存为草稿)"
+            if result.get("exp_status") == "draft"
             else ""
         )
         await _try_extract_and_save_personal_memory(conversation, user, settings)
@@ -887,7 +886,8 @@ async def tm_learn(
                     "id": result.get("id"),
                     "title": result.get("title"),
                     "tags": result.get("tags", []),
-                    "publish_status": result.get("publish_status"),
+                    "status": result.get("exp_status"),
+                    "visibility": result.get("visibility"),
                     "created_at": result.get("created_at"),
                 },
             },
@@ -1291,7 +1291,8 @@ async def tm_save(
     language: str | None = None,
     framework: str | None = None,
     root_cause: str | None = None,
-    publish_status: str = "personal",
+    status: str = "published",
+    visibility: str = "project",
     skip_dedup: bool = False,
     project: str | None = None,
     file_locations: list[dict] | None = None,
@@ -1301,26 +1302,22 @@ async def tm_save(
     Args:
         title: Experience title (required).
         problem: Problem description (required).
-        solution: Solution description (optional — allows incomplete experiences).
+        solution: Solution description (optional).
         tags: Tags for the experience.
         code_snippets: Key code examples.
         language: Programming language.
         framework: Framework.
         root_cause: Root cause analysis.
-        publish_status: "personal" (default), "published", or "draft".
+        status: "published" (default) or "draft".
+        visibility: "project" (default), "private", or "global".
         skip_dedup: If True, skip duplicate detection check.
         project: Project scope.
-        file_locations: Optional list of file location dicts (path, start_line, end_line;
-            optionally snippet, file_mtime, file_content_hash).
+        file_locations: Optional list of file location dicts.
     """
     service = _get_service()
     db_url = _get_db_url()
     user = await _get_current_user()
     resolved_project = _resolve_project(project)
-    # 项目级 mcp.json 配置了 TEAM_MEMORY_USER 时，默认 published 以便在 Web 端看到写入的经验
-    effective_publish = (
-        "published" if (publish_status == "personal" and user != "anonymous") else publish_status
-    )
 
     async with get_session(db_url) as session:
         result = await service.save(
@@ -1335,7 +1332,8 @@ async def tm_save(
             framework=framework,
             source="auto_extract",
             root_cause=root_cause,
-            publish_status=effective_publish,
+            exp_status=status,
+            visibility=visibility,
             skip_dedup=skip_dedup,
             project=resolved_project,
             file_locations=file_locations,
@@ -1361,7 +1359,8 @@ async def tm_save(
             "experience": {
                 "id": result.get("id"),
                 "title": result.get("title"),
-                "publish_status": result.get("publish_status"),
+                "status": result.get("exp_status"),
+                "visibility": result.get("visibility"),
                 "completeness_score": result.get("completeness_score"),
                 "created_at": result.get("created_at"),
             },
@@ -1496,7 +1495,8 @@ async def tm_save_typed(
     structured_data: dict | None = None,
     git_refs: list[dict] | None = None,
     related_links: list[dict] | None = None,
-    publish_status: str = "published",
+    status: str = "published",
+    visibility: str = "project",
     skip_dedup: bool = False,
     project: str | None = None,
     file_locations: list[dict] | None = None,
@@ -1507,23 +1507,23 @@ async def tm_save_typed(
         title: Experience title (required).
         problem: Problem description (required).
         experience_type: Type — general/feature/bugfix/tech_design/incident/best_practice/learning.
-        solution: Solution (optional — allows incomplete experiences).
+        solution: Solution (optional).
         tags: Tags for the experience.
         code_snippets: Key code examples.
         language: Programming language.
         framework: Framework.
         root_cause: Root cause analysis.
         severity: Severity level (P0-P4, for bugfix/incident).
-        category: Category (frontend/backend/database/infra/performance/security/other).
-        progress_status: Progress status (type-specific, e.g., open/investigating/fixed/verified).
-        structured_data: Type-specific data dict (e.g., reproduction_steps, environment for bugfix).
-        git_refs: List of git references [{type, url, hash, description}].
-        related_links: List of related links [{type, url, title}].
-        publish_status: "published" (default) or "draft".
+        category: Category.
+        progress_status: Progress status (type-specific).
+        structured_data: Type-specific data dict.
+        git_refs: List of git references.
+        related_links: List of related links.
+        status: "published" (default) or "draft".
+        visibility: "project" (default), "private", or "global".
         skip_dedup: If True, skip duplicate detection check.
         project: Project scope.
-        file_locations: Optional list of file location dicts (path, start_line, end_line;
-            optionally snippet, file_mtime, file_content_hash).
+        file_locations: Optional list of file location dicts.
     """
     service = _get_service()
     db_url = _get_db_url()
@@ -1543,7 +1543,8 @@ async def tm_save_typed(
             framework=framework,
             source="auto_extract",
             root_cause=root_cause,
-            publish_status=publish_status,
+            exp_status=status,
+            visibility=visibility,
             skip_dedup=skip_dedup,
             experience_type=experience_type,
             severity=severity,
@@ -1577,7 +1578,8 @@ async def tm_save_typed(
                 "category": result.get("category"),
                 "progress_status": result.get("progress_status"),
                 "completeness_score": result.get("completeness_score"),
-                "publish_status": result.get("publish_status"),
+                "status": result.get("exp_status"),
+                "visibility": result.get("visibility"),
                 "created_at": result.get("created_at"),
             },
         },
@@ -2257,7 +2259,8 @@ async def tm_analyze_patterns(
                         created_by=user,
                         tags=["user-pattern", p.get("category", "general")],
                         source="auto_extract",
-                        publish_status="personal",
+                        exp_status="published",
+                        visibility="private",
                         experience_type="learning",
                         project=project,
                         skip_dedup=False,

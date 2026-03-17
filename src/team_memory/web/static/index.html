@@ -3515,10 +3515,6 @@
             <div class="stat-value" id="stat-recent">—</div>
             <div class="stat-label">近 7 天新增</div>
           </div>
-          <div class="stat-card" style="cursor:pointer" onclick="switchListSubTab('review')">
-            <div class="stat-value" id="stat-pending" style="color:var(--yellow)">—</div>
-            <div class="stat-label">待审核</div>
-          </div>
           <div class="stat-card">
             <div class="stat-value" id="stat-tags">—</div>
             <div class="stat-label">标签数量</div>
@@ -3530,7 +3526,6 @@
           <div class="mode-tabs" style="margin-bottom:12px">
             <button class="mode-tab active" onclick="switchListSubTab('all')" id="list-tab-all">全部经验</button>
             <button class="mode-tab" onclick="switchListSubTab('draft')" id="list-tab-draft">我的草稿</button>
-            <button class="mode-tab" onclick="switchListSubTab('review')" id="list-tab-review">待审核</button>
           </div>
 
           <div style="display:flex;justify-content:space-between;align-items:center">
@@ -3546,8 +3541,6 @@
                 <option value="">已发布</option>
                 <option value="all">全部状态</option>
                 <option value="draft">草稿</option>
-                <option value="review">审核中</option>
-                <option value="rejected">已拒绝</option>
               </select>
               <select id="list-type-filter" onchange="loadList(1)" class="filter-select">
                 <option value="">全部类型</option>

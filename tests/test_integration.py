@@ -232,7 +232,7 @@ class TestRepositoryIntegration:
             "solution": "",
             "embedding": same_embedding,
             "created_by": "tester",
-            "publish_status": "published",
+            "exp_status": "published",
         }
         # Group A: children about "托底修复"
         await repo.create_group(

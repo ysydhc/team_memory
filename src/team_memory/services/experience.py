@@ -47,7 +47,6 @@ class ExperienceService:
         event_bus: EventBus | None = None,
         embedding_queue: EmbeddingQueue | None = None,
         lifecycle_config=None,
-        review_config=None,
         memory_config=None,
         llm_config=None,
         pageindex_lite_config=None,
@@ -63,7 +62,6 @@ class ExperienceService:
         self._embedding_queue = embedding_queue
         self._archive_service = archive_service
         self._lifecycle_config = lifecycle_config
-        self._review_config = review_config
         self._memory_config = memory_config
         self._llm_config = llm_config
         self._pageindex_lite_config = pageindex_lite_config
@@ -546,8 +544,8 @@ class ExperienceService:
         framework: str | None = None,
         source: str = "auto_extract",
         root_cause: str | None = None,
-        publish_status: str = "personal",
-        review_status: str = "approved",
+        exp_status: str = "published",
+        visibility: str = "project",
         sync_embedding: bool = True,
         skip_dedup: bool = False,
         # Type system fields (v3)
@@ -648,18 +646,6 @@ class ExperienceService:
                 except Exception:
                     logger.warning("Dedup-on-save check failed, proceeding with save")
 
-            # P0-2: Auto-set draft + pending_review for AI-created experiences
-            # Skip override when caller explicitly requests "personal" — personal
-            # experiences are private to the creator and don't need team review.
-            if (
-                self._review_config is not None
-                and self._review_config.require_review_for_ai
-                and source in ("auto_extract", "mcp")
-                and publish_status != "personal"
-            ):
-                publish_status = "draft"
-                review_status = "pending"
-
             prepare_duration_ms = int((time.monotonic() - prepare_start) * 1000)
             io_logger.log_internal(
                 "save_prepare",
@@ -683,8 +669,8 @@ class ExperienceService:
                 embedding=embedding,
                 source=source,
                 root_cause=root_cause,
-                publish_status=publish_status,
-                review_status=review_status,
+                exp_status=exp_status,
+                visibility=visibility,
                 embedding_status=embedding_status,
                 experience_type=experience_type,
                 severity=severity,
@@ -773,7 +759,8 @@ class ExperienceService:
                 "title": title,
                 "created_by": created_by,
                 "embedding_status": embedding_status,
-                "publish_status": publish_status,
+                "status": exp_status,
+                "visibility": visibility,
             })
             persist_duration_ms = int((time.monotonic() - persist_start) * 1000)
             io_logger.log_internal(
@@ -792,27 +779,17 @@ class ExperienceService:
         user: str = "system",
     ) -> dict | None:
         async with self._session() as session:
-            """Publish a draft experience (set publish_status='published').
-
-            Also sets review_status='approved' if not already.
-            """
+            """Publish a draft experience (exp_status -> published)."""
             repo = ExperienceRepository(session)
             exp_uuid = uuid.UUID(experience_id)
             experience = await repo.get_by_id(exp_uuid, include_deleted=True)
             if experience is None:
                 return None
 
-            if experience.publish_status == "published":
+            if experience.exp_status == "published":
                 return experience.to_dict()
 
-            updates = {
-                "publish_status": "published",
-            }
-            if experience.review_status != "approved":
-                updates["review_status"] = "approved"
-                updates["reviewed_by"] = user
-
-            updated = await repo.update(exp_uuid, **updates)
+            updated = await repo.change_status(exp_uuid, "published", changed_by=user)
             if updated:
                 await self._event_bus.emit(Events.EXPERIENCE_PUBLISHED, {
                     "experience_id": experience_id,
@@ -919,7 +896,7 @@ class ExperienceService:
 
             Supported kwargs:
                 title, description, solution, root_cause, code_snippets,
-                programming_language/language, framework, tags, publish_status,
+                programming_language/language, framework, tags, exp_status, visibility,
                 experience_type, severity, category, progress_status,
                 structured_data, git_refs, related_links,
                 solution_addendum (legacy append mode).
@@ -987,8 +964,10 @@ class ExperienceService:
             if "tags" in kwargs:
                 updates["tags"] = kwargs["tags"]
 
-            if "publish_status" in kwargs:
-                updates["publish_status"] = kwargs["publish_status"]
+            if "exp_status" in kwargs:
+                updates["exp_status"] = kwargs["exp_status"]
+            if "visibility" in kwargs:
+                updates["visibility"] = kwargs["visibility"]
 
             # --- Type system fields ---
             etype = kwargs.get("experience_type") or experience.experience_type or "general"
@@ -1128,54 +1107,6 @@ class ExperienceService:
                     })
             return updated.to_dict() if updated else None
 
-    async def review(
-        self,
-        experience_id: str,
-        review_status: str,
-        reviewed_by: str,
-        review_note: str | None = None,
-    ) -> dict | None:
-        async with self._session() as session:
-            """Review an experience: approve or reject.
-
-            On approve, auto-sets publish_status='published'.
-            On reject, auto-sets publish_status='rejected'.
-            Also records review history and sets reviewed_at timestamp.
-            """
-            repo = ExperienceRepository(session)
-            exp_uuid = uuid.UUID(experience_id)
-
-            experience = await repo.review(
-                experience_id=exp_uuid,
-                review_status=review_status,
-                reviewed_by=reviewed_by,
-                review_note=review_note,
-            )
-            if experience:
-                # Set reviewed_at timestamp
-                experience.reviewed_at = datetime.now(timezone.utc)
-                await session.flush()
-
-                # Record review history (P1-6)
-                from team_memory.storage.models import ReviewHistory
-                history = ReviewHistory(
-                    experience_id=exp_uuid,
-                    reviewer=reviewed_by,
-                    action=review_status,
-                    comment=review_note,
-                )
-                session.add(history)
-                await session.commit()
-
-                await self._event_bus.emit(Events.EXPERIENCE_REVIEWED, {
-                    "experience_id": experience_id,
-                    "review_status": review_status,
-                    "reviewed_by": reviewed_by,
-                })
-                if self._archive_service:
-                    await self._archive_service.update_archive_status_for_experience(exp_uuid)
-            return experience.to_dict() if experience else None
-
     async def soft_delete(
         self,
         experience_id: str,
@@ -1283,15 +1214,6 @@ class ExperienceService:
                 include_all_statuses=include_all_statuses,
                 project=project,
             )
-            return [exp.to_dict() for exp in experiences]
-
-    async def get_pending_reviews(
-        self,
-    ) -> list[dict]:
-        async with self._session() as session:
-            """Get experiences pending review."""
-            repo = ExperienceRepository(session)
-            experiences = await repo.list_pending_review()
             return [exp.to_dict() for exp in experiences]
 
     async def get_stats(

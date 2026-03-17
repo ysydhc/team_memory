@@ -657,7 +657,8 @@ class ExperienceCreate(BaseModel):
     language: str | None = None
     framework: str | None = None
     root_cause: str | None = None
-    publish_status: str = "published"  # "published" or "draft"
+    status: str = "published"
+    visibility: str = "project"
     skip_dedup_check: bool = False
     # Type system (v3)
     experience_type: str = "general"
@@ -695,8 +696,7 @@ class ExperienceUpdate(BaseModel):
     git_refs: list | None = None
     related_links: list | None = None
     file_locations: list[dict] | None = None
-    publish_status: str | None = None
-    # New status model
+    exp_status: str | None = None
     visibility: str | None = None
     project: str | None = None
     # Legacy append mode
@@ -733,11 +733,6 @@ class InstallableInstallRequest(BaseModel):
     source: str | None = None
     target_project: str | None = None  # 项目名，从 project_paths 解析路径
     target_path: str | None = None  # 或直接指定项目根目录
-
-
-class ReviewRequest(BaseModel):
-    review_status: str  # "approved" or "rejected"
-    review_note: str | None = None
 
 
 class ParseDocumentRequest(BaseModel):
@@ -1088,15 +1083,6 @@ class LifecycleConfigUpdate(BaseModel):
     duplicate_threshold: float = 0.92
     dedup_on_save: bool = True
     dedup_on_save_threshold: float = 0.90
-
-
-# ============================================================
-# Review Config Routes (P0-2)
-# ============================================================
-class ReviewConfigUpdate(BaseModel):
-    enabled: bool = True
-    auto_publish_threshold: float = 0.0
-    require_review_for_ai: bool = True
 
 
 # ============================================================
