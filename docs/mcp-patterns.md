@@ -1,5 +1,19 @@
 # MCP 工具开发规范
 
+## Lite MCP（`server_lite`，对外主路径）
+
+| 工具 | 说明 |
+|------|------|
+| `memory_context` | JSON 含 `profile: { static: [], dynamic: [] }` 与 `relevant_experiences` |
+| `memory_recall` | 可选 `include_user_profile=True` 时在响应中附加同上 `profile`；可选 **`include_archives=True`** 混合返回档案条目（`type=archive`，含 `solution_preview`、`overview_preview` 等 L0/L1 字段，非全文） |
+| `memory_get_archive` | 按 `archive_id` 拉取档案 **L2**（`solution_doc`、`overview`、`conversation_summary`、`attachments`）。**双阶段**：在 `memory_recall` 命中档案后再按需调用，节省 Token（对齐 OpenViking L0/L1/L2） |
+| `memory_save` | `scope=archive` 时可传 `conversation_summary`、`attachments`、`archive_record_scope`、`archive_scope_ref`；未传 `overview` 时服务端用确定性规则从 `solution` 生成 L1 梗概 |
+| `memory_feedback` | 见 [mcp-server.md](../design-docs/ops/mcp-server.md) |
+
+**Web 浏览**：`GET /api/v1/archives` 为按时间与**关键词（标题/概览 ILIKE）**分页列表；**语义检索**仍以本页「搜索」或上述 `memory_recall` 为主，避免与向量结果预期混用。
+
+完整 `tm_*` 工具见下表（遗留 `server.py`）；**`tm_get_archive` 已与 Lite 相同按当前用户 + project 做可见性校验**（非创建者不可读他人 draft 等）。**产品验收以 Lite 为准**。
+
 ## 工具实现位置
 
 本项目的 MCP 工具**全部内联**于 `src/team_memory/server.py`，不采用独立 `tools/` 目录。新增工具时：
@@ -93,7 +107,7 @@ raise HTTPException(...)  # 在 MCP 工具层禁止
 | `tm_get_archive` | 按 id 获取档案馆 L2 详情（solution_doc、overview、attachments） | ✅ |
 | `tm_feedback` | 对搜索结果评分（影响排序） | ✅ |
 | `tm_update` | 更新已有经验 | ✅ |
-| `tm_claim` | 认领经验，声明正在处理 | ✅ |
+| `tm_claim` | 认领经验：在 `experiences.tags` 追加一条以 `agent_claim` 开头的标签（字段以竖线分隔 user、ISO 时间、备注）；再次认领会移除旧认领标签 | ✅ |
 | `tm_notify` | Webhook 通知团队 | ✅ |
 | `tm_config` | 查看运行时配置快照 | ✅ |
 | `tm_status` | 查看系统健康状态 | ✅ |

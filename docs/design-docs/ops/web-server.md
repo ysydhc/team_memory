@@ -21,7 +21,7 @@ Open http://localhost:9111 in your browser
 INFO:     Uvicorn running on http://0.0.0.0:9111 (Press CTRL+C to quit)
 ```
 
-> 默认端口为 **9111**，可通过 `config.yaml` 中的 `web.port` 或环境变量 `TEAM_MEMORY_WEB_PORT` 修改。
+> 默认端口为 **9111**，可通过 YAML 中 `web.port` 或环境变量 `TEAM_MEMORY_WEB_PORT` 修改。
 
 ## 访问
 
@@ -48,8 +48,8 @@ INFO:     Uvicorn running on http://0.0.0.0:9111 (Press CTRL+C to quit)
 
 ### 设置（检索参数配置）
 - 查看和修改检索参数：`max_tokens` / `max_count` / `trim_strategy` / `top_k_children` / `min_avg_rating` / `rating_weight` / `summary_model`
-- 修改后即时生效（运行时），重启服务后恢复 `config.yaml` 中的默认值
-- 也可通过 API 管理：`GET /api/v1/config/retrieval` 和 `PUT /api/v1/config/retrieval`（与 config.yaml 的 `retrieval` 段对应）
+- 修改后即时生效（运行时），重启服务后恢复 YAML 文件中的默认值
+- 也可通过 API 管理：`GET /api/v1/config/retrieval` 和 `PUT /api/v1/config/retrieval`（与配置中 `retrieval` 段对应）
 
 ### 新建经验（三种模式）
 1. **手动填写** — 逐字段填写标题、问题、方案等
@@ -64,9 +64,9 @@ INFO:     Uvicorn running on http://0.0.0.0:9111 (Press CTRL+C to quit)
 |--------|------|--------|
 | `TEAM_MEMORY_API_KEY` | API Key（登录凭证） | 无，必须设置 |
 | `TEAM_MEMORY_USER` | 该 API Key 对应的用户名 | `admin` |
-| `TEAM_MEMORY_WEB_HOST` | 监听地址（覆盖 config.yaml web.host） | `0.0.0.0` |
-| `TEAM_MEMORY_WEB_PORT` | 监听端口（覆盖 config.yaml web.port） | `9111` |
-| `TEAM_MEMORY_DB_URL` | 数据库连接地址（覆盖 config.yaml） | 无 |
+| `TEAM_MEMORY_WEB_HOST` | 监听地址（覆盖 YAML web.host） | `0.0.0.0` |
+| `TEAM_MEMORY_WEB_PORT` | 监听端口（覆盖 YAML web.port） | `9111` |
+| `TEAM_MEMORY_DB_URL` | 数据库连接地址（覆盖 YAML database） | 无 |
 
 ### 修改端口
 

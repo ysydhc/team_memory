@@ -14,29 +14,26 @@ export const state = {
     feedbackExpId: null,
     groupChildrenIds: [],
     editChildrenIds: [],
-    cachedTemplates: [],
     cachedSchema: null,
     editOriginalExp: null,
     defaultProject: 'default',
     activeProject: 'default',
     cachedRetrievalConfig: null,
     cachedInstallables: [],
-    webhookRows: [],
     createMode: 'manual',
-    importFile: null,
-    generatedSchemaData: null,
     detailReferrer: 'list',
     /** Stack of experience ids when navigating via related links; back button pops and shows that detail. */
     detailBackStack: [],
     /** Scroll position when returning to settings from personal-memory/user-expansion/dedup. */
     settingsScrollTop: 0,
     availableProjects: [],
+    /** Archives browse page (API `/api/v1/archives`). */
+    archivesListPage: 1,
 };
 
 export const defaultTypeIcons = {
-    general: '📝', feature: '🚀', bugfix: '🐛', tech_design: '📐',
-    incident: '🔥', best_practice: '✨', learning: '📚', data_quality: '📊',
-    pipeline_failure: '🔧', schema_change: '🗂️', deployment: '🚢',
-    capacity_planning: '📈', runbook: '📋', postmortem: '📄', note: '📝',
-    decision: '⚖️', action_item: '✅',
+    general: '📝', data_quality: '📊', pipeline_failure: '🔧',
+    schema_change: '🗂️', deployment: '🚢', capacity_planning: '📈',
+    runbook: '📋', postmortem: '📄', note: '📝', decision: '⚖️',
+    action_item: '✅',
 };

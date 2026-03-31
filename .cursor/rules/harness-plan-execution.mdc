@@ -1,5 +1,5 @@
 ---
-description: Plan 执行专用，plan/exec 文档时触发
+description: Plan 执行门控与记录
 globs:
   - "**/plan*.md"
   - "**/exec*.md"
@@ -11,28 +11,18 @@ alwaysApply: false
 
 > 完整设计：[HARNESS-SPEC](../../docs/design-docs/harness/harness-spec.md)
 
-## 执行前（强制）
-加载 [HARNESS-SPEC](../../docs/design-docs/harness/harness-spec.md)，**未加载不得进 step-0**。
+## step-0（必须通过才能进 Task 1）
+1. 加载 HARNESS-SPEC，列出「已加载文档：xxx」
+2. 创建 `docs/exec-plans/executing/{plan-id}-execute.md`
+3. 摸底确认 Plan 可行
 
-step-0 前须显式列出「已加载文档：xxx」，否则中断。
-
-## 执行模式（强制）
-- **Subagent-Driven**：每 Task 派发 implementer，主 Agent 验收、更新 execute
-- **禁止**主 Agent 直接实现 Task；未派发即违规，须中断提醒
-- 回复记录：`[subagent] task-N: 派发 implementer`、`[subagent] task-N: 完成`
-- execute 须含 Subagent 记录。详见 [HARNESS-SPEC](../../docs/design-docs/harness/harness-spec.md)
-
-## step-0
-摸底 + Plan 已加载 + execute 已创建。否则中断，不得进 Task 1。
-
-## 关键节点
-- 更新 `docs/exec-plans/executing/{plan-id}-execute.md`
+## 执行中
+- 每完成一个 Task → 更新 execute 文件，记录状态和当前 Task
 - 回复含「Plan 执行记录已更新：xxx，状态：xxx，当前 Task：xxx」
-- 通知（best-effort，失败仅记 execute）：
-  - 开始：`./scripts/notify_plan_status.sh "Harness Plan" "{plan-id} 已开始"`
-  - 决策点：`"Harness 需确认" "{plan-id} Task N：{内容}，请回复"`
-  - 中断：`"Harness 已中断" "{plan-id} 已中断，原因：{简要}"`
-  - 完成：`"Harness Plan" "{plan-id} 已完成"`
+- 遇到阻塞 → 停止，写 execute 记原因，提示用户决策
 
-## 自检失败
-停止 → 写 execute 记原因 → 回复提示 → 调用 notify
+## 通知（best-effort）
+```bash
+./scripts/notify_plan_status.sh "Harness Plan" "{plan-id} {事件}"
+```
+脚本不存在或失败仅记 execute，不阻塞执行。

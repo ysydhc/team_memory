@@ -8,11 +8,11 @@
 | 项目 | 值 |
 |------|---|
 | 镜像 | `pgvector/pgvector:pg16` |
-| 端口 | `5432` (本机) |
+| 端口 | `5433` (本机映射；容器内 `5432`) |
 | 数据库名 | `team_memory` |
 | 用户名 | `developer` |
 | 密码 | `devpass` |
-| 连接地址 | `postgresql://developer:devpass@localhost:5432/team_memory` |
+| 连接地址 | `postgresql://developer:devpass@localhost:5433/team_memory` |
 
 ## 启停操作
 
@@ -25,7 +25,7 @@ docker compose ps
 
 # 正常输出示例：
 #  NAME                COMMAND                  STATUS          PORTS
-#  team_memory-postgres-1 "docker-entrypoint.s…"  Up (healthy)    0.0.0.0:5432->5432/tcp
+#  team_memory-postgres-1 "docker-entrypoint.s…"  Up (healthy)    0.0.0.0:5433->5432/tcp
 
 # 查看数据库日志（最后 20 行）
 docker compose logs --tail=20 postgres

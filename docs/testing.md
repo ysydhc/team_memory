@@ -5,7 +5,8 @@
 ```
 tests/
 ├── conftest.py          ← 全局 fixtures（数据库、客户端、mock 配置）
-├── test_server.py       ← MCP 工具测试（工具注册、命名空间、功能）
+├── test_server.py       ← 完整 MCP（`tm_*`）测试；默认产品入口为 Lite，见 [mcp-lite-default](../design-docs/ops/mcp-lite-default.md)
+├── test_server_lite.py ← Lite MCP（`memory_*`）测试
 ├── test_integration.py  ← 集成测试（真实 DB）
 ├── test_service.py      ← 服务层单元测试
 ├── test_auth.py         ← 认证测试
@@ -18,8 +19,11 @@ tests/
 ## 每类测试的要求
 
 ### MCP 工具测试（最重要）
-`test_server.py` 覆盖：
-- 命名空间：所有工具使用 `tm_` 前缀
+
+**产品默认**为 Lite（`memory_*`），新功能优先在 **`test_server_lite.py`** 覆盖。
+
+`test_server.py`（完整 `tm_*`，遗留）覆盖：
+- 命名空间：工具使用 `tm_` 前缀
 - 工具注册：预期工具均已注册
 - description：每个工具有描述，且包含 token 提示
 - 正常路径：有结果返回
@@ -48,7 +52,7 @@ async def test_search_returns_results(mock_search_service):
 - 测试业务规则（评分衰减、去重检测、权限校验）
 
 ### 集成测试
-- 使用测试数据库（`TEAM_MEMORY_ENV=test` 或 testcontainers）
+- 使用测试数据库（`TEAM_MEMORY_TEST_DB_URL` 或 testcontainers；`TEAM_MEMORY_ENV=test` 与 development 配置相同）
 - 每个测试用 fixture 清空状态，保证隔离
 
 ## 禁止在测试中做的事

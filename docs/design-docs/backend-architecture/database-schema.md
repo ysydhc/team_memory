@@ -1,6 +1,7 @@
 # 数据库 Schema 与表结构
 
-> 技术架构 | 表结构说明
+> 技术架构 | 表结构说明  
+> **MVP 以 `src/team_memory/storage/models.py` 与 `migrations/versions/001_initial_mvp.py` 为准。**  
 > 运维操作：[database-operations](../ops/database-operations.md) | 技术概念：[设计文档索引](../README.md#techconcepts)
 
 ## 表关系总览
@@ -20,38 +21,54 @@
 experiences.parent_id ──► experiences.id (自引用，父子层级)
 ```
 
-## 核心表
+另：MVP 含 `archives`、`archive_experience_links`、`archive_attachments`、`document_tree_nodes`（挂 `archive_id`）、`personal_memories`。已从旧版删除的表（如 `tool_usage_logs`、`experience_links`）见 `migrations/versions/002_mvp_cleanup.py`。
+
+## 核心表（MVP）
 
 | 表 | 说明 |
 |----|------|
-| experiences | 经验主表，含 embedding、fts、父子层级、经验类型、scope、project |
-| experience_feedbacks | 反馈评分（rating 1-5、fitness_score） |
+| experiences | 经验主表：embedding、fts、父子层级、project、visibility、exp_status、tags、group_key 等 |
+| experience_feedbacks | 反馈：rating、fitness_score、comment |
+| archives | 档案馆摘要与嵌入 |
+| archive_experience_links / archive_attachments | 档案与经验/附件关联 |
+| document_tree_nodes | 档案绑定的章节树（PageIndex-Lite） |
+| personal_memories | 个人记忆 |
 | api_keys | API Key 认证 |
-| query_logs | 搜索日志 |
 
-## experiences 主要字段（与 models.py 对齐）
+## experiences 主要字段（MVP）
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| experience_type | String(30) | general/feature/bugfix/tech_design/incident/best_practice/learning |
-| scope | String(20) | global/team/personal |
-| project | String(100) | 项目隔离 |
-| structured_data | JSONB | 类型相关结构化数据 |
-| git_refs | JSONB | Git 引用 |
-| embedding_dim | Integer | 向量维度（支持混合维度） |
-| summary | Text | LLM 摘要（记忆压缩） |
-| visibility | String(20) | private/project/global |
-| exp_status | String(20) | draft/review/published/rejected |
-| publish_status | String(20) | personal/draft/pending_team/published/rejected |
-| quality_score | Integer | 质量打分（0-300） |
+| title / description / solution | Text | 问题与方案；`description` 即 problem |
+| tags | String[] | 含可选认领标签 `agent_claim\|...` |
+| group_key | String | 同组经验 |
+| experience_type | String(30) | 类型标签 |
+| embedding | vector(768) | 与默认 Ollama 维度一致 |
+| fts | tsvector | 触发器维护全文检索 |
+| project / visibility / exp_status | String | 隔离与状态 |
+| is_deleted / deleted_at | bool + timestamptz | 软删除 |
+| use_count | int | 隐式召回计数 |
+
+平均评分不冗余存储：需要时对 `experience_feedbacks` 做聚合。
 
 ## experience_feedbacks 主要字段
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | rating | Integer | 1-5，5 为最佳 |
-| fitness_score | Integer | 1-5 使用后适用度 |
+| fitness_score | Integer | 可选，1-5 适用度 |
 | feedback_by | String(100) | 反馈人 |
+
+
+## personal_memories（用户画像源）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| profile_kind | String(16) | `static`（长期偏好） / `dynamic`（近期语境）；迁移 `004_profile_kind` |
+| scope | String(20) | `generic` / `context`，与 kind 同步（HTTP 兼容） |
+| content | Text | 一条可读事实 |
+| embedding | vector(768) | 语义合并与 dynamic 上下文匹配 |
+
 
 ## 设计决策
 

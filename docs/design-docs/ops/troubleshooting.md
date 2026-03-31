@@ -207,6 +207,29 @@ node tools/gitnexus-bridge/server.js
 npx gitnexus analyze
 ```
 
+## 12. 个人记忆（personal_memories）没有写入
+
+**写入只在**：`tm_learn` 或 **Lite** 的 **`memory_save(..., content=...)`** 成功保存经验**之后**才会异步尝试；**仅 `tm_save` / 只有 `title+problem` 的 `memory_save` 不会跑个人记忆提取**。
+
+**怎么从日志判断**（`team_memory` logger，默认 INFO；MCP 看 Cursor MCP 日志或终端）：
+
+| 日志片段 | 含义 |
+|---------|------|
+| `personal_memory: skipped — user is anonymous` | 当前 MCP 用户是 `anonymous`：检查 `TEAM_MEMORY_API_KEY` 能否通过鉴权，或设置 `TEAM_MEMORY_USER` |
+| `personal_memory: no rows to save` | LLM 未抽出任何偏好条目（对话里没可抽内容、JSON 解析失败、或连不上 LLM——后者见 `llm_parser` 的 WARNING） |
+| `personal_memory: saved N item(s) for user= ... (static=M dynamic=N)` | 已写入 N 条，含 static/dynamic 计数 |
+| `personal_memory: saved N item(s) for user=`（旧日志） | 已写入 N 条 |
+| `personal_memory: extract/save failed` | 写库或 embedding 异常；设 `TEAM_MEMORY_DEBUG=1` 可看栈 |
+
+**数据库确认**（需有表，迁移见 `alembic upgrade head`）：
+
+```bash
+docker compose exec -T postgres psql -U developer -d team_memory -c \
+  "SELECT id, user_id, left(content,60), scope, profile_kind, updated_at FROM personal_memories ORDER BY updated_at DESC LIMIT 10;"
+```
+
+**LLM**：个人记忆与正文解析共用 `llm.base_url` + `/api/chat`；`*-cloud` 模型会走云端，失败时先看网络与模型名。
+
 ## 速查：服务状态一览
 
 ```bash

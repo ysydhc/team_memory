@@ -63,11 +63,13 @@ Server / Web → Services / Auth / Embedding / Reranker / Architecture
 - 工具只能调用 Services 层，禁止直接操作数据库
 
 ### 配置系统
-分层加载优先级（低 → 高）：
+单文件 YAML + 环境变量覆盖（`TEAM_MEMORY_*`）：
 ```
-config.yaml → config.local.yaml → config.{env}.yaml → 环境变量
+config.development.yaml（默认）或 config.production.yaml（TEAM_MEMORY_ENV=production）
+→ 可选 TEAM_MEMORY_CONFIG_PATH 指向自定义单文件
+→ 环境变量
 ```
-- `config.minimal.yaml` 仅在 `config.yaml` 不存在时作为 fallback，或设置 `TEAM_MEMORY_ENABLE_MINIMAL_OVERLAY=1` 时作为显式 overlay
+- `TEAM_MEMORY_ENV` 为 `test` / `local` / `dev` 时与 `development` 等同；`prod` 与 `production` 等同
 - 所有配置通过 `team_memory/config.py` 中的 Pydantic Settings 读取，禁止在业务代码中直接读环境变量
 
 ## 关键约束

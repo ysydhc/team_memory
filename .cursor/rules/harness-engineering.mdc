@@ -1,66 +1,25 @@
 ---
-description: Harness 原则、知识库、反馈回路、任务流程、分层架构
+description: Harness 补充规则（CLAUDE.md 未覆盖部分）
 globs:
 alwaysApply: true
 ---
 
 # harness-engineering
 
-## 原则（4 条）
-1. 人类掌舵：目标、优先级、验收由人定；Agent 执行产出
-2. Agent 执行：代码/文档/配置由 Agent 生成，人验收
-3. 尽量不手写：规则、工作流、MCP 驱动
-4. 先规划再执行：复杂任务先出计划，人确认后再做
+> 主规范在 `CLAUDE.md`，本文件仅补充其未覆盖的可执行规则。
 
-## 每次回复收口
-见 [extraction-state-update](extraction-state-update.mdc)。
-
-## 知识库
-| 轨道 | 路径 | 用途 |
-|------|------|------|
-| 设计 | [docs/design-docs](../../docs/design-docs/) | 架构、方案、决策 |
-| 计划 | [docs/exec-plans](../../docs/exec-plans/) | 执行计划、归档 |
-
-- 文档与 Plan 规范见 [doc-maintenance-guide](../../docs/design-docs/harness/doc-maintenance-guide.md)、[plan-document-structure](../../docs/design-docs/harness/plan-document-structure.md)；
-
-- Web 改动：`make lint-js` + 对应 pytest
-
-## 分层架构
-Server/Web → Services → Storage → Models。见 [project-extension](../../docs/design-docs/harness/project-extension.md)、[architecture](../../docs/architecture.md)。
+## 任务开始前
+1. 读 `CLAUDE.md`（结构、命令、规范入口）
+2. 读任务相关 docs（MCP → mcp-patterns.md，架构 → architecture.md，代码 → conventions.md）
+3. 确认「完成标准」再编码
 
 ## 反馈回路
 1. 出错 → 更新 rules 或 docs，记根因
 2. 未追踪改动 → 关键内容写入规则/文档
-3. 可 `tm_save` / `tm_learn` 沉淀
+3. 可 `memory_save` 沉淀经验
 
 ## Plan 执行
 见 [harness-plan-execution](harness-plan-execution.mdc)。
-
-## 任务开始前
-1. 读 `AGENTS.md` 了解结构、命令、规范入口
-2. 读任务相关 docs（MCP → mcpPatterns.md，架构 → architecture.md，代码 → conventions.md）
-3. 确认「任务完成标准」再编码
-
-## 编码中
-- 遵守分层：Server/Web → Services → Storage → Models
-- 新函数必有类型注解；外部输入必 Pydantic 验证
-- 禁止 `print()`，用 `logger`；禁止硬编码密钥
-
-## 提交前
-```bash
-make lint
-make test
-make harness-check
-```
-失败须修复通过，不可跳过。
-
-## 新增 MCP 工具
-1. 在 `docs/mcpPatterns.md` 登记
-2. 在 `server.py` 加 `@mcp.tool` + `@track_usage` 的 `async def tm_xxx(...)`
-3. 在 `tests/test_server.py` 写测试（正常 + 空结果 + 错误）
-4. `make verify` 全绿
-
-详见 [mcp-tools](mcp-tools.mdc)。
 
 ## 不确定时
 停下来问，不猜测。

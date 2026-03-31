@@ -48,15 +48,17 @@ make web
   "mcpServers": {
     "team_memory": {
       "command": "python3",
-      "args": ["-m", "team_memory.server"],
+      "args": ["-m", "team_memory.server_lite"],
       "env": {
-        "TEAM_MEMORY_DB_URL": "postgresql+asyncpg://developer:devpass@localhost:5432/team_memory",
+        "TEAM_MEMORY_DB_URL": "postgresql+asyncpg://developer:devpass@localhost:5433/team_memory",
         "TEAM_MEMORY_API_KEY": "你的 API Key"
       }
     }
   }
 }
 ```
+
+（默认 **Lite**：`memory_*` 四个工具。遗留 **`team_memory.server`**（`tm_*`）见 [docs/design-docs/ops/mcp-lite-default.md](docs/design-docs/ops/mcp-lite-default.md)。）
 
 本机直连数据库时需要配 `TEAM_MEMORY_DB_URL`；从源码跑且项目里已有 config 的，可以不配。
 

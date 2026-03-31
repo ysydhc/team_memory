@@ -119,7 +119,7 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 - **记忆压缩与摘要**：经验支持 `summary` 字段，LLM 可生成简短摘要；单条（POST `/experiences/{id}/summarize`）与批量（POST `/experiences/batch-summarize`）生成；MCP 搜索结果中每条经验可包含 `summary`，便于节省 Token
 - **PageIndex-Lite**：长文档自动分块建立节点索引，支持节点级精准检索
 - **个人扩写**：per-user tag_synonyms 在检索前生效（词表替换 + LLM 扩写），MCP 搜索返回后自动维护；Web 设置 → 个人扩写
-- **个人记忆**：按 user 隔离的偏好与习惯，tm_learn 自动提炼、拉取时按 scope + current_context 语义返回；Web 设置 → 个人记忆
+- **个人记忆 / 用户画像**：按 `user_id` 隔离；**Lite** 下由 **`memory_save(..., content=...)`** 解析等路径可写入；**`memory_context`** 返回 `profile.static` / `profile.dynamic`（字符串列表）。Web **设置 → 用户画像** 可分组查看、过滤 **static/dynamic** 并 **删除** 错误条目（还可调 HTTP API `profile_kind`）。
 - **文件位置绑定**：保存经验时可传 `file_locations`（路径 + 行范围，可选 snippet/file_mtime/file_content_hash）；检索时可传 `current_file_locations`，与当前编辑位置匹配的经验会获得 location 加分，详见 [经验文件位置绑定与过期](design-docs/experience-file-line-binding-and-expiration.md)。
 
 ### 三层作用域
@@ -210,9 +210,9 @@ make setup
 
 会完成：启动 Docker（PostgreSQL+pgvector、Ollama、Redis）、安装 Python 依赖、执行数据库迁移。成功时输出 `✔ Setup complete!`。常见失败原因：Docker 未启动、5432/11434 端口被占用、pip 安装失败。
 
-**2. 改配置（2 项）**
+**2. 改配置**
 
-使用 config.minimal.yaml 时需改 2 项：`database.url`、`auth.api_key`。最简方式为环境变量：
+默认使用仓库根目录 `config.development.yaml`。确认 `database.url` 与本地 Postgres 一致；`auth.api_key` 建议用环境变量注入：
 
 设置环境变量作为管理员引导密钥（首次部署必须；**勿提交 Git、勿明文写入配置文件**）：
 
@@ -232,7 +232,7 @@ echo "你的管理员 API Key: $TEAM_MEMORY_API_KEY"
 
 ### 方式二：配置文件
 
-在 config.yaml 或 config.minimal.yaml 中设置：
+在 `config.development.yaml`（或 `TEAM_MEMORY_CONFIG_PATH` 指向的文件）中设置：
 ```
 auth:
   type: db_api_key
@@ -331,7 +331,7 @@ pip install team_memory
   "mcpServers": {
     "team_memory": {
       "command": "python3",
-      "args": ["-m", "team_memory.server"],
+      "args": ["-m", "team_memory.server_lite"],
       "env": {
         "TEAM_MEMORY_DB_URL": "postgresql+asyncpg://用户:密码@主机:5432/team_memory",
         "TEAM_MEMORY_API_KEY": "你的 API Key"
@@ -348,7 +348,7 @@ pip install team_memory
   "mcpServers": {
     "team_memory": {
       "command": "/path/to/team_memory/.venv/bin/python",
-      "args": ["-m", "team_memory.server"],
+      "args": ["-m", "team_memory.server_lite"],
       "cwd": "/path/to/team_memory",
       "env": {
         "TEAM_MEMORY_API_KEY": "你的 API Key",
@@ -362,14 +362,14 @@ pip install team_memory
 
 **4. 验证**
 
-重启 Cursor 或 Claude Desktop，在对话里输入：「请搜索经验库中关于 Docker 的经验」。若配置正确，AI 会调用 `tm_search` 并返回经验列表或相关摘要。
+重启 Cursor 或 Claude Desktop，在对话里请 Agent 使用 **`memory_recall`**（或 **`memory_context`**）搜索与 Docker 相关的经验。若配置正确，会返回 JSON 结果。遗留 **`tm_*`** 仅在使用 `python -m team_memory.server` 时可用，默认推荐 **Lite**，见 [mcp-lite-default.md](design-docs/ops/mcp-lite-default.md)。
 
 ---
 
 ### 其他安装方式
 
 - **仅 Docker、不克隆源码**：若你只想跑 Web 不跑本地 MCP，可用 `docker compose up -d` 启动（含数据库迁移）。在 `.env` 中设置 `TEAM_MEMORY_API_KEY`（默认 `changeme` 请修改）。**生产环境必须修改默认 Key，禁止使用 changeme**。访问 http://localhost:9111 。
-- **从 PyPI 部署、无 Make**：`pip install team_memory` 后，需自备 PostgreSQL（pgvector）并从本仓库克隆后在项目根目录执行 `alembic upgrade head`，再通过 `TEAM_MEMORY_CONFIG_PATH` 或 `TEAM_MEMORY_DB_URL` 启动 `team-memory-web` 或 `python -m team_memory.server`。
+- **从 PyPI 部署、无 Make**：`pip install team_memory` 后，需自备 PostgreSQL（pgvector）并从本仓库克隆后在项目根目录执行 `alembic upgrade head`，再通过 `TEAM_MEMORY_CONFIG_PATH` 或 `TEAM_MEMORY_DB_URL` 启动 `team-memory-web` 或 **`python -m team_memory.server_lite`**（默认 MCP）；遗留完整面为 **`python -m team_memory.server`**。
 
 ---
 
@@ -382,7 +382,7 @@ pip install team_memory
   "mcpServers": {
     "team_memory": {
       "command": "python3",
-      "args": ["-m", "team_memory.server"],
+      "args": ["-m", "team_memory.server_lite"],
       "env": {
         "TEAM_MEMORY_DB_URL": "postgresql+asyncpg://用户:密码@主机:5432/team_memory",
         "TEAM_MEMORY_API_KEY": "你的 API Key"
@@ -459,7 +459,7 @@ AI 的行为（主动推荐）：
 | `tm_save` | 快速保存 | title + problem | 手动保存单条经验 |
 | `tm_save_typed` | 完整保存 | 全量结构化字段 | 保存带类型和专属字段的经验 |
 | `tm_save_group` | 保存经验组 | 父经验 + 子步骤 | 保存一组关联经验 |
-| `tm_claim` | 认领经验 | 经验 ID | 声明正在处理某条经验 |
+| `tm_claim` | 认领经验 | 经验 ID | 写入 `tags`（`agent_claim` + 竖线分隔 user/时间/备注）；再次认领会替换上一条认领标签 |
 | `tm_notify` | 通知团队 | 经验 ID | 通过 Webhook 通知 |
 | `tm_feedback` | 反馈评分 | 经验 ID + 1-5 分 | 对搜索结果评分 |
 | `tm_update` | 更新经验 | 经验 ID + 字段 | 追加方案或标签 |
@@ -530,27 +530,23 @@ API 参考（前缀 `/api/v1`）：
 
 ## 配置说明
 
-配置分层加载（后者覆盖前者）：
+仅保留**两个**环境配置文件（二选一，再结合环境变量覆盖）：
 
-| 层级 | 文件 | 用途 |
-|------|------|------|
-| 1 | `config.yaml` | 全量默认配置（按 `[必改]`/`[可选]`/`[高级]` 分级标注） |
-| 2 | `config.minimal.yaml` | 用户简化配置（需改 2 项：database.url、auth.api_key）；需显式指定 `TEAM_MEMORY_CONFIG_PATH=config.minimal.yaml` 或 `TEAM_MEMORY_ENABLE_MINIMAL_OVERLAY=1` 才生效 |
-| 3 | `config.local.yaml` | 开发者高级覆盖 |
-| 4 | `config.{env}.yaml` | 多环境叠加 |
-| 5 | 环境变量 | 最高优先级 |
+| 文件 | 用途 |
+|------|------|
+| `config.development.yaml` | 本地 / 默认（`TEAM_MEMORY_ENV` 未设或 `development` / `test` / `dev` / `local`） |
+| `config.production.yaml` | 正式 / 预发（`TEAM_MEMORY_ENV=production` 或 `prod`） |
+| `TEAM_MEMORY_CONFIG_PATH` | 可选：指向任意单文件，则不再按环境名解析上述两个文件 |
+| 环境变量 `TEAM_MEMORY_*` | 最高优先级，覆盖 YAML 中的同名字段 |
 
 ### 多环境配置
 
 ```bash
-# 开发环境（默认）
-TEAM_MEMORY_ENV=development  # 使用 config.yaml
+# 开发（默认）
+unset TEAM_MEMORY_ENV   # 或 TEAM_MEMORY_ENV=development
 
-# 生产环境
-TEAM_MEMORY_ENV=production   # 叠加 config.production.yaml
-
-# 测试环境
-TEAM_MEMORY_ENV=test         # 叠加 config.test.yaml
+# 正式
+TEAM_MEMORY_ENV=production
 ```
 
 ### 认证类型
@@ -580,7 +576,7 @@ embedding:
 
 架构页展示项目代码架构（概览、集群、依赖图、影响面），数据由 GitNexus 通过 Bridge 提供。
 
-**1. 配置 `config.yaml`**
+**1. 在 `config.development.yaml`（或当前使用的单文件配置）中**
 
 ```yaml
 architecture:
@@ -642,7 +638,8 @@ make lint          # 代码检查（ruff）
 | `make setup` | 首次安装 | `docker compose up -d` → 等 PG 就绪 → 建库（若无）→ 按需启动 Ollama 容器 → `pip install -e ".[dev]"` → `alembic upgrade head` |
 | `make dev` | 启动全部服务 | 先执行 `make release-9111`（避免 9111 被占）→ `docker compose up -d postgres redis` → 若 11434 未被占用则 `docker compose --profile ollama up -d` → 前台运行 `python -m team_memory.web.app` |
 | `make web` | 仅启动 Web | 先执行 `make release-9111` → 前台运行 `python -m team_memory.web.app`（默认 http://0.0.0.0:9111） |
-| `make mcp` | 仅启动 MCP 服务 | `python -m team_memory.server`（stdio，供 Cursor/Claude Desktop 调用） |
+| `make mcp` | 启动 **Lite** MCP | `python -m team_memory.server_lite`（stdio，`memory_*` 工具） |
+| `make mcp-full` | 启动遗留完整 MCP（`tm_*`） | `python -m team_memory.server`；计划移除，见 [mcp-lite-default.md](design-docs/ops/mcp-lite-default.md) |
 | `make health` | 健康检查 | `./scripts/healthcheck.sh`（检测 DB、Web、Ollama 等） |
 | `make migrate` | 数据库迁移 | `alembic upgrade head` |
 | `make migrate-fts` | 补齐经验表 FTS 字段（存量迁移） | `python scripts/migrate_fts.py`；可用 `--dry-run` 预览待更新条数 |
@@ -695,7 +692,7 @@ docker compose up -d
 
 - **I/O 日志**：启用 `TEAM_MEMORY_LOG_IO_ENABLED=1` 可记录 MCP 工具调用、检索管道、服务层等内部节点日志，便于排查与性能分析。粒度由 `LOG_IO_DETAIL`（mcp/service/pipeline/full）控制。
 - **文件输出**：启用 `LOG_FILE_ENABLED` 或 `TEAM_MEMORY_LOGGING__FILE_ENABLED=1`，日志写入 `LOG_FILE_PATH`（默认 `logs/team_memory.log`），支持按大小轮转。
-- **热加载**：运行时通过 `GET /api/v1/config/logging` 查询、`PUT /api/v1/config/logging` 更新日志配置（需认证），无需重启即可生效；持久化需写入 config.yaml。
+- **热加载**：运行时通过 `GET /api/v1/config/logging` 查询、`PUT /api/v1/config/logging` 更新日志配置（需认证），无需重启即可生效；持久化需写入当前使用的 YAML（如 `config.development.yaml`）。
 
 更多配置项与格式规范见 [日志格式规范](design-docs/logging-format.md)、[日志系统设计](plans/2025-03-10-logging-system-design.md)。
 

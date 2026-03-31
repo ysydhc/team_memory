@@ -21,7 +21,7 @@
 ## 三、API 与配置文档
 
 - 描述 API 时使用 `/api/v1/` 路径（旧路径 `/api/` 可兼容，但文档以 v1 为准）
-- 配置项与 `config.yaml` 对应段保持一致；变更 config 时同步更新 docs 中相关说明
+- 配置项与 `config.development.yaml` / `config.production.yaml` 对应段保持一致；变更 config 时同步更新 docs
 
 ## 四、归档与废弃
 

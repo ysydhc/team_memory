@@ -7,7 +7,6 @@ import {
     loadSchemaAndPopulateFilters,
     applyProjectPlaceholders,
     resolveProjectInput,
-    populateCreateTypeSelector,
 } from './schema.js';
 import * as pages from './pages.js';
 import * as components from './components.js';
@@ -26,12 +25,18 @@ function toast(msg, type = 'info') {
 async function api(method, path, body = null) {
     const opts = {
         method,
-        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
     };
     const key = state.apiKey || (typeof localStorage !== 'undefined' && localStorage.getItem('api_key'));
-    if (key) opts.headers['Authorization'] = `Bearer ${key}`;
-    if (body) opts.body = JSON.stringify(body);
+    if (body instanceof FormData) {
+        opts.headers = {};
+        if (key) opts.headers['Authorization'] = `Bearer ${key}`;
+        opts.body = body;
+    } else {
+        opts.headers = { 'Content-Type': 'application/json' };
+        if (key) opts.headers['Authorization'] = `Bearer ${key}`;
+        if (body) opts.body = JSON.stringify(body);
+    }
 
     const res = await fetch(path, opts);
     if (res.status === 401) {
@@ -166,31 +171,22 @@ function showApp() {
     document.getElementById('user-name').textContent = state.currentUser.name;
     document.getElementById('user-avatar').textContent = state.currentUser.name[0].toUpperCase();
     api('GET', '/api/v1/config/retrieval').then((cfg) => { state.cachedRetrievalConfig = cfg; }).catch(() => { });
-    api('GET', '/api/v1/config/project')
-        .then((cfg) => {
-            state.defaultProject = cfg.default_project || 'default';
-            state.activeProject = state.defaultProject;
-            applyProjectPlaceholders();
-            reloadCurrentPage();
-        })
-        .catch(() => {
-            state.defaultProject = 'default';
-            state.activeProject = 'default';
-            applyProjectPlaceholders();
-            reloadCurrentPage();
-        });
-    api('GET', '/api/v1/templates')
-        .then((r) => {
-            state.cachedTemplates = r.templates || [];
-            populateCreateTypeSelector();
-        })
-        .catch(() => { state.cachedTemplates = []; });
-    api('GET', '/api/v1/projects')
-        .then((r) => {
-            state.availableProjects = r.projects || [];
-            populateProjectSwitcher();
-        })
-        .catch(() => { });
+    api('GET', '/api/v1/projects').then((data) => {
+        const projects = data.projects || [];
+        state.availableProjects = projects;
+        const preferred = projects.includes('team_memory') ? 'team_memory' : (projects[0] || 'default');
+        state.defaultProject = preferred;
+        state.activeProject = preferred;
+        populateProjectSwitcher();
+        applyProjectPlaceholders();
+        reloadCurrentPage();
+    }).catch(() => {
+        state.defaultProject = 'default';
+        state.activeProject = 'default';
+        applyProjectPlaceholders();
+        reloadCurrentPage();
+    });
+    applyProjectPlaceholders();
     loadSchemaAndPopulateFilters(api);
     navigateFromHash();
     window.addEventListener('hashchange', navigateFromHash);
@@ -203,8 +199,8 @@ state.activeProjects = [];
 function populateProjectSwitcher() {
     const projects = state.availableProjects || [];
     const containers = [
-        'page-list-projects', 'page-tasks-projects',
-        'page-search-projects', 'page-usage-projects',
+        'page-list-projects',
+        'page-search-projects',
     ];
     containers.forEach(containerId => {
         const container = document.getElementById(containerId);
@@ -267,8 +263,6 @@ function toggleProjectOpt(el, pageKey) {
     }
     updateProjectTrigger(containerId, pageKey);
     if (pageKey === 'list') pages.loadList(1);
-    else if (pageKey === 'tasks') pages.loadTasks();
-    else if (pageKey === 'usage') pages.loadUsageStats();
 }
 
 function updateProjectTrigger(containerId, pageKey) {
@@ -301,21 +295,18 @@ function onProjectSwitch(value) {
     applyProjectPlaceholders();
     const page = state.currentPage;
     if (page === 'list') pages.loadList(1);
-    else if (page === 'tasks') pages.loadTasks();
-    else if (page === 'usage') pages.loadUsageStats();
+    if (page === 'archives') pages.loadArchivesList(1);
 }
 
 // ===== Navigation =====
 // Hash-to-page mapping for URL-driven navigation (enables browser automation / deep links)
 const HASH_TO_PAGE = {
     list: 'list',
-    tasks: 'tasks',
     search: 'search',
+    archives: 'archives',
     settings: 'settings',
-    usage: 'usage',
-    dedup: 'dedup',
     'personal-memory': 'personal-memory',
-    'user-expansion': 'user-expansion',
+    dedup: 'dedup',
     // Legacy redirects
     dashboard: 'list',
     drafts: 'list',
@@ -323,15 +314,33 @@ const HASH_TO_PAGE = {
 };
 
 function reloadCurrentPage() {
-    if (state.currentPage) navigate(state.currentPage);
+    if (!state.currentPage) return;
+    const page = state.currentPage;
+    if (page === 'list') {
+        pages.loadList(state.listPage || 1);
+    } else if (page === 'archives') {
+        pages.loadArchivesList(state.archivesListPage || 1);
+    } else if (page === 'personal-memory') {
+        pages.loadPersonalMemoryList();
+    } else if (page === 'settings') {
+        const dotEl = document.getElementById('health-status-dot');
+        if (dotEl) {
+            dotEl.className = 'health-dot loading';
+            dotEl.title = '加载中…';
+        }
+        pages.loadHealthStatus();
+        pages.loadRuntimeConfigForms();
+        pages.loadAccountSecurity();
+        pages.loadKeyManagement();
+    }
 }
 
 function navigate(page) {
-    if (state.currentPage === page) return;
+    if (state.currentPage === page && page !== 'archives') return;
     const fromSettings = state.currentPage === 'settings';
-    const toSubPage = ['personal-memory', 'user-expansion', 'dedup'].includes(page);
+    const toSubPage = ['personal-memory', 'dedup'].includes(page);
     const toSettings = page === 'settings';
-    const fromSubPage = ['personal-memory', 'user-expansion', 'dedup'].includes(state.currentPage);
+    const fromSubPage = ['personal-memory', 'dedup'].includes(state.currentPage);
 
     if (fromSettings && toSubPage) {
         state.settingsScrollTop = window.scrollY || document.documentElement.scrollTop;
@@ -341,7 +350,6 @@ function navigate(page) {
     document.querySelectorAll('.page').forEach((p) => p.classList.add('hidden'));
     const target = document.getElementById(`page-${page}`);
     if (target) target.classList.remove('hidden');
-    const mainContent = document.querySelector('.main-content');
     document.querySelectorAll('.topbar-nav a').forEach((a) => {
         a.classList.toggle('active', a.dataset.page === page);
     });
@@ -358,29 +366,29 @@ function navigate(page) {
 
     if (page === 'list') {
         pages.loadList(state.listPage || 1);
-        pages.checkOutdatedCount();
     }
-    else if (page === 'tasks') pages.loadTasks();
     else if (page === 'search') { }
-    else if (page === 'usage') pages.loadUsageStats();
-    else if (page === 'dedup') { }
+    else if (page === 'archives') {
+        pages.showArchivesListView();
+        pages.loadArchivesList(1);
+    }
     else if (page === 'personal-memory') pages.loadPersonalMemoryList();
-    else if (page === 'user-expansion') pages.loadUserExpansion();
     else if (page === 'settings') {
         const dotEl = document.getElementById('health-status-dot');
         if (dotEl) {
             dotEl.className = 'health-dot loading';
             dotEl.title = '加载中…';
         }
-        pages.loadRetrievalConfig();
-        components.loadWebhookConfig();
-        pages.loadCurrentSchema();
-        pages.loadScoringConfig();
-        pages.checkMergeSuggestions();
         pages.loadHealthStatus();
+        pages.loadRuntimeConfigForms();
         pages.loadAccountSecurity();
         pages.loadKeyManagement();
     }
+}
+
+/** Placeholder: experience list 「批量生成摘要」按钮（避免未定义报错） */
+function batchSummarize() {
+    toast('批量生成摘要功能尚未接入', 'info');
 }
 
 function navigateFromHash() {
@@ -392,7 +400,24 @@ function navigateFromHash() {
             return;
         }
     }
-    const page = HASH_TO_PAGE[raw] || 'tasks';
+    if (raw === 'archives' || raw.startsWith('archives/')) {
+        state.currentPage = 'archives';
+        document.querySelectorAll('.page').forEach((p) => p.classList.add('hidden'));
+        const archPage = document.getElementById('page-archives');
+        if (archPage) archPage.classList.remove('hidden');
+        document.querySelectorAll('.topbar-nav a').forEach((a) => {
+            a.classList.toggle('active', a.dataset.page === 'archives');
+        });
+        const segs = raw.split('/').filter(Boolean);
+        if (segs.length >= 2 && segs[0] === 'archives') {
+            pages.openArchiveDetail(segs[1]);
+        } else {
+            pages.showArchivesListView();
+            pages.loadArchivesList(state.archivesListPage || 1);
+        }
+        return;
+    }
+    const page = HASH_TO_PAGE[raw] || 'list';
     navigate(page);
 }
 
@@ -421,17 +446,6 @@ window.toggleProjectDropdown = toggleProjectDropdown;
 window.onProjectMultiChange = onProjectMultiChange;
 window.getSelectedProjects = getSelectedProjects;
 window.toggleProjectOpt = toggleProjectOpt;
-window.switchProjCfgTab = function (tab) {
-    document.querySelectorAll('.proj-cfg-tab').forEach(t => t.classList.toggle('active', t.textContent.includes(
-        tab === 'basic' ? '基础' : tab === 'scan' ? '扫描' : '可安装'
-    )));
-    document.querySelectorAll('.proj-cfg-panel').forEach(p => p.classList.remove('active'));
-    const panel = document.getElementById('proj-cfg-' + tab);
-    if (panel) panel.classList.add('active');
-    if (tab === 'installables') {
-        pages.loadScanDirsConfig();
-    }
-};
 window.loadList = pages.loadList;
 window.switchListSubTab = pages.switchListSubTab;
 window.filterByTag = pages.filterByTag;
@@ -440,39 +454,11 @@ window.viewDetail = pages.viewDetail;
 window.backToPreviousDetail = pages.backToPreviousDetail;
 window.loadDashboard = pages.loadDashboard;
 window.loadDrafts = pages.loadDrafts;
-window.loadTasks = pages.loadTasks;
-window.showTaskDetail = pages.showTaskDetail;
-window.closeTaskSlideout = pages.closeTaskSlideout;
-window.saveTaskFromSlideout = pages.saveTaskFromSlideout;
-window.deleteTaskFromSlideout = pages.deleteTaskFromSlideout;
-window.createTaskGroupFromSlideout = pages.createTaskGroupFromSlideout;
-window.sendTaskMessage = pages.sendTaskMessage;
-window.sedimentTaskGroup = pages.sedimentTaskGroup;
-window.archiveGroup = pages.archiveGroup;
-window.unarchiveGroup = pages.unarchiveGroup;
-window.pinTaskGroupToTop = pages.pinTaskGroupToTop;
-window.switchTasksSubTab = pages.switchTasksSubTab;
-window.toggleTaskGroups = pages.toggleTaskGroups;
-window.toggleGroupVisibility = pages.toggleGroupVisibility;
-window.showAllTaskGroups = pages.showAllTaskGroups;
-window.hideAllTaskGroups = pages.hideAllTaskGroups;
-window.generateTaskPrompt = pages.generateTaskPrompt;
-window.openCreateTaskModal = () => toast('任务创建面板即将上线', 'info');
 window.changeExpStatus = pages.changeExpStatus;
 window.publishDraft = pages.publishDraft;
 window.loadReviews = pages.loadReviews;
 window.reviewExperience = pages.reviewExperience;
-window.loadDuplicates = pages.loadDuplicates;
-window.reembedGroups = pages.reembedGroups;
-window.doMerge = pages.doMerge;
-window.toggleDupDiff = pages.toggleDupDiff;
-window.scanStale = pages.scanStale;
-window.loadUsageStats = pages.loadUsageStats;
 window.appendTag = pages.appendTag;
-window.toggleVersionHistory = pages.toggleVersionHistory;
-window.viewVersionSnapshot = pages.viewVersionSnapshot;
-window.toggleVersionSnapshot = pages.toggleVersionSnapshot;
-window.rollbackVersion = pages.rollbackVersion;
 window.loadInstallables = pages.loadInstallables;
 window.previewInstallable = pages.previewInstallable;
 window.toggleInstallablePreview = pages.toggleInstallablePreview;
@@ -482,51 +468,14 @@ window.openEditInstallableModalFromBtn = pages.openEditInstallableModalFromBtn;
 window.closeEditInstallableModal = pages.closeEditInstallableModal;
 window.switchEditInstallableTab = pages.switchEditInstallableTab;
 window.saveEditInstallableContent = pages.saveEditInstallableContent;
-window.loadAllConfig = pages.loadAllConfig;
-window.saveRetrievalConfig = pages.saveRetrievalConfig;
-window.saveDefaultProjectConfig = pages.saveDefaultProjectConfig;
-window.saveScanDirsConfig = pages.saveScanDirsConfig;
-window.loadScanDirsConfig = pages.loadScanDirsConfig;
-window.saveSearchConfig = pages.saveSearchConfig;
-window.saveFileLocationBindingConfig = pages.saveFileLocationBindingConfig;
-window.saveRerankerConfig = pages.saveRerankerConfig;
-window.saveCacheConfig = pages.saveCacheConfig;
-window.savePageIndexLiteConfig = pages.savePageIndexLiteConfig;
-window.clearCache = pages.clearCache;
-window.switchPreset = pages.switchPreset;
-window.generateSchemaFromDoc = pages.generateSchemaFromDoc;
-window.applyGeneratedSchema = pages.applyGeneratedSchema;
-window.loadCurrentSchema = pages.loadCurrentSchema;
-window.generateSummary = pages.generateSummary;
-window.batchSummarize = pages.batchSummarize;
-window.toggleOutdatedPanel = pages.toggleOutdatedPanel;
-window.scoreAction = pages.scoreAction;
-window.refreshScores = pages.refreshScores;
-window.saveScoringConfig = pages.saveScoringConfig;
-window.loadMergePreview = pages.loadMergePreview;
 window.loadPersonalMemoryList = pages.loadPersonalMemoryList;
-window.loadUserExpansion = pages.loadUserExpansion;
+window.loadArchivesList = pages.loadArchivesList;
+window.openArchiveDetail = pages.openArchiveDetail;
+window.backToArchivesList = pages.backToArchivesList;
 window.showAddPersonalMemoryModal = pages.showAddPersonalMemoryModal;
 window.editPersonalMemory = pages.editPersonalMemory;
 window.deletePersonalMemory = pages.deletePersonalMemory;
-window.addExpansionRow = pages.addExpansionRow;
-window.removeExpansionRow = pages.removeExpansionRow;
-window.saveUserExpansion = pages.saveUserExpansion;
-
-window.addCustomScanPath = function () {
-    const container = document.getElementById('custom-scan-paths');
-    const row = document.createElement('div');
-    row.className = 'scan-path-row custom';
-    row.innerHTML = `<input class="scan-path-val" type="text" placeholder="/path/to/scan/dir" value="">` +
-        `<span class="scan-path-del" onclick="this.parentElement.remove()">✕</span>`;
-    container.appendChild(row);
-    row.querySelector('input').focus();
-};
-
-window.getCustomScanPaths = function () {
-    const inputs = document.querySelectorAll('#custom-scan-paths .scan-path-row.custom input');
-    return Array.from(inputs).map(i => i.value.trim()).filter(Boolean);
-};
+window.batchSummarize = batchSummarize;
 
 // Components
 window.toggleSearchAdvanced = components.toggleSearchAdvanced;
@@ -539,8 +488,6 @@ window.switchCreateMode = components.switchCreateMode;
 window.toggleCreateQuickMode = components.toggleCreateQuickMode;
 window.addGroupChild = components.addGroupChild;
 window.removeGroupChild = components.removeGroupChild;
-window.doParse = components.doParse;
-window.doParseURL = components.doParseURL;
 window.doCreate = components.doCreate;
 window.openFeedbackModal = components.openFeedbackModal;
 window.closeFeedbackModal = components.closeFeedbackModal;
@@ -551,24 +498,17 @@ window.addEditChild = components.addEditChild;
 window.removeEditChild = components.removeEditChild;
 window.submitEdit = components.submitEdit;
 window.deleteExp = components.deleteExp;
-window.addWebhookRow = components.addWebhookRow;
-window.removeWebhookRow = components.removeWebhookRow;
-window.testWebhook = components.testWebhook;
-window.saveWebhookConfig = components.saveWebhookConfig;
-window.openImportModal = components.openImportModal;
-window.closeImportModal = components.closeImportModal;
-window.handleImportFile = components.handleImportFile;
-window.doImport = components.doImport;
-window.openExportModal = components.openExportModal;
-window.closeExportModal = components.closeExportModal;
-window.openWorkflowVisualizationModal = pages.openWorkflowVisualizationModal;
-window.closeWorkflowVisualizationModal = pages.closeWorkflowVisualizationModal;
-window.doExport = components.doExport;
 
 // Key management exports
 window.loadAccountSecurity = pages.loadAccountSecurity;
 window.doChangePassword = pages.doChangePassword;
 window.loadKeyManagement = pages.loadKeyManagement;
+window.loadRuntimeConfigForms = pages.loadRuntimeConfigForms;
+window.saveRetrievalConfig = pages.saveRetrievalConfig;
+window.saveSearchConfig = pages.saveSearchConfig;
+window.loadAllConfig = pages.loadAllConfig;
+window.loadDuplicates = pages.loadDuplicates;
+window.reembedGroups = pages.reembedGroups;
 window.approveUser = pages.approveUser;
 window.rejectUser = pages.rejectUser;
 window.createUserAdmin = pages.createUserAdmin;
@@ -581,29 +521,21 @@ window.openAdminCreateUser = function () {
 // ===== Init =====
 document.addEventListener('DOMContentLoaded', () => {
     checkAuth();
+    // Login / register: bind here so we use module-scoped functions (inline onclick sees global only).
+    document.getElementById('login-btn-submit')?.addEventListener('click', () => doLogin());
+    document.getElementById('login-btn-register')?.addEventListener('click', () => doRegister());
+    document.getElementById('login-link-to-register')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        switchLoginMode('register');
+    });
+    document.getElementById('login-link-to-login')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        switchLoginMode('password');
+    });
     document.getElementById('login-password').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') doLogin();
     });
     document.getElementById('reg-password2').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') doRegister();
     });
-
-    // Drag and drop for import
-    const zone = document.getElementById('import-drop-zone');
-    if (zone) {
-        zone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            zone.classList.add('drag-over');
-        });
-        zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-        zone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            zone.classList.remove('drag-over');
-            if (e.dataTransfer.files.length > 0) {
-                const input = document.getElementById('import-file');
-                input.files = e.dataTransfer.files;
-                components.handleImportFile(input);
-            }
-        });
-    }
 });

@@ -9,7 +9,7 @@
 |------|------|
 | **tm_search** | MCP 工具，语义搜索经验库 |
 | **tm_save** | MCP 工具，保存新经验 |
-| **API Key** | 登录凭证，在 config.yaml 或 config.minimal.yaml 中配置 |
+| **API Key** | 登录凭证，在 `config.development.yaml` 或通过环境变量配置 |
 | **经验** | 问题-方案对，可被检索和复用 |
 | **MCP** | Model Context Protocol，让 Cursor 等 AI 客户端调用 tm_search、tm_save 等工具 |
 
@@ -34,7 +34,7 @@ make setup
 make web
 ```
 
-浏览器打开 http://localhost:9111 ，输入 `config.yaml` 或 `config.minimal.yaml` 中配置的 API Key 登录。
+浏览器打开 http://localhost:9111 ，输入环境变量或开发配置中设定的 API Key 登录。
 
 > **简化配置**: 如果不想面对 100+ 行的完整配置，只需修改 `config.minimal.yaml` 中的 `auth.api_key` 即可启动。
 

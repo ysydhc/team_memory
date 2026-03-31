@@ -3,8 +3,8 @@
 ## 硬性规则（违反直接打回）
 
 1. **API Key 和密码禁止出现在代码中**
-   - 使用环境变量或 `config.yaml`（通过 `${ENV_VAR}` 引用）
-   - `config.local.yaml` 等本地配置禁止提交到 Git（已在 `.gitignore`）
+   - 使用环境变量或 `config.development.yaml` / `config.production.yaml`（通过 `${ENV_VAR}` 引用）
+   - 仅限本机的覆盖文件可通过 `TEAM_MEMORY_CONFIG_PATH` 指向未入库路径
    - 生产环境禁止使用 `auth.type: none`
 
 2. **日志中禁止打印敏感信息**
@@ -29,5 +29,5 @@
 ## 数据隐私
 
 - `project` 参数用于隔离不同项目数据，跨项目查询需要显式授权
-- 个人记忆（personal scope）只能被当前 user 访问
+- 个人记忆表 `personal_memories`（用户画像源）：仅当前登录用户可 **列表 / 读写 / 删除** 自己的行；团队经验中的 `visibility=private` 等仍按 Experience RBAC，与画像表分离
 - 审计日志记录所有写操作（who、what、when），不可删除
