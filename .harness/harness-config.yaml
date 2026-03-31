@@ -1,0 +1,91 @@
+# .harness/harness-config.yaml
+version: 1
+
+project:
+  name: team-memory
+  description: MCP-based team experience library
+
+# 质量门禁（项目特有，迁移时须修改）
+quality_gates:
+  lint: "ruff check src/"
+  format: "ruff format --check src/"
+  test: "pytest tests/ -v"
+  verify: "make verify"
+  harness: "make harness-check"
+
+# 分层约束（项目特有）
+layering:
+  forbidden_imports:
+    - from: "storage"
+      to: "services"
+      direction: "禁止 storage → services"
+    - from: "services"
+      to: "web"
+      direction: "禁止 services → web/server"
+    - from: "storage"
+      to: "web"
+      direction: "禁止 storage → web/server"
+
+# 计划管理
+plans:
+  archive_completed: true
+  archive_path: .harness/plans/completed/
+  progress_max_lines: 100
+
+# 超时策略
+timeouts:
+  command: 30         # 单条命令（秒）
+  install: 300        # 安装/构建命令（秒）
+  task: 1800          # 单个 Task 总时长（秒）
+
+# Context 管理
+context:
+  warning_threshold: 65        # context 使用率警告阈值（%）
+  critical_threshold: 80       # context 使用率危险阈值（%）
+  max_consecutive_reads: 5     # 连续只读操作上限
+  split_file_threshold: 5      # 涉及文件数超过此值建议拆分
+
+# 失败恢复
+failure:
+  auto_retry_limit: 1           # Level 1 自动重试次数
+  escalate_after_failures: 3    # 连续失败 N 次后升级到人工
+  max_deviation_fixes: 3        # Level 2 偏差自动修复最大次数
+
+# Hook 脚本路径
+hooks:
+  pre_bash_guard: .harness/hooks/pre-bash-guard.sh
+  post_edit_format: .harness/hooks/post-edit-format.sh
+  stop_check: .harness/hooks/stop-check.sh
+
+# 安全防护
+security:
+  blocked_commands:
+    - "rm -rf /"
+    - "sudo"
+    - "curl|sh"
+    - "DROP DATABASE"
+    - "git push --force main"
+    - "git push --force master"
+  blocked_interactive:
+    - "vim"
+    - "nano"
+    - "emacs"
+    - "python -i"
+    - "psql"
+    - "mysql"
+    - "sqlite3"
+    - "less"
+    - "more"
+    - "top"
+    - "htop"
+
+# 平台适配
+adapters:
+  claude_code:
+    instructions_file: CLAUDE.md
+    rules_dir: .claude/rules/
+    settings: .claude/settings.json
+  cursor:
+    instructions_file: AGENTS.md
+    rules_dir: .cursor/rules/
+    hooks_config: .cursor/hooks.json
