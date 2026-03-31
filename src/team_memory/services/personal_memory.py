@@ -36,13 +36,69 @@ class PersonalMemoryService:
             yield session
 
     async def list_by_user(
-        self, user_id: str, scope: str | None = None
+        self,
+        user_id: str,
+        scope: str | None = None,
+        profile_kind: str | None = None,
     ) -> list[dict]:
-        """List memories for user, optionally filtered by scope."""
+        """List memories for user, optionally filtered by scope and/or profile_kind."""
         async with self._session() as session:
             repo = PersonalMemoryRepository(session)
-            rows = await repo.list_by_user(user_id, scope=scope)
+            rows = await repo.list_by_user(
+                user_id, scope=scope, profile_kind=profile_kind
+            )
             return [r.to_dict() for r in rows]
+
+    @staticmethod
+    def _dedupe_cap(contents: list[str], max_n: int) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for c in contents:
+            key = c.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(c)
+            if len(out) >= max_n:
+                break
+        return out
+
+    async def build_profile_for_user(
+        self,
+        user_id: str | None,
+        current_context: str | None = None,
+        context_similarity_threshold: float = 0.5,
+        max_per_side: int = 20,
+    ) -> dict[str, list[str]]:
+        """Assemble Supermemory-shaped profile: static/dynamic string lists."""
+        if not user_id or user_id.strip().lower() == "anonymous":
+            return {"static": [], "dynamic": []}
+        context_embedding = None
+        if current_context and current_context.strip():
+            context_embedding = await self._embedding.encode_single(
+                current_context.strip()
+            )
+        async with self._session() as session:
+            repo = PersonalMemoryRepository(session)
+            rows = await repo.list_for_pull(
+                user_id=user_id,
+                context_embedding=context_embedding,
+                context_similarity_threshold=context_similarity_threshold,
+            )
+        static_ordered: list[str] = []
+        dynamic_ordered: list[str] = []
+        for r in rows:
+            c = (r.content or "").strip()
+            if not c:
+                continue
+            if r.profile_kind == "dynamic":
+                dynamic_ordered.append(c)
+            else:
+                static_ordered.append(c)
+        return {
+            "static": self._dedupe_cap(static_ordered, max_per_side),
+            "dynamic": self._dedupe_cap(dynamic_ordered, max_per_side),
+        }
 
     async def pull(
         self,
@@ -92,18 +148,25 @@ class PersonalMemoryService:
         scope: str = "generic",
         context_hint: str | None = None,
         overwrite_threshold: float = PERSONAL_MEMORY_OVERWRITE_THRESHOLD,
+        profile_kind: str | None = None,
     ) -> dict:
         """Write one memory: compute embedding, then upsert by semantic (overwrite if similar)."""
+        if profile_kind in ("static", "dynamic"):
+            pk: str = profile_kind
+        else:
+            pk = "dynamic" if scope == "context" else "static"
+        scope_norm = "context" if pk == "dynamic" else "generic"
         embedding = await self._embedding.encode_single(content)
         async with self._session() as session:
             repo = PersonalMemoryRepository(session)
             mem = await repo.upsert_by_semantic(
                 user_id=user_id,
                 content=content,
-                scope=scope,
+                scope=scope_norm,
                 context_hint=context_hint,
                 embedding=embedding,
                 threshold=overwrite_threshold,
+                profile_kind=pk,
             )
             return mem.to_dict()
 
@@ -114,6 +177,7 @@ class PersonalMemoryService:
         content: str | None = None,
         scope: str | None = None,
         context_hint: str | None = None,
+        profile_kind: str | None = None,
     ) -> dict | None:
         """Update an existing memory; optionally re-compute embedding if content changed."""
         import uuid
@@ -128,9 +192,13 @@ class PersonalMemoryService:
         async with self._session() as session:
             repo = PersonalMemoryRepository(session)
             mem = await repo.update(
-                uid, user_id,
-                content=content, scope=scope, context_hint=context_hint,
+                uid,
+                user_id,
+                content=content,
+                scope=scope,
+                context_hint=context_hint,
                 embedding=embedding,
+                profile_kind=profile_kind,
             )
             return mem.to_dict() if mem else None
 

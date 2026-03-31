@@ -99,6 +99,7 @@ async def test_personal_memory_insert(session, mock_embedding):
     assert mem.user_id == "alice"
     assert mem.content == "I like concise UI"
     assert mem.scope == "generic"
+    assert mem.profile_kind == "static"
 
     listed = await repo.list_by_user("alice")
     assert len(listed) == 1
@@ -122,14 +123,15 @@ async def test_personal_memory_conflict_overwrite(session, mock_embedding):
     mem2 = await repo.upsert_by_semantic(
         user_id="bob",
         content="User prefers short answers (updated)",
-        embedding=vec,  # same embedding => will match mem1
-        scope="context",
+        embedding=vec,  # same embedding => will match mem1 (same profile_kind)
+        scope="generic",
         context_hint="when asking for help",
         threshold=PERSONAL_MEMORY_OVERWRITE_THRESHOLD,
+        profile_kind="static",
     )
     assert mem2.id == mem1.id
     assert mem2.content == "User prefers short answers (updated)"
-    assert mem2.scope == "context"
+    assert mem2.scope == "generic"
     assert mem2.context_hint == "when asking for help"
 
     listed = await repo.list_by_user("bob")
@@ -160,6 +162,31 @@ async def test_personal_memory_no_conflict_new(session, mock_embedding):
     assert len(listed) == 2
 
 
+@pytest.mark.asyncio
+async def test_personal_memory_upsert_cross_kind_no_merge(session, mock_embedding):
+    """High similarity across profile_kind must not overwrite — two rows."""
+    repo = PersonalMemoryRepository(session)
+    vec = await mock_embedding.encode_single("same embedding text")
+    await repo.create(
+        user_id="dana",
+        content="static fact",
+        scope="generic",
+        embedding=vec,
+        profile_kind="static",
+    )
+    mem2 = await repo.upsert_by_semantic(
+        user_id="dana",
+        content="dynamic fact",
+        embedding=vec,
+        scope="context",
+        threshold=PERSONAL_MEMORY_OVERWRITE_THRESHOLD,
+        profile_kind="dynamic",
+    )
+    assert mem2.content == "dynamic fact"
+    listed = await repo.list_by_user("dana")
+    assert len(listed) == 2
+
+
 # ---- Task 2: Pull API — generic only; generic+context (DB required) ----
 @pytest.mark.asyncio
 async def test_pull_generic_only_and_generic_plus_context(engine, session, mock_embedding):
@@ -187,6 +214,7 @@ async def test_pull_generic_only_and_generic_plus_context(engine, session, mock_
     out = await svc.pull(user_id="pull_user", current_context=None)
     assert len(out) == 1
     assert out[0]["scope"] == "generic"
+    assert out[0].get("profile_kind") == "static"
 
     # With current_context similar to context item: generic + context
     out2 = await svc.pull(
@@ -196,6 +224,7 @@ async def test_pull_generic_only_and_generic_plus_context(engine, session, mock_
     )
     assert len(out2) >= 1
     assert any(m["scope"] == "generic" for m in out2)
+    assert any(m.get("profile_kind") == "dynamic" for m in out2)
 
 
 # ---- Service-level: write (upsert) and list ----
