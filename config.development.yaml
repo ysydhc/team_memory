@@ -1,0 +1,295 @@
+# =============================================================================
+# team_memory — 开发环境配置（仓库默认）
+# =============================================================================
+#
+# 【如何被选中的】
+#   1) 未设置 TEAM_MEMORY_ENV，或设为 development / test / dev / local
+#   2) 未设置 TEAM_MEMORY_CONFIG_PATH（若设置了，则只加载该路径指向的单一文件，本文件被忽略）
+#
+# 【正式环境】
+#   TEAM_MEMORY_ENV=production（或 prod）→ 使用同目录下的 config.production.yaml
+#
+# 【覆盖优先级（从高到低）】
+#   环境变量 TEAM_MEMORY_*（Pydantic 嵌套用双下划线，如 TEAM_MEMORY_DATABASE__URL）
+#   → 本 YAML
+#   → Settings 代码内默认值（仅当本文件未写某字段时）
+#
+# 【安全】
+#   - 勿把真实密码/API Key 明文提交到 Git；可用 "${ENV_NAME}" 占位 + 导出环境变量
+#   - auth.api_key 常用于与 TEAM_MEMORY_API_KEY 对齐，便于 MCP 与 Web 同账号
+#
+# 【与数据库一致】
+#   - embedding.*.dimension 须与迁移里 experiences.embedding / archives.embedding 维度一致
+#     （本仓库 MVP 默认 768，对应 Ollama nomic-embed-text）
+#   - 改维度必须先改库迁移或接受重建向量列（本配置不负责迁移，仅说明风险）
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# database — PostgreSQL + asyncpg + pgvector
+# -----------------------------------------------------------------------------
+# url: SQLAlchemy 异步连接串，必须使用 postgresql+asyncpg:// 前缀。
+#      开发常见：Docker Compose 将容器 5432 映射到主机 5433，故示例用 5433。
+#      覆盖示例：export TEAM_MEMORY_DATABASE__URL=postgresql+asyncpg://...
+database:
+  url: "postgresql+asyncpg://developer:devpass@localhost:5433/team_memory"
+
+# -----------------------------------------------------------------------------
+# embedding — 向量嵌入服务（检索、保存经验/档案时编码）
+# -----------------------------------------------------------------------------
+# provider: ollama | openai | local | generic（切换时需同步 dimension 与下游模型可用性）
+# ollama.model: 须已 ollama pull；与 base_url 指向的实例一致
+# ollama.dimension: 写入 DB 的向量维数；错误会导致写入失败或检索异常
+#
+# 使用 OpenAI 时典型配置（整段注释掉，按需启用并取消注释）：
+# embedding:
+#   provider: openai
+#   openai:
+#     api_key: "${OPENAI_API_KEY}"
+#     model: text-embedding-3-small
+#     dimension: 1536
+embedding:
+  provider: ollama
+  ollama:
+    # 与 ollama list /api/tags 中 name 一致（含 :latest）；勿只写无前缀名以免脚本误判未安装
+    model: nomic-embed-text:latest
+    # TM 跑在宿主机用 localhost；TM 跑在 Docker 内而 Ollama 在宿主机时用 host.docker.internal（见 docker-compose）
+    base_url: http://localhost:11434
+    dimension: 768
+
+# -----------------------------------------------------------------------------
+# llm — 文档解析、经验提取、个人记忆抽取等（调用 Ollama 的 /api/chat）
+# -----------------------------------------------------------------------------
+# 与上一段 embedding 是两回事：nomic-embed-text 只做向量（/api/embed），不能填在 llm.model。
+# 带 *-cloud 的名称会走 Ollama 云端；纯本机请用已 ollama pull 的「对话模型」，例如 llama3.2。
+# 覆盖示例：TEAM_MEMORY_LLM__MODEL、TEAM_MEMORY_LLM__BASE_URL
+llm:
+  model: llama3.2
+  base_url: http://localhost:11434
+  prompt_dir: null
+
+# -----------------------------------------------------------------------------
+# extraction — 从对话/文档自动提取经验时的质量门控
+# -----------------------------------------------------------------------------
+# quality_gate: 整数，提取结果质量分阈值（尺度见 prompts）；低于则按 max_retries 重试
+# max_retries: 质量不达标时的额外尝试次数；0 表示不重试
+# few_shot_examples: 指向自定义 few-shot 文件路径；null 使用内置示例
+extraction:
+  quality_gate: 2
+  max_retries: 1
+  few_shot_examples: null
+
+# -----------------------------------------------------------------------------
+# auth — 鉴权模式（Web / MCP 共用 AuthProvider）
+# -----------------------------------------------------------------------------
+# type:
+#   - db_api_key（推荐）：用户与 API Key 在库表 api_keys 中管理，支持注册/登录/Web UI
+#   - api_key：进程内单 Key，适合极简演示（生产慎用）
+#   - none：无认证（仅本地调试）
+# api_key: 可与环境变量 TEAM_MEMORY_API_KEY 一致；值支持 "${VAR}" 解析
+# 其他字段（session_secret、default_admin_password 等）见 config.py AuthConfig，可按需补全
+auth:
+  type: db_api_key
+  api_key: "${TEAM_MEMORY_API_KEY}"
+
+# -----------------------------------------------------------------------------
+# default_project — 多租户/多项目隔离的默认项目名
+# -----------------------------------------------------------------------------
+# MCP/Web 未显式传 project 时回退到此值；须与库内 experiences.project 策略一致
+default_project: "team_memory"
+
+# -----------------------------------------------------------------------------
+# web — FastAPI / Uvicorn 监听
+# -----------------------------------------------------------------------------
+# host: 0.0.0.0 允许局域网访问；仅本机可改为 127.0.0.1
+# port: 默认 9111；可被 TEAM_MEMORY_WEB__PORT 覆盖
+# ssl_keyfile / ssl_certfile: 生产 HTTPS 时使用；也可用环境变量 TEAM_MEMORY_WEB_SSL_KEYFILE 等
+web:
+  host: "0.0.0.0"
+  port: 9111
+
+# -----------------------------------------------------------------------------
+# installable_catalog — 可安装 Rules / Prompts / Skills 目录与注册表
+# -----------------------------------------------------------------------------
+# sources: local 读本地目录；registry 需配置 registry_manifest_url
+# local_base_dir: 相对仓库根；内置清单与压缩包来源
+# target_*: 安装目标目录（Cursor 规则常用 .cursor 下路径）
+# target_skills_dir: Skills 安装目录（与 MCP tm_skill_manage 等配合）
+installable_catalog:
+  sources: ["local"]
+  local_base_dir: "docs/res"
+  registry_manifest_url: ""
+  target_rules_dir: ".cursor/rules"
+  target_prompts_dir: ".cursor/prompts"
+  target_skills_dir: ".cursor/skills"
+  request_timeout_seconds: 8
+
+# -----------------------------------------------------------------------------
+# retrieval — 检索结果裁剪与上下文预算（偏向「返回给模型多少条、多少子节点」）
+# -----------------------------------------------------------------------------
+# max_tokens: 返回正文总 token 上限；null 表示不按 token 截断（仍可能受 mcp 层限制）
+# max_count: 最多返回多少条「经验组」或扁平结果（与 grouped 策略配合）
+# trim_strategy: top_k 按条数保留；summary 可走 LLM 压缩（依赖 llm）
+# top_k_children: 每个父经验下附带多少条子经验预览
+# min_avg_rating / rating_weight: 当前 MVP 混合检索管线未使用 experiences 上冗余平均分；预留 Web/未来排序
+# summary_model: trim_strategy=summary 时可选覆盖 llm.model；null 则用 llm.model
+retrieval:
+  max_tokens: null
+  max_count: 20
+  trim_strategy: top_k
+  top_k_children: 3
+  min_avg_rating: 0.0
+  rating_weight: 0.0
+  summary_model: null
+
+# -----------------------------------------------------------------------------
+# pageindex_lite — 长文档 / 档案章节树相关参数（配置保留；管线接线以代码为准）
+# -----------------------------------------------------------------------------
+# enabled: 总开关；仅当服务端实际接入树检索时生效
+# only_long_docs: 仅对超长正文建/用树，避免短文开销
+# min_doc_chars: 超过该长度视为「长文档」
+# max_tree_depth / max_nodes_per_doc / max_node_chars: 树规模与单节长度上限
+# tree_weight: 与主检索分融合的权重（实现依赖 search 管线）
+# min_node_score: 节点匹配分过滤下限
+# include_matched_nodes: 是否在响应中带出命中的节点片段
+pageindex_lite:
+  enabled: true
+  only_long_docs: true
+  min_doc_chars: 800
+  max_tree_depth: 4
+  max_nodes_per_doc: 40
+  max_node_chars: 1200
+  tree_weight: 0.15
+  min_node_score: 0.01
+  include_matched_nodes: true
+
+# -----------------------------------------------------------------------------
+# search — 混合检索管线（向量 + 全文 FTS + RRF 等）
+# -----------------------------------------------------------------------------
+# mode:
+#   - hybrid: 向量 + 全文融合（默认）
+#   - vector: 仅向量
+#   - fts: 仅 PostgreSQL 全文检索
+# rrf_k: Reciprocal Rank Fusion 平滑常数，常见 60
+# vector_weight / fts_weight: hybrid 时两路权重大致比例（须为正，相对大小有意义）
+# adaptive_filter: 是否启用基于分位/肘部的自适应截断，减少噪声结果
+# score_gap_threshold: 相邻候选分差距阈值，用于肘部检测（过大则少截断）
+# min_confidence_ratio: 相对 Top1 的最低分比例，低于则可能标为低置信
+# adaptive_min_keep: 自适应过滤时至少保留条数，避免结果被切光
+# short_query_max_chars: 短于该字数的查询视为「短查询」
+# min_similarity_short: 短查询使用的最低向量相似度门槛（召回略放宽）
+# query_expansion_enabled: 是否启用 LLM 查询扩展（超时则回退原查询）
+# query_expansion_timeout_seconds: 扩展请求超时秒数
+search:
+  mode: hybrid
+  vector_weight: 0.7
+  fts_weight: 0.3
+  rrf_k: 60
+  adaptive_filter: true
+  score_gap_threshold: 0.15
+  min_confidence_ratio: 0.6
+  adaptive_min_keep: 3
+  short_query_max_chars: 20
+  min_similarity_short: 0.45
+  query_expansion_enabled: false
+  query_expansion_timeout_seconds: 5
+
+# -----------------------------------------------------------------------------
+# cache — 检索结果与向量嵌入缓存
+# -----------------------------------------------------------------------------
+# backend: memory（进程内）或 redis（多实例/可持久）
+# redis_url: 仅 backend=redis 时使用；docker-compose 中 redis 服务默认可用
+# ttl_seconds: 检索缓存条目生存时间（秒）
+# max_size: 检索缓存最大条数（memory 后端）
+# embedding_cache_size: 查询向量缓存条数上限
+cache:
+  enabled: true
+  backend: memory
+  redis_url: "redis://localhost:6379/0"
+  ttl_seconds: 300
+  max_size: 100
+  embedding_cache_size: 200
+
+# -----------------------------------------------------------------------------
+# lifecycle — 保存时去重（相似经验提示）
+# -----------------------------------------------------------------------------
+# dedup_on_save: 新经验写入前是否与库内候选做相似度比对
+# dedup_on_save_threshold: 余弦相似度门槛，越高越严格（0~1）
+lifecycle:
+  dedup_on_save: true
+  dedup_on_save_threshold: 0.90
+
+# -----------------------------------------------------------------------------
+# vector — pgvector 索引策略（表级索引创建见迁移/运维文档）
+# -----------------------------------------------------------------------------
+# index_type: ivfflat（默认、中等规模）或 hnsw（大规模、更高内存/建索引成本）
+# hnsw_*: 仅 index_type=hnsw 时参数有意义；具体组合见 PostgreSQL/pgvector 文档
+vector:
+  index_type: ivfflat
+  hnsw_m: 16
+  hnsw_ef_construction: 200
+  hnsw_ef_search: 100
+
+# -----------------------------------------------------------------------------
+# mcp — MCP 工具返回体大小控制（避免一次工具调用撑爆上下文）
+# -----------------------------------------------------------------------------
+# max_output_tokens: 工具响应侧 token 预算参考上限
+# truncate_solution_at: 单条 solution 字段在返回前可截断的字符数上限
+mcp:
+  max_output_tokens: 4000
+  truncate_solution_at: 2000
+
+# -----------------------------------------------------------------------------
+# logging — 日志子系统（可选；未写时走 Settings 默认值）
+# -----------------------------------------------------------------------------
+# 可通过本段或环境变量 TEAM_MEMORY_LOGGING__* 配置；详见 docs/design-docs/logging-format.md
+# 示例：
+# logging:
+#   log_io_enabled: false
+#   log_io_detail: mcp
+#   log_file_enabled: false
+#   log_file_path: logs/team_memory.log
+
+# -----------------------------------------------------------------------------
+# webhooks — 事件 HTTP 回调（经验变更等，列表为空表示不启用）
+# -----------------------------------------------------------------------------
+# 每项: url, events[], secret, active
+# webhooks:
+#   - url: "https://hooks.example.com/team-memory"
+#     events: ["experience.created"]
+#     secret: "${WEBHOOK_SECRET}"
+#     active: true
+webhooks: []
+
+# -----------------------------------------------------------------------------
+# tag_synonyms — 检索/保存时标签规范化（缩写 → 全称）
+# -----------------------------------------------------------------------------
+# 键为「可能出现的别名」，值为「希望归一成的词」；可按团队习惯扩展
+tag_synonyms:
+  PG: PostgreSQL
+  pg: PostgreSQL
+  JS: JavaScript
+  js: JavaScript
+  TS: TypeScript
+  ts: TypeScript
+  py: Python
+  k8s: Kubernetes
+
+# -----------------------------------------------------------------------------
+# uploads — 档案附件本地上传（multipart → 磁盘；与 L2 可见性一致）
+# -----------------------------------------------------------------------------
+# enabled: false 时 POST 上传返回 503；已落盘的附件仍可按 GET 下载
+# root_dir: 相对仓库根或绝对路径；生产建议独立数据卷
+# max_bytes: 单文件上限；可覆盖 TEAM_MEMORY_UPLOADS__MAX_BYTES
+# allowed_extensions: 非空时为后缀白名单（小写带点，如 .pdf）；空列表表示允许任意非空扩展名
+uploads:
+  enabled: true
+  root_dir: "data/uploads"
+  max_bytes: 52428800
+  allowed_extensions: [".md", ".txt", ".json", ".pdf"]
+
+# -----------------------------------------------------------------------------
+# log_format — 控制台/结构化日志形态
+# -----------------------------------------------------------------------------
+# human: 人类可读；json: 每行 JSON（便于 Loki/ELK）；可被环境变量 LOG_FORMAT 覆盖
+log_format: human

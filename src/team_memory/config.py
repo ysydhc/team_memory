@@ -1,7 +1,8 @@
 """Configuration management for team_memory.
 
-Supports loading from config.yaml + environment variable overrides.
-Environment variables take precedence over YAML values.
+Loads one YAML per environment (default ``config.development.yaml``;
+``TEAM_MEMORY_ENV=production`` → ``config.production.yaml``), then
+environment variables override (pydantic-settings).
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from pydantic_settings import (
 class DatabaseConfig(BaseModel):
     """Database connection configuration."""
 
-    url: str = "postgresql+asyncpg://developer:devpass@localhost:5432/team_memory"
+    url: str = "postgresql+asyncpg://developer:devpass@localhost:5433/team_memory"
 
 
 class OpenAIEmbeddingConfig(BaseModel):
@@ -36,7 +37,8 @@ class OpenAIEmbeddingConfig(BaseModel):
 class OllamaEmbeddingConfig(BaseModel):
     """Ollama embedding configuration."""
 
-    model: str = "nomic-embed-text"
+    # Explicit :latest avoids ambiguity with Ollama tags (name is always tagged in /api/tags).
+    model: str = "nomic-embed-text:latest"
     base_url: str = "http://localhost:11434"
     dimension: int = 768
 
@@ -85,173 +87,94 @@ class LLMConfig(BaseModel):
     provider: str = "ollama"  # ollama | openai | generic
     model: str = "gpt-oss:120b-cloud"
     base_url: str = "http://localhost:11434"
-    api_key: str = ""  # For OpenAI/generic providers
-    prompt_dir: str | None = None  # Custom prompt template directory
-    monthly_budget: float = 0.0  # Monthly budget in USD (0 = unlimited)
+    api_key: str = ""
+    prompt_dir: str | None = None
+    monthly_budget: float = 0.0
 
 
 class ExtractionConfig(BaseModel):
     """Experience extraction quality gate and retry configuration."""
 
-    quality_gate: int = 2  # Minimum quality score (0-5); below this triggers retry
-    max_retries: int = 1  # Max retries when quality score < quality_gate (0 = no retry)
-    few_shot_examples: str | None = None  # Custom few-shot path (null = built-in)
+    quality_gate: int = 2
+    max_retries: int = 1
+    few_shot_examples: str | None = None
 
 
 class RetrievalConfig(BaseModel):
-    """Retrieval and context trimming configuration."""
+    """Retrieval configuration."""
 
-    max_tokens: int | None = None  # Token budget for returned content (None = no limit)
-    max_count: int = 20  # Maximum number of experience groups returned
+    max_tokens: int | None = None
+    max_count: int = 20
     trim_strategy: Literal["top_k", "summary"] = "top_k"
-    top_k_children: int = 3  # Max children per group
-    min_avg_rating: float = 0.0  # Minimum avg_rating filter (0 = no filter)
-    rating_weight: float = 0.3  # Weight of rating in final score
-    summary_model: str | None = None  # LLM model for summary strategy
+    top_k_children: int = 3
+    # Reserved for future ranking; MVP hybrid search does not read experiences.avg_rating.
+    min_avg_rating: float = Field(
+        default=0.0,
+        description="Min avg feedback rating filter (0=off). Not used in MVP search yet.",
+    )
+    rating_weight: float = Field(
+        default=0.0,
+        description="Rating blend weight. Not used in MVP search yet.",
+    )
+    summary_model: str | None = Field(
+        default=None,
+        description="LLM model for summary trim; null = llm.model.",
+    )
 
 
 class PageIndexLiteConfig(BaseModel):
-    """PageIndex-Lite configuration for long-document tree retrieval."""
+    """PageIndex-Lite configuration (used for Archive long-doc retrieval)."""
 
     enabled: bool = True
-    only_long_docs: bool = True  # only build tree for long document content
-    min_doc_chars: int = 800  # minimum content length to build tree
-    max_tree_depth: int = 4  # keep only top N heading levels
-    max_nodes_per_doc: int = 40  # hard cap for node count
-    max_node_chars: int = 1200  # truncate very long node content
-    tree_weight: float = 0.15  # score contribution in search pipeline
-    min_node_score: float = 0.01  # minimum node match score in tree search
-    include_matched_nodes: bool = True  # include matched nodes in API/MCP output
-
-
-# ====================== Reranker Configuration ======================
-
-
-class OllamaLLMRerankerConfig(BaseModel):
-    """Ollama LLM reranker config — uses chat API for relevance scoring.
-
-    If model/base_url are None, they fall back to the global LLMConfig values.
-    """
-
-    model: str | None = None  # None = reuse LLMConfig.model
-    base_url: str | None = None  # None = reuse LLMConfig.base_url
-    top_k: int = 10  # Keep top K after reranking
-    batch_size: int = 5  # Documents per LLM call
-    prompt_template: str | None = None  # Custom prompt (None = use built-in default)
-
-
-class CrossEncoderRerankerConfig(BaseModel):
-    """Local cross-encoder reranker config (sentence-transformers)."""
-
-    model_name: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
-    device: str = "cpu"
-    top_k: int = 10
-
-
-class JinaRerankerConfig(BaseModel):
-    """Jina Reranker API config."""
-
-    api_key: str = ""
-    model: str = "jina-reranker-v2-base-multilingual"
-    top_k: int = 10
-
-
-class RerankerConfig(BaseModel):
-    """Reranker configuration — pluggable provider architecture.
-
-    provider = "none": No server-side reranking, rely on client LLM to judge.
-    provider = "ollama_llm": Use Ollama LLM (or any OpenAI-compatible API) for scoring.
-    provider = "cross_encoder": Use local cross-encoder model (sentence-transformers).
-    provider = "jina": Use Jina Reranker API.
-    """
-
-    provider: Literal["none", "ollama_llm", "cross_encoder", "jina"] = "none"
-    ollama_llm: OllamaLLMRerankerConfig = Field(default_factory=OllamaLLMRerankerConfig)
-    cross_encoder: CrossEncoderRerankerConfig = Field(
-        default_factory=CrossEncoderRerankerConfig
-    )
-    jina: JinaRerankerConfig = Field(default_factory=JinaRerankerConfig)
-
-
-# ====================== File Location Binding Configuration ======================
-
-
-class FileLocationBindingConfig(BaseModel):
-    """File location binding TTL and cleanup configuration.
-
-    Controls how long experience–file bindings are kept and when they are refreshed
-    or cleaned up.
-    """
-
-    file_location_ttl_days: int = 30  # Days until a binding is considered expired
-    file_location_refresh_on_access: bool = True  # Refresh TTL when binding is used
-    file_location_cleanup_enabled: bool = True  # Run periodic cleanup of expired bindings
-    file_location_cleanup_interval_hours: int = 24  # How often cleanup runs (hours)
-
-
-# ====================== Search Configuration ======================
+    only_long_docs: bool = True
+    min_doc_chars: int = 800
+    max_tree_depth: int = 4
+    max_nodes_per_doc: int = 40
+    max_node_chars: int = 1200
+    tree_weight: float = 0.15
+    min_node_score: float = 0.01
+    include_matched_nodes: bool = True
 
 
 class SearchConfig(BaseModel):
     """Search pipeline configuration."""
 
-    mode: Literal["hybrid", "vector", "fts"] = "hybrid"  # Search mode
-    rrf_k: int = 60  # RRF constant (standard value)
-    vector_weight: float = 0.7  # Weight for vector results in RRF
-    fts_weight: float = 0.3  # Weight for FTS results in RRF
-    location_weight: float = Field(
-        0.15,
-        description="文件位置匹配在最终得分中的权重，推荐 0.1～0.25，默认即可一般无需调整",
-    )
-    adaptive_filter: bool = True  # Enable adaptive score filtering
-    score_gap_threshold: float = 0.15  # Gap threshold for elbow detection
-    min_confidence_ratio: float = 0.6  # Min ratio vs top-1 for dynamic threshold
-    adaptive_min_keep: int = 3  # Min results before elbow cut; avoids losing good matches
-    # Short-query relaxation (better recall for 1–2 word queries)
-    short_query_max_chars: int = 20  # Treat query as "short" when len <= this
-    min_similarity_short: float = 0.45  # Lower min_similarity for short queries
-    # LLM query expansion (P1-5): expand query for recall; fallback on timeout/failure
+    mode: Literal["hybrid", "vector", "fts"] = "hybrid"
+    rrf_k: int = 60
+    vector_weight: float = 0.7
+    fts_weight: float = 0.3
+    adaptive_filter: bool = True
+    score_gap_threshold: float = 0.15
+    min_confidence_ratio: float = 0.6
+    adaptive_min_keep: int = 3
+    short_query_max_chars: int = 20
+    min_similarity_short: float = 0.45
     query_expansion_enabled: bool = False
     query_expansion_timeout_seconds: float = 3.0
 
 
-# ====================== Cache Configuration ======================
-
-
 class CacheConfig(BaseModel):
-    """Query result caching configuration.
+    """Query result caching configuration."""
 
-    backend = "memory": In-process LRU cache (default, no external deps).
-    backend = "redis": Redis-backed cache (requires redis server).
-    """
-
-    enabled: bool = True  # Enable/disable caching
-    backend: Literal["memory", "redis"] = "memory"  # Cache backend
-    redis_url: str = "redis://localhost:6379/0"  # Redis connection URL
-    ttl_seconds: int = 300  # Cache TTL (5 minutes)
-    max_size: int = 100  # Max cached entries
-    embedding_cache_size: int = 200  # Max cached embeddings
+    enabled: bool = True
+    backend: Literal["memory", "redis"] = "memory"
+    redis_url: str = "redis://localhost:6379/0"
+    ttl_seconds: int = 300
+    max_size: int = 100
+    embedding_cache_size: int = 200
 
 
 class VectorConfig(BaseModel):
-    """Vector index configuration (P2-4)."""
+    """Vector index configuration."""
 
     index_type: Literal["ivfflat", "hnsw"] = "ivfflat"
-    # HNSW parameters (only used when index_type=hnsw)
     hnsw_m: int = 16
     hnsw_ef_construction: int = 200
     hnsw_ef_search: int = 100
 
 
 class AuthConfig(BaseModel):
-    """Authentication configuration.
-
-    Supported types:
-      - "db_api_key": Database-backed multi-user auth (recommended).
-        Supports password login on Web and API Key for MCP.
-      - "api_key": In-memory single/dual key auth (legacy).
-      - "none": No auth (development only).
-    """
+    """Authentication configuration."""
 
     type: Literal["api_key", "db_api_key", "none"] = "db_api_key"
     api_key: str | None = None
@@ -273,10 +196,8 @@ class WebConfig(BaseModel):
 class InstallableCatalogConfig(BaseModel):
     """Installable rules/prompts catalog configuration."""
 
-    sources: list[Literal["local", "registry"]] = Field(
-        default_factory=lambda: ["local"]
-    )
-    local_base_dir: str = "docs/res"  # 可安装 rules/prompts 来源目录
+    sources: list[Literal["local", "registry"]] = Field(default_factory=lambda: ["local"])
+    local_base_dir: str = "docs/res"
     registry_manifest_url: str = ""
     target_rules_dir: str = ".cursor/rules"
     target_prompts_dir: str = ".cursor/prompts"
@@ -284,118 +205,31 @@ class InstallableCatalogConfig(BaseModel):
     request_timeout_seconds: int = 8
 
 
-class MemoryConfig(BaseModel):
-    """Memory compaction / summary configuration."""
-
-    auto_summarize: bool = True  # Auto-generate summary for long experiences
-    summary_threshold_tokens: int = 500  # Token threshold to trigger summarization
-    summary_model: str = (
-        ""  # LLM model override for summarization (empty = use default)
-    )
-    batch_size: int = 10  # Batch size for bulk summarization
-
-
 class LifecycleConfig(BaseModel):
-    """Experience lifecycle management configuration."""
+    """Experience lifecycle — dedup on save."""
 
-    stale_months: int = 6  # Months of inactivity before marking as stale
-    scan_interval_hours: int = 24  # Background scan interval in hours
-    duplicate_threshold: float = 0.92  # Cosine similarity threshold for dedup
-    dedup_on_save: bool = True  # Check for duplicates before saving
-    dedup_on_save_threshold: float = 0.90  # Similarity threshold for save-time dedup
+    dedup_on_save: bool = True
+    dedup_on_save_threshold: float = 0.90
 
 
 class MCPConfig(BaseModel):
-    """MCP server output control.
+    """MCP server output control."""
 
-    Controls how much data MCP tools return to the LLM client,
-    preventing context window overflow.
-    """
-
-    max_output_tokens: int = 4000  # Max token budget for a single tool response
-    truncate_solution_at: int = 2000  # Max chars per solution field before truncation
-    include_code_snippets: bool = True  # Whether to include code_snippets in results
+    max_output_tokens: int = 4000
+    truncate_solution_at: int = 2000
+    profile_max_strings_per_side: int = 20
 
 
 class LoggingConfig(BaseModel):
-    """Logging configuration for io_logger and file logging.
+    """Logging configuration."""
 
-    See docs/plans/2025-03-10-logging-system-design.md for design details.
-    """
-
-    log_io_enabled: bool = False  # Enable I/O logging (io_logger)
-    log_io_detail: str = "mcp"  # Granularity: mcp / service / pipeline / full
-    log_io_truncate: int = 300  # Truncate single log entry beyond this (0 = no truncate)
-    log_file_enabled: bool = False  # Enable file logging
+    log_io_enabled: bool = False
+    log_io_detail: str = "mcp"
+    log_io_truncate: int = 300
+    log_file_enabled: bool = False
     log_file_path: str = "logs/team_memory.log"
     log_file_backup_count: int = 5
-    log_file_max_bytes: int = 10 * 1024 * 1024  # Max bytes per file (10M)
-
-
-# ====================== Schema Configuration ======================
-
-
-class StructuredFieldDef(BaseModel):
-    """Definition of a custom structured field for an experience type."""
-
-    name: str
-    type: str = "text"  # text / list / bool
-    label: str = ""
-    required: bool = False
-
-
-class ExperienceTypeDef(BaseModel):
-    """Definition of an experience type (built-in or custom)."""
-
-    id: str
-    label: str = ""
-    severity: bool = False  # Whether this type uses severity levels
-    progress_states: list[str] = Field(default_factory=list)
-    structured_fields: list[StructuredFieldDef] = Field(default_factory=list)
-
-
-class CategoryDef(BaseModel):
-    """Definition of a category."""
-
-    id: str
-    label: str = ""
-
-
-class CustomSchemaConfig(BaseModel):
-    """Schema customisation — preset + user-defined overrides.
-
-    Progressive complexity:
-      - preset alone: zero-config, pick one of the built-in packs
-      - experience_types / categories / severity_levels: add or override items
-    """
-
-    preset: str = "software-dev"  # software-dev / data-engineering / devops / general
-    experience_types: list[ExperienceTypeDef] = Field(default_factory=list)
-    categories: list[CategoryDef] = Field(default_factory=list)
-    severity_levels: list[str] = Field(
-        default_factory=list
-    )  # empty = inherit from preset
-
-
-# ====================== AI Behavior Configuration ======================
-
-
-class AIBehaviorConfig(BaseModel):
-    """AI behaviour preferences — the friendly layer above raw prompt files.
-
-    Users describe what they want in natural language; the system translates
-    these into prompt constraints automatically.
-    """
-
-    output_language: str = "zh-CN"
-    detail_level: str = "detailed"  # detailed / concise
-    focus_areas: list[str] = Field(
-        default_factory=lambda: ["root_cause", "solution", "code_snippets"]
-    )
-    custom_instructions: str = ""  # Free-form team instructions
-
-
-# ====================== Webhook Configuration ======================
+    log_file_max_bytes: int = 10 * 1024 * 1024
 
 
 class WebhookItemConfig(BaseModel):
@@ -407,10 +241,20 @@ class WebhookItemConfig(BaseModel):
     active: bool = True
 
 
+class UploadsConfig(BaseModel):
+    """Local multipart uploads for archive attachments (MVP disk storage)."""
+
+    enabled: bool = True
+    root_dir: str = "data/uploads"
+    max_bytes: int = 52_428_800  # ~50 MiB
+    # Empty list = allow any non-empty extension; non-empty = lowercase suffix whitelist
+    allowed_extensions: list[str] = Field(default_factory=lambda: [".md", ".txt", ".json", ".pdf"])
+
+
 class Settings(BaseSettings):
     """Application settings.
 
-    Loads from config.yaml, then overrides with environment variables.
+    Loads from ``config.{development|production}.yaml``, then env overrides.
     """
 
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
@@ -421,29 +265,18 @@ class Settings(BaseSettings):
     default_project: str = "default"
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     pageindex_lite: PageIndexLiteConfig = Field(default_factory=PageIndexLiteConfig)
-    reranker: RerankerConfig = Field(default_factory=RerankerConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
-    file_location_binding: FileLocationBindingConfig = Field(
-        default_factory=FileLocationBindingConfig
-    )
     cache: CacheConfig = Field(default_factory=CacheConfig)
     vector: VectorConfig = Field(default_factory=VectorConfig)
     web: WebConfig = Field(default_factory=WebConfig)
     lifecycle: LifecycleConfig = Field(default_factory=LifecycleConfig)
-    memory: MemoryConfig = Field(default_factory=MemoryConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
-    installable_catalog: InstallableCatalogConfig = Field(
-        default_factory=InstallableCatalogConfig
-    )
-    custom_schema: CustomSchemaConfig = Field(default_factory=CustomSchemaConfig)
-    ai_behavior: AIBehaviorConfig = Field(default_factory=AIBehaviorConfig)
+    installable_catalog: InstallableCatalogConfig = Field(default_factory=InstallableCatalogConfig)
     webhooks: list[WebhookItemConfig] = Field(default_factory=list)
-    tag_synonyms: dict[str, str] = Field(default_factory=dict)  # P2-7: PG -> PostgreSQL
-    # Log format: "human" (default) or "json".
-    # Priority: TEAM_MEMORY_LOG_FORMAT > LOG_FORMAT (in load_settings) > yaml.
-    # Use LOG_FORMAT for quick dev override; TEAM_MEMORY_LOG_FORMAT wins if both set.
+    tag_synonyms: dict[str, str] = Field(default_factory=dict)
     log_format: Literal["human", "json"] = "human"
+    uploads: UploadsConfig = Field(default_factory=UploadsConfig)
 
     model_config = SettingsConfigDict(
         env_prefix="TEAM_MEMORY_",
@@ -459,7 +292,6 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        """Let environment variables override YAML-provided init values."""
         return (
             env_settings,
             init_settings,
@@ -491,55 +323,50 @@ def _resolve_dict(d: dict) -> dict:
     return result
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
-    """Deep merge override dict into base dict (override wins)."""
-    result = base.copy()
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
-
-
 def _load_dotenv_if_available() -> None:
-    """Load .env into os.environ so TEAM_MEMORY_* are available before config resolution."""
+    """Load .env into os.environ."""
     try:
         from dotenv import load_dotenv
     except ImportError:
         return
-    for candidate in (Path.cwd() / ".env", Path(__file__).resolve().parent.parent.parent / ".env"):
+    for candidate in (
+        Path.cwd() / ".env",
+        Path(__file__).resolve().parent.parent.parent / ".env",
+    ):
         if candidate.exists():
             load_dotenv(candidate)
             return
 
 
+def _normalize_env_name(raw: str) -> str:
+    """Map legacy env names to development|production."""
+    key = (raw or "development").strip().lower()
+    aliases = {
+        "dev": "development",
+        "test": "development",
+        "local": "development",
+        "prod": "production",
+    }
+    key = aliases.get(key, key)
+    return key if key in ("development", "production") else "development"
+
+
 def load_settings(config_path: str | Path | None = None) -> Settings:
-    """Load settings from YAML config file(s) with environment variable overrides.
+    """Load settings from a single YAML file, then apply environment overrides.
 
-    Configuration layering (later layers override earlier ones):
-      1. config.yaml          — full defaults (always loaded as base)
-      2. config.local.yaml    — developer machine overrides (deep merged)
-      3. config.{env}.yaml    — environment-specific overlay (deep merged)
-      4. Environment variables — highest priority (pydantic-settings)
+    Resolution order:
+      1. ``config_path`` argument if provided and file exists
+      2. ``TEAM_MEMORY_CONFIG_PATH`` if set and file exists
+      3. ``config.{development|production}.yaml`` where env is ``TEAM_MEMORY_ENV``
+         (default ``development``; aliases: test/local/dev → development, prod → production)
+      4. Empty dict → Pydantic defaults only when no matching file exists
 
-    Special behavior:
-      - TEAM_MEMORY_CONFIG_PATH: explicit base config path (replaces step 1-2)
-      - config.minimal.yaml is NOT auto-merged by default
-      - TEAM_MEMORY_ENABLE_MINIMAL_OVERLAY=1 can explicitly enable minimal overlay
-      - If config.yaml does not exist, config.minimal.yaml is used as fallback base
-
-    Args:
-        config_path: Path to the YAML config file. If None, auto-detects.
-
-    Returns:
-        Fully resolved Settings instance.
+    Environment variables (``TEAM_MEMORY_*``) always override YAML via pydantic-settings.
     """
     _load_dotenv_if_available()
     yaml_data: dict = {}
 
     if config_path is not None:
-        # Explicit path provided — use it as the sole base
         path = Path(config_path)
         if path.exists():
             with open(path) as f:
@@ -548,62 +375,23 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
     else:
         env_path = os.environ.get("TEAM_MEMORY_CONFIG_PATH")
         if env_path:
-            # Explicit env var — use as sole base
             path = Path(env_path)
             if path.exists():
                 with open(path) as f:
                     raw = yaml.safe_load(f) or {}
                 yaml_data = _resolve_dict(raw)
         else:
-            # Layered loading: base -> local.
-            # config.minimal.yaml is treated as example/template by default.
-            base_path = Path("config.yaml")
-            if base_path.exists():
-                with open(base_path) as f:
+            env_name = _normalize_env_name(os.environ.get("TEAM_MEMORY_ENV", "development"))
+            cfg_path = Path(f"config.{env_name}.yaml")
+            if cfg_path.exists():
+                with open(cfg_path) as f:
                     raw = yaml.safe_load(f) or {}
                 yaml_data = _resolve_dict(raw)
 
-            # Optional explicit overlay for config.minimal.yaml
-            minimal_overlay_enabled = os.environ.get(
-                "TEAM_MEMORY_ENABLE_MINIMAL_OVERLAY", ""
-            ).lower() in {"1", "true", "yes", "on"}
-            minimal_path = Path("config.minimal.yaml")
-            if minimal_overlay_enabled and minimal_path.exists():
-                with open(minimal_path) as f:
-                    minimal_raw = yaml.safe_load(f) or {}
-                minimal_data = _resolve_dict(minimal_raw)
-                yaml_data = _deep_merge(yaml_data, minimal_data)
-            elif not yaml_data and minimal_path.exists():
-                # Bootstrap fallback when config.yaml is absent.
-                with open(minimal_path) as f:
-                    minimal_raw = yaml.safe_load(f) or {}
-                yaml_data = _resolve_dict(minimal_raw)
-
-            # Overlay config.local.yaml (developer overrides)
-            local_path = Path("config.local.yaml")
-            if local_path.exists():
-                with open(local_path) as f:
-                    local_raw = yaml.safe_load(f) or {}
-                local_data = _resolve_dict(local_raw)
-                yaml_data = _deep_merge(yaml_data, local_data)
-
-    # Multi-environment overlay: load config.{TEAM_MEMORY_ENV}.yaml
-    env_name = os.environ.get("TEAM_MEMORY_ENV", "")
-    if env_name:
-        env_config_path = Path(f"config.{env_name}.yaml")
-        if env_config_path.exists():
-            with open(env_config_path) as f:
-                env_raw = yaml.safe_load(f) or {}
-            env_data = _resolve_dict(env_raw)
-            yaml_data = _deep_merge(yaml_data, env_data)
-
-    # LOG_FORMAT (no prefix) overrides yaml; applied before pydantic.
-    # TEAM_MEMORY_LOG_FORMAT (pydantic env) wins if both LOG_FORMAT and TEAM_MEMORY_LOG_FORMAT set.
     if os.environ.get("LOG_FORMAT"):
         v = os.environ["LOG_FORMAT"].lower()
         yaml_data["log_format"] = "json" if v == "json" else "human"
-    # Environment variable overrides (e.g. TEAM_MEMORY_DATABASE__URL)
-    # are handled by pydantic-settings automatically
+
     return Settings(**yaml_data)
 
 

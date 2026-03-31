@@ -9,7 +9,8 @@ services:
       POSTGRES_USER: developer
       POSTGRES_PASSWORD: devpass
     ports:
-      - "5432:5432"
+      # 主机 5433，避免与本机其他 PostgreSQL（如 Homebrew）占用 5432 冲突
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -39,7 +40,7 @@ services:
 
   # ============================================================
   # Redis (optional: cache backend)
-  # Only needed if cache.backend is set to "redis" in config.yaml
+  # Only needed if cache.backend is set to "redis" in config
   # ============================================================
   redis:
     image: redis:7-alpine
@@ -63,15 +64,23 @@ services:
       dockerfile: Dockerfile
     ports:
       - "9111:9111"
+    # 使用宿主机 ./src（置前于 site-packages），改代码后无需 rebuild 即可加载新路由
+    volumes:
+      - ./src:/app/live-src:ro
     environment:
       TEAM_MEMORY_DB_URL: "postgresql+asyncpg://developer:devpass@postgres:5432/team_memory"
       TEAM_MEMORY_WEB_HOST: "0.0.0.0"
       TEAM_MEMORY_WEB_PORT: "9111"
+      PYTHONPATH: /app/live-src
       TEAM_MEMORY_API_KEY: "${TEAM_MEMORY_API_KEY:-changeme}"
       TEAM_MEMORY_USER: "${TEAM_MEMORY_USER:-admin}"
       RUN_MIGRATIONS: "true"
-      # Use host port 11434 for Ollama (host or container with profile ollama). On Linux without Docker Desktop you may need extra_hosts: ["host.docker.internal:host-gateway"].
+      # Ollama on the host: container localhost:11434 is NOT the host. Use host.docker.internal (see extra_hosts on Linux).
       TEAM_MEMORY_EMBEDDING__OLLAMA__BASE_URL: "http://host.docker.internal:11434"
+      TEAM_MEMORY_EMBEDDING__OLLAMA__MODEL: "nomic-embed-text:latest"
+      TEAM_MEMORY_LLM__BASE_URL: "http://host.docker.internal:11434"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
