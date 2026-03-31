@@ -6,27 +6,17 @@ high-level operations for the MCP tools and Web API.
 
 from __future__ import annotations
 
-import csv
-import io
-import json
 import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
 
 from team_memory import io_logger
 from team_memory.auth.provider import AuthProvider, User
 from team_memory.embedding.base import EmbeddingProvider
-from team_memory.services.event_bus import EventBus, Events
-from team_memory.services.pageindex_lite import PageIndexLiteBuilder
-from team_memory.storage.repository import ExperienceRepository
-
-if TYPE_CHECKING:
-    from team_memory.services.embedding_queue import EmbeddingQueue
-
 from team_memory.services.archive import ArchiveService
+from team_memory.services.event_bus import EventBus, Events
+from team_memory.storage.repository import ExperienceRepository
 
 logger = logging.getLogger("team_memory.service")
 
@@ -45,12 +35,8 @@ class ExperienceService:
         auth_provider: AuthProvider,
         search_pipeline=None,
         event_bus: EventBus | None = None,
-        embedding_queue: EmbeddingQueue | None = None,
         lifecycle_config=None,
-        memory_config=None,
         llm_config=None,
-        pageindex_lite_config=None,
-        file_location_config=None,
         db_url: str = "",
         archive_service: ArchiveService | None = None,
     ):
@@ -59,19 +45,9 @@ class ExperienceService:
         self._auth = auth_provider
         self._search_pipeline = search_pipeline
         self._event_bus = event_bus or EventBus()
-        self._embedding_queue = embedding_queue
         self._archive_service = archive_service
         self._lifecycle_config = lifecycle_config
-        self._memory_config = memory_config
         self._llm_config = llm_config
-        self._pageindex_lite_config = pageindex_lite_config
-        self._file_location_config = file_location_config
-        self._pageindex_builder = PageIndexLiteBuilder(
-            min_doc_chars=getattr(pageindex_lite_config, "min_doc_chars", 800),
-            max_tree_depth=getattr(pageindex_lite_config, "max_tree_depth", 4),
-            max_nodes_per_doc=getattr(pageindex_lite_config, "max_nodes_per_doc", 40),
-            max_node_chars=getattr(pageindex_lite_config, "max_node_chars", 1200),
-        )
 
     @asynccontextmanager
     async def _session(self):
@@ -98,23 +74,12 @@ class ExperienceService:
         description: str,
         solution: str = "",
         *,
-        root_cause: str | None = None,
-        code_snippets: str | None = None,
         tags: list[str] | None = None,
         children: list | None = None,
     ) -> str:
-        """Build text for parent experience embedding; includes children when provided.
-
-        children: list of Experience (from repo.get_children) or list of dict
-        (from save_group/import) with title, description/problem, solution.
-        Child description/solution are truncated to _CHILD_EMBED_TRUNCATE chars.
-        """
+        """Build text for parent experience embedding; includes children when provided."""
         parts = [title, description, solution or ""]
         text = "\n".join(parts)
-        if root_cause:
-            text += f"\n{root_cause}"
-        if code_snippets:
-            text += f"\n{code_snippets}"
         if tags:
             text += f"\n{' '.join(tags)}"
         if not children:
@@ -147,28 +112,19 @@ class ExperienceService:
         source: str = "mcp",
         grouped: bool = False,
         top_k_children: int = 3,
-        min_avg_rating: float = 0.0,
-        rating_weight: float = 0.3,
-        use_pageindex_lite: bool | None = None,
         project: str | None = None,
-        current_file_locations: list[dict] | None = None,
         include_archives: bool = False,
     ) -> list[dict]:
+        """Search experiences using the enhanced search pipeline.
+
+        If a SearchPipeline is configured, uses the full pipeline
+        (hybrid search + RRF fusion + adaptive filter + compression).
+        Otherwise, falls back to legacy vector/FTS search.
+        """
         async with self._session() as session:
-            """Search experiences using the enhanced search pipeline.
-
-            If a SearchPipeline is configured, uses the full pipeline
-            (hybrid search + RRF fusion + adaptive filter + reranker + compression).
-            Otherwise, falls back to the legacy vector/FTS search.
-
-            Args:
-                grouped: If True, return results grouped by root experience.
-                top_k_children: Max children per group (only when grouped=True).
-                current_file_locations: Optional list of {path, start_line, end_line, ...}
-                    for location_score boost.
-            """
             search_start = time.monotonic()
-            # Use enhanced pipeline if available
+            repo = ExperienceRepository(session)
+
             if self._search_pipeline is not None:
                 from team_memory.services.search_pipeline import SearchRequest
 
@@ -182,11 +138,7 @@ class ExperienceService:
                     source=source,
                     grouped=grouped,
                     top_k_children=top_k_children,
-                    min_avg_rating=min_avg_rating,
-                    rating_weight=rating_weight,
-                    use_pageindex_lite=use_pageindex_lite,
                     project=project,
-                    current_file_locations=current_file_locations,
                     include_archives=include_archives,
                 )
                 pipeline_result = await self._search_pipeline.search(
@@ -203,39 +155,25 @@ class ExperienceService:
                     duration_ms=duration_ms,
                 )
 
-                # Log the query
-                repo = ExperienceRepository(session)
-                try:
-                    await repo.log_query(
-                        query=query,
-                        user_name=user_name,
-                        source=source,
-                        result_count=len(pipeline_result.results),
-                        search_type=pipeline_result.search_type,
-                        duration_ms=pipeline_result.duration_ms,
-                    )
-                except Exception:
-                    logger.warning("Failed to log query", exc_info=True)
-
-                # Enrich each result with related_experience_ids (P1-3)
-                import uuid as _uuid
-
+                # Implicit feedback: increment use_count for top results
+                result_ids = []
                 for r in pipeline_result.results:
                     eid = r.get("group_id") or r.get("id")
                     if eid:
                         try:
-                            r["related_experience_ids"] = (
-                                await repo.get_related_experience_ids(
-                                    _uuid.UUID(str(eid))
-                                )
-                            )
+                            result_ids.append(uuid.UUID(str(eid)))
                         except (ValueError, TypeError):
-                            r["related_experience_ids"] = []
-                    else:
-                        r["related_experience_ids"] = []
+                            pass
+                if result_ids:
+                    for rid in result_ids:
+                        try:
+                            await repo.increment_use_count(rid)
+                        except Exception:
+                            pass
+
                 return pipeline_result.results
 
-            # Legacy fallback: direct vector/FTS search (reuse session)
+            # Legacy fallback: direct vector/FTS search
             results = await self._legacy_search(
                 session,
                 query=query,
@@ -246,8 +184,6 @@ class ExperienceService:
                 source=source,
                 grouped=grouped,
                 top_k_children=top_k_children,
-                min_avg_rating=min_avg_rating,
-                rating_weight=rating_weight,
                 project=project,
             )
             duration_ms = int((time.monotonic() - search_start) * 1000)
@@ -264,7 +200,7 @@ class ExperienceService:
 
     async def _legacy_search(
         self,
-        session,  # noqa: ANN001 - passed from search() which holds the session
+        session,  # noqa: ANN001
         query: str,
         tags: list[str] | None = None,
         max_results: int = 5,
@@ -273,43 +209,25 @@ class ExperienceService:
         source: str = "mcp",
         grouped: bool = False,
         top_k_children: int = 3,
-        min_avg_rating: float = 0.0,
-        rating_weight: float = 0.3,
         project: str | None = None,
     ) -> list[dict]:
         """Legacy search (vector with FTS fallback, no pipeline)."""
         repo = ExperienceRepository(session)
-        start = time.monotonic()
-        search_type = "vector"
 
         try:
             query_embedding = await self._embedding.encode_single(query)
-            if grouped:
-                results = await repo.search_by_vector_grouped(
-                    query_embedding=query_embedding,
-                    max_results=max_results,
-                    min_similarity=min_similarity,
-                    tags=tags,
-                    top_k_children=top_k_children,
-                    min_avg_rating=min_avg_rating,
-                    rating_weight=rating_weight,
-                    project=project,
-                    current_user=user_name,
-                )
-            else:
-                results = await repo.search_by_vector(
-                    query_embedding=query_embedding,
-                    max_results=max_results,
-                    min_similarity=min_similarity,
-                    tags=tags,
-                    project=project,
-                    current_user=user_name,
-                )
+            results = await repo.search_by_vector(
+                query_embedding=query_embedding,
+                max_results=max_results,
+                min_similarity=min_similarity,
+                tags=tags,
+                project=project,
+                current_user=user_name,
+            )
         except Exception as e:
             logger.warning(
                 "Vector search failed, falling back to FTS: %s", str(e)
             )
-            search_type = "fts"
             results = await repo.search_by_fts(
                 query_text=query,
                 max_results=max_results,
@@ -318,219 +236,12 @@ class ExperienceService:
                 current_user=user_name,
             )
 
-        duration_ms = int((time.monotonic() - start) * 1000)
-
-        try:
-            await repo.log_query(
-                query=query,
-                user_name=user_name,
-                source=source,
-                result_count=len(results),
-                search_type=search_type,
-                duration_ms=duration_ms,
-            )
-        except Exception:
-            logger.warning("Failed to log query", exc_info=True)
-
-        # Enrich each result with related_experience_ids (P1-3)
-        for r in results:
-            eid = r.get("group_id") or r.get("id")
-            if eid:
-                try:
-                    r["related_experience_ids"] = (
-                        await repo.get_related_experience_ids(
-                            uuid.UUID(str(eid))
-                        )
-                    )
-                except (ValueError, TypeError):
-                    r["related_experience_ids"] = []
-            else:
-                r["related_experience_ids"] = []
         return results
 
     async def invalidate_search_cache(self):
         """Invalidate search cache after data mutations."""
         if self._search_pipeline is not None:
             await self._search_pipeline.invalidate_cache()
-
-    async def _maybe_build_tree_nodes(
-        self,
-        repo: ExperienceRepository,
-        experience_id: uuid.UUID,
-        *,
-        problem: str,
-        solution: str | None = None,
-        root_cause: str | None = None,
-        code_snippets: str | None = None,
-    ) -> int:
-        """Build and persist PageIndex-Lite tree nodes for one experience."""
-        cfg = self._pageindex_lite_config
-        if cfg is None or not getattr(cfg, "enabled", False):
-            return 0
-
-        content = self._pageindex_builder.build_experience_document(
-            problem=problem,
-            solution=solution,
-            root_cause=root_cause,
-            code_snippets=code_snippets,
-        )
-        if getattr(cfg, "only_long_docs", True) and not self._pageindex_builder.is_long_document(
-            content
-        ):
-            return 0
-
-        nodes = self._pageindex_builder.build_nodes(content)
-        if not nodes:
-            return 0
-        return await repo.replace_tree_nodes(experience_id, nodes)
-
-    async def save_group(
-        self,
-        parent: dict,
-        children: list[dict],
-        created_by: str,
-        project: str | None = None,
-        *,
-        session=None,  # noqa: ANN001 - for internal reuse (e.g. hard_delete_and_rebuild)
-    ) -> dict:
-        async with self._session_or(session) as session:
-            """Save a parent experience with child experiences as a group.
-
-            Args:
-                parent: Fields for the parent experience (title, problem, solution, tags, etc.)
-                children: List of field dicts for child experiences.
-                created_by: Author name.
-
-            Returns:
-                Parent experience dict with children included.
-            """
-            repo = ExperienceRepository(session)
-
-            # Generate embedding for parent (include children for dedup consistency)
-            parent_embed_text = self._build_parent_embed_text(
-                parent.get("title", ""),
-                parent.get("problem", ""),
-                parent.get("solution", ""),
-                root_cause=parent.get("root_cause"),
-                code_snippets=parent.get("code_snippets"),
-                tags=parent.get("tags"),
-                children=children if children else None,
-            )
-            try:
-                parent_embedding = await self._embedding.encode_single(parent_embed_text)
-            except Exception:
-                logger.warning("Failed to generate parent embedding")
-                parent_embedding = None
-
-            parent_data = {
-                "title": parent["title"],
-                "description": parent.get("problem", ""),
-                "solution": parent.get("solution", ""),
-                "tags": parent.get("tags"),
-                "programming_language": parent.get("language"),
-                "framework": parent.get("framework"),
-                "code_snippets": parent.get("code_snippets"),
-                "root_cause": parent.get("root_cause"),
-                "embedding": parent_embedding,
-                "source": parent.get("source", "manual"),
-                "project": project or parent.get("project"),
-            }
-            if parent.get("experience_type"):
-                parent_data["experience_type"] = parent["experience_type"]
-            if parent.get("source_context") is not None:
-                parent_data["source_context"] = parent["source_context"]
-
-            # Generate embeddings for children
-            children_data = []
-            for child in children:
-                child_embed_text = "\n".join([
-                    child.get("title", ""),
-                    child.get("problem", ""),
-                    child.get("solution", ""),
-                ])
-                if child.get("root_cause"):
-                    child_embed_text += f"\n{child['root_cause']}"
-                if child.get("tags"):
-                    child_embed_text += f"\n{' '.join(child['tags'])}"
-                try:
-                    child_embedding = await self._embedding.encode_single(child_embed_text)
-                except Exception:
-                    logger.warning("Failed to generate child embedding")
-                    child_embedding = None
-
-                children_data.append({
-                    "title": child.get("title", ""),
-                    "description": child.get("problem", ""),
-                    "solution": child.get("solution", ""),
-                    "tags": child.get("tags"),
-                    "programming_language": child.get("language"),
-                    "framework": child.get("framework"),
-                    "code_snippets": child.get("code_snippets"),
-                    "root_cause": child.get("root_cause"),
-                    "embedding": child_embedding,
-                    "source": child.get("source", "manual"),
-                    "project": project or child.get("project"),
-                    "experience_type": child.get("experience_type", "general"),
-                    "category": child.get("category"),
-                })
-
-            parent_exp = await repo.create_group(
-                parent_data=parent_data,
-                children_data=children_data,
-                created_by=created_by,
-            )
-
-            # Build tree nodes for long-document groups (parent + children)
-            try:
-                await self._maybe_build_tree_nodes(
-                    repo,
-                    parent_exp.id,
-                    problem=parent.get("problem", ""),
-                    solution=parent.get("solution"),
-                    root_cause=parent.get("root_cause"),
-                    code_snippets=parent.get("code_snippets"),
-                )
-                for child_exp, child_payload in zip(
-                    parent_exp.children or [], children, strict=False
-                ):
-                    await self._maybe_build_tree_nodes(
-                        repo,
-                        child_exp.id,
-                        problem=child_payload.get("problem", ""),
-                        solution=child_payload.get("solution"),
-                        root_cause=child_payload.get("root_cause"),
-                        code_snippets=child_payload.get("code_snippets"),
-                    )
-            except Exception:
-                logger.warning("Failed to build PageIndex-Lite nodes for group", exc_info=True)
-
-            # Total-sub-sub: grouped_children by group_by, or skip if force_single_group
-            if parent_exp.children and not parent.get("force_single_group"):
-                group_by_key = (
-                    (parent.get("group_by") or "experience_type").strip()
-                    or "experience_type"
-                )
-                grouped_children: dict[str, list[str]] = {}
-                for c in parent_exp.children:
-                    if group_by_key == "category":
-                        key = (getattr(c, "category", None) or "other").strip() or "other"
-                    else:
-                        raw = getattr(c, "experience_type", None) or "general"
-                        key = (raw or "general").strip() or "general"
-                    grouped_children.setdefault(key, []).append(str(c.id))
-                new_sd = dict(parent_exp.structured_data or {})
-                new_sd["grouped_children"] = grouped_children
-                await repo.update(parent_exp.id, structured_data=new_sd)
-                parent_exp.structured_data = new_sd
-
-            await self._event_bus.emit(Events.EXPERIENCE_CREATED, {
-                "experience_id": str(parent_exp.id),
-                "title": parent["title"],
-                "created_by": created_by,
-                "is_group": True,
-                "children_count": len(children),
-            })
-            return parent_exp.to_dict(include_children=True)
 
     async def save(
         self,
@@ -539,90 +250,42 @@ class ExperienceService:
         solution: str | None = None,
         created_by: str = "system",
         tags: list[str] | None = None,
-        code_snippets: str | None = None,
-        language: str | None = None,
-        framework: str | None = None,
         source: str = "auto_extract",
-        root_cause: str | None = None,
         exp_status: str = "published",
         visibility: str = "project",
-        sync_embedding: bool = True,
         skip_dedup: bool = False,
-        # Type system fields (v3)
         experience_type: str = "general",
-        severity: str | None = None,
-        category: str | None = None,
-        progress_status: str | None = None,
-        structured_data: dict | None = None,
-        git_refs: list | None = None,
-        related_links: list | None = None,
         project: str | None = None,
-        quality_score: int = 0,
-        file_locations: list[dict] | None = None,
+        group_key: str | None = None,
         *,
-        session=None,  # noqa: ANN001 - for internal reuse (e.g. hard_delete_and_rebuild)
+        session=None,  # noqa: ANN001
     ) -> dict:
+        """Save a new experience to the database.
+
+        If group_key is provided, auto-groups under a shared parent.
+        If dedup_on_save is enabled, checks for similar experiences first.
+
+        Returns:
+            Experience dict. If dedup is triggered, returns a dict with
+            "status": "duplicate_detected" and "candidates" list.
+        """
         async with self._session_or(session) as session:
-            """Save a new experience to the database.
-
-            Generates embedding from the combined title + problem + solution text.
-
-            Args:
-                sync_embedding: If True (default), generate embedding synchronously.
-                    If False and an embedding queue is available, save with
-                    embedding_status='pending' and generate in background.
-                skip_dedup: If True, skip dedup-on-save check.
-
-            Returns:
-                Experience dict. If dedup is triggered, returns a dict with
-                "status": "duplicate_detected" and "candidates" list.
-            """
-            from team_memory.schemas import (
-                get_schema_registry,
-                validate_git_refs,
-                validate_related_links,
-                validate_structured_data,
-            )
-
             prepare_start = time.monotonic()
             repo = ExperienceRepository(session)
 
-            # Validate JSONB fields
-            structured_data = validate_structured_data(experience_type, structured_data)
-            git_refs = validate_git_refs(git_refs)
-            related_links = validate_related_links(related_links)
-
-            # Auto-infer progress_status via SchemaRegistry
-            registry = get_schema_registry()
-            if progress_status is None and registry.get_progress_states(experience_type):
-                progress_status = registry.get_default_progress(
-                    experience_type, has_solution=bool(solution)
-                )
-
-            # Build text for embedding (include tags for better semantic matching)
+            # Build text for embedding
             embed_text = f"{title}\n{problem}\n{solution or ''}"
-            if root_cause:
-                embed_text += f"\n{root_cause}"
-            if code_snippets:
-                embed_text += f"\n{code_snippets}"
             if tags:
                 embed_text += f"\n{' '.join(tags)}"
 
-            # Decide: sync or async embedding
+            # Generate embedding synchronously
             embedding = None
-            embedding_status = "ready"
+            try:
+                embedding = await self._embedding.encode_single(embed_text)
+            except Exception:
+                logger.warning("Failed to generate embedding, saving without it")
 
-            if not sync_embedding and self._embedding_queue is not None:
-                # Async mode: save without embedding, generate in background
-                embedding_status = "pending"
-            else:
-                # Sync mode (default): generate embedding before saving
-                try:
-                    embedding = await self._embedding.encode_single(embed_text)
-                except Exception:
-                    logger.warning("Failed to generate embedding, saving without it")
-
-            # P0-3: Dedup-on-save check
+            # Dedup-on-save check
             if (
                 not skip_dedup
                 and embedding is not None
@@ -649,12 +312,20 @@ class ExperienceService:
             prepare_duration_ms = int((time.monotonic() - prepare_start) * 1000)
             io_logger.log_internal(
                 "save_prepare",
-                {
-                    "title": (title or "")[:50],
-                    "embedding_status": embedding_status,
-                },
+                {"title": (title or "")[:50]},
                 duration_ms=prepare_duration_ms,
             )
+
+            # Auto-group via group_key
+            parent_id = None
+            if group_key:
+                parent = await repo.find_or_create_group_parent(
+                    session=session,
+                    project=project or "default",
+                    group_key=group_key,
+                    created_by=created_by,
+                )
+                parent_id = parent.id
 
             persist_start = time.monotonic()
             experience = await repo.create(
@@ -663,102 +334,20 @@ class ExperienceService:
                 solution=solution,
                 created_by=created_by,
                 tags=tags,
-                programming_language=language,
-                framework=framework,
-                code_snippets=code_snippets,
                 embedding=embedding,
                 source=source,
-                root_cause=root_cause,
                 exp_status=exp_status,
                 visibility=visibility,
-                embedding_status=embedding_status,
                 experience_type=experience_type,
-                severity=severity,
-                category=category,
-                progress_status=progress_status,
-                structured_data=structured_data,
-                git_refs=git_refs,
-                related_links=related_links,
                 project=project or "default",
-                quality_score=quality_score,
+                group_key=group_key,
+                parent_id=parent_id,
             )
-
-            # Build tree nodes for long-document experience
-            try:
-                await self._maybe_build_tree_nodes(
-                    repo,
-                    experience.id,
-                    problem=problem,
-                    solution=solution,
-                    root_cause=root_cause,
-                    code_snippets=code_snippets,
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to build PageIndex-Lite nodes for %s",
-                    experience.id,
-                    exc_info=True,
-                )
-
-            # File location bindings: content_fingerprint from snippet only; expires_at from config
-            if file_locations:
-                ttl_days = 30
-                if self._file_location_config is not None:
-                    ttl_days = self._file_location_config.file_location_ttl_days
-                from team_memory.utils.location_fingerprint import (
-                    content_fingerprint,
-                    normalize_snippet_for_fingerprint,
-                )
-
-                now = datetime.now(timezone.utc)
-                expires_at = now + timedelta(days=ttl_days)
-                bindings: list[dict] = []
-                for loc in file_locations:
-                    path = loc.get("path")
-                    if not path:
-                        continue
-                    start_line = int(loc.get("start_line", 1))
-                    end_line = int(loc.get("end_line", 1))
-                    snippet = loc.get("snippet")
-                    content_fp = None
-                    if snippet is not None:
-                        content_fp = content_fingerprint(
-                            normalize_snippet_for_fingerprint(snippet)
-                        )
-                    bindings.append({
-                        "path": path,
-                        "start_line": start_line,
-                        "end_line": end_line,
-                        "content_fingerprint": content_fp,
-                        "snippet": loc.get("snippet"),
-                        "file_mtime_at_bind": loc.get("file_mtime"),
-                        "file_content_hash_at_bind": loc.get("file_content_hash"),
-                        "expires_at": expires_at,
-                    })
-                if bindings:
-                    try:
-                        await repo.replace_file_location_bindings(
-                            experience.id, bindings
-                        )
-                    except Exception:
-                        logger.warning(
-                            "Failed to replace file location bindings for %s",
-                            experience.id,
-                            exc_info=True,
-                        )
-
-            # Enqueue background embedding task if async mode
-            if embedding_status == "pending" and self._embedding_queue is not None:
-                try:
-                    await self._embedding_queue.enqueue(experience.id, embed_text)
-                except Exception:
-                    logger.warning("Failed to enqueue embedding task for %s", experience.id)
 
             await self._event_bus.emit(Events.EXPERIENCE_CREATED, {
                 "experience_id": str(experience.id),
                 "title": title,
                 "created_by": created_by,
-                "embedding_status": embedding_status,
                 "status": exp_status,
                 "visibility": visibility,
             })
@@ -771,77 +360,240 @@ class ExperienceService:
                 },
                 duration_ms=persist_duration_ms,
             )
+
+            # Re-embed parent if this child was added to a group
+            if parent_id:
+                try:
+                    parent_exp = await repo.get_with_children(parent_id)
+                    if parent_exp:
+                        parent_embed_text = self._build_parent_embed_text(
+                            parent_exp.title,
+                            parent_exp.description,
+                            parent_exp.solution or "",
+                            tags=parent_exp.tags,
+                            children=parent_exp.children,
+                        )
+                        parent_embedding = await self._embedding.encode_single(
+                            parent_embed_text
+                        )
+                        await repo.update(parent_id, embedding=parent_embedding)
+                except Exception:
+                    logger.warning("Failed to re-embed group parent %s", parent_id)
+
             return experience.to_dict()
 
-    async def publish_experience(
+    async def update(
         self,
         experience_id: str,
         user: str = "system",
+        *,
+        session=None,  # noqa: ANN001
+        **kwargs,
     ) -> dict | None:
-        async with self._session() as session:
-            """Publish a draft experience (exp_status -> published)."""
+        """Update an existing experience (in-place).
+
+        Only kwargs that are explicitly provided will be applied.
+        Supported kwargs:
+            title, description, solution, tags, exp_status, visibility,
+            experience_type, solution_addendum (legacy append mode).
+        """
+        async with self._session_or(session) as session:
             repo = ExperienceRepository(session)
             exp_uuid = uuid.UUID(experience_id)
-            experience = await repo.get_by_id(exp_uuid, include_deleted=True)
+
+            experience = await repo.get_by_id(exp_uuid)
             if experience is None:
                 return None
 
-            if experience.exp_status == "published":
+            updates: dict = {}
+            need_reembed = False
+
+            if "title" in kwargs:
+                updates["title"] = kwargs["title"]
+                need_reembed = True
+
+            if "description" in kwargs:
+                updates["description"] = kwargs["description"]
+                need_reembed = True
+
+            solution_addendum = kwargs.get("solution_addendum")
+            if "solution" in kwargs:
+                updates["solution"] = kwargs["solution"]
+                need_reembed = True
+            elif solution_addendum:
+                updates["solution"] = f"{experience.solution or ''}\n\n---\n\n{solution_addendum}"
+                need_reembed = True
+
+            if "tags" in kwargs:
+                updates["tags"] = kwargs["tags"]
+
+            if "exp_status" in kwargs:
+                updates["exp_status"] = kwargs["exp_status"]
+            if "visibility" in kwargs:
+                updates["visibility"] = kwargs["visibility"]
+            if "experience_type" in kwargs:
+                updates["experience_type"] = kwargs["experience_type"]
+
+            if not updates:
                 return experience.to_dict()
 
-            updated = await repo.change_status(exp_uuid, "published", changed_by=user)
-            if updated:
-                await self._event_bus.emit(Events.EXPERIENCE_PUBLISHED, {
+            # Re-generate embedding if content fields changed
+            if need_reembed:
+                final_title = updates.get("title", experience.title)
+                final_desc = updates.get("description", experience.description)
+                final_sol = updates.get("solution", experience.solution) or ""
+                final_tags = updates.get("tags", experience.tags)
+                children = await repo.get_children(exp_uuid)
+                embed_text = self._build_parent_embed_text(
+                    final_title,
+                    final_desc,
+                    final_sol,
+                    tags=final_tags,
+                    children=children if children else None,
+                )
+                try:
+                    embedding = await self._embedding.encode_single(embed_text)
+                    updates["embedding"] = embedding
+                except Exception:
+                    logger.warning("Failed to regenerate embedding during update")
+
+            updated = await repo.update(exp_uuid, **updates)
+
+            if updated and updates:
+                fields_updated = list(updates.keys())
+                await self._event_bus.emit(Events.EXPERIENCE_UPDATED, {
                     "experience_id": experience_id,
-                    "published_by": user,
+                    "fields_updated": fields_updated,
+                    "user": user,
                 })
-                if self._archive_service:
-                    await self._archive_service.update_archive_status_for_experience(exp_uuid)
+
+                # Update archive status if exp_status or visibility changed
+                if self._archive_service and (
+                    "exp_status" in updates or "visibility" in updates
+                ):
+                    try:
+                        await self._archive_service.update_archive_status_for_experience(
+                            exp_uuid
+                        )
+                    except Exception:
+                        logger.warning("Failed to update archive status", exc_info=True)
+
             return updated.to_dict() if updated else None
 
-    async def publish_to_team(
+    async def find_duplicate_pairs(
         self,
-        experience_id: uuid.UUID,
-        user: str,
-        is_admin: bool = False,
-    ) -> dict | None:
-        """Publish a personal experience to the team.
+        *,
+        threshold: float,
+        limit: int,
+        project: str | None,
+    ) -> dict:
+        """Semantic duplicate candidate pairs for the Web dedup UI (PostgreSQL + pgvector)."""
+        thr = max(0.05, min(1.0, float(threshold)))
+        lim = max(1, min(200, int(limit)))
+        proj_norm = ExperienceRepository._project_value(project)
+        async with self._session() as session:
+            repo = ExperienceRepository(session)
+            pairs = await repo.find_duplicates(threshold=thr, limit=lim, project=project)
+        return {
+            "pairs": pairs,
+            "threshold": thr,
+            "limit": lim,
+            "project": proj_norm,
+        }
 
-        Admin users go directly to 'published'; others go to 'pending_team'.
+    async def reembed_group_parent_vectors(self, project: str | None) -> dict:
+        """Recompute embeddings for parents that have children (group aggregate text)."""
+        proj_norm = ExperienceRepository._project_value(project)
+        updated = 0
+        errors = 0
+        total_groups = 0
+        async with self._session() as session:
+            repo = ExperienceRepository(session)
+            root_ids = await repo.list_root_ids_with_children(project)
+            total_groups = len(root_ids)
+            for rid in root_ids:
+                parent = await repo.get_with_children(rid)
+                if not parent:
+                    continue
+                children = parent.children or []
+                if not children:
+                    continue
+                embed_text = self._build_parent_embed_text(
+                    parent.title,
+                    parent.description,
+                    parent.solution or "",
+                    tags=parent.tags,
+                    children=children,
+                )
+                try:
+                    embedding = await self._embedding.encode_single(embed_text)
+                    await repo.update(rid, embedding=embedding)
+                    updated += 1
+                except Exception:
+                    logger.warning(
+                        "reembed_group_parent failed for %s",
+                        rid,
+                        exc_info=True,
+                    )
+                    errors += 1
+        await self.invalidate_search_cache()
+        return {
+            "updated": updated,
+            "errors": errors,
+            "total_groups": total_groups,
+            "project": proj_norm,
+        }
+
+    async def soft_delete(self, experience_id: str) -> bool:
+        """Soft-delete an experience."""
+        async with self._session() as session:
+            repo = ExperienceRepository(session)
+            result = await repo.soft_delete(uuid.UUID(experience_id))
+            if result:
+                await self._event_bus.emit(Events.EXPERIENCE_DELETED, {
+                    "experience_id": experience_id,
+                    "hard": False,
+                })
+            return result
+
+    async def restore(self, experience_id: str) -> bool:
+        """Restore a soft-deleted experience."""
+        async with self._session() as session:
+            repo = ExperienceRepository(session)
+            result = await repo.restore(uuid.UUID(experience_id))
+            if result:
+                await self._event_bus.emit(Events.EXPERIENCE_RESTORED, {
+                    "experience_id": experience_id,
+                })
+            return result
+
+    async def hard_delete_and_rebuild(
+        self,
+        experience_id: str,
+        new_data: dict,
+        created_by: str = "system",
+    ) -> dict:
+        """Hard-delete an experience, then create a new one.
+
+        Used for the "edit and confirm" flow where the user edits fields
+        and we replace the old record with a new one.
         """
         async with self._session() as session:
             repo = ExperienceRepository(session)
-            experience = await repo.publish_to_team(experience_id, is_admin=is_admin)
-            if experience and self._archive_service:
-                await self._archive_service.update_archive_status_for_experience(experience_id)
-            return experience.to_dict() if experience else None
+            old_uuid = uuid.UUID(experience_id)
 
-    async def publish_personal(
-        self,
-        experience_id: uuid.UUID,
-    ) -> dict | None:
-        """Move a draft experience to personal (visible to creator only)."""
-        async with self._session() as session:
-            repo = ExperienceRepository(session)
-            experience = await repo.publish_personal(experience_id)
-            if experience and self._archive_service:
-                await self._archive_service.update_archive_status_for_experience(experience_id)
-            return experience.to_dict() if experience else None
+            deleted = await repo.delete(old_uuid)
+            if not deleted:
+                return None
 
-    async def get_drafts(
-        self,
-        created_by: str | None = None,
-        limit: int = 50,
-        offset: int = 0,
-        project: str | None = None,
-    ) -> list[dict]:
-        async with self._session() as session:
-            """Get draft experiences, optionally filtered by creator."""
-            repo = ExperienceRepository(session)
-            drafts = await repo.list_drafts(
-                created_by=created_by, limit=limit, offset=offset, project=project
+            return await self.save(
+                session=session,
+                title=new_data.get("title", ""),
+                problem=new_data.get("problem", ""),
+                solution=new_data.get("solution", ""),
+                created_by=created_by,
+                tags=new_data.get("tags"),
             )
-            return [exp.to_dict() for exp in drafts]
 
     async def feedback(
         self,
@@ -852,10 +604,10 @@ class ExperienceService:
         fitness_score: int | None = None,
         *,
         session=None,  # noqa: ANN001
-        **kwargs: object,  # absorb MCP/context extras (e.g. session from tool layer)
+        **kwargs: object,
     ) -> bool:
+        """Submit feedback for an experience. rating: 1-5, 5=best."""
         async with self._session_or(session) as session:
-            """Submit feedback for an experience. rating: 1-5, 5=best."""
             if not (1 <= rating <= 5):
                 raise ValueError("rating must be between 1 and 5")
             repo = ExperienceRepository(session)
@@ -879,335 +631,14 @@ class ExperienceService:
             })
             return True
 
-    async def update(
-        self,
-        experience_id: str,
-        user: str = "system",
-        *,
-        session=None,  # noqa: ANN001
-        **kwargs,
-    ) -> dict | None:
-        async with self._session_or(session) as session:
-            """Update an existing experience (in-place).
-
-            Only kwargs that are explicitly provided will be applied.
-            The caller (web API) should use model_dump(exclude_unset=True)
-            to only include fields the user actually sent.
-
-            Supported kwargs:
-                title, description, solution, root_cause, code_snippets,
-                programming_language/language, framework, tags, exp_status, visibility,
-                experience_type, severity, category, progress_status,
-                structured_data, git_refs, related_links,
-                solution_addendum (legacy append mode).
-            """
-            from team_memory.schemas import (
-                get_schema_registry,
-                validate_git_refs,
-                validate_related_links,
-                validate_structured_data,
-            )
-
-            repo = ExperienceRepository(session)
-            exp_uuid = uuid.UUID(experience_id)
-
-            experience = await repo.get_by_id(exp_uuid)
-            if experience is None:
-                return None
-
-            file_locations = kwargs.pop("file_locations", None)
-
-            # Save version snapshot before editing
-            try:
-                await repo.save_version(
-                    experience_id=exp_uuid,
-                    changed_by=user,
-                    change_summary="编辑前快照 (in-place update)",
-                )
-            except Exception as e:
-                logger.warning("Failed to save version before update: %s", e)
-
-            updates: dict = {}
-            need_reembed = False
-
-            # --- Simple text fields ---
-            if "title" in kwargs:
-                updates["title"] = kwargs["title"]
-                need_reembed = True
-
-            if "description" in kwargs:
-                updates["description"] = kwargs["description"]
-                need_reembed = True
-
-            # Handle solution: direct set or legacy append
-            solution_addendum = kwargs.get("solution_addendum")
-            if "solution" in kwargs:
-                updates["solution"] = kwargs["solution"]
-                need_reembed = True
-            elif solution_addendum:
-                updates["solution"] = f"{experience.solution or ''}\n\n---\n\n{solution_addendum}"
-                need_reembed = True
-
-            if "root_cause" in kwargs:
-                updates["root_cause"] = kwargs["root_cause"]
-                need_reembed = True
-            if "code_snippets" in kwargs:
-                updates["code_snippets"] = kwargs["code_snippets"]
-            # Support both "language" and "programming_language"
-            if "language" in kwargs:
-                updates["programming_language"] = kwargs["language"]
-            elif "programming_language" in kwargs:
-                updates["programming_language"] = kwargs["programming_language"]
-            if "framework" in kwargs:
-                updates["framework"] = kwargs["framework"]
-
-            if "tags" in kwargs:
-                updates["tags"] = kwargs["tags"]
-
-            if "exp_status" in kwargs:
-                updates["exp_status"] = kwargs["exp_status"]
-            if "visibility" in kwargs:
-                updates["visibility"] = kwargs["visibility"]
-
-            # --- Type system fields ---
-            etype = kwargs.get("experience_type") or experience.experience_type or "general"
-            if "experience_type" in kwargs:
-                updates["experience_type"] = kwargs["experience_type"]
-
-            if "severity" in kwargs:
-                updates["severity"] = kwargs["severity"]
-            if "category" in kwargs:
-                updates["category"] = kwargs["category"]
-
-            # Validate & set structured_data
-            if "structured_data" in kwargs:
-                sd = kwargs["structured_data"]
-                if sd is not None:
-                    sd = validate_structured_data(etype, sd)
-                updates["structured_data"] = sd
-
-            # Validate & set git_refs
-            if "git_refs" in kwargs:
-                gr = kwargs["git_refs"]
-                if gr is not None:
-                    gr = validate_git_refs(gr)
-                updates["git_refs"] = gr
-
-            # Validate & set related_links
-            if "related_links" in kwargs:
-                rl = kwargs["related_links"]
-                if rl is not None:
-                    rl = validate_related_links(rl)
-                updates["related_links"] = rl
-
-            # Auto-infer progress_status if not explicitly provided
-            registry = get_schema_registry()
-            if "progress_status" in kwargs:
-                updates["progress_status"] = kwargs["progress_status"]
-            elif registry.get_progress_states(etype) and experience.progress_status is None:
-                final_solution = updates.get("solution", experience.solution)
-                updates["progress_status"] = registry.get_default_progress(
-                    etype, has_solution=bool(final_solution)
-                )
-
-            if not updates and file_locations is None:
-                return experience.to_dict()
-
-            # Re-generate embedding if content fields changed (include children for groups)
-            if need_reembed:
-                final_title = updates.get("title", experience.title)
-                final_desc = updates.get("description", experience.description)
-                final_sol = updates.get("solution", experience.solution) or ""
-                final_rc = updates.get("root_cause", experience.root_cause)
-                final_cs = updates.get("code_snippets", experience.code_snippets)
-                final_tags = updates.get("tags", experience.tags)
-                children = await repo.get_children(exp_uuid)
-                embed_text = self._build_parent_embed_text(
-                    final_title,
-                    final_desc,
-                    final_sol,
-                    root_cause=final_rc,
-                    code_snippets=final_cs,
-                    tags=final_tags,
-                    children=children if children else None,
-                )
-                try:
-                    embedding = await self._embedding.encode_single(embed_text)
-                    updates["embedding"] = embedding
-                except Exception:
-                    logger.warning("Failed to regenerate embedding during update")
-
-            updated = await repo.update(exp_uuid, **updates) if updates else experience
-
-            if file_locations is not None:
-                ttl_days = 30
-                if self._file_location_config is not None:
-                    ttl_days = self._file_location_config.file_location_ttl_days
-                now = datetime.now(timezone.utc)
-                expires_at = now + timedelta(days=ttl_days)
-                bindings: list[dict] = []
-                for loc in file_locations:
-                    path = loc.get("path")
-                    if not path:
-                        continue
-                    start_line = int(loc.get("start_line", 1))
-                    end_line = int(loc.get("end_line", 1))
-                    snippet = loc.get("snippet")
-                    content_fp = None
-                    if snippet is not None:
-                        from team_memory.utils.location_fingerprint import (
-                            content_fingerprint,
-                            normalize_snippet_for_fingerprint,
-                        )
-                        content_fp = content_fingerprint(
-                            normalize_snippet_for_fingerprint(snippet)
-                        )
-                    bindings.append({
-                        "path": path,
-                        "start_line": start_line,
-                        "end_line": end_line,
-                        "content_fingerprint": content_fp,
-                        "snippet": loc.get("snippet"),
-                        "file_mtime_at_bind": loc.get("file_mtime"),
-                        "file_content_hash_at_bind": loc.get("file_content_hash"),
-                        "expires_at": expires_at,
-                    })
-                if bindings:
-                    try:
-                        await repo.replace_file_location_bindings(exp_uuid, bindings)
-                    except Exception:
-                        logger.warning(
-                            "Failed to replace file location bindings for %s",
-                            experience_id,
-                            exc_info=True,
-                        )
-
-            if updated:
-                if updates:
-                    try:
-                        await self._maybe_build_tree_nodes(
-                            repo,
-                            updated.id,
-                            problem=updates.get("description", updated.description),
-                            solution=updates.get("solution", updated.solution),
-                            root_cause=updates.get("root_cause", updated.root_cause),
-                            code_snippets=updates.get("code_snippets", updated.code_snippets),
-                        )
-                    except Exception:
-                        logger.warning(
-                            "Failed to rebuild PageIndex-Lite nodes for %s",
-                            updated.id,
-                            exc_info=True,
-                        )
-                    fields_updated = list(updates.keys())
-                    await self._event_bus.emit(Events.EXPERIENCE_UPDATED, {
-                        "experience_id": experience_id,
-                        "fields_updated": fields_updated,
-                        "user": user,
-                    })
-            return updated.to_dict() if updated else None
-
-    async def soft_delete(
-        self,
-        experience_id: str,
-    ) -> bool:
-        async with self._session() as session:
-            """Soft-delete an experience."""
-            repo = ExperienceRepository(session)
-            result = await repo.soft_delete(uuid.UUID(experience_id))
-            if result:
-                await self._event_bus.emit(Events.EXPERIENCE_DELETED, {
-                    "experience_id": experience_id,
-                    "hard": False,
-                })
-            return result
-
-    async def restore(
-        self,
-        experience_id: str,
-    ) -> bool:
-        async with self._session() as session:
-            """Restore a soft-deleted experience."""
-            repo = ExperienceRepository(session)
-            result = await repo.restore(uuid.UUID(experience_id))
-            if result:
-                await self._event_bus.emit(Events.EXPERIENCE_RESTORED, {
-                    "experience_id": experience_id,
-                })
-            return result
-
-    async def hard_delete_and_rebuild(
-        self,
-        experience_id: str,
-        new_data: dict,
-        children_data: list[dict] | None = None,
-        created_by: str = "system",
-    ) -> dict:
-        async with self._session() as session:
-            """Hard-delete an experience (and its children), then create a new one.
-
-            Saves a version snapshot before deletion for version history (B3).
-
-            Used for the "edit and confirm" flow where the user edits fields
-            and we replace the old record with a new one.
-
-            Args:
-                experience_id: ID of the experience to replace.
-                new_data: Fields for the new parent experience.
-                children_data: If provided, recreate with children.
-                created_by: Author name.
-
-            Returns:
-                The newly created experience dict.
-            """
-            repo = ExperienceRepository(session)
-            old_uuid = uuid.UUID(experience_id)
-
-            # Save version snapshot before destructive operation (B3)
-            try:
-                await repo.save_version(
-                    experience_id=old_uuid,
-                    changed_by=created_by,
-                    change_summary="编辑前快照 (hard_delete_and_rebuild)",
-                )
-            except (ValueError, Exception) as e:
-                logger.warning("Failed to save version snapshot: %s", str(e))
-
-            # Delete old record (CASCADE deletes children + feedbacks)
-            deleted = await repo.delete(old_uuid)
-            if not deleted:
-                return None
-
-            # Create new record(s)
-            if children_data:
-                return await self.save_group(
-                    session=session,
-                    parent=new_data,
-                    children=children_data,
-                    created_by=created_by,
-                )
-            else:
-                return await self.save(
-                    session=session,
-                    title=new_data.get("title", ""),
-                    problem=new_data.get("problem", ""),
-                    solution=new_data.get("solution", ""),
-                    created_by=created_by,
-                    tags=new_data.get("tags"),
-                    code_snippets=new_data.get("code_snippets"),
-                    language=new_data.get("language"),
-                    framework=new_data.get("framework"),
-                    root_cause=new_data.get("root_cause"),
-                )
-
     async def get_recent(
         self,
         limit: int = 10,
         include_all_statuses: bool = False,
         project: str | None = None,
     ) -> list[dict]:
+        """Get recent experiences."""
         async with self._session() as session:
-            """Get recent experiences."""
             repo = ExperienceRepository(session)
             experiences = await repo.list_recent(
                 limit=limit,
@@ -1216,622 +647,11 @@ class ExperienceService:
             )
             return [exp.to_dict() for exp in experiences]
 
-    async def get_stats(
-        self,
-        project: str | None = None,
-        scope: str | None = None,
-        current_user: str | None = None,
-    ) -> dict:
-        async with self._session() as session:
-            """Get experience database statistics."""
-            repo = ExperienceRepository(session)
-            return await repo.get_stats(
-                project=project, scope=scope, current_user=current_user
-            )
-
     async def list_projects(self) -> list[str]:
         """Return distinct project names."""
         async with self._session() as session:
             repo = ExperienceRepository(session)
             return await repo.list_projects()
-
-    async def get_query_logs(
-        self,
-        limit: int = 100,
-    ) -> list[dict]:
-        async with self._session() as session:
-            """Get recent query logs."""
-            repo = ExperienceRepository(session)
-            return await repo.get_query_logs(limit=limit)
-
-    async def get_query_stats(
-        self,
-    ) -> dict:
-        async with self._session() as session:
-            """Get query analytics summary."""
-            repo = ExperienceRepository(session)
-            return await repo.get_query_stats()
-
-    # ======================== VERSION HISTORY (B3) ========================
-
-    async def get_versions(
-        self,
-        experience_id: str,
-    ) -> list[dict]:
-        async with self._session() as session:
-            """Get version history for an experience."""
-            repo = ExperienceRepository(session)
-            versions = await repo.get_versions(uuid.UUID(experience_id))
-            return [v.to_dict() for v in versions]
-
-    async def get_version_detail(
-        self,
-        version_id: str,
-    ) -> dict | None:
-        async with self._session() as session:
-            """Get a single version snapshot."""
-            repo = ExperienceRepository(session)
-            version = await repo.get_version_detail(uuid.UUID(version_id))
-            return version.to_dict() if version else None
-
-    async def rollback_to_version(
-        self,
-        experience_id: str,
-        version_id: str,
-        user: str = "system",
-    ) -> dict | None:
-        async with self._session() as session:
-            """Rollback an experience to a specific version.
-
-            1. Save current state as a new version ("回滚前快照")
-            2. Restore content fields from the target version's snapshot
-            3. Re-generate embedding for the restored content
-            4. Save a final version record ("回滚至版本 X")
-
-            Returns the updated experience dict.
-            """
-            repo = ExperienceRepository(session)
-            exp_uuid = uuid.UUID(experience_id)
-            ver_uuid = uuid.UUID(version_id)
-
-            # Check that both exist
-            exp = await repo.get_by_id(exp_uuid, include_deleted=True)
-            version = await repo.get_version_detail(ver_uuid)
-            if exp is None or version is None:
-                return None
-
-            # Save current state before rollback
-            try:
-                await repo.save_version(
-                    experience_id=exp_uuid,
-                    changed_by=user,
-                    change_summary="回滚前快照",
-                )
-            except Exception as e:
-                logger.warning("Failed to save pre-rollback version: %s", str(e))
-
-            # Restore content fields from snapshot
-            snapshot = version.snapshot
-            updates = {}
-            for field in (
-                "title", "description", "root_cause", "solution", "tags",
-                "programming_language", "framework", "code_snippets",
-            ):
-                if field in snapshot:
-                    updates[field] = snapshot[field]
-
-            # Re-generate embedding (include children when this is a parent)
-            children = await repo.get_children(exp_uuid)
-            embed_text = self._build_parent_embed_text(
-                snapshot.get("title", ""),
-                snapshot.get("description", ""),
-                snapshot.get("solution", ""),
-                root_cause=snapshot.get("root_cause"),
-                code_snippets=snapshot.get("code_snippets"),
-                tags=snapshot.get("tags"),
-                children=children if children else None,
-            )
-            try:
-                embedding = await self._embedding.encode_single(embed_text)
-                updates["embedding"] = embedding
-            except Exception:
-                logger.warning("Failed to regenerate embedding during rollback")
-
-            # Apply updates
-            updated = await repo.update(exp_uuid, **updates)
-            if updated is None:
-                return None
-
-            # Save a version record for the rollback action
-            try:
-                await repo.save_version(
-                    experience_id=exp_uuid,
-                    changed_by=user,
-                    change_summary=f"回滚至版本 {version.version_number}",
-                )
-            except Exception as e:
-                logger.warning("Failed to save rollback version: %s", str(e))
-
-            await self._event_bus.emit(Events.EXPERIENCE_ROLLED_BACK, {
-                "experience_id": experience_id,
-                "version_id": version_id,
-                "user": user,
-            })
-            return updated.to_dict()
-
-    # ======================== STALE DETECTION (B1) ========================
-
-    async def scan_stale(
-        self,
-        months: int = 6,
-    ) -> list[dict]:
-        async with self._session() as session:
-            """Scan for stale (unused) experiences."""
-            repo = ExperienceRepository(session)
-            stale = await repo.scan_stale(months=months)
-            return [exp.to_dict() for exp in stale]
-
-    # ======================== DEDUPLICATION (B2) ========================
-
-    # ======================== SUMMARY / MEMORY COMPACTION (P0-4) ========================
-
-    async def generate_summary(
-        self,
-        experience_id: str,
-    ) -> dict | None:
-        async with self._session() as session:
-            """Generate an LLM summary for a single experience."""
-            from team_memory.services.llm_parser import generate_summary
-
-            repo = ExperienceRepository(session)
-            exp_uuid = uuid.UUID(experience_id)
-            experience = await repo.get_by_id(exp_uuid)
-            if experience is None:
-                return None
-
-            content = (
-                f"标题: {experience.title}\n问题: {experience.description}\n"
-                f"解决方案: {experience.solution or '(尚未解决)'}"
-            )
-            if experience.root_cause:
-                content += f"\n根因: {experience.root_cause}"
-
-            try:
-                summary = await generate_summary(content, llm_config=self._llm_config)
-            except Exception as e:
-                logger.warning("Failed to generate summary for %s: %s", experience_id, e)
-                return None
-
-            updated = await repo.update(exp_uuid, summary=summary)
-            return updated.to_dict() if updated else None
-
-    async def batch_generate_summaries(
-        self,
-        limit: int = 10,
-    ) -> dict:
-        async with self._session() as session:
-            """Batch generate summaries for experiences without one."""
-            from team_memory.services.llm_parser import generate_summary
-
-            repo = ExperienceRepository(session)
-            min_length = (
-                self._memory_config.summary_threshold_tokens
-                if self._memory_config
-                else 500
-            )
-            experiences = await repo.get_experiences_without_summary(
-                limit=limit, min_content_length=min_length
-            )
-
-            generated = 0
-            errors = []
-            for exp in experiences:
-                content = (
-                    f"标题: {exp.title}\n问题: {exp.description}\n"
-                    f"解决方案: {exp.solution or '(尚未解决)'}"
-                )
-                if exp.root_cause:
-                    content += f"\n根因: {exp.root_cause}"
-                try:
-                    summary = await generate_summary(content, llm_config=self._llm_config)
-                    await repo.update(exp.id, summary=summary)
-                    generated += 1
-                except Exception as e:
-                    errors.append({"id": str(exp.id), "error": str(e)})
-                    logger.warning("Summary generation failed for %s: %s", exp.id, e)
-
-            return {
-                "generated": generated,
-                "total_candidates": len(experiences),
-                "errors": errors,
-            }
-
-    # ======================== DEDUPLICATION (B2) ========================
-
-    async def reembed_experience_groups(
-        self, project: str | None = None
-    ) -> dict:
-        """Recompute embeddings for all root experiences that have children.
-
-        Uses parent + children content (same as update_experience) so that
-        duplicate detection no longer treats same-description-but-different-children
-        groups as identical. Returns {"updated": N, "errors": [...]}.
-        """
-        updated = 0
-        errors: list[str] = []
-        async with self._session() as session:
-            repo = ExperienceRepository(session)
-            root_ids = await repo.list_root_ids_with_children(project=project)
-            for root_id in root_ids:
-                try:
-                    root = await repo.get_with_children(root_id)
-                    if not root or not root.children:
-                        continue
-                    embed_text = self._build_parent_embed_text(
-                        root.title,
-                        root.description,
-                        root.solution or "",
-                        root_cause=root.root_cause,
-                        code_snippets=root.code_snippets,
-                        tags=root.tags,
-                        children=root.children,
-                    )
-                    embedding = await self._embedding.encode_single(embed_text)
-                    await repo.update(root_id, embedding=embedding)
-                    updated += 1
-                except Exception as e:
-                    errors.append(f"{root_id}: {e!s}")
-        return {"updated": updated, "errors": errors}
-
-    async def find_duplicates(
-        self,
-        threshold: float = 0.92,
-        limit: int = 20,
-    ) -> list[dict]:
-        async with self._session() as session:
-            """Find near-duplicate experience pairs."""
-            repo = ExperienceRepository(session)
-            return await repo.find_duplicates(threshold=threshold, limit=limit)
-
-    async def merge_experiences(
-        self,
-        primary_id: str,
-        secondary_id: str,
-        user: str = "system",
-    ) -> dict | None:
-        async with self._session() as session:
-            """Merge secondary experience into primary.
-
-            Saves version snapshots for both before merging (B3 integration).
-            """
-            repo = ExperienceRepository(session)
-            primary_uuid = uuid.UUID(primary_id)
-            secondary_uuid = uuid.UUID(secondary_id)
-
-            # Save version snapshots before merge
-            for exp_id, label in [
-                (primary_uuid, "合并前快照 (主经验)"),
-                (secondary_uuid, "合并前快照 (被合并经验)"),
-            ]:
-                try:
-                    await repo.save_version(
-                        experience_id=exp_id,
-                        changed_by=user,
-                        change_summary=label,
-                    )
-                except Exception as e:
-                    logger.warning("Failed to save merge version for %s: %s", exp_id, str(e))
-
-            result = await repo.merge_experiences(primary_uuid, secondary_uuid)
-            if result is None:
-                return None
-
-            await self._event_bus.emit(Events.EXPERIENCE_MERGED, {
-                "primary_id": primary_id,
-                "secondary_id": secondary_id,
-                "user": user,
-            })
-            return result.to_dict(include_children=True)
-
-    # ======================== IMPORT / EXPORT (B4) ========================
-
-    async def import_experiences(
-        self,
-        data: str | bytes,
-        fmt: str,
-        created_by: str,
-    ) -> dict:
-        async with self._session() as session:
-            """Import experiences from JSON or CSV data.
-
-            Args:
-                data: Raw file content.
-                fmt: 'json' or 'csv'.
-                created_by: Author name.
-
-            Returns:
-                Summary dict with imported count.
-            """
-            repo = ExperienceRepository(session)
-
-            if fmt == "json":
-                parsed = json.loads(data)
-                raw_experiences = (
-                    parsed.get("experiences", parsed) if isinstance(parsed, dict) else parsed
-                )
-            elif fmt == "csv":
-                text = data if isinstance(data, str) else data.decode("utf-8")
-                reader = csv.DictReader(io.StringIO(text))
-                raw_experiences = list(reader)
-            else:
-                raise ValueError(f"Unsupported format: {fmt}")
-
-            imported = 0
-            errors = []
-            for idx, raw in enumerate(raw_experiences):
-                try:
-                    # Parse tags
-                    tags = raw.get("tags", [])
-                    if isinstance(tags, str):
-                        tags = [t.strip() for t in tags.split(";") if t.strip()]
-
-                    children_raw = raw.get("children")
-                    if children_raw:
-                        # Import as group: parent embedding includes children for dedup
-                        parent_embed_text = self._build_parent_embed_text(
-                            raw.get("title", ""),
-                            raw.get("description", raw.get("problem", "")),
-                            raw.get("solution", ""),
-                            root_cause=raw.get("root_cause"),
-                            code_snippets=raw.get("code_snippets"),
-                            tags=tags,
-                            children=children_raw,
-                        )
-                        try:
-                            parent_embedding = await self._embedding.encode_single(
-                                parent_embed_text
-                            )
-                        except Exception:
-                            parent_embedding = None
-                        parent_data = {
-                            "title": raw.get("title", ""),
-                            "description": raw.get("description", raw.get("problem", "")),
-                            "solution": raw.get("solution", ""),
-                            "tags": tags,
-                            "programming_language": raw.get(
-                                "programming_language", raw.get("language")
-                            ),
-                            "framework": raw.get("framework"),
-                            "code_snippets": raw.get("code_snippets"),
-                            "root_cause": raw.get("root_cause"),
-                            "embedding": parent_embedding,
-                            "source": raw.get("source", "import"),
-                        }
-                        children_data = []
-                        for child in children_raw:
-                            child_tags = child.get("tags", [])
-                            if isinstance(child_tags, str):
-                                child_tags = [t.strip() for t in child_tags.split(";") if t.strip()]
-                            child_embed_text = "\n".join([
-                                child.get("title", ""),
-                                child.get("description", child.get("problem", "")),
-                                child.get("solution", ""),
-                            ])
-                            try:
-                                child_embedding = await self._embedding.encode_single(
-                                    child_embed_text
-                                )
-                            except Exception:
-                                child_embedding = None
-                            children_data.append({
-                                "title": child.get("title", ""),
-                                "description": child.get("description", child.get("problem", "")),
-                                "solution": child.get("solution", ""),
-                                "tags": child_tags,
-                                "programming_language": child.get(
-                                    "programming_language", child.get("language")
-                                ),
-                                "framework": child.get("framework"),
-                                "code_snippets": child.get("code_snippets"),
-                                "root_cause": child.get("root_cause"),
-                                "embedding": child_embedding,
-                                "source": child.get("source", "import"),
-                                "created_by": created_by,
-                            })
-                        parent_data["created_by"] = created_by
-                        parent_exp = await repo.create_group(
-                            parent_data=parent_data,
-                            children_data=children_data,
-                            created_by=created_by,
-                        )
-                        try:
-                            await self._maybe_build_tree_nodes(
-                                repo,
-                                parent_exp.id,
-                                problem=raw.get("description", raw.get("problem", "")),
-                                solution=raw.get("solution", ""),
-                                root_cause=raw.get("root_cause"),
-                                code_snippets=raw.get("code_snippets"),
-                            )
-                            for child_exp, child in zip(
-                                parent_exp.children or [], children_raw, strict=False
-                            ):
-                                await self._maybe_build_tree_nodes(
-                                    repo,
-                                    child_exp.id,
-                                    problem=child.get("description", child.get("problem", "")),
-                                    solution=child.get("solution", ""),
-                                    root_cause=child.get("root_cause"),
-                                    code_snippets=child.get("code_snippets"),
-                                )
-                        except Exception:
-                            logger.warning(
-                                "PageIndex-Lite build failed during group import",
-                                exc_info=True,
-                            )
-                    else:
-                        # Import as single
-                        single_embed_text = self._build_parent_embed_text(
-                            raw.get("title", ""),
-                            raw.get("description", raw.get("problem", "")),
-                            raw.get("solution", ""),
-                            root_cause=raw.get("root_cause"),
-                            code_snippets=raw.get("code_snippets"),
-                            tags=tags,
-                            children=None,
-                        )
-                        try:
-                            single_embedding = await self._embedding.encode_single(
-                                single_embed_text
-                            )
-                        except Exception:
-                            single_embedding = None
-                        exp = await repo.create(
-                            title=raw.get("title", ""),
-                            description=raw.get("description", raw.get("problem", "")),
-                            solution=raw.get("solution", ""),
-                            created_by=created_by,
-                            tags=tags,
-                            programming_language=raw.get(
-                                "programming_language", raw.get("language")
-                            ),
-                            framework=raw.get("framework"),
-                            code_snippets=raw.get("code_snippets"),
-                            embedding=single_embedding,
-                            source=raw.get("source", "import"),
-                            root_cause=raw.get("root_cause"),
-                        )
-                        try:
-                            await self._maybe_build_tree_nodes(
-                                repo,
-                                exp.id,
-                                problem=raw.get("description", raw.get("problem", "")),
-                                solution=raw.get("solution", ""),
-                                root_cause=raw.get("root_cause"),
-                                code_snippets=raw.get("code_snippets"),
-                            )
-                        except Exception:
-                            logger.warning(
-                                "PageIndex-Lite build failed during import",
-                                exc_info=True,
-                            )
-                    imported += 1
-                except Exception as e:
-                    errors.append({"index": idx, "error": str(e)})
-                    logger.warning("Import error at index %d: %s", idx, str(e))
-
-            await self._event_bus.emit(Events.EXPERIENCE_IMPORTED, {
-                "imported": imported,
-                "total": len(raw_experiences),
-                "format": fmt,
-                "created_by": created_by,
-            })
-            return {
-                "imported": imported,
-                "total": len(raw_experiences),
-                "errors": errors,
-            }
-
-    async def export_experiences(
-        self,
-        fmt: str = "json",
-        tag: str | None = None,
-        start: str | None = None,
-        end: str | None = None,
-    ) -> str:
-        async with self._session() as session:
-            """Export experiences as JSON or CSV.
-
-            Args:
-                fmt: 'json' or 'csv'.
-                tag: Filter by tag.
-                start: Start date (ISO format).
-                end: End date (ISO format).
-
-            Returns:
-                Serialized string content.
-            """
-            repo = ExperienceRepository(session)
-
-            start_dt = datetime.fromisoformat(start) if start else None
-            end_dt = datetime.fromisoformat(end) if end else None
-
-            experiences = await repo.export_filtered(
-                tag=tag, start=start_dt, end=end_dt
-            )
-
-            if fmt == "json":
-                result = {
-                    "version": "1.0",
-                    "exported_at": datetime.now(timezone.utc).isoformat(),
-                    "count": len(experiences),
-                    "experiences": [],
-                }
-                for exp in experiences:
-                    exp_dict = {
-                        "title": exp.title,
-                        "description": exp.description,
-                        "root_cause": exp.root_cause,
-                        "solution": exp.solution,
-                        "tags": exp.tags or [],
-                        "programming_language": exp.programming_language,
-                        "framework": exp.framework,
-                        "code_snippets": exp.code_snippets,
-                        "source": exp.source,
-                        "created_by": exp.created_by,
-                        "created_at": exp.created_at.isoformat() if exp.created_at else None,
-                        "avg_rating": exp.avg_rating,
-                        "use_count": exp.use_count,
-                    }
-                    if exp.children:
-                        exp_dict["children"] = [
-                            {
-                                "title": c.title,
-                                "description": c.description,
-                                "root_cause": c.root_cause,
-                                "solution": c.solution,
-                                "tags": c.tags or [],
-                                "programming_language": c.programming_language,
-                                "framework": c.framework,
-                                "code_snippets": c.code_snippets,
-                            }
-                            for c in exp.children
-                        ]
-                    result["experiences"].append(exp_dict)
-                return json.dumps(result, ensure_ascii=False, indent=2)
-
-            elif fmt == "csv":
-                output = io.StringIO()
-                writer = csv.writer(output)
-                writer.writerow([
-                    "title", "description", "root_cause", "solution",
-                    "tags", "programming_language", "framework", "code_snippets",
-                    "source", "created_by", "created_at", "avg_rating", "use_count",
-                ])
-                for exp in experiences:
-                    writer.writerow([
-                        exp.title,
-                        exp.description,
-                        exp.root_cause or "",
-                        exp.solution or "",
-                        ";".join(exp.tags or []),
-                        exp.programming_language or "",
-                        exp.framework or "",
-                        exp.code_snippets or "",
-                        exp.source,
-                        exp.created_by,
-                        exp.created_at.isoformat() if exp.created_at else "",
-                        exp.avg_rating,
-                        exp.use_count,
-                    ])
-                return output.getvalue()
-
-            else:
-                raise ValueError(f"Unsupported format: {fmt}")
-
-    # ------------------------------------------------------------------
-    # P1-4: Convenience facades for route handlers
-    # ------------------------------------------------------------------
 
     async def list_experiences(
         self,
@@ -1871,50 +691,3 @@ class ExperienceService:
             if exp is None:
                 return None
             return repo.experience_to_dict(exp)
-
-    async def promote(
-        self, experience_id: str, *, user: str = "system"
-    ) -> dict | None:
-        """Promote an experience to 'published' status."""
-        return await self.review(
-            experience_id, new_status="approved", reviewer=user
-        )
-
-    async def batch_action(
-        self,
-        ids: list[str],
-        action: str,
-        *,
-        user: str = "system",
-    ) -> dict:
-        """Apply an action to multiple experiences."""
-        results: dict = {"success": 0, "failed": 0, "errors": []}
-        for exp_id in ids:
-            try:
-                if action == "delete":
-                    ok = await self.soft_delete(exp_id)
-                elif action == "restore":
-                    ok = await self.restore(exp_id)
-                elif action == "promote":
-                    ok = await self.promote(exp_id, user=user) is not None
-                else:
-                    raise ValueError(f"Unknown action: {action}")
-                if ok:
-                    results["success"] += 1
-                else:
-                    results["failed"] += 1
-            except Exception as e:
-                results["failed"] += 1
-                results["errors"].append({"id": exp_id, "error": str(e)})
-        return results
-
-    async def suggest_tags(
-        self, prefix: str = "", *, limit: int = 20
-    ) -> list[str]:
-        """Suggest tags based on prefix and existing usage."""
-        stats = await self.get_stats()
-        tags = stats.get("tag_distribution", {})
-        if prefix:
-            tags = {k: v for k, v in tags.items() if k.startswith(prefix.lower())}
-        sorted_tags = sorted(tags, key=lambda t: tags[t], reverse=True)
-        return sorted_tags[:limit]

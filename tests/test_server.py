@@ -28,34 +28,48 @@ class TestToolNamespace:
     @pytest.mark.asyncio
     async def test_all_tools_have_tm_prefix(self):
         """Every registered tool name must start with 'tm_'."""
-        tools = await mcp.get_tools()
+        tools = {t.name: t for t in await mcp.list_tools()}
         for name in tools:
             assert name.startswith("tm_"), f"Tool '{name}' does not use tm_ prefix"
 
     @pytest.mark.asyncio
     async def test_expected_tools_registered(self):
         """All expected tools should be present."""
-        tools = await mcp.get_tools()
+        tools = {t.name: t for t in await mcp.list_tools()}
         expected = {
-            "tm_search", "tm_save", "tm_save_group", "tm_archive_save", "tm_get_archive",
-            "tm_feedback", "tm_update",
-            "tm_solve", "tm_learn", "tm_suggest",
+            "tm_search",
+            "tm_save",
+            "tm_save_group",
+            "tm_archive_save",
+            "tm_get_archive",
+            "tm_feedback",
+            "tm_update",
+            "tm_solve",
+            "tm_learn",
+            "tm_suggest",
         }
         for name in expected:
             assert name in tools, f"Tool '{name}' not registered"
 
     @pytest.mark.asyncio
     async def test_all_tools_have_descriptions(self):
-        tools = await mcp.get_tools()
+        tools = {t.name: t for t in await mcp.list_tools()}
         for name, tool in tools.items():
             assert tool.description, f"Tool {name} has no description"
 
     @pytest.mark.asyncio
     async def test_tool_descriptions_have_token_hints(self):
         """Workflow tools should mention approximate token output size."""
-        tools = await mcp.get_tools()
-        for name in ("tm_search", "tm_solve", "tm_suggest", "tm_save",
-                      "tm_save_group", "tm_feedback", "tm_update"):
+        tools = {t.name: t for t in await mcp.list_tools()}
+        for name in (
+            "tm_search",
+            "tm_solve",
+            "tm_suggest",
+            "tm_save",
+            "tm_save_group",
+            "tm_feedback",
+            "tm_update",
+        ):
             desc = tools[name].description or ""
             assert "token" in desc.lower(), (
                 f"Tool '{name}' description should mention token output size"
@@ -72,13 +86,9 @@ class TestMCPResourceRegistration:
 
     @pytest.mark.asyncio
     async def test_recent_resource_registered(self):
-        resources = await mcp.get_resources()
-        assert "experiences://recent" in resources
-
-    @pytest.mark.asyncio
-    async def test_stats_resource_registered(self):
-        resources = await mcp.get_resources()
-        assert "experiences://stats" in resources
+        resources = await mcp.list_resources()
+        uris = {str(r.uri) for r in resources}
+        assert "experiences://recent" in uris
 
 
 # ============================================================
@@ -98,10 +108,7 @@ class TestGuardOutput:
 
     def test_large_output_truncates_results(self):
         """Output exceeding budget should remove trailing results."""
-        results = [
-            {"title": f"Experience {i}", "solution": "x" * 3000}
-            for i in range(10)
-        ]
+        results = [{"title": f"Experience {i}", "solution": "x" * 3000} for i in range(10)]
         data = {"message": "Found 10", "results": results}
         raw = json.dumps(data, ensure_ascii=False)
 
@@ -151,23 +158,6 @@ class TestGuardOutput:
         result = _guard_output(raw, max_tokens=100)
         assert json.loads(result) == data
 
-    def test_strips_code_snippets_when_disabled(self):
-        """code_snippets should be removed when include_code_snippets=False."""
-        results = [{"title": "A", "code_snippets": "print('hi')", "solution": "ok"}]
-        data = {"message": "ok", "results": results}
-        raw = json.dumps(data)
-
-        with patch("team_memory.server._get_settings") as mock_settings:
-            mock_cfg = MagicMock()
-            mock_cfg.mcp.max_output_tokens = 100
-            mock_cfg.mcp.truncate_solution_at = 5000
-            mock_cfg.mcp.include_code_snippets = False
-            mock_settings.return_value = mock_cfg
-
-            result = _guard_output(raw, max_tokens=100)
-            parsed = json.loads(result)
-            assert "code_snippets" not in parsed["results"][0]
-
 
 # ============================================================
 # tm_search (renamed from search_experiences)
@@ -190,20 +180,19 @@ class TestTdSearch:
             }
         ]
 
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server.get_session") as mock_get_session:
-
+        with (
+            patch("team_memory.server._get_service") as mock_get_service,
+            patch("team_memory.server.get_session") as mock_get_session,
+        ):
             mock_service = MagicMock()
             mock_service.search = AsyncMock(return_value=mock_results)
             mock_get_service.return_value = mock_service
 
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             search_fn = tools["tm_search"].fn
             result = await search_fn(query="test problem")
 
@@ -214,20 +203,19 @@ class TestTdSearch:
 
     @pytest.mark.asyncio
     async def test_search_empty_results(self):
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server.get_session") as mock_get_session:
-
+        with (
+            patch("team_memory.server._get_service") as mock_get_service,
+            patch("team_memory.server.get_session") as mock_get_session,
+        ):
             mock_service = MagicMock()
             mock_service.search = AsyncMock(return_value=[])
             mock_get_service.return_value = mock_service
 
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             search_fn = tools["tm_search"].fn
             result = await search_fn(query="nonexistent")
 
@@ -242,22 +230,21 @@ class TestTdSearch:
             {"path": "src/team_memory/server.py", "start_line": 1, "end_line": 10},
             {"path": "tests/conftest.py"},
         ]
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server.get_session") as mock_get_session, \
-             patch("team_memory.server._get_current_user", return_value="alice"), \
-             patch("team_memory.server._resolve_project", return_value="default"):
-
+        with (
+            patch("team_memory.server._get_service") as mock_get_service,
+            patch("team_memory.server.get_session") as mock_get_session,
+            patch("team_memory.server._get_current_user", return_value="alice"),
+            patch("team_memory.server._resolve_project", return_value="default"),
+        ):
             mock_service = MagicMock()
             mock_service.search = AsyncMock(return_value=[])
             mock_get_service.return_value = mock_service
 
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             search_fn = tools["tm_search"].fn
             await search_fn(
                 query="test",
@@ -285,23 +272,22 @@ class TestTdSave:
             "created_at": "2026-01-01T00:00:00+00:00",
         }
 
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server.get_session") as mock_get_session, \
-             patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
-             patch("team_memory.server._resolve_project", return_value="default"), \
-             patch("team_memory.server._get_current_user", return_value="alice"):
-
+        with (
+            patch("team_memory.server._get_service") as mock_get_service,
+            patch("team_memory.server.get_session") as mock_get_session,
+            patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"),
+            patch("team_memory.server._resolve_project", return_value="default"),
+            patch("team_memory.server._get_current_user", return_value="alice"),
+        ):
             mock_service = MagicMock()
             mock_service.save = AsyncMock(return_value=mock_result)
             mock_get_service.return_value = mock_service
 
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             save_fn = tools["tm_save"].fn
             result = await save_fn(
                 title="Fix Docker issue",
@@ -314,93 +300,6 @@ class TestTdSave:
         assert "experience" in data
         assert data["experience"]["id"] == exp_id
         assert "saved successfully" in data["message"].lower()
-
-    @pytest.mark.asyncio
-    async def test_save_with_file_locations_passes_through(self):
-        """tm_save with file_locations passes them through to save."""
-        exp_id = str(uuid.uuid4())
-        mock_result = {
-            "id": exp_id,
-            "title": "Fix",
-            "created_at": "2026-01-01T00:00:00+00:00",
-        }
-        file_locs = [
-            {"path": "src/server.py", "start_line": 10, "end_line": 20},
-        ]
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server.get_session") as mock_get_session, \
-             patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
-             patch("team_memory.server._resolve_project", return_value="default"), \
-             patch("team_memory.server._get_current_user", return_value="alice"):
-            mock_service = MagicMock()
-            mock_service.save = AsyncMock(return_value=mock_result)
-            mock_get_service.return_value = mock_service
-            mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            tools = await mcp.get_tools()
-            save_fn = tools["tm_save"].fn
-            await save_fn(
-                title="Fix",
-                problem="Problem",
-                file_locations=file_locs,
-            )
-            kwargs = mock_service.save.call_args.kwargs
-            assert kwargs.get("file_locations") == file_locs
-
-    @pytest.mark.asyncio
-    async def test_save_with_file_locations_binding_exists(self):
-        """tm_save with file_locations forwards to save so bindings are created."""
-        exp_id = str(uuid.uuid4())
-        mock_result = {
-            "id": exp_id,
-            "title": "Fix",
-            "created_at": "2026-01-01T00:00:00+00:00",
-        }
-        file_locs = [
-            {
-                "path": "src/team_memory/server.py",
-                "start_line": 1,
-                "end_line": 5,
-                "snippet": "def tm_save",
-                "file_mtime": "2026-01-01T00:00:00Z",
-                "file_content_hash": "abc123",
-            },
-        ]
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server.get_session") as mock_get_session, \
-             patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
-             patch("team_memory.server._resolve_project", return_value="default"), \
-             patch("team_memory.server._get_current_user", return_value="alice"):
-            mock_service = MagicMock()
-            mock_service.save = AsyncMock(return_value=mock_result)
-            mock_get_service.return_value = mock_service
-            mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            tools = await mcp.get_tools()
-            save_fn = tools["tm_save"].fn
-            await save_fn(
-                title="Fix",
-                problem="Problem",
-                file_locations=file_locs,
-            )
-            kwargs = mock_service.save.call_args.kwargs
-            assert kwargs.get("file_locations") == file_locs
-            assert len(kwargs["file_locations"]) == 1
-            binding = kwargs["file_locations"][0]
-            assert binding["path"] == "src/team_memory/server.py"
-            assert binding["start_line"] == 1
-            assert binding["end_line"] == 5
-            assert binding.get("snippet") == "def tm_save"
-            assert binding.get("file_mtime") == "2026-01-01T00:00:00Z"
-            assert binding.get("file_content_hash") == "abc123"
 
 
 # ============================================================
@@ -415,14 +314,16 @@ class TestTmArchiveSave:
     async def test_tm_archive_save_returns_archive_id(self):
         """tm_archive_save returns JSON with archive_id."""
         archive_id = str(uuid.uuid4())
-        with patch("team_memory.server._get_archive_service") as mock_get_archive_svc, \
-             patch("team_memory.server._get_current_user", return_value="alice"), \
-             patch("team_memory.server._resolve_project", return_value="default"):
+        with (
+            patch("team_memory.server._get_archive_service") as mock_get_archive_svc,
+            patch("team_memory.server._get_current_user", return_value="alice"),
+            patch("team_memory.server._resolve_project", return_value="default"),
+        ):
             mock_svc = MagicMock()
             mock_svc.archive_save = AsyncMock(return_value=uuid.UUID(archive_id))
             mock_get_archive_svc.return_value = mock_svc
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             assert "tm_archive_save" in tools
             save_fn = tools["tm_archive_save"].fn
             result = await save_fn(
@@ -451,12 +352,18 @@ class TestTmGetArchive:
             "overview": "O",
             "attachments": [{"id": "a1", "kind": "file", "path": "p"}],
         }
-        with patch("team_memory.server._get_archive_service") as mock_get_svc:
+        with (
+            patch("team_memory.server._get_archive_service") as mock_get_svc,
+            patch(
+                "team_memory.server._get_current_user", new_callable=AsyncMock, return_value="alice"
+            ),
+            patch("team_memory.server._resolve_project", return_value="default"),
+        ):
             mock_svc = MagicMock()
             mock_svc.get_archive = AsyncMock(return_value=l2)
             mock_get_svc.return_value = mock_svc
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             get_fn = tools["tm_get_archive"].fn
             result = await get_fn(archive_id=archive_id)
 
@@ -468,7 +375,7 @@ class TestTmGetArchive:
     @pytest.mark.asyncio
     async def test_tm_get_archive_404_invalid_id(self):
         """tm_get_archive returns 404 for invalid UUID."""
-        tools = await mcp.get_tools()
+        tools = {t.name: t for t in await mcp.list_tools()}
         get_fn = tools["tm_get_archive"].fn
         result = await get_fn(archive_id="not-a-uuid")
         data = json.loads(result)
@@ -479,12 +386,18 @@ class TestTmGetArchive:
     async def test_tm_get_archive_404_not_found(self):
         """tm_get_archive returns 404 when archive does not exist."""
         archive_id = str(uuid.uuid4())
-        with patch("team_memory.server._get_archive_service") as mock_get_svc:
+        with (
+            patch("team_memory.server._get_archive_service") as mock_get_svc,
+            patch(
+                "team_memory.server._get_current_user", new_callable=AsyncMock, return_value="alice"
+            ),
+            patch("team_memory.server._resolve_project", return_value="default"),
+        ):
             mock_svc = MagicMock()
             mock_svc.get_archive = AsyncMock(return_value=None)
             mock_get_svc.return_value = mock_svc
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             get_fn = tools["tm_get_archive"].fn
             result = await get_fn(archive_id=archive_id)
 
@@ -496,12 +409,18 @@ class TestTmGetArchive:
         """tm_get_archive ensures attachments is [] when missing."""
         archive_id = str(uuid.uuid4())
         l2 = {"id": archive_id, "title": "T", "solution_doc": "D"}
-        with patch("team_memory.server._get_archive_service") as mock_get_svc:
+        with (
+            patch("team_memory.server._get_archive_service") as mock_get_svc,
+            patch(
+                "team_memory.server._get_current_user", new_callable=AsyncMock, return_value="alice"
+            ),
+            patch("team_memory.server._resolve_project", return_value="default"),
+        ):
             mock_svc = MagicMock()
             mock_svc.get_archive = AsyncMock(return_value=l2)
             mock_get_svc.return_value = mock_svc
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             get_fn = tools["tm_get_archive"].fn
             result = await get_fn(archive_id=archive_id)
 
@@ -517,45 +436,6 @@ class TestTmGetArchive:
 class TestTdSaveTyped:
     """Test tm_save_typed tool function."""
 
-    @pytest.mark.asyncio
-    async def test_save_typed_with_file_locations_passes_through(self):
-        """tm_save_typed with file_locations passes them through to save."""
-        exp_id = str(uuid.uuid4())
-        mock_result = {
-            "id": exp_id,
-            "title": "Fix",
-            "experience_type": "bugfix",
-            "created_at": "2026-01-01T00:00:00+00:00",
-        }
-        file_locs = [
-            {"path": "src/utils/path.py", "start_line": 1, "end_line": 10},
-            {"path": "src/foo.py", "start_line": 5, "end_line": 15},
-        ]
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server.get_session") as mock_get_session, \
-             patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
-             patch("team_memory.server._resolve_project", return_value="default"), \
-             patch("team_memory.server._get_current_user", return_value="alice"):
-            mock_service = MagicMock()
-            mock_service.save = AsyncMock(return_value=mock_result)
-            mock_get_service.return_value = mock_service
-            mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            tools = await mcp.get_tools()
-            save_fn = tools["tm_save_typed"].fn
-            await save_fn(
-                title="Fix",
-                problem="Problem",
-                experience_type="bugfix",
-                file_locations=file_locs,
-            )
-            kwargs = mock_service.save.call_args.kwargs
-            assert kwargs.get("file_locations") == file_locs
-
 
 # ============================================================
 # tm_feedback (renamed from feedback_experience)
@@ -567,21 +447,20 @@ class TestTdFeedback:
 
     @pytest.mark.asyncio
     async def test_feedback_success(self):
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server.get_session") as mock_get_session, \
-             patch("team_memory.server._get_current_user", return_value="alice"):
-
+        with (
+            patch("team_memory.server._get_service") as mock_get_service,
+            patch("team_memory.server.get_session") as mock_get_session,
+            patch("team_memory.server._get_current_user", return_value="alice"),
+        ):
             mock_service = MagicMock()
             mock_service.feedback = AsyncMock(return_value=True)
             mock_get_service.return_value = mock_service
 
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             feedback_fn = tools["tm_feedback"].fn
             result = await feedback_fn(
                 experience_id=str(uuid.uuid4()),
@@ -595,7 +474,7 @@ class TestTdFeedback:
     @pytest.mark.asyncio
     async def test_feedback_invalid_rating(self):
         """Rating outside 1-5 should return error."""
-        tools = await mcp.get_tools()
+        tools = {t.name: t for t in await mcp.list_tools()}
         feedback_fn = tools["tm_feedback"].fn
         result = await feedback_fn(
             experience_id=str(uuid.uuid4()),
@@ -630,21 +509,20 @@ class TestTdSolve:
         mock_repo = MagicMock()
         mock_repo.increment_use_count = AsyncMock()
 
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server.get_session") as mock_get_session, \
-             patch("team_memory.storage.repository.ExperienceRepository", return_value=mock_repo):
-
+        with (
+            patch("team_memory.server._get_service") as mock_get_service,
+            patch("team_memory.server.get_session") as mock_get_session,
+            patch("team_memory.storage.repository.ExperienceRepository", return_value=mock_repo),
+        ):
             mock_service = MagicMock()
             mock_service.search = AsyncMock(return_value=mock_results)
             mock_get_service.return_value = mock_service
 
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             solve_fn = tools["tm_solve"].fn
             result = await solve_fn(
                 problem="Docker container won't start",
@@ -660,20 +538,19 @@ class TestTdSolve:
     @pytest.mark.asyncio
     async def test_solve_no_results_suggests_save(self):
         """tm_solve with no results should suggest tm_save."""
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server.get_session") as mock_get_session:
-
+        with (
+            patch("team_memory.server._get_service") as mock_get_service,
+            patch("team_memory.server.get_session") as mock_get_session,
+        ):
             mock_service = MagicMock()
             mock_service.search = AsyncMock(return_value=[])
             mock_get_service.return_value = mock_service
 
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             solve_fn = tools["tm_solve"].fn
             result = await solve_fn(problem="Unique unseen problem")
 
@@ -685,23 +562,22 @@ class TestTdSolve:
     async def test_solve_passes_current_file_locations_from_file_path(self):
         """tm_solve with current_file_locations should pass them to search for location boost."""
         locs = [{"path": "src/team_memory/server.py", "start_line": 1, "end_line": 5}]
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server.get_session") as mock_get_session, \
-             patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
-             patch("team_memory.server._get_current_user", return_value="alice"), \
-             patch("team_memory.server._resolve_project", return_value="default"):
-
+        with (
+            patch("team_memory.server._get_service") as mock_get_service,
+            patch("team_memory.server.get_session") as mock_get_session,
+            patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"),
+            patch("team_memory.server._get_current_user", return_value="alice"),
+            patch("team_memory.server._resolve_project", return_value="default"),
+        ):
             mock_service = MagicMock()
             mock_service.search = AsyncMock(return_value=[])
             mock_get_service.return_value = mock_service
 
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             solve_fn = tools["tm_solve"].fn
             await solve_fn(
                 problem="test",
@@ -715,23 +591,22 @@ class TestTdSolve:
     async def test_solve_passes_current_file_locations_from_file_paths(self):
         """tm_solve with current_file_locations should pass them to search for location boost."""
         locs = [{"path": "src/foo.py"}, {"path": "tests/bar.py"}]
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server.get_session") as mock_get_session, \
-             patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
-             patch("team_memory.server._get_current_user", return_value="alice"), \
-             patch("team_memory.server._resolve_project", return_value="default"):
-
+        with (
+            patch("team_memory.server._get_service") as mock_get_service,
+            patch("team_memory.server.get_session") as mock_get_session,
+            patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"),
+            patch("team_memory.server._get_current_user", return_value="alice"),
+            patch("team_memory.server._resolve_project", return_value="default"),
+        ):
             mock_service = MagicMock()
             mock_service.search = AsyncMock(return_value=[])
             mock_get_service.return_value = mock_service
 
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             solve_fn = tools["tm_solve"].fn
             await solve_fn(
                 problem="test",
@@ -744,20 +619,19 @@ class TestTdSolve:
     @pytest.mark.asyncio
     async def test_solve_builds_enhanced_query(self):
         """tm_solve should combine problem + language + framework into query."""
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server.get_session") as mock_get_session:
-
+        with (
+            patch("team_memory.server._get_service") as mock_get_service,
+            patch("team_memory.server.get_session") as mock_get_session,
+        ):
             mock_service = MagicMock()
             mock_service.search = AsyncMock(return_value=[])
             mock_get_service.return_value = mock_service
 
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             solve_fn = tools["tm_solve"].fn
             await solve_fn(
                 problem="API error",
@@ -803,13 +677,18 @@ class TestTdLearn:
             "created_at": "2026-01-01T00:00:00",
         }
 
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server._get_settings") as mock_get_settings, \
-             patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
-             patch("team_memory.server._resolve_project", return_value="default"), \
-             patch("team_memory.server.get_session") as mock_get_session, \
-             patch("team_memory.services.llm_parser.parse_content", new_callable=AsyncMock, return_value=parsed):
-
+        with (
+            patch("team_memory.server._get_service") as mock_get_service,
+            patch("team_memory.server._get_settings") as mock_get_settings,
+            patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"),
+            patch("team_memory.server._resolve_project", return_value="default"),
+            patch("team_memory.server.get_session") as mock_get_session,
+            patch(
+                "team_memory.services.llm_parser.parse_content",
+                new_callable=AsyncMock,
+                return_value=parsed,
+            ),
+        ):
             mock_service = MagicMock()
             mock_service.save = AsyncMock(return_value=saved)
             mock_get_service.return_value = mock_service
@@ -820,12 +699,10 @@ class TestTdLearn:
             mock_get_settings.return_value = mock_settings_obj
 
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             learn_fn = tools["tm_learn"].fn
             result = await learn_fn(
                 conversation="We fixed the database timeout issue by adding pooling...",
@@ -841,13 +718,17 @@ class TestTdLearn:
         """tm_learn should handle LLM parse failures gracefully."""
         from team_memory.services.llm_parser import LLMParseError
 
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server._get_settings") as mock_get_settings, \
-             patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"), \
-             patch("team_memory.server._resolve_project", return_value="default"), \
-             patch("team_memory.services.llm_parser.parse_content", new_callable=AsyncMock,
-                   side_effect=LLMParseError("Connection refused")):
-
+        with (
+            patch("team_memory.server._get_service") as mock_get_service,
+            patch("team_memory.server._get_settings") as mock_get_settings,
+            patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"),
+            patch("team_memory.server._resolve_project", return_value="default"),
+            patch(
+                "team_memory.services.llm_parser.parse_content",
+                new_callable=AsyncMock,
+                side_effect=LLMParseError("Connection refused"),
+            ),
+        ):
             mock_service = MagicMock()
             mock_get_service.return_value = mock_service
 
@@ -856,7 +737,7 @@ class TestTdLearn:
             mock_settings_obj.extraction = MagicMock(quality_gate=2, max_retries=1)
             mock_get_settings.return_value = mock_settings_obj
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             learn_fn = tools["tm_learn"].fn
             result = await learn_fn(conversation="some text")
 
@@ -876,20 +757,19 @@ class TestTdSuggest:
     @pytest.mark.asyncio
     async def test_suggest_builds_query_from_context(self):
         """tm_suggest should build a query from file_path + language + framework."""
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server.get_session") as mock_get_session:
-
+        with (
+            patch("team_memory.server._get_service") as mock_get_service,
+            patch("team_memory.server.get_session") as mock_get_session,
+        ):
             mock_service = MagicMock()
             mock_service.search = AsyncMock(return_value=[])
             mock_get_service.return_value = mock_service
 
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             suggest_fn = tools["tm_suggest"].fn
             await suggest_fn(
                 file_path="tests/test_auth.py",
@@ -906,22 +786,21 @@ class TestTdSuggest:
     @pytest.mark.asyncio
     async def test_suggest_calls_search_with_context_query(self):
         """tm_suggest with file_path should call search with context-derived query."""
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server.get_session") as mock_get_session, \
-             patch("team_memory.server._get_current_user", return_value="alice"), \
-             patch("team_memory.server._resolve_project", return_value="default"):
-
+        with (
+            patch("team_memory.server._get_service") as mock_get_service,
+            patch("team_memory.server.get_session") as mock_get_session,
+            patch("team_memory.server._get_current_user", return_value="alice"),
+            patch("team_memory.server._resolve_project", return_value="default"),
+        ):
             mock_service = MagicMock()
             mock_service.search = AsyncMock(return_value=[])
             mock_get_service.return_value = mock_service
 
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             suggest_fn = tools["tm_suggest"].fn
             await suggest_fn(file_path="src/team_memory/server.py")
 
@@ -934,7 +813,7 @@ class TestTdSuggest:
     @pytest.mark.asyncio
     async def test_suggest_no_context_error(self):
         """tm_suggest with no context params should return error."""
-        tools = await mcp.get_tools()
+        tools = {t.name: t for t in await mcp.list_tools()}
         suggest_fn = tools["tm_suggest"].fn
         result = await suggest_fn()
 
@@ -961,20 +840,19 @@ class TestTdSuggest:
             }
         ]
 
-        with patch("team_memory.server._get_service") as mock_get_service, \
-             patch("team_memory.server.get_session") as mock_get_session:
-
+        with (
+            patch("team_memory.server._get_service") as mock_get_service,
+            patch("team_memory.server.get_session") as mock_get_session,
+        ):
             mock_service = MagicMock()
             mock_service.search = AsyncMock(return_value=mock_results)
             mock_get_service.return_value = mock_service
 
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = await mcp.get_tools()
+            tools = {t.name: t for t in await mcp.list_tools()}
             suggest_fn = tools["tm_suggest"].fn
             result = await suggest_fn(error_message="AssertionError in test_auth")
 
@@ -1000,48 +878,55 @@ class TestLLMParser:
 
     def test_extract_json_plain(self):
         from team_memory.services.llm_parser import _extract_json
+
         result = _extract_json('{"title": "test", "problem": "p"}')
         assert result["title"] == "test"
 
     def test_extract_json_with_markdown_wrapper(self):
         from team_memory.services.llm_parser import _extract_json
+
         text = '```json\n{"title": "test"}\n```'
         result = _extract_json(text)
         assert result["title"] == "test"
 
     def test_extract_json_with_prefix(self):
         from team_memory.services.llm_parser import _extract_json
+
         text = 'Here is the result: {"title": "test"}'
         result = _extract_json(text)
         assert result["title"] == "test"
 
     def test_extract_json_invalid_raises(self):
         from team_memory.services.llm_parser import LLMParseError, _extract_json
+
         with pytest.raises(LLMParseError):
             _extract_json("not json at all")
 
     def test_normalize_single(self):
         from team_memory.services.llm_parser import _normalize_single
-        result = _normalize_single({
-            "title": " Fix bug ",
-            "problem": "crash",
-            "solution": "patch",
-            "tags": ["Python", " Docker "],
-            "root_cause": "",
-            "language": "python",
-        })
+
+        result = _normalize_single(
+            {
+                "title": " Fix bug ",
+                "problem": "crash",
+                "solution": "patch",
+                "tags": ["Python", " Docker "],
+            }
+        )
         assert result["title"] == "Fix bug"
-        assert result["root_cause"] is None
         assert result["tags"] == ["python", "docker"]
 
     def test_normalize_group(self):
         from team_memory.services.llm_parser import _normalize_group
-        result = _normalize_group({
-            "parent": {"title": "Parent", "problem": "p", "solution": "s", "tags": []},
-            "children": [
-                {"title": "Child1", "problem": "cp", "solution": "cs", "tags": ["go"]},
-            ],
-        })
+
+        result = _normalize_group(
+            {
+                "parent": {"title": "Parent", "problem": "p", "solution": "s", "tags": []},
+                "children": [
+                    {"title": "Child1", "problem": "cp", "solution": "cs", "tags": ["go"]},
+                ],
+            }
+        )
         assert result["parent"]["title"] == "Parent"
         assert len(result["children"]) == 1
         assert result["children"][0]["tags"] == ["go"]
@@ -1069,7 +954,57 @@ class TestLLMParser:
         assert len(result) == 1
         assert result[0]["content"] == "喜欢简洁回复"
         assert result[0]["scope"] == "generic"
+        assert result[0]["profile_kind"] == "static"
         assert result[0]["context_hint"] is None
+
+    @pytest.mark.asyncio
+    async def test_parse_personal_memory_invalid_kind_uses_scope(self):
+        """Illegal profile_kind falls back from scope (T-B01)."""
+        from team_memory.services.llm_parser import parse_personal_memory
+
+        async def _run(json_content: str):
+            fake_response = {"message": {"content": json_content}}
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json = MagicMock(return_value=fake_response)
+            client = MagicMock()
+            client.post = AsyncMock(return_value=resp)
+            with patch("httpx.AsyncClient") as mock_client_cls:
+                mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
+                mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+                return await parse_personal_memory("x", timeout=5.0)
+
+        r1 = await _run('[{"content": "a", "scope": "generic", "profile_kind": "bogus"}]')
+        assert r1[0]["profile_kind"] == "static"
+        r2 = await _run('[{"content": "b", "scope": "context", "profile_kind": "invalid"}]')
+        assert r2[0]["profile_kind"] == "dynamic"
+        assert r2[0]["scope"] == "context"
+
+    @pytest.mark.asyncio
+    async def test_parse_personal_memory_explicit_dynamic_kind(self):
+        from team_memory.services.llm_parser import parse_personal_memory
+
+        fake_response = {
+            "message": {
+                "content": (
+                    '[{"content": "current task focus", '
+                    '"scope": "generic", "profile_kind": "dynamic", '
+                    '"context_hint": null}]'
+                )
+            }
+        }
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json = MagicMock(return_value=fake_response)
+        client = MagicMock()
+        client.post = AsyncMock(return_value=resp)
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await parse_personal_memory("x", timeout=5.0)
+        assert len(result) == 1
+        assert result[0]["profile_kind"] == "dynamic"
+        assert result[0]["scope"] == "context"
 
     @pytest.mark.asyncio
     async def test_parse_personal_memory_on_error_returns_empty(self):
@@ -1125,13 +1060,17 @@ class TestTryExtractAndSavePersonalMemory:
         mock_pm_svc.write = mock_write
         settings = MagicMock()
         settings.llm = MagicMock()
-        with patch(
-            "team_memory.services.llm_parser.parse_personal_memory",
-            new_callable=AsyncMock,
-            return_value=items,
-        ), patch("team_memory.bootstrap.get_context") as mock_ctx, patch(
-            "team_memory.services.personal_memory.PersonalMemoryService",
-            return_value=mock_pm_svc,
+        with (
+            patch(
+                "team_memory.services.llm_parser.parse_personal_memory",
+                new_callable=AsyncMock,
+                return_value=items,
+            ),
+            patch("team_memory.bootstrap.get_context") as mock_ctx,
+            patch(
+                "team_memory.services.personal_memory.PersonalMemoryService",
+                return_value=mock_pm_svc,
+            ),
         ):
             mock_ctx.return_value.embedding = MagicMock()
             mock_ctx.return_value.db_url = "sqlite:///"
@@ -1143,6 +1082,7 @@ class TestTryExtractAndSavePersonalMemory:
         assert call_kw["user_id"] == "user-1"
         assert call_kw["content"] == "喜欢简洁回复"
         assert call_kw["scope"] == "generic"
+        assert call_kw["profile_kind"] == "static"
 
 
 # ============================================================
@@ -1156,10 +1096,11 @@ class TestTrackUsageIoLogger:
     @pytest.mark.asyncio
     async def test_io_logger_called_when_enabled(self):
         """With io_logger enabled, calling a tm_ tool invokes log_mcp_io."""
-        with patch("team_memory.server.io_logger.is_io_enabled", return_value=True), \
-             patch("team_memory.server.io_logger.log_mcp_io") as mock_log:
-
-            tools = await mcp.get_tools()
+        with (
+            patch("team_memory.server.io_logger.is_io_enabled", return_value=True),
+            patch("team_memory.server.io_logger.log_mcp_io") as mock_log,
+        ):
+            tools = {t.name: t for t in await mcp.list_tools()}
             feedback_fn = tools["tm_feedback"].fn
             await feedback_fn(
                 experience_id=str(uuid.uuid4()),
@@ -1167,69 +1108,3 @@ class TestTrackUsageIoLogger:
             )
 
             assert mock_log.call_count > 0
-
-
-# ============================================================
-# Task 5: User expansion auto-maintain from tm_search
-# ============================================================
-
-
-class TestTryUpdateUserExpansionFromSearch:
-    """Test _try_update_user_expansion_from_search (no block on failure)."""
-
-    @pytest.mark.asyncio
-    async def test_skips_when_anonymous(self):
-        """Anonymous user: get_session not called (early return)."""
-        from team_memory.server import _try_update_user_expansion_from_search
-
-        with patch(
-            "team_memory.storage.database.get_session",
-        ) as mock_get_session:
-            await _try_update_user_expansion_from_search(
-                "PG timeout",
-                [{"tags": ["postgresql", "timeout"]}],
-                user=None,
-            )
-            await _try_update_user_expansion_from_search(
-                "PG timeout",
-                [{"tags": ["postgresql"]}],
-                user="anonymous",
-            )
-            mock_get_session.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_upserts_when_logged_in_and_inference_possible(self):
-        """Logged-in user + query 'pg' + tag 'postgresql': upsert called with merged."""
-        from team_memory.server import _try_update_user_expansion_from_search
-
-        mock_upsert = AsyncMock()
-        mock_get = AsyncMock(return_value={})
-        mock_repo = MagicMock()
-        mock_repo.get_by_user = mock_get
-        mock_repo.upsert = mock_upsert
-        mock_session_obj = MagicMock()
-        with patch(
-            "team_memory.bootstrap.get_context",
-        ) as mock_ctx, patch(
-            "team_memory.storage.database.get_session",
-        ) as mock_get_session, patch(
-            "team_memory.storage.repository.UserExpansionRepository",
-            return_value=mock_repo,
-        ):
-            mock_ctx.return_value.db_url = "sqlite:///"
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session_obj
-            )
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-            await _try_update_user_expansion_from_search(
-                "pg connection",
-                [{"tags": ["postgresql", "connection"]}],
-                user="user-1",
-            )
-        mock_get.assert_called_once_with("user-1")
-        mock_upsert.assert_called_once()
-        args = mock_upsert.call_args[0]
-        assert args[0] == "user-1"
-        merged = args[1]
-        assert "pg" in merged
-        assert merged["pg"] == "postgresql"

@@ -5,9 +5,9 @@ Pipeline stages:
   2. Embedding — encode query to vector
   3. Retrieval — parallel vector + FTS search (hybrid mode) or single mode
   4. RRF Fusion — merge results from multiple sources using Reciprocal Rank Fusion
-  5. Adaptive Filtering — dynamic threshold + elbow detection + confidence labeling
-  6. Reranking — optional server-side reranking (LLM/cross-encoder/Jina)
-  7. Context Compression — trim results to fit token budget
+  5. Exact match boost — boost score when query matches title
+  6. Adaptive Filtering — dynamic threshold + elbow detection + confidence labeling
+  7. Archive merging — include archive results when requested
   8. Cache store — save results for future queries
 """
 
@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,25 +24,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from team_memory import io_logger
 from team_memory.config import (
     CacheConfig,
-    FileLocationBindingConfig,
-    PageIndexLiteConfig,
     RetrievalConfig,
     SearchConfig,
 )
 from team_memory.embedding.base import EmbeddingProvider
-from team_memory.reranker.base import RerankerProvider
 from team_memory.services.cache import SearchCache
-from team_memory.services.context_trimmer import ContextTrimmer
 from team_memory.storage.archive_repository import ArchiveRepository
 from team_memory.storage.database import get_session
-from team_memory.storage.repository import ExperienceRepository, UserExpansionRepository
-from team_memory.utils.location_fingerprint import (
-    LOCATION_SCORE_EXACT,
-    LOCATION_SCORE_SAME_FILE,
-    find_fingerprint_in_lines,
-    lines_overlap,
-    overlap_score,
-)
+from team_memory.storage.repository import ExperienceRepository
 
 logger = logging.getLogger("team_memory.search_pipeline")
 
@@ -59,17 +49,9 @@ class SearchRequest:
     user_name: str = "anonymous"
     current_user: str | None = None
     source: str = "mcp"
-    # Grouped search params
     grouped: bool = False
     top_k_children: int = 3
-    min_avg_rating: float = 0.0
-    rating_weight: float = 0.3
-    use_pageindex_lite: bool | None = None
     project: str | None = None
-    # File location binding: optional current editor locations for location_score boost
-    # path, start_line, end_line; optional file_content, file_mtime, file_content_hash
-    current_file_locations: list[dict] | None = None
-    # Include archives in search results (L0/L1) when True
     include_archives: bool = False
 
 
@@ -77,14 +59,12 @@ class SearchRequest:
 class SearchResultItem:
     """A single search result with metadata from the pipeline."""
 
-    data: dict  # The experience dict
+    data: dict
     score: float = 0.0
     similarity: float = 0.0
     fts_rank: float = 0.0
     rrf_score: float = 0.0
-    rerank_score: float | None = None
     confidence: str = "medium"  # "high" | "medium" | "low"
-    reranked: bool = False
     source_type: str = "vector"  # "vector" | "fts" | "hybrid"
 
 
@@ -98,28 +78,7 @@ class SearchPipelineResult:
     reranked: bool = False
     cached: bool = False
     duration_ms: int = 0
-    tree_hits: int = 0
     stage_metrics: dict[str, int] = field(default_factory=dict)
-
-
-def _expand_query_synonyms(query: str, tag_synonyms: dict[str, str]) -> str:
-    """Expand query with synonym terms from tag_synonyms (key<->value) for better recall.
-
-    Cache key must remain the original query; only retrieval uses expanded query.
-    """
-    if not query or not tag_synonyms:
-        return query.strip()
-    q = query.strip()
-    added: list[str] = []
-    for key, value in tag_synonyms.items():
-        if key and value and key != value:
-            if key in q and value not in q:
-                added.append(value)
-            if value in q and key not in q:
-                added.append(key)
-    if not added:
-        return q
-    return q + " " + " ".join(dict.fromkeys(added))
 
 
 async def _llm_expand_query(
@@ -156,36 +115,26 @@ async def _llm_expand_query(
 class SearchPipeline:
     """Orchestrates the complete search pipeline.
 
-    This is the main entry point for all search operations. It coordinates:
-    - EmbeddingProvider for query vectorization
-    - ExperienceRepository for database queries
-    - SearchCache for result caching
-    - RerankerProvider for optional reranking
-    - ContextTrimmer for token budget management
+    Coordinates EmbeddingProvider, ExperienceRepository, SearchCache
+    for hybrid retrieval (vector + FTS + RRF fusion).
     """
 
     def __init__(
         self,
         embedding_provider: EmbeddingProvider,
-        reranker_provider: RerankerProvider,
         search_config: SearchConfig,
         retrieval_config: RetrievalConfig,
         cache_config: CacheConfig,
-        pageindex_lite_config: PageIndexLiteConfig | None = None,
         llm_config=None,
         tag_synonyms: dict[str, str] | None = None,
         db_url: str | None = None,
-        file_location_config: FileLocationBindingConfig | None = None,
     ):
         self._embedding = embedding_provider
         self._db_url = db_url
-        self._reranker = reranker_provider
         self._search_config = search_config
         self._retrieval_config = retrieval_config
-        self._pageindex_lite_config = pageindex_lite_config
         self._llm_config = llm_config
         self._tag_synonyms = tag_synonyms or {}
-        self._file_location_config = file_location_config
         self._cache = SearchCache(
             max_size=cache_config.max_size,
             ttl_seconds=cache_config.ttl_seconds,
@@ -194,12 +143,6 @@ class SearchPipeline:
             backend=getattr(cache_config, "backend", "memory"),
             redis_url=getattr(cache_config, "redis_url", "redis://localhost:6379/0"),
         )
-        self._trimmer = ContextTrimmer(
-            max_tokens=retrieval_config.max_tokens,
-            trim_strategy=retrieval_config.trim_strategy,
-            summary_model=retrieval_config.summary_model,
-            llm_config=llm_config,
-        )
 
     async def search(
         self,
@@ -207,34 +150,17 @@ class SearchPipeline:
         request: SearchRequest,
     ) -> SearchPipelineResult:
         """Execute the full search pipeline."""
-        import time
-
         start = time.monotonic()
         stage_metrics: dict[str, int] = {}
         repo = ExperienceRepository(session)
 
-        # Per-user tag_synonyms: merge with global when current_user is set
-        effective_synonyms = dict(self._tag_synonyms)
-        if request.current_user and str(request.current_user).strip().lower() != "anonymous":
-            expansion_repo = UserExpansionRepository(session)
-            per_user = await expansion_repo.get_by_user(request.current_user)
-            if per_user:
-                effective_synonyms = {**effective_synonyms, **per_user}
-
-        cache_user = (
-            request.current_user
-            if (request.current_user and str(request.current_user).strip().lower() != "anonymous")
-            else None
-        )
-
-        # Stage 1: Cache check (key includes current_user when per-user expansion)
-        # T8: cache_check logged at cache layer (SearchCache.get)
+        # Stage 1: Cache check
         if self._cache.enabled:
             cached = await self._cache.get(
                 request.query,
                 request.tags,
                 project=request.project,
-                current_user=cache_user,
+                current_user=request.current_user,
                 include_archives=request.include_archives,
             )
             if cached is not None:
@@ -242,21 +168,11 @@ class SearchPipeline:
                 cached.duration_ms = int((time.monotonic() - start) * 1000)
                 return cached
 
-        # Query expansion (synonyms) for retrieval; per-user merged with global
+        # Query expansion: tag synonyms (simple key<->value)
         stage_begin = time.monotonic()
-        retrieval_query = _expand_query_synonyms(
-            request.query, effective_synonyms
-        )
-        if _SEARCH_DEBUG:
-            logger.info(
-                "[SEARCH_DEBUG] query=%r retrieval_query=%r current_user=%r "
-                "query_expansion_enabled=%s",
-                (request.query or "")[:80],
-                (retrieval_query or "")[:80],
-                request.current_user,
-                getattr(self._search_config, "query_expansion_enabled", False),
-            )
-        # Optional LLM query expansion (P1-5): merge LLM keywords; fallback on timeout/failure
+        retrieval_query = self._expand_query_synonyms(request.query)
+
+        # Optional LLM query expansion
         if getattr(self._search_config, "query_expansion_enabled", False) and self._llm_config:
             timeout_s = getattr(
                 self._search_config, "query_expansion_timeout_seconds", 3.0
@@ -268,6 +184,7 @@ class SearchPipeline:
                 retrieval_query = (
                     request.query.strip() + " " + expanded.strip()
                 ).strip()[:2000]
+
         query_expansion_ms = int((time.monotonic() - stage_begin) * 1000)
         io_logger.log_internal(
             "query_expansion",
@@ -275,25 +192,20 @@ class SearchPipeline:
             duration_ms=query_expansion_ms,
         )
 
-        # Lower min_similarity for short queries to improve recall
-        short_threshold = getattr(
-            self._search_config, "short_query_max_chars", 20
-        )
-        min_sim_short = getattr(
-            self._search_config, "min_similarity_short", 0.45
-        )
+        # Lower min_similarity for short queries
+        short_threshold = getattr(self._search_config, "short_query_max_chars", 20)
+        min_sim_short = getattr(self._search_config, "min_similarity_short", 0.45)
         effective_min_similarity = (
             min_sim_short
             if len(request.query.strip()) <= short_threshold
             else request.min_similarity
         )
-        # Relax threshold when searching by workflow tag for stable recall
         if request.tags:
             tags_lower = [t.lower() for t in request.tags if isinstance(t, str)]
             if "workflow" in tags_lower:
                 effective_min_similarity = min(effective_min_similarity, 0.5)
 
-        # Stage 2: Embedding (T8: embedding logged at cache layer in get_or_compute_embedding)
+        # Stage 2: Embedding
         stage_begin = time.monotonic()
         query_embedding = None
         try:
@@ -308,7 +220,7 @@ class SearchPipeline:
         stage_begin = time.monotonic()
         mode = self._search_config.mode
         if query_embedding is None:
-            mode = "fts"  # Force FTS if embedding unavailable
+            mode = "fts"
 
         candidates = await self._retrieve_and_fuse(
             repo,
@@ -329,132 +241,42 @@ class SearchPipeline:
             duration_ms=stage_metrics["retrieve_fuse_ms"],
         )
 
-        # Exact match boost (query == title or query in title; root + children)
+        # Stage 5: Exact match boost
         candidates = self._apply_exact_match_boost(candidates, request.query)
 
-        # Location boost: one batch list_bindings_by_paths, in-memory location_score
-        candidates = await self._apply_location_boost(session, request, repo, candidates)
-
         total_candidates = len(candidates)
-        if _SEARCH_DEBUG:
-            _ids = [
-                (c.data.get("group_id") or c.data.get("id"), c.similarity, c.score)
-                for c in candidates[:15]
-            ]
-            _has_target = any(
-                "4d44f14a" in str(x[0]) for x in _ids
-            )
-            logger.info(
-                "[SEARCH_DEBUG] after_retrieve total=%d ids=%s has_4d44f14a=%s",
-                total_candidates,
-                _ids,
-                _has_target,
-            )
 
-        # Stage 5: Adaptive Filtering
+        # Stage 6: Adaptive Filtering
         stage_begin = time.monotonic()
-        before_adaptive = len(candidates)
         if self._search_config.adaptive_filter and candidates:
             candidates = self._apply_adaptive_filter(candidates)
-        if _SEARCH_DEBUG:
-            _after_ids = [
-                (c.data.get("group_id") or c.data.get("id"), c.similarity)
-                for c in candidates
-            ]
-            _had_target = any("4d44f14a" in str(x[0]) for x in _after_ids)
-            logger.info(
-                "[SEARCH_DEBUG] after_adaptive before=%d after=%d ids=%s has_4d44f14a=%s",
-                before_adaptive,
-                len(candidates),
-                _after_ids,
-                _had_target,
-            )
         stage_metrics["adaptive_filter_ms"] = int((time.monotonic() - stage_begin) * 1000)
         io_logger.log_internal(
             "adaptive_filter",
             {
                 "query": (request.query or "")[:50],
-                "before": before_adaptive,
+                "before": total_candidates,
                 "after": len(candidates),
             },
             duration_ms=stage_metrics["adaptive_filter_ms"],
         )
 
-        # Stage 5.5: PageIndex-Lite candidate enhancement
-        stage_begin = time.monotonic()
-        tree_hits = 0
-        if candidates and self._should_use_pageindex(request):
-            candidates, tree_hits = await self._apply_pageindex_lite(
-                repo=repo,
-                query=request.query,
-                candidates=candidates,
-            )
-        stage_metrics["pageindex_lite_ms"] = int((time.monotonic() - stage_begin) * 1000)
-        io_logger.log_internal(
-            "pageindex_lite",
-            {
-                "query": (request.query or "")[:50],
-                "candidates": len(candidates),
-                "tree_hits": tree_hits,
-            },
-            duration_ms=stage_metrics["pageindex_lite_ms"],
-        )
-
-        # Stage 6: Reranking
-        stage_begin = time.monotonic()
-        reranked = False
-        if self._reranker.provider_name != "noop" and candidates:
-            candidates = await self._apply_reranker(
-                request.query, candidates
-            )
-            reranked = True
-        stage_metrics["rerank_ms"] = int((time.monotonic() - stage_begin) * 1000)
-        io_logger.log_internal(
-            "rerank",
-            {
-                "query": (request.query or "")[:50],
-                "candidates": len(candidates),
-                "reranked": reranked,
-            },
-            duration_ms=stage_metrics["rerank_ms"],
-        )
-
-        # Apply confidence labels (always, regardless of reranker)
+        # Confidence labels
         candidates = self._label_confidence(candidates)
-
-        # Stage 7: Context Compression
-        stage_begin = time.monotonic()
-        candidates = await self._trimmer.trim(candidates)
-        stage_metrics["trim_ms"] = int((time.monotonic() - stage_begin) * 1000)
-        io_logger.log_internal(
-            "context_trim",
-            {
-                "query": (request.query or "")[:50],
-                "results": len(candidates),
-            },
-            duration_ms=stage_metrics["trim_ms"],
-        )
 
         # Limit final results
         candidates = candidates[: request.max_results]
 
-        # Build final result dicts (score = primary score + location_weight * location_score)
-        location_weight = getattr(self._search_config, "location_weight", 0.15)
+        # Build final result dicts
         result_dicts = []
         for item in candidates:
             d = item.data.copy()
-            loc_score = d.get("location_score", 0.0)
-            final_score = float(item.score) + location_weight * loc_score
-            d["score"] = round(final_score, 4)
-            d["location_score"] = loc_score  # for debugging
+            d["score"] = round(float(item.score), 4)
             d["similarity"] = round(item.similarity, 4)
             d["confidence"] = item.confidence
-            d["reranked"] = item.reranked
-            if item.rerank_score is not None:
-                d["rerank_score"] = round(item.rerank_score, 4)
             result_dicts.append(d)
 
-        # Include archives when requested: search archives, merge by score, truncate
+        # Stage 7: Include archives when requested
         if request.include_archives and query_embedding is not None:
             archive_repo = ArchiveRepository(session)
             archive_limit = max(request.max_results * 2, 20)
@@ -468,8 +290,6 @@ class SearchPipeline:
             for row in archive_hits:
                 d = dict(row)
                 d.setdefault("confidence", "medium")
-                d.setdefault("reranked", False)
-                d.setdefault("location_score", 0.0)
                 result_dicts.append(d)
             result_dicts.sort(key=lambda x: float(x.get("score", 0)), reverse=True)
             result_dicts = result_dicts[: request.max_results]
@@ -480,14 +300,13 @@ class SearchPipeline:
             results=result_dicts,
             total_candidates=total_candidates,
             search_type=mode,
-            reranked=reranked,
+            reranked=False,
             cached=False,
             duration_ms=duration_ms,
-            tree_hits=tree_hits,
             stage_metrics=stage_metrics,
         )
 
-        # Stage 8: Cache store (key includes current_user when per-user expansion)
+        # Stage 8: Cache store
         if self._cache.enabled:
             stage_begin = time.monotonic()
             await self._cache.put(
@@ -495,111 +314,35 @@ class SearchPipeline:
                 request.tags,
                 pipeline_result,
                 project=request.project,
-                current_user=cache_user,
+                current_user=request.current_user,
                 include_archives=request.include_archives,
             )
-            cache_store_ms = int((time.monotonic() - stage_begin) * 1000)
             io_logger.log_internal(
                 "cache_store",
                 {
                     "query": (request.query or "")[:50],
                     "results": len(pipeline_result.results),
                 },
-                duration_ms=cache_store_ms,
+                duration_ms=int((time.monotonic() - stage_begin) * 1000),
             )
 
         return pipeline_result
 
-    def _should_use_pageindex(self, request: SearchRequest) -> bool:
-        """Decide whether to apply PageIndex-Lite for this search call."""
-        cfg = self._pageindex_lite_config
-        if cfg is None:
-            return False
-        if request.use_pageindex_lite is not None:
-            return request.use_pageindex_lite
-        return bool(getattr(cfg, "enabled", False))
-
-    async def _apply_pageindex_lite(
-        self,
-        repo: ExperienceRepository,
-        query: str,
-        candidates: list[SearchResultItem],
-    ) -> tuple[list[SearchResultItem], int]:
-        """Apply PageIndex-Lite node matching and score boost to candidates."""
-        cfg = self._pageindex_lite_config
-        if cfg is None:
-            return candidates, 0
-
-        candidate_uuids = []
-        child_to_root: dict[str, str] = {}
-        for item in candidates:
-            data = item.data
-            candidate_id = data.get("group_id") or data.get("id")
-            if not candidate_id:
-                continue
-            try:
-                import uuid
-
-                candidate_uuids.append(uuid.UUID(candidate_id))
-            except Exception:
-                continue
-            for child in data.get("children", []):
-                child_id = child.get("id")
-                if not child_id:
-                    continue
-                child_to_root[child_id] = candidate_id
-                try:
-                    candidate_uuids.append(uuid.UUID(child_id))
-                except Exception:
-                    continue
-
-        if not candidate_uuids:
-            return candidates, 0
-        # De-duplicate IDs before querying tree nodes.
-        candidate_uuids = list(dict.fromkeys(candidate_uuids))
-
-        node_map = await repo.search_tree_nodes(
-            query_text=query,
-            experience_ids=candidate_uuids,
-            max_results=max(len(candidate_uuids) * 3, 15),
-            min_score=getattr(cfg, "min_node_score", 0.01),
-            max_nodes_per_experience=3,
-        )
-
-        tree_hits = 0
-        tree_weight = getattr(cfg, "tree_weight", 0.15)
-        include_nodes = getattr(cfg, "include_matched_nodes", True)
-
-        # Merge child node hits into their root candidate.
-        for child_id, root_id in child_to_root.items():
-            child_nodes = node_map.get(child_id, [])
-            if not child_nodes:
-                continue
-            prefixed = []
-            for n in child_nodes:
-                n2 = dict(n)
-                n2["path"] = f"child:{n2.get('path', '')}"
-                prefixed.append(n2)
-            node_map.setdefault(root_id, [])
-            node_map[root_id].extend(prefixed)
-
-        for item in candidates:
-            data = item.data
-            candidate_id = data.get("group_id") or data.get("id")
-            if not candidate_id:
-                continue
-            matched = node_map.get(candidate_id, [])
-            if not matched:
-                continue
-            tree_hits += len(matched)
-            best_score = max(m.get("score", 0.0) for m in matched)
-            item.score = float(item.score) + float(tree_weight) * float(best_score)
-            data["tree_score"] = round(float(best_score), 4)
-            if include_nodes:
-                data["matched_nodes"] = matched
-
-        candidates.sort(key=lambda x: x.score, reverse=True)
-        return candidates, tree_hits
+    def _expand_query_synonyms(self, query: str) -> str:
+        """Expand query with tag_synonyms (key<->value) for better recall."""
+        if not query or not self._tag_synonyms:
+            return query.strip()
+        q = query.strip()
+        added: list[str] = []
+        for key, value in self._tag_synonyms.items():
+            if key and value and key != value:
+                if key in q and value not in q:
+                    added.append(value)
+                if value in q and key not in q:
+                    added.append(key)
+        if not added:
+            return q
+        return q + " " + " ".join(dict.fromkeys(added))
 
     async def _retrieve_and_fuse(
         self,
@@ -610,14 +353,9 @@ class SearchPipeline:
         retrieval_query: str | None = None,
         effective_min_similarity: float | None = None,
     ) -> list[SearchResultItem]:
-        """Execute retrieval and RRF fusion.
-
-        retrieval_query: query used for retrieval (may be synonym-expanded);
-        defaults to request.query if not provided.
-        effective_min_similarity: override for short-query lower threshold.
-        """
+        """Execute retrieval and RRF fusion."""
         q = (retrieval_query or request.query).strip()
-        over_fetch = request.max_results * 3  # Over-fetch for filtering
+        over_fetch = request.max_results * 3
         min_sim = (
             effective_min_similarity
             if effective_min_similarity is not None
@@ -645,7 +383,6 @@ class SearchPipeline:
             vector_task, fts_task, return_exceptions=True
         )
 
-        # Handle exceptions
         if isinstance(vector_results, Exception):
             logger.warning("Vector search failed in hybrid mode: %s", vector_results)
             vector_results = []
@@ -653,7 +390,6 @@ class SearchPipeline:
             logger.warning("FTS failed in hybrid mode: %s", fts_results)
             fts_results = []
 
-        # RRF Fusion
         return self._rrf_fuse(vector_results, fts_results, over_fetch)
 
     async def _vector_search(
@@ -666,31 +402,6 @@ class SearchPipeline:
     ) -> list[SearchResultItem]:
         """Execute vector similarity search."""
         min_sim = min_similarity if min_similarity is not None else request.min_similarity
-        if request.grouped:
-            raw = await repo.search_by_vector_grouped(
-                query_embedding=query_embedding,
-                max_results=limit,
-                min_similarity=min_sim,
-                tags=request.tags,
-                top_k_children=request.top_k_children,
-                min_avg_rating=request.min_avg_rating,
-                rating_weight=request.rating_weight,
-                project=request.project,
-                current_user=request.current_user,
-            )
-            # Grouped results have a different structure
-            items = []
-            for r in raw:
-                items.append(
-                    SearchResultItem(
-                        data=r,
-                        score=r.get("score", 0),
-                        similarity=r.get("similarity", 0),
-                        source_type="vector",
-                    )
-                )
-            return items
-
         raw = await repo.search_by_vector(
             query_embedding=query_embedding,
             max_results=limit,
@@ -768,7 +479,6 @@ class SearchPipeline:
         v_weight = self._search_config.vector_weight
         f_weight = self._search_config.fts_weight
 
-        # Build score map: experience_id -> {rrf_score, best_item}
         score_map: dict[str, dict] = {}
 
         for rank, item in enumerate(vector_results):
@@ -781,7 +491,6 @@ class SearchPipeline:
                     "similarity": item.similarity,
                 }
             score_map[exp_id]["rrf_score"] += rrf_contribution
-            # Keep the item with higher similarity
             if item.similarity > score_map[exp_id]["similarity"]:
                 score_map[exp_id]["item"] = item
                 score_map[exp_id]["similarity"] = item.similarity
@@ -797,27 +506,21 @@ class SearchPipeline:
                 }
             score_map[exp_id]["rrf_score"] += rrf_contribution
 
-        # Build fused results
         fused = []
-        for exp_id, data in score_map.items():
+        for _exp_id, data in score_map.items():
             item = data["item"]
             item.rrf_score = data["rrf_score"]
             item.score = data["rrf_score"]
             item.source_type = "hybrid"
             fused.append(item)
 
-        # Sort by RRF score descending
         fused.sort(key=lambda x: x.score, reverse=True)
         return fused[:limit]
 
     def _apply_exact_match_boost(
         self, candidates: list[SearchResultItem], query: str
     ) -> list[SearchResultItem]:
-        """Boost score when query exactly matches or is contained in title.
-
-        Checks root title and children titles (grouped). Sets exact_title_match
-        in item.data for downstream (adaptive filter, reranker).
-        """
+        """Boost score when query exactly matches or is contained in title."""
         if not query or not query.strip():
             return candidates
         q = query.strip()
@@ -856,143 +559,14 @@ class SearchPipeline:
         candidates.sort(key=lambda x: x.score, reverse=True)
         return candidates
 
-    async def _apply_location_boost(
-        self,
-        session: AsyncSession,
-        request: SearchRequest,
-        repo: ExperienceRepository,
-        candidates: list[SearchResultItem],
-    ) -> list[SearchResultItem]:
-        """Apply file-location score boost: one batch list_bindings_by_paths, in-memory scoring.
-
-        If current_file_locations is None or empty, skip. Otherwise: collect paths, call
-        repo.list_bindings_by_paths once, compute location_score per candidate (max over positions),
-        set item.data['location_score'], sort by final_score; optionally batch-refresh hit bindings.
-        """
-        import time
-
-        locs = request.current_file_locations
-        if not locs:
-            return candidates
-
-        location_weight = getattr(self._search_config, "location_weight", 0.15)
-        fl_config = self._file_location_config
-        ttl_days = getattr(fl_config, "file_location_ttl_days", 30) if fl_config else 30
-        refresh_on_access = (
-            getattr(fl_config, "file_location_refresh_on_access", True) if fl_config else True
-        )
-
-        stage_start = time.monotonic()
-        paths = list(dict.fromkeys(p for loc in locs for p in [loc.get("path")] if p))
-        bindings_by_path: dict[str, list[dict]] = {}
-        hit_binding_ids: set[str] = set()
-
-        try:
-            bindings_by_path = await repo.list_bindings_by_paths(paths, ttl_days=ttl_days)
-        except Exception as e:
-            logger.warning(
-                "list_bindings_by_paths failed, location_score=0 for all: %s",
-                e,
-                exc_info=True,
-            )
-            for item in candidates:
-                item.data["location_score"] = 0.0
-            return candidates
-
-        total_bindings = sum(len(b) for b in bindings_by_path.values())
-        candidates_with_boost = 0
-
-        for item in candidates:
-            exp_id = str(item.data.get("id") or item.data.get("group_id") or "")
-            if not exp_id:
-                item.data["location_score"] = 0.0
-                continue
-            best = 0.0
-            for loc in locs:
-                path = loc.get("path")
-                if not path:
-                    continue
-                bindings = bindings_by_path.get(path, [])
-                loc_start = loc.get("start_line")
-                loc_end = loc.get("end_line")
-                file_content = loc.get("file_content")
-                for b in bindings:
-                    if str(b.get("experience_id")) != exp_id:
-                        continue
-                    b_start = b.get("start_line")
-                    b_end = b.get("end_line")
-                    fingerprint = b.get("content_fingerprint")
-                    score = 0.0
-                    if file_content and fingerprint:
-                        lines = file_content.splitlines() if isinstance(file_content, str) else []
-                        found = find_fingerprint_in_lines(lines, fingerprint)
-                        if found:
-                            s, e = found
-                            if loc_start is not None and loc_end is not None:
-                                score = overlap_score(s, e, loc_start, loc_end)
-                            else:
-                                score = LOCATION_SCORE_SAME_FILE
-                        else:
-                            score = LOCATION_SCORE_SAME_FILE
-                    else:
-                        if (
-                            loc_start is not None
-                            and loc_end is not None
-                            and b_start is not None
-                            and b_end is not None
-                        ):
-                            if lines_overlap(b_start, b_end, loc_start, loc_end):
-                                score = LOCATION_SCORE_EXACT
-                            else:
-                                score = LOCATION_SCORE_SAME_FILE
-                        else:
-                            score = LOCATION_SCORE_SAME_FILE
-                    if score > best:
-                        best = score
-                    if score > 0 and b.get("id"):
-                        hit_binding_ids.add(str(b["id"]))
-            item.data["location_score"] = round(best, 4)
-            if best > 0:
-                candidates_with_boost += 1
-
-        candidates.sort(
-            key=lambda x: float(x.score) + location_weight * x.data.get("location_score", 0.0),
-            reverse=True,
-        )
-
-        if refresh_on_access and hit_binding_ids:
-            try:
-                await repo.refresh_file_location_bindings(list(hit_binding_ids), ttl_days)
-            except Exception as e:
-                logger.warning(
-                    "refresh_file_location_bindings failed (non-fatal): %s",
-                    e,
-                    exc_info=True,
-                )
-
-        stage_ms = int((time.monotonic() - stage_start) * 1000)
-        logger.info(
-            "location_boost step: locs=%d bindings=%d boosted=%d duration_ms=%d",
-            len(locs),
-            total_bindings,
-            candidates_with_boost,
-            stage_ms,
-        )
-        return candidates
-
     def _apply_adaptive_filter(
         self, candidates: list[SearchResultItem]
     ) -> list[SearchResultItem]:
         """Apply adaptive score filtering using similarity scores.
 
-        Uses the primary score for filtering: similarity when set (e.g. from vector
-        search), otherwise score (e.g. from RRF or tests). RRF scores are low
-        (~0.01-0.02 with k=60) so pipeline callers pass similarity; tests may pass
-        only score.
-
         Two strategies:
         1. Dynamic threshold: filter results below min_confidence_ratio * top-1.
-        2. Elbow detection: cut when score gap (relative to previous) exceeds threshold.
+        2. Elbow detection: cut when score gap exceeds threshold.
         """
         if not candidates:
             return candidates
@@ -1004,8 +578,6 @@ class SearchPipeline:
         min_ratio = self._search_config.min_confidence_ratio
         gap_threshold = self._search_config.score_gap_threshold
         threshold = top_sim * min_ratio
-        # Never cut below this many results when candidates pass threshold;
-        # avoids losing good matches (e.g. exact title) when top-1 has slight edge
         min_keep = getattr(self._search_config, "adaptive_min_keep", 3)
 
         filtered = [candidates[0]]
@@ -1014,7 +586,6 @@ class SearchPipeline:
             curr = candidates[i]
             curr_s = _score(curr)
 
-            # Always keep exact match items (exact or contains); never cut them
             if curr.data.get("exact_title_match"):
                 filtered.append(curr)
                 continue
@@ -1023,7 +594,6 @@ class SearchPipeline:
                 break
 
             prev_s = _score(candidates[i - 1])
-            # Apply elbow break only after we have min_keep results
             if (
                 len(filtered) >= min_keep
                 and prev_s > 0
@@ -1035,60 +605,12 @@ class SearchPipeline:
 
         return filtered
 
-    async def _apply_reranker(
-        self, query: str, candidates: list[SearchResultItem]
-    ) -> list[SearchResultItem]:
-        """Apply server-side reranking."""
-        # Extract document texts for reranking
-        doc_texts = []
-        for item in candidates:
-            data = item.data
-            # Build a text representation for the reranker to score
-            parts = []
-            if data.get("title"):
-                parts.append(data["title"])
-            if data.get("description"):
-                parts.append(data["description"])
-            if data.get("solution"):
-                parts.append(data["solution"][:500])  # Truncate long solutions
-            doc_texts.append("\n".join(parts) if parts else str(data))
-
-        document_metadata = [
-            {"exact_title_match": c.data.get("exact_title_match", "")}
-            for c in candidates
-        ]
-        try:
-            rerank_results = await self._reranker.rank(
-                query=query,
-                documents=doc_texts,
-                top_k=len(candidates),  # Rerank all, filter later
-                document_metadata=document_metadata,
-            )
-
-            # Map rerank scores back to candidates
-            reranked = []
-            for rr in rerank_results:
-                if rr.index < len(candidates):
-                    item = candidates[rr.index]
-                    item.rerank_score = rr.score
-                    item.reranked = True
-                    # Use rerank score as primary score
-                    item.score = rr.score
-                    reranked.append(item)
-
-            return reranked
-
-        except Exception as e:
-            logger.warning("Reranking failed, using original order: %s", e)
-            return candidates
-
     @staticmethod
     def _label_confidence(
         candidates: list[SearchResultItem],
     ) -> list[SearchResultItem]:
         """Label each result with a confidence level based on its score.
 
-        Score boundaries (relative to top-1):
         - high: >= 80% of top score
         - medium: >= 50% of top score
         - low: < 50% of top score

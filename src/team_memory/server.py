@@ -26,7 +26,15 @@ from fastmcp import FastMCP
 
 from team_memory import io_logger
 from team_memory.bootstrap import bootstrap, get_context
-from team_memory.services.context_trimmer import estimate_tokens
+
+try:
+    from team_memory.services.context_trimmer import estimate_tokens
+except ImportError:
+
+    def estimate_tokens(text: str) -> int:
+        return len(text) // 4
+
+
 from team_memory.storage.database import get_session
 
 logger = logging.getLogger("team_memory")
@@ -34,6 +42,7 @@ logger = logging.getLogger("team_memory")
 
 def track_usage(func):
     """Decorator to auto-track MCP tool usage."""
+
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
         from team_memory.services.hooks import (
@@ -100,9 +109,7 @@ def track_usage(func):
                 from team_memory import mcp_debug_log
 
                 if mcp_debug_log.is_mcp_debug_enabled():
-                    await mcp_debug_log.log_mcp_io_async(
-                        tool_name, "out", {"error": error_msg}
-                    )
+                    await mcp_debug_log.log_mcp_io_async(tool_name, "out", {"error": error_msg})
             except Exception:
                 pass
             try:
@@ -202,78 +209,8 @@ def _get_db_url() -> str:
 async def _try_update_user_expansion_from_search(
     query: str, results: list[dict], user: str | None
 ) -> None:
-    """Update per-user tag_synonyms from query + result tags (Task 5 auto-maintain).
-
-    Only runs for logged-in non-anonymous user. Failure does not block search.
-    Infers mappings: short query tokens (2-5 chars) -> longer result tags.
-    """
-    if not user or str(user).strip().lower() == "anonymous":
-        return
-    if not query or not results:
-        return
-    try:
-        import re
-
-        from team_memory.bootstrap import get_context
-        from team_memory.storage.database import get_session
-        from team_memory.storage.repository import UserExpansionRepository
-
-        # Extract short alphanumeric tokens from query (2-5 chars)
-        tokens = re.findall(r"[a-zA-Z0-9]{2,5}", query.strip())
-        tokens = list(dict.fromkeys(t.lower() for t in tokens))[:10]
-
-        # Collect tags from top 5 results (parent + children)
-        all_tags: set[str] = set()
-        for r in results[:5]:
-            for t in r.get("tags") or []:
-                if isinstance(t, str) and t.strip():
-                    all_tags.add(t.strip())
-            for child in r.get("children") or []:
-                for t in child.get("tags") or []:
-                    if isinstance(t, str) and t.strip():
-                        all_tags.add(t.strip())
-
-        if not tokens or not all_tags:
-            return
-
-        # Infer: short token (2-4 chars) -> longer tag when tag could be expansion
-        new_mappings: dict[str, str] = {}
-        sorted_tags = sorted(all_tags, key=lambda x: (-len(x), x))
-        for t in tokens:
-            if len(t) > 4 or len(new_mappings) >= 10:
-                break
-            best_tag: str | None = None
-            for tag in sorted_tags:
-                tag_lower = tag.lower()
-                if t == tag_lower or len(tag) <= 4:
-                    continue
-                # Prefer: prefix match > contains > length+first-char heuristic
-                if tag_lower.startswith(t) or t in tag_lower:
-                    best_tag = tag
-                    break
-                if (
-                    len(t) <= 3
-                    and len(tag) >= 6
-                    and tag_lower[0] == t[0]
-                    and best_tag is None
-                ):
-                    best_tag = tag
-            if best_tag and t not in new_mappings:
-                new_mappings[t] = best_tag
-
-        if not new_mappings:
-            return
-
-        ctx = get_context()
-        async with get_session(ctx.db_url) as session:
-            repo = UserExpansionRepository(session)
-            existing = await repo.get_by_user(user)
-            merged = {**existing, **new_mappings}
-            await repo.upsert(user, merged)
-    except Exception as e:
-        logger.warning(
-            "User expansion auto-update skipped (no block): %s", e, exc_info=False
-        )
+    """No-op: UserExpansion removed in MVP simplification."""
+    return
 
 
 async def _try_extract_and_save_personal_memory(
@@ -285,107 +222,67 @@ async def _try_extract_and_save_personal_memory(
     do not block the caller (tm_learn experience save already done).
     """
     if not user or str(user).strip().lower() == "anonymous":
+        logger.info(
+            "personal_memory: skipped — user is anonymous or empty "
+            "(set MCP env TEAM_MEMORY_API_KEY valid for auth, or TEAM_MEMORY_USER for fallback)"
+        )
         return
     try:
         from team_memory.bootstrap import get_context
         from team_memory.services.llm_parser import parse_personal_memory
         from team_memory.services.personal_memory import PersonalMemoryService
 
-        items = await parse_personal_memory(
-            conversation, llm_config=settings.llm, timeout=25.0
+        logger.debug(
+            "personal_memory: parsing preferences (conversation_chars=%s user=%s)",
+            len(conversation or ""),
+            user,
         )
+        items = await parse_personal_memory(conversation, llm_config=settings.llm, timeout=25.0)
         if not items:
+            logger.info(
+                "personal_memory: no rows to save — LLM returned no preference items "
+                "(content may have no extractable habits, or llm_parser warnings above; "
+                "try TEAM_MEMORY_DEBUG=1)"
+            )
             return
         ctx = get_context()
-        pm_svc = PersonalMemoryService(
-            embedding_provider=ctx.embedding, db_url=ctx.db_url
-        )
+        pm_svc = PersonalMemoryService(embedding_provider=ctx.embedding, db_url=ctx.db_url)
+        n_static = 0
+        n_dynamic = 0
         for item in items:
+            pk = item.get("profile_kind")
+            if pk not in ("static", "dynamic"):
+                pk = "dynamic" if item.get("scope") == "context" else "static"
+            if pk == "dynamic":
+                n_dynamic += 1
+            else:
+                n_static += 1
             await pm_svc.write(
                 user_id=user,
                 content=item["content"],
                 scope=item.get("scope") or "generic",
                 context_hint=item.get("context_hint"),
+                profile_kind=pk,
             )
+        logger.info(
+            "personal_memory: saved %d item(s) for user=%s (static=%d dynamic=%d)",
+            len(items),
+            user,
+            n_static,
+            n_dynamic,
+        )
     except Exception as e:
         logger.warning(
-            "Personal memory extract/save skipped (no block): %s", e, exc_info=False
+            "personal_memory: extract/save failed (experience save already succeeded): %s",
+            e,
+            exc_info=os.environ.get("TEAM_MEMORY_DEBUG", "0") == "1",
         )
-
-
-async def _create_reflection(
-    session, task, summary: str, sediment_experience_id: str | None, settings
-) -> str | None:
-    """P2.C: Create a reflection record after task completion.
-
-    Generates a self-assessment using LLM, then stores it.
-    Returns the reflection ID or None if generation fails.
-    """
-    import uuid as _uuid
-
-    import httpx
-
-    from team_memory.storage.models import ExperienceReflection
-
-    prompt = f"""你是一个技术复盘助手。任务刚刚完成，请基于以下信息进行简要复盘。
-
-任务标题: {task.title}
-完成摘要: {summary[:2000]}
-
-请严格以 JSON 格式返回（不要用 markdown 代码块包裹）:
-{{
-  "success_points": "做得好的地方（1-3点）",
-  "failure_points": "遇到的问题或不足（1-3点，没有则为 null）",
-  "improvements": "下次可以改进的地方（1-3点）",
-  "generalized_strategy": "从这次任务中提炼的通用策略（1-2句话）"
-}}"""
-
-    llm_model = settings.llm.model
-    llm_base_url = settings.llm.base_url.rstrip("/")
-
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{llm_base_url}/api/chat",
-                json={
-                    "model": llm_model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "stream": False,
-                    "options": {"temperature": 0.3},
-                },
-            )
-            resp.raise_for_status()
-            raw = resp.json().get("message", {}).get("content", "")
-            raw = raw.strip()
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
-            parsed = json.loads(raw)
-    except Exception:
-        logger.warning("Reflection LLM call failed, creating minimal reflection")
-        parsed = {
-            "success_points": "任务已完成",
-            "failure_points": None,
-            "improvements": None,
-            "generalized_strategy": None,
-        }
-
-    exp_uuid = _uuid.UUID(sediment_experience_id) if sediment_experience_id else None
-    reflection = ExperienceReflection(
-        task_id=task.id,
-        experience_id=exp_uuid,
-        success_points=parsed.get("success_points"),
-        failure_points=parsed.get("failure_points"),
-        improvements=parsed.get("improvements"),
-        generalized_strategy=parsed.get("generalized_strategy"),
-    )
-    session.add(reflection)
-    await session.flush()
-    return str(reflection.id)
 
 
 # ============================================================
 # Token Budget Guard (C3)
 # ============================================================
+
 
 def _guard_output(result_json: str, max_tokens: int | None = None) -> str:
     """Enforce token budget on MCP tool output.
@@ -421,10 +318,7 @@ def _guard_output(result_json: str, max_tokens: int | None = None) -> str:
 
     # Step 1: Remove low-confidence results (if present)
     if len(results) > 1:
-        high_medium = [
-            r for r in results
-            if r.get("confidence", "high") in ("high", "medium")
-        ]
+        high_medium = [r for r in results if r.get("confidence", "high") in ("high", "medium")]
         if high_medium and len(high_medium) < len(results):
             results = high_medium
             truncated = True
@@ -456,16 +350,6 @@ def _guard_output(result_json: str, max_tokens: int | None = None) -> str:
                         if isinstance(val, str) and len(val) > max_solution_chars:
                             child[field] = val[:max_solution_chars] + "... [truncated]"
                             truncated = True
-
-        # Strip code_snippets entirely if config says so
-        if not settings.mcp.include_code_snippets:
-            result.pop("code_snippets", None)
-            if isinstance(parent, dict):
-                parent.pop("code_snippets", None)
-            for child in children:
-                if isinstance(child, dict):
-                    child.pop("code_snippets", None)
-            truncated = True
 
     # Apply truncation flag if any changes were made
     if truncated:
@@ -501,13 +385,13 @@ mcp = FastMCP(
         "Use search_depth (skip/light/full) to decide if tm_search/tm_solve is needed.\n\n"
         "**When to use which tool:**\n"
         "- tm_solve(problem=...): First for concrete technical problems. "
-        "Returns best solution and marks used; add file_path/language/framework for recall.\n"
+        "Returns best solution and marks used; add file_path/language for recall.\n"
         "- tm_search(query=..., tags=..., max_results=5): Exploratory or more results. "
         "Short queries get lower min_similarity automatically.\n"
         "- tm_learn(conversation=..., as_group=...): User pastes long doc or chat. "
         "LLM extracts experience; as_group=True for multi-step.\n"
         "- tm_save(title=..., problem=..., solution=...): Quick-save. "
-        "Use tm_save_typed for experience_type, severity, git_refs.\n"
+        "Use tm_save_typed for experience_type.\n"
         "- tm_feedback(experience_id=..., rating=1..5): After a result helped; improves ranking.\n"
         "- tm_task(action=...): create/list/get/update; completed+summary → experience.\n\n"
         "Types: general, feature, bugfix, tech_design, incident, best_practice, learning. "
@@ -519,6 +403,7 @@ mcp = FastMCP(
 # ============================================================
 # Tools — C1: Workflow-oriented tools
 # ============================================================
+
 
 @mcp.tool(
     name="tm_solve",
@@ -621,29 +506,14 @@ async def tm_solve(
         if best_id and best.get("type") != "archive":
             async with get_session(db_url) as session:
                 from team_memory.storage.repository import ExperienceRepository
+
                 repo = ExperienceRepository(session)
                 try:
                     import uuid as _uuid
+
                     await repo.increment_use_count(_uuid.UUID(best_id))
                 except Exception:
                     logger.debug("Failed to increment use_count", exc_info=True)
-                try:
-                    from sqlalchemy import select as sa_select
-
-                    from team_memory.services.scoring import apply_reference_boost
-                    from team_memory.storage.models import Experience
-                    q = sa_select(Experience).where(
-                        Experience.id == _uuid.UUID(best_id)
-                    )
-                    r = await session.execute(q)
-                    exp = r.scalar_one_or_none()
-                    if exp:
-                        exp.quality_score = apply_reference_boost(
-                            exp.quality_score
-                        )
-                        await session.commit()
-                except Exception:
-                    logger.debug("Failed to apply reference boost", exc_info=True)
         reflection_duration_ms = int((time.monotonic() - reflection_start) * 1000)
         io_logger.log_internal(
             "solve_reflection",
@@ -747,7 +617,6 @@ async def tm_learn(
     """
     from team_memory.services.llm_parser import (
         LLMParseError,
-        compute_quality_score,
         parse_content,
     )
 
@@ -798,18 +667,38 @@ async def tm_learn(
             parsed["parent"]["experience_type"] = tpl_type
 
         async with get_session(db_url) as session:
-            result = await service.save_group(
-                session=session,
-                parent=parsed["parent"],
-                children=parsed["children"],
+            from team_memory.storage.repository import ExperienceRepository
+
+            repo = ExperienceRepository(session)
+            parent_data = {
+                "title": parsed["parent"].get("title", "Untitled"),
+                "description": parsed["parent"].get("problem", ""),
+                "solution": parsed["parent"].get("solution"),
+                "tags": parent_tags,
+                "embedding": None,
+                "created_by": user,
+                "exp_status": status,
+            }
+            children_data = [
+                {
+                    "title": c.get("title", "Untitled"),
+                    "description": c.get("problem", ""),
+                    "solution": c.get("solution"),
+                    "tags": c.get("tags", []),
+                    "embedding": None,
+                }
+                for c in parsed.get("children", [])
+            ]
+            result = await repo.create_group(
+                parent_data=parent_data,
+                children_data=children_data,
                 created_by=user,
                 project=resolved_project,
             )
+            await session.commit()
 
         child_count = len(parsed["children"])
-        draft_note = (
-            " (已保存为草稿)" if status == "draft" else ""
-        )
+        draft_note = " (已保存为草稿)" if status == "draft" else ""
         await _try_extract_and_save_personal_memory(conversation, user, settings)
         return json.dumps(
             {
@@ -830,8 +719,6 @@ async def tm_learn(
             extracted_tags = list(set(extracted_tags + [t.lower() for t in tags]))
         experience_type = parsed.get("experience_type") or tpl_type or "general"
 
-        q_score = compute_quality_score(parsed)
-
         async with get_session(db_url) as session:
             result = await service.save(
                 session=session,
@@ -840,20 +727,11 @@ async def tm_learn(
                 solution=parsed.get("solution"),
                 created_by=user,
                 tags=extracted_tags,
-                code_snippets=parsed.get("code_snippets"),
-                language=parsed.get("language"),
-                framework=parsed.get("framework"),
-                root_cause=parsed.get("root_cause"),
                 source="auto_extract",
                 exp_status=status,
                 visibility="project",
                 experience_type=experience_type,
-                severity=parsed.get("severity"),
-                category=parsed.get("category"),
-                structured_data=parsed.get("structured_data"),
-                git_refs=parsed.get("git_refs"),
                 project=resolved_project,
-                quality_score=q_score,
             )
 
         # Handle dedup detection
@@ -870,11 +748,7 @@ async def tm_learn(
                 ensure_ascii=False,
             )
 
-        draft_note = (
-            " (已保存为草稿)"
-            if result.get("exp_status") == "draft"
-            else ""
-        )
+        draft_note = " (已保存为草稿)" if result.get("exp_status") == "draft" else ""
         await _try_extract_and_save_personal_memory(conversation, user, settings)
         return json.dumps(
             {
@@ -896,134 +770,9 @@ async def tm_learn(
 
 
 # ============================================================
-# Tools — P2.B: Verbatim artifact extraction
-# ============================================================
-
-@mcp.tool(
-    name="tm_extract_artifacts",
-    description=(
-        "Extract verbatim knowledge artifacts from conversations or documents. "
-        "Unlike tm_learn which summarizes, this preserves exact quotes with context. "
-        "Best for Plan discussions, architecture decisions, requirement documents. "
-        "Returns ~300-800 tokens."
-    ),
-)
-async def tm_extract_artifacts(
-    text: str,
-    experience_id: str | None = None,
-    source_ref: str = "",
-    artifact_types: list[str] | None = None,
-) -> str:
-    """Extract verbatim artifacts from text and optionally link to an experience.
-
-    Args:
-        text: The conversation or document text to extract from (required).
-        experience_id: Optional existing experience ID to link artifacts to.
-        source_ref: Source identifier (session ID, file path, etc.).
-        artifact_types: Filter types: decision, problem, pattern, constraint, fact.
-    """
-    settings = _get_settings()
-    db_url = _get_db_url()
-    allowed_types = artifact_types or ["decision", "problem", "pattern", "constraint", "fact"]
-
-    prompt = f"""从以下文本中提取知识 artifact（逐字引用，不要摘要改写）。
-
-每个 artifact 必须是以下类型之一: {', '.join(allowed_types)}
-
-请严格以 JSON 格式返回（不要用 markdown 代码块包裹）:
-{{
-  "artifacts": [
-    {{
-      "type": "decision|problem|pattern|constraint|fact",
-      "content": "原文引用（保留原始表述）",
-      "context_before": "引用前的上下文（1-2句，帮助理解背景）",
-      "context_after": "引用后的上下文（1-2句，帮助理解结果）"
-    }}
-  ]
-}}
-
-注意:
-- content 必须是原文中的直接引用，不要改写
-- 每个 artifact 应该是一个独立的知识点
-- 最多提取 10 个最重要的 artifact
-- context_before/context_after 可以为 null
-
-文本:
-{text[:8000]}"""
-
-    import httpx
-    llm_model = settings.llm.model
-    llm_base_url = settings.llm.base_url.rstrip("/")
-
-    artifacts_data = []
-    try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                f"{llm_base_url}/api/chat",
-                json={
-                    "model": llm_model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "stream": False,
-                    "options": {"temperature": 0.2},
-                },
-            )
-            resp.raise_for_status()
-            raw = resp.json().get("message", {}).get("content", "")
-            raw = raw.strip()
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
-            parsed = json.loads(raw)
-            artifacts_data = parsed.get("artifacts", [])
-    except Exception as e:
-        return json.dumps(
-            {"error": True, "message": f"Artifact extraction failed: {e}"},
-            ensure_ascii=False,
-        )
-
-    if not artifacts_data:
-        return json.dumps(
-            {"message": "No artifacts extracted from the text.", "artifacts": []},
-            ensure_ascii=False,
-        )
-
-    # Save to database
-    import uuid as _uuid
-
-    from team_memory.storage.models import ExperienceArtifact
-
-    exp_uuid = _uuid.UUID(experience_id) if experience_id else None
-    saved = []
-
-    if exp_uuid:
-        from team_memory.storage.database import get_session
-        async with get_session(db_url) as session:
-            for a in artifacts_data:
-                art = ExperienceArtifact(
-                    experience_id=exp_uuid,
-                    artifact_type=a.get("type", "fact"),
-                    content=a.get("content", ""),
-                    context_before=a.get("context_before"),
-                    context_after=a.get("context_after"),
-                    source_ref=source_ref,
-                )
-                session.add(art)
-                saved.append(art.to_dict())
-            await session.commit()
-
-    return json.dumps(
-        {
-            "message": f"Extracted {len(artifacts_data)} artifacts"
-            + (f", saved to experience {experience_id}" if exp_uuid else ""),
-            "artifacts": saved if saved else artifacts_data,
-            "count": len(artifacts_data),
-        },
-        ensure_ascii=False,
-    )
-
-
-# ============================================================
 # Tools — C2: Context-based suggestions
 # ============================================================
+
 
 @mcp.tool(
     name="tm_suggest",
@@ -1073,8 +822,19 @@ async def tm_suggest(
         # Extract meaningful directory hints
         parts_lower = [part.lower() for part in p.parts]
         context_hints = []
-        for hint in ("test", "tests", "migration", "migrations", "api", "auth",
-                      "config", "deploy", "docker", "ci", "scripts"):
+        for hint in (
+            "test",
+            "tests",
+            "migration",
+            "migrations",
+            "api",
+            "auth",
+            "config",
+            "deploy",
+            "docker",
+            "ci",
+            "scripts",
+        ):
             if hint in parts_lower:
                 context_hints.append(hint)
         if context_hints:
@@ -1135,14 +895,16 @@ async def tm_suggest(
     suggestions = []
     for r in results:
         parent = r.get("parent", r)
-        suggestions.append({
-            "id": r.get("group_id") or parent.get("id", ""),
-            "title": parent.get("title", "Untitled"),
-            "tags": parent.get("tags", []),
-            "score": r.get("score", r.get("similarity", 0)),
-            "confidence": r.get("confidence", "medium"),
-            "children_count": r.get("total_children", 0),
-        })
+        suggestions.append(
+            {
+                "id": r.get("group_id") or parent.get("id", ""),
+                "title": parent.get("title", "Untitled"),
+                "tags": parent.get("tags", []),
+                "score": r.get("score", r.get("similarity", 0)),
+                "confidence": r.get("confidence", "medium"),
+                "children_count": r.get("total_children", 0),
+            }
+        )
 
     output = json.dumps(
         {
@@ -1158,6 +920,7 @@ async def tm_suggest(
 # ============================================================
 # Tools — Renamed existing tools (C4 namespace)
 # ============================================================
+
 
 @mcp.tool(
     name="tm_search",
@@ -1275,9 +1038,6 @@ async def tm_search(
     description=(
         "Quick-save a simple experience (title + problem required, solution optional). "
         "Use this for fast knowledge capture — solution can be added later. "
-        "For typed experiences with full fields, use tm_save_typed instead. "
-        "Optional file_locations: list of dicts, each may have path, start_line, end_line, "
-        "and optionally snippet, file_mtime, file_content_hash. "
         "Returns ~100-200 tokens."
     ),
 )
@@ -1287,15 +1047,11 @@ async def tm_save(
     problem: str,
     solution: str | None = None,
     tags: list[str] | None = None,
-    code_snippets: str | None = None,
-    language: str | None = None,
-    framework: str | None = None,
-    root_cause: str | None = None,
     status: str = "published",
     visibility: str = "project",
     skip_dedup: bool = False,
     project: str | None = None,
-    file_locations: list[dict] | None = None,
+    group_key: str | None = None,
 ) -> str:
     """Quick-save a new experience to the team knowledge base.
 
@@ -1304,15 +1060,11 @@ async def tm_save(
         problem: Problem description (required).
         solution: Solution description (optional).
         tags: Tags for the experience.
-        code_snippets: Key code examples.
-        language: Programming language.
-        framework: Framework.
-        root_cause: Root cause analysis.
         status: "published" (default) or "draft".
         visibility: "project" (default), "private", or "global".
         skip_dedup: If True, skip duplicate detection check.
         project: Project scope.
-        file_locations: Optional list of file location dicts.
+        group_key: Auto-group key (experiences with same key share a parent).
     """
     service = _get_service()
     db_url = _get_db_url()
@@ -1327,16 +1079,12 @@ async def tm_save(
             solution=solution,
             created_by=user,
             tags=tags,
-            code_snippets=code_snippets,
-            language=language,
-            framework=framework,
             source="auto_extract",
-            root_cause=root_cause,
             exp_status=status,
             visibility=visibility,
             skip_dedup=skip_dedup,
             project=resolved_project,
-            file_locations=file_locations,
+            group_key=group_key,
         )
 
     # Handle dedup detection
@@ -1456,7 +1204,9 @@ async def tm_get_archive(archive_id: str) -> str:
         )
 
     archive_svc = _get_archive_service()
-    out = await archive_svc.get_archive(aid)
+    user = await _get_current_user()
+    resolved_project = _resolve_project(None)
+    out = await archive_svc.get_archive(aid, viewer=user, project=resolved_project)
     if out is None:
         return json.dumps(
             {"error": "archive not found", "code": 404},
@@ -1464,17 +1214,16 @@ async def tm_get_archive(archive_id: str) -> str:
         )
     if "attachments" not in out or out["attachments"] is None:
         out = {**out, "attachments": []}
+    if "document_tree_nodes" not in out or out["document_tree_nodes"] is None:
+        out = {**out, "document_tree_nodes": []}
     return json.dumps(out, ensure_ascii=False)
 
 
 @mcp.tool(
     name="tm_save_typed",
     description=(
-        "Save a typed experience with full fields (experience_type, severity, "
-        "category, structured_data, git_refs, related_links, progress_status). "
+        "Save an experience with explicit experience_type. "
         "Types: general, feature, bugfix, tech_design, incident, best_practice, learning. "
-        "Optional file_locations: list of dicts, each may have path, start_line, end_line, "
-        "and optionally snippet, file_mtime, file_content_hash. "
         "Returns ~200-400 tokens."
     ),
 )
@@ -1485,23 +1234,13 @@ async def tm_save_typed(
     experience_type: str = "general",
     solution: str | None = None,
     tags: list[str] | None = None,
-    code_snippets: str | None = None,
-    language: str | None = None,
-    framework: str | None = None,
-    root_cause: str | None = None,
-    severity: str | None = None,
-    category: str | None = None,
-    progress_status: str | None = None,
-    structured_data: dict | None = None,
-    git_refs: list[dict] | None = None,
-    related_links: list[dict] | None = None,
     status: str = "published",
     visibility: str = "project",
     skip_dedup: bool = False,
     project: str | None = None,
-    file_locations: list[dict] | None = None,
+    group_key: str | None = None,
 ) -> str:
-    """Save a typed experience with full fields.
+    """Save a typed experience.
 
     Args:
         title: Experience title (required).
@@ -1509,21 +1248,11 @@ async def tm_save_typed(
         experience_type: Type — general/feature/bugfix/tech_design/incident/best_practice/learning.
         solution: Solution (optional).
         tags: Tags for the experience.
-        code_snippets: Key code examples.
-        language: Programming language.
-        framework: Framework.
-        root_cause: Root cause analysis.
-        severity: Severity level (P0-P4, for bugfix/incident).
-        category: Category.
-        progress_status: Progress status (type-specific).
-        structured_data: Type-specific data dict.
-        git_refs: List of git references.
-        related_links: List of related links.
         status: "published" (default) or "draft".
         visibility: "project" (default), "private", or "global".
         skip_dedup: If True, skip duplicate detection check.
         project: Project scope.
-        file_locations: Optional list of file location dicts.
+        group_key: Auto-group key.
     """
     service = _get_service()
     db_url = _get_db_url()
@@ -1538,23 +1267,13 @@ async def tm_save_typed(
             solution=solution,
             created_by=user,
             tags=tags,
-            code_snippets=code_snippets,
-            language=language,
-            framework=framework,
             source="auto_extract",
-            root_cause=root_cause,
             exp_status=status,
             visibility=visibility,
             skip_dedup=skip_dedup,
             experience_type=experience_type,
-            severity=severity,
-            category=category,
-            progress_status=progress_status,
-            structured_data=structured_data,
-            git_refs=git_refs,
-            related_links=related_links,
             project=resolved_project,
-            file_locations=file_locations,
+            group_key=group_key,
         )
 
     if result.get("status") == "duplicate_detected":
@@ -1574,10 +1293,6 @@ async def tm_save_typed(
                 "id": result.get("id"),
                 "title": result.get("title"),
                 "experience_type": result.get("experience_type"),
-                "severity": result.get("severity"),
-                "category": result.get("category"),
-                "progress_status": result.get("progress_status"),
-                "completeness_score": result.get("completeness_score"),
                 "status": result.get("exp_status"),
                 "visibility": result.get("visibility"),
                 "created_at": result.get("created_at"),
@@ -1592,8 +1307,6 @@ async def tm_save_typed(
     description=(
         "Save a group of related experiences (parent + children). "
         "Use this when a solution involves multiple steps or stages. "
-        "The parent describes the overall problem/solution, "
-        "children describe individual steps. "
         "Returns ~200-500 tokens."
     ),
 )
@@ -1603,110 +1316,60 @@ async def tm_save_group(
     children: list[dict],
     parent_solution: str | None = None,
     parent_tags: list[str] | None = None,
-    parent_root_cause: str | None = None,
-    language: str | None = None,
-    framework: str | None = None,
     experience_type: str = "general",
-    severity: str | None = None,
-    category: str | None = None,
     project: str | None = None,
-    group_id: str | None = None,
-    force_single_group: bool = False,
-    group_by: str | None = None,
 ) -> str:
     """Save a group of experiences (parent with children).
-
-    When group_id is provided, only one group experience per group (idempotent).
-    Use force_single_group=True for 总-分 (no type grouping); otherwise 总-分-分
-    with grouped_children by group_by (default experience_type).
 
     Args:
         parent_title: Title for the parent experience.
         parent_problem: Problem description for the parent.
-        children: List of dicts, each with keys: title, problem, solution,
-                  and optionally: tags, code_snippets, root_cause, experience_type, category.
+        children: List of dicts, each with keys: title, problem, solution, tags.
         parent_solution: Overall solution summary (optional).
         parent_tags: Tags for the parent.
-        parent_root_cause: Root cause for the parent.
-        language: Programming language.
-        framework: Framework.
         experience_type: Type for the group (default "general").
-        severity: Severity for bugfix/incident groups.
-        category: Category classification.
-        group_id: Optional task group id; when set, at most one group experience
-                  per group_id is stored (idempotent).
-        force_single_group: If True, do not write grouped_children (总-分).
-        group_by: Key for grouping: "experience_type" or "category"; default experience_type.
-
-    Returns:
-        JSON string with the created or existing group.
+        project: Project scope.
     """
-    service = _get_service()
     db_url = _get_db_url()
     user = await _get_current_user()
     resolved_project = _resolve_project(project)
 
     parent_data = {
         "title": parent_title,
-        "problem": parent_problem,
+        "description": parent_problem,
         "solution": parent_solution or "",
-        "tags": parent_tags,
-        "root_cause": parent_root_cause,
-        "language": language,
-        "framework": framework,
-        "source": "auto_extract",
+        "tags": parent_tags or [],
+        "embedding": None,
+        "exp_status": "published",
         "project": resolved_project,
+        "experience_type": experience_type,
     }
-    if group_id:
-        parent_data["source_context"] = f"task_group:{group_id}"
-    parent_data["force_single_group"] = force_single_group
-    if group_by is not None:
-        parent_data["group_by"] = group_by
 
-    children_data = []
-    for child in children:
-        children_data.append({
-            "title": child.get("title", ""),
-            "problem": child.get("problem", ""),
-            "solution": child.get("solution", ""),
-            "tags": child.get("tags"),
-            "code_snippets": child.get("code_snippets"),
-            "root_cause": child.get("root_cause"),
-            "source": "auto_extract",
+    children_data = [
+        {
+            "title": c.get("title", ""),
+            "description": c.get("problem", ""),
+            "solution": c.get("solution", ""),
+            "tags": c.get("tags", []),
+            "embedding": None,
             "project": resolved_project,
-            "experience_type": child.get("experience_type", "general"),
-            "category": child.get("category"),
-        })
+            "experience_type": experience_type,
+        }
+        for c in children
+    ]
 
     async with get_session(db_url) as session:
-        if group_id:
-            from team_memory.storage.repository import ExperienceRepository
-            repo = ExperienceRepository(session)
-            existing = await repo.get_root_by_source_context(
-                resolved_project, f"task_group:{group_id}"
-            )
-            if existing:
-                full = await repo.get_with_children(existing.id)
-                return json.dumps(
-                    {
-                        "message": "该任务组已有组级经验，未重复写入",
-                        "already_exists": True,
-                        "group": full.to_dict(include_children=True),
-                    },
-                    ensure_ascii=False,
-                )
-        result = await service.save_group(
-            session=session,
-            parent=parent_data,
-            children=children_data,
-            created_by=user,
-            project=resolved_project,
-        )
+        from team_memory.storage.repository import ExperienceRepository
 
-    msg = (
-        f"Experience group ({experience_type}) saved: "
-        f"1 parent + {len(children_data)} children."
-    )
+        repo = ExperienceRepository(session)
+        result = await repo.create_group(
+            parent_data=parent_data,
+            children_data=children_data,
+            created_by=user,
+        )
+        await session.commit()
+
+    msg = f"Experience group ({experience_type}) saved: 1 parent + {len(children_data)} children."
     return json.dumps(
         {
             "message": msg,
@@ -1720,11 +1383,12 @@ async def tm_save_group(
 # Tools — P3-2: Agent Collaboration
 # ============================================================
 
+
 @mcp.tool(
     name="tm_claim",
     description=(
         "Claim an experience/problem so other agents know you're working on it. "
-        "Claims auto-expire after 30 minutes of inactivity."
+        "Stored as a tag agent_claim|user|ISO8601|message (prior claim tag replaced)."
     ),
 )
 async def tm_claim(
@@ -1745,30 +1409,25 @@ async def tm_claim(
     user = await _get_current_user()
 
     async with get_session(db_url) as session:
-        from sqlalchemy import update
-
         from team_memory.storage.models import Experience
 
-        result = await session.execute(
-            update(Experience)
-            .where(Experience.id == _uuid.UUID(experience_id))
-            .values(
-                source_context=json.dumps({
-                    "claimed_by": user,
-                    "claimed_at": datetime.now(timezone.utc).isoformat(),
-                    "message": message or "",
-                })
-            )
-            .returning(Experience.id)
-        )
-        if not result.first():
+        exp = await session.get(Experience, _uuid.UUID(experience_id))
+        if exp is None or exp.is_deleted:
             return json.dumps({"message": "Experience not found.", "error": True})
+        now_iso = datetime.now(timezone.utc).isoformat()
+        msg = (message or "").replace("\n", " ").strip()[:200]
+        claim_tag = f"agent_claim|{user}|{now_iso}|{msg}"
+        prev = list(exp.tags or [])
+        kept = [t for t in prev if not str(t).startswith("agent_claim|")]
+        exp.tags = kept + [claim_tag]
         await session.commit()
 
-    return json.dumps({
-        "message": f"Claimed by {user}. Other agents will see this.",
-        "claimed_by": user,
-    })
+    return json.dumps(
+        {
+            "message": f"Claimed by {user}. Other agents will see this.",
+            "claimed_by": user,
+        }
+    )
 
 
 @mcp.tool(
@@ -1794,17 +1453,23 @@ async def tm_notify(
     service = _get_service()
     if service._event_bus:
         from team_memory.services.event_bus import Events
-        await service._event_bus.emit(Events.EXPERIENCE_UPDATED, {
-            "experience_id": experience_id,
-            "notified_by": user,
-            "message": message,
-        })
 
-    return json.dumps({
-        "message": f"Notification sent: {message}",
-        "notified_by": user,
-        "experience_id": experience_id,
-    })
+        await service._event_bus.emit(
+            Events.EXPERIENCE_UPDATED,
+            {
+                "experience_id": experience_id,
+                "notified_by": user,
+                "message": message,
+            },
+        )
+
+    return json.dumps(
+        {
+            "message": f"Notification sent: {message}",
+            "notified_by": user,
+            "experience_id": experience_id,
+        }
+    )
 
 
 @mcp.tool(
@@ -1841,7 +1506,6 @@ async def tm_feedback(
     if fitness_score is not None and not (1 <= fitness_score <= 5):
         return json.dumps({"message": "fitness_score must be between 1 and 5.", "error": True})
     service = _get_service()
-    db_url = _get_db_url()
     user = await _get_current_user()
 
     success = await service.feedback(
@@ -1853,22 +1517,6 @@ async def tm_feedback(
     )
 
     if success:
-        # Apply quality score boost for high ratings
-        try:
-            from team_memory.services.scoring import apply_rating_boost
-            from team_memory.storage.models import Experience
-
-            async with get_session(db_url) as s2:
-                from sqlalchemy import select as sa_select
-
-                q = sa_select(Experience).where(Experience.id == experience_id)
-                r = await s2.execute(q)
-                exp = r.scalar_one_or_none()
-                if exp:
-                    exp.quality_score = apply_rating_boost(exp.quality_score, rating)
-                    await s2.commit()
-        except Exception:
-            pass
         return json.dumps({"message": "Feedback recorded. Thank you!"})
     else:
         return json.dumps({"message": "Experience not found.", "error": True})
@@ -1911,8 +1559,7 @@ async def tm_update(
 @mcp.tool(
     name="tm_config",
     description=(
-        "Read runtime retrieval configuration snapshot "
-        "(retrieval/search/cache/pageindex-lite)."
+        "Read runtime retrieval configuration snapshot (retrieval/search/cache/pageindex-lite)."
     ),
 )
 async def tm_config() -> str:
@@ -1991,7 +1638,6 @@ async def tm_status() -> str:
             "service_initialized": service is not None,
             "search_pipeline_enabled": pipeline is not None,
             "embedding_provider": settings.embedding.provider,
-            "reranker_provider": settings.reranker.provider,
             "cache_enabled": cache_stats.get("enabled", False),
             "cache_size": cache_stats.get("result_cache_size", 0),
             "embedding_cache_size": cache_stats.get("embedding_cache_size", 0),
@@ -2017,47 +1663,6 @@ async def tm_invalidate_search_cache() -> str:
     service = _get_service()
     await service.invalidate_search_cache()
     return json.dumps({"message": "Search cache cleared"}, ensure_ascii=False)
-
-
-@mcp.tool(
-    name="tm_track",
-    description=(
-        "Report external MCP/skill usage for analytics tracking. "
-        "Call this to report usage of tools from other MCP servers or skills. "
-        "Returns ~50 tokens."
-    ),
-)
-async def tm_track(
-    tool_name: str,
-    tool_type: str = "mcp",
-    duration_ms: int | None = None,
-    success: bool = True,
-    session_id: str | None = None,
-    error_message: str | None = None,
-    metadata: dict | None = None,
-    api_key_name: str | None = None,
-) -> str:
-    """Report external MCP/skill usage for analytics tracking."""
-    from team_memory.storage.models import ToolUsageLog
-
-    db_url = _get_db_url()
-    user = await _get_current_user()
-    async with get_session(db_url) as session:
-        log = ToolUsageLog(
-            tool_name=tool_name,
-            tool_type=tool_type,
-            user=user,
-            project=_resolve_project(None),
-            duration_ms=duration_ms,
-            success=success,
-            error_message=error_message,
-            session_id=session_id,
-            metadata_extra=metadata or {},
-            api_key_name=api_key_name or os.environ.get("TEAM_MEMORY_API_KEY_NAME"),
-        )
-        session.add(log)
-        await session.commit()
-    return f"✅ Tracked: {tool_name} ({tool_type})"
 
 
 @mcp.tool(
@@ -2102,17 +1707,15 @@ async def tm_skill_manage(
                             or (skill_dir / "SKILL.md.disabled").exists()
                         )
                         if active or disabled:
-                            skills.append({
-                                "name": skill_dir.name,
-                                "path": str(skill_dir),
-                                "active": active,
-                            })
+                            skills.append(
+                                {
+                                    "name": skill_dir.name,
+                                    "path": str(skill_dir),
+                                    "active": active,
+                                }
+                            )
         lines = [f"{'✅' if s['active'] else '⏸️'} {s['name']}" for s in skills]
-        return (
-            f"Skills ({len(skills)}):\n" + "\n".join(lines)
-            if lines
-            else "No skills found."
-        )
+        return f"Skills ({len(skills)}):\n" + "\n".join(lines) if lines else "No skills found."
 
     if not skill_path:
         return "❌ skill_path required for disable/enable"
@@ -2292,6 +1895,7 @@ async def tm_analyze_patterns(
 # Resources
 # ============================================================
 
+
 @mcp.resource("experiences://recent")
 async def recent_experiences() -> str:
     """Get the 10 most recently added experiences."""
@@ -2313,31 +1917,10 @@ async def recent_experiences() -> str:
     return "\n".join(lines)
 
 
-@mcp.resource("experiences://stats")
-async def experience_stats() -> str:
-    """Get experience database statistics."""
-    service = _get_service()
-    db_url = _get_db_url()
-
-    async with get_session(db_url) as session:
-        stats = await service.get_stats(session=session)
-
-    lines = [
-        "# Experience Database Stats\n",
-        f"- **Total experiences**: {stats['total_experiences']}",
-        f"- **Added in last 7 days**: {stats['recent_7days']}",
-        f"- **Pending reviews**: {stats.get('pending_reviews', 0)}",
-        "\n## Top Tags\n",
-    ]
-    for tag, count in stats.get("tag_distribution", {}).items():
-        lines.append(f"- {tag}: {count}")
-
-    return "\n".join(lines)
-
-
 # ============================================================
 # Prompts
 # ============================================================
+
 
 @mcp.prompt(
     description=(
@@ -2488,862 +2071,9 @@ Keep the response compact and reference section paths whenever available."""
 
 
 # ============================================================
-# Task Management Tools — tm_task, tm_doc_sync
-# ============================================================
-
-
-@mcp.tool(
-    name="tm_task",
-    description=(
-        "Task management: action='create'|'list'|'get'|'update'. "
-        "create: title required, optional description/project/status. "
-        "update: task_id + status='completed' + summary → auto-saves as experience. "
-        "list: filter by project, status (wait/in_progress/completed). "
-        "Use tm_task_claim to claim before starting; complete with summary. Returns ~200 tokens."
-    ),
-)
-@track_usage
-async def tm_task(
-    action: str,
-    task_id: str | None = None,
-    group_id: str | None = None,
-    title: str | None = None,
-    description: str | None = None,
-    status: str | None = None,
-    priority: str | None = None,
-    importance: int | None = None,
-    project: str | None = None,
-    due_date: str | None = None,
-    labels: list[str] | None = None,
-    experience_id: str | None = None,
-    summary: str | None = None,
-    with_context: bool = False,
-    sediment_experience_id: str | None = None,
-    acceptance_criteria: str | None = None,
-    acceptance_met: bool | None = None,
-    changed_files: list[str] | None = None,
-) -> str:
-    """Manage personal tasks.
-
-    Args:
-        action: One of 'create', 'update', 'list', 'get'.
-        task_id: Required for update/get.
-        group_id: Optional group filter for list, or group to assign for create.
-        title: Task title (required for create).
-        description: Optional description.
-        status: wait/plan/in_progress/completed/cancelled.
-        priority: low/medium/high/urgent.
-        importance: 1-5 importance level.
-        project: Project name (defaults to env/config).
-        due_date: ISO date string for deadline.
-        labels: Tag labels.
-        experience_id: Link to an existing experience.
-        summary: Required when completing (status=completed) for auto-sediment.
-        with_context: If True and action=get, include linked experience content.
-        sediment_experience_id: When completing, if provided, use this experience as
-            task sediment and skip auto-sediment from summary (e.g. from subagent extraction).
-        acceptance_criteria: Task-level acceptance criteria (links to workflow step).
-        acceptance_met: Whether acceptance has been met (True/False/None).
-        changed_files: When completing, file paths to bind to sediment experience
-            (architecture bindings). Explicit only; Task 7b adds Git auto-parse.
-    """
-    import uuid as _uuid
-    from datetime import datetime as _dt
-
-    db_url = _get_db_url()
-    resolved_project = _resolve_project(project)
-    user = await _get_current_user()
-
-    from team_memory.storage.repository import TaskRepository
-
-    if action == "create":
-        if not title:
-            return json.dumps({"error": True, "message": "title is required for create"})
-        async with get_session(db_url) as session:
-            repo = TaskRepository(session)
-            if status == "in_progress":
-                ok, cnt = await repo.check_wip(resolved_project, user)
-                if not ok:
-                    return json.dumps({
-                        "error": True,
-                        "message": f"WIP limit ({repo.WIP_LIMIT}) exceeded ({cnt} in progress).",
-                    })
-            parsed_due = None
-            if due_date:
-                try:
-                    parsed_due = _dt.fromisoformat(due_date)
-                except ValueError:
-                    pass
-            task = await repo.create_task(
-                title=title,
-                user_id=user,
-                project=resolved_project,
-                group_id=_uuid.UUID(group_id) if group_id else None,
-                description=description,
-                status=status or "wait",
-                priority=priority or "medium",
-                importance=importance or 3,
-                due_date=parsed_due,
-                labels=labels,
-                experience_id=_uuid.UUID(experience_id) if experience_id else None,
-                acceptance_criteria=acceptance_criteria,
-            )
-            await session.commit()
-            task_dict = task.to_dict()
-
-        related = []
-        if title:
-            try:
-                service = _get_service()
-                search_query = f"{title} {description or ''}"[:200]
-                hits = await service.search(
-                    query=search_query, max_results=3,
-                    min_similarity=0.4, user_name=user, source="task_create",
-                    grouped=True, top_k_children=1, project=resolved_project,
-                )
-                for h in hits:
-                    p = h.get("parent", h)
-                    related.append({
-                        "id": p.get("id", ""),
-                        "title": p.get("title", ""),
-                        "score": round(h.get("similarity", 0), 3),
-                    })
-            except Exception:
-                pass
-        return json.dumps({
-            "task": task_dict, "message": "Task created.",
-            "related_experiences": related,
-        }, ensure_ascii=False)
-
-    elif action == "update":
-        if not task_id:
-            return json.dumps({"error": True, "message": "task_id is required for update"})
-        async with get_session(db_url) as session:
-            repo = TaskRepository(session)
-            task = await repo.get_task(_uuid.UUID(task_id))
-            if not task:
-                return json.dumps({"error": True, "message": "Task not found."})
-            kwargs = {}
-            if title is not None:
-                kwargs["title"] = title
-            if description is not None:
-                kwargs["description"] = description
-            if status is not None:
-                kwargs["status"] = status
-            if priority is not None:
-                kwargs["priority"] = priority
-            if importance is not None:
-                kwargs["importance"] = importance
-            if due_date is not None:
-                try:
-                    kwargs["due_date"] = _dt.fromisoformat(due_date)
-                except ValueError:
-                    pass
-            if labels is not None:
-                kwargs["labels"] = labels
-            if acceptance_criteria is not None:
-                kwargs["acceptance_criteria"] = acceptance_criteria
-            if acceptance_met is not None:
-                kwargs["acceptance_met"] = acceptance_met
-
-            # When completing with pre-extracted experience, attach it as sediment
-            if (
-                status == "completed"
-                and sediment_experience_id
-            ):
-                try:
-                    kwargs["sediment_experience_id"] = _uuid.UUID(
-                        sediment_experience_id
-                    )
-                except ValueError:
-                    pass
-
-            warning = None
-            if status == "in_progress" and task.status != "in_progress":
-                ok, cnt = await repo.check_wip(task.project, task.user_id)
-                if not ok:
-                    warning = f"WIP limit ({repo.WIP_LIMIT}) exceeded ({cnt} in progress)"
-
-            updated = await repo.update_task(task.id, **kwargs)
-
-            # Auto-sediment on completion (skip when sediment_experience_id provided)
-            sediment_id = None
-            reflection_id = None
-            if status == "completed" and summary:
-                if sediment_experience_id:
-                    sediment_id = sediment_experience_id.strip()
-                else:
-                    try:
-                        from team_memory.services.llm_parser import (
-                            compute_quality_score,
-                        )
-                        service = _get_service()
-                        q_score = compute_quality_score({
-                            "problem": summary,
-                            "solution": summary,
-                        })
-                        learned = await service.save(
-                            session=session,
-                            title=f"[任务沉淀] {task.title}",
-                            problem=summary,
-                            tags=task.labels or ["task-sediment"],
-                            created_by=user,
-                            project=task.project,
-                            source="task_sediment",
-                            quality_score=q_score,
-                        )
-                        if learned and hasattr(learned, "id"):
-                            sediment_id = str(learned.id)
-                            if updated:
-                                updated.sediment_experience_id = learned.id
-                    except Exception as e:
-                        logger.warning("Auto-sediment failed: %s", e)
-
-                # P2.C: Auto-reflection on task completion
-                try:
-                    reflection_id = await _create_reflection(
-                        session=session,
-                        task=task,
-                        summary=summary,
-                        sediment_experience_id=sediment_id,
-                        settings=_get_settings(),
-                    )
-                except Exception as e:
-                    logger.warning("Auto-reflection failed: %s", e)
-
-            # Group completion check: when completing a task in a group, see if group is done
-            group_completed = False
-            group_id_str = None
-            group_completed_hint = None
-            if (
-                status == "completed"
-                and summary
-                and task.group_id is not None
-            ):
-                if await repo.group_all_completed_or_cancelled(
-                    task.project, task.group_id
-                ):
-                    group_completed = True
-                    group_id_str = str(task.group_id)
-                    group_completed_hint = (
-                        "建议调用 tm_save_group 做组级复盘"
-                    )
-
-            await session.commit()
-        result = {
-            "task": updated.to_dict() if updated else {},
-            "message": "Task updated.",
-        }
-        if sediment_id:
-            result["sediment_experience_id"] = sediment_id
-            result["message"] = f"Task completed. Experience sediment created: {sediment_id}"
-        if reflection_id:
-            result["reflection_id"] = reflection_id
-        if warning:
-            result["warning"] = warning
-        if group_completed and group_id_str and group_completed_hint:
-            result["group_completed"] = True
-            result["group_id"] = group_id_str
-            result["group_completed_hint"] = group_completed_hint
-        return json.dumps(result)
-
-    elif action == "list":
-        async with get_session(db_url) as session:
-            repo = TaskRepository(session)
-            tasks = await repo.list_tasks(
-                project=resolved_project,
-                user_id=user,
-                status=status,
-                group_id=_uuid.UUID(group_id) if group_id else None,
-            )
-        result = {
-            "tasks": [t.to_dict() for t in tasks],
-            "total": len(tasks),
-        }
-        if group_id is not None:
-            completed = sum(
-                1 for t in tasks if t.status in ("completed", "cancelled")
-            )
-            result["group_progress"] = {"total": len(tasks), "completed": completed}
-        return json.dumps(result)
-
-    elif action == "get":
-        if not task_id and not group_id:
-            return json.dumps({"error": True, "message": "task_id or group_id required"})
-        async with get_session(db_url) as session:
-            repo = TaskRepository(session)
-            if task_id:
-                task = await repo.get_task(_uuid.UUID(task_id))
-                if not task:
-                    return json.dumps({"error": True, "message": "Task not found."})
-                data = task.to_dict()
-                if with_context and task.experience_id:
-                    from team_memory.storage.repository import ExperienceRepository
-                    exp_repo = ExperienceRepository(session)
-                    exp = await exp_repo.get_by_id(task.experience_id)
-                    if exp:
-                        data["experience_context"] = exp.to_dict()
-                return json.dumps(data)
-            else:
-                group = await repo.get_group(_uuid.UUID(group_id))
-                if not group:
-                    return json.dumps({"error": True, "message": "Group not found."})
-                return json.dumps(group.to_dict(include_tasks=True))
-
-    return json.dumps({"error": True, "message": f"Unknown action: {action}"})
-
-
-@mcp.tool(
-    name="tm_task_claim",
-    description=(
-        "Atomically claim a task (assigns to you + sets in_progress). "
-        "Respects WIP limit. Returns ~100 tokens."
-    ),
-)
-async def tm_task_claim(
-    task_id: str,
-) -> str:
-    """Claim a task for yourself.
-
-    Args:
-        task_id: The task ID to claim.
-    """
-    import uuid as _uuid
-
-    db_url = _get_db_url()
-    user = await _get_current_user()
-
-    from team_memory.storage.repository import TaskRepository
-
-    async with get_session(db_url) as session:
-        repo = TaskRepository(session)
-        try:
-            task = await repo.claim_task(
-                _uuid.UUID(task_id), user, project=_resolve_project(None),
-            )
-        except ValueError as e:
-            return json.dumps({"error": True, "message": str(e)})
-        if not task:
-            return json.dumps({"error": True, "message": "Task not found"})
-        await session.commit()
-    return json.dumps({"task": task.to_dict(), "message": f"Claimed by {user}"})
-
-
-@mcp.tool(
-    name="tm_ready",
-    description=(
-        "List tasks ready to start (no unresolved blocking dependencies). "
-        "Returns ~200 tokens."
-    ),
-)
-async def tm_ready(
-    project: str | None = None,
-) -> str:
-    """Get tasks that are ready to work on.
-
-    Args:
-        project: Project filter.
-    """
-    db_url = _get_db_url()
-    user = await _get_current_user()
-    resolved_project = _resolve_project(project)
-
-    from team_memory.storage.repository import TaskRepository
-
-    async with get_session(db_url) as session:
-        repo = TaskRepository(session)
-        tasks = await repo.get_ready_tasks(resolved_project, user)
-    return json.dumps({
-        "ready_tasks": [t.to_dict() for t in tasks],
-        "total": len(tasks),
-    })
-
-
-@mcp.tool(
-    name="tm_message",
-    description=(
-        "Leave a message/comment on a task. Supports threaded replies. "
-        "Returns ~50 tokens."
-    ),
-)
-async def tm_message(
-    task_id: str,
-    content: str,
-    thread_id: str | None = None,
-) -> str:
-    """Add a message to a task.
-
-    Args:
-        task_id: The task to comment on.
-        content: Message content.
-        thread_id: Optional thread ID for replies.
-    """
-    import uuid as _uuid
-
-    db_url = _get_db_url()
-    user = await _get_current_user()
-
-    from team_memory.storage.repository import TaskRepository
-
-    async with get_session(db_url) as session:
-        repo = TaskRepository(session)
-        msg = await repo.add_message(
-            task_id=_uuid.UUID(task_id),
-            author=user,
-            content=content,
-            thread_id=_uuid.UUID(thread_id) if thread_id else None,
-        )
-        await session.commit()
-    return json.dumps({"message": msg.to_dict()})
-
-
-@mcp.tool(
-    name="tm_workflow_next_step",
-    description=(
-        "Step oracle: given a workflow id (e.g. task-execution-workflow) and optional "
-        "task_id, returns the next step (id, name, action, acceptance_criteria). "
-        "If task_id is provided, infers current step from the task's tm_message history. "
-        "Use group_completed=true when step-complete just returned group_completed. ~300 tokens."
-    ),
-)
-async def tm_workflow_next_step(
-    workflow_id: str,
-    task_id: str | None = None,
-    group_completed: bool = False,
-) -> str:
-    """Return the next workflow step for execution.
-
-    Args:
-        workflow_id: Workflow id (e.g. task-execution-workflow, workflow-optimization-workflow).
-        task_id: Optional. If set, last step is inferred from task messages matching
-            [workflow] <workflow_id> step-<id> (e.g. step-coldstart, step-claim).
-        group_completed: When true, steps with when(group_completed) use the group_completed branch.
-    """
-    import uuid as _uuid
-    from pathlib import Path
-
-    from team_memory.workflow_oracle import get_next_step, get_next_step_for_task
-
-    workspace_root = Path.cwd()
-    try:
-        if task_id:
-            db_url = _get_db_url()
-            from team_memory.storage.repository import TaskRepository
-
-            async with get_session(db_url) as session:
-                repo = TaskRepository(session)
-                task = await repo.get_task(_uuid.UUID(task_id))
-                if not task:
-                    return json.dumps({
-                        "error": True,
-                        "message": "Task not found",
-                    })
-                messages = await repo.list_messages(_uuid.UUID(task_id))
-            msg_list = [
-                {"content": getattr(m, "content", "")}
-                for m in messages
-            ]
-            result = get_next_step_for_task(
-                workflow_id=workflow_id,
-                task_id=task_id,
-                messages=msg_list,
-                workspace_root=workspace_root,
-                group_completed=group_completed,
-            )
-        else:
-            result = get_next_step(
-                workflow_id=workflow_id,
-                workspace_root=workspace_root,
-                current_step_id=None,
-                group_completed=group_completed,
-            )
-        return json.dumps(result, ensure_ascii=False)
-    except FileNotFoundError as e:
-        return json.dumps({"error": True, "message": str(e)})
-    except ValueError as e:
-        return json.dumps({"error": True, "message": str(e)})
-
-
-@mcp.tool(
-    name="tm_dependency",
-    description=(
-        "Manage task dependencies — add or remove blocking/related relationships. "
-        "Returns ~50 tokens."
-    ),
-)
-async def tm_dependency(
-    action: str,
-    source_task_id: str,
-    target_task_id: str,
-    dep_type: str = "blocks",
-) -> str:
-    """Manage task dependencies.
-
-    Args:
-        action: 'add' or 'remove'.
-        source_task_id: The blocking/source task.
-        target_task_id: The blocked/target task.
-        dep_type: blocks, related, or discovered_from.
-    """
-    import uuid as _uuid
-
-    db_url = _get_db_url()
-    user = await _get_current_user()
-
-    from team_memory.storage.repository import TaskRepository
-
-    async with get_session(db_url) as session:
-        repo = TaskRepository(session)
-        if action == "add":
-            dep = await repo.add_dependency(
-                _uuid.UUID(source_task_id),
-                _uuid.UUID(target_task_id),
-                dep_type=dep_type,
-                created_by=user,
-            )
-            await session.commit()
-            return json.dumps({"dependency": dep.to_dict(), "message": "Added"})
-        elif action == "remove":
-            ok = await repo.remove_dependency(
-                _uuid.UUID(source_task_id), _uuid.UUID(target_task_id),
-            )
-            await session.commit()
-            if not ok:
-                return json.dumps({"error": True, "message": "Dependency not found"})
-            return json.dumps({"message": "Dependency removed"})
-        return json.dumps({"error": True, "message": f"Unknown action: {action}"})
-
-
-@mcp.tool(
-    name="tm_doc_sync",
-    description=(
-        "Sync a .debug document into team_memory. "
-        "Routes to Experience or TaskGroup based on doc_type. "
-        "Idempotent via content_hash. Returns ~100 tokens."
-    ),
-)
-async def tm_doc_sync(
-    file_path: str,
-    content: str,
-    doc_type: str = "experience",
-    project: str | None = None,
-) -> str:
-    """Sync a local document into team_memory.
-
-    Args:
-        file_path: Source file path (e.g. .debug/01-deploy-guide.md).
-        content: Full file content.
-        doc_type: 'experience', 'task_group', or 'guide'.
-        project: Target project.
-    """
-    import hashlib
-
-    db_url = _get_db_url()
-    resolved_project = _resolve_project(project)
-    user = await _get_current_user()
-    content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
-
-    from team_memory.storage.repository import TaskRepository
-
-    if doc_type == "task_group":
-        async with get_session(db_url) as session:
-            repo = TaskRepository(session)
-            existing = await repo.get_group_by_source(file_path)
-            if existing and existing.content_hash == content_hash:
-                return json.dumps({
-                    "message": "Document unchanged (hash match), skipped.",
-                    "group_id": str(existing.id),
-                })
-
-            import re
-            lines = content.strip().split("\n")
-            doc_title = lines[0].lstrip("# ").strip() if lines else file_path
-
-            if existing:
-                existing.title = doc_title
-                existing.content_hash = content_hash
-                existing.description = content[:500]
-                group = existing
-            else:
-                group = await repo.create_group(
-                    title=doc_title,
-                    user_id=user,
-                    project=resolved_project,
-                    source_doc=file_path,
-                    content_hash=content_hash,
-                    description=content[:500],
-                )
-
-            task_pattern = re.compile(r"^-\s*\[([xX ])\]\s*(.+)$", re.MULTILINE)
-            matches = task_pattern.findall(content)
-            created_count = 0
-            for checked, task_title in matches:
-                st = "completed" if checked.lower() == "x" else "wait"
-                await repo.create_task(
-                    title=task_title.strip(),
-                    user_id=user,
-                    project=resolved_project,
-                    group_id=group.id,
-                    status=st,
-                )
-                created_count += 1
-
-            await session.commit()
-        return json.dumps({
-            "message": f"Task group synced: {created_count} tasks.",
-            "group_id": str(group.id),
-        })
-
-    else:
-        service = _get_service()
-        db_url = _get_db_url()
-        async with get_session(db_url) as session:
-            from sqlalchemy import text as _sa_text
-            existing_results = await session.execute(
-                _sa_text(
-                    "SELECT id FROM experiences WHERE source_context = :src LIMIT 1"
-                ),
-                {"src": file_path},
-            )
-            existing_row = existing_results.first()
-            if existing_row:
-                return json.dumps({
-                    "message": "Document already synced as experience.",
-                    "experience_id": str(existing_row[0]),
-                })
-
-        exp_type = "runbook" if doc_type == "guide" else "general"
-        lines = content.strip().split("\n")
-        title = lines[0].lstrip("# ").strip() if lines else file_path
-
-        result = await service.save(
-            title=title,
-            problem=content[:2000],
-            solution=content[2000:4000] if len(content) > 2000 else None,
-            tags=["doc-sync", doc_type],
-            created_by=user,
-            project=resolved_project,
-            source="doc_sync",
-            experience_type=exp_type,
-        )
-        exp_id = str(result.id) if hasattr(result, "id") else str(result.get("id", ""))
-        return json.dumps({
-            "message": f"Document synced as {doc_type} experience.",
-            "experience_id": exp_id,
-        })
-
-
-# ============================================================
-# Pre-flight Check — tm_preflight
-# ============================================================
-
-
-COMPLEX_KEYWORDS = {
-    "架构", "迁移", "安全", "plan", "重构", "新功能", "设计", "权限",
-    "migration", "refactor", "architecture", "security", "redesign",
-    "多模块", "数据库", "schema", "部署", "deploy", "taskgroup",
-}
-MEDIUM_KEYWORDS = {
-    "修复", "fix", "bug", "优化", "改进", "enhance", "update",
-    "添加", "add", "feature", "功能", "页面", "组件", "api",
-}
-
-
-def _estimate_complexity(
-    task_description: str, current_files: list[str] | None = None
-) -> str:
-    desc_lower = task_description.lower()
-    file_count = len(current_files) if current_files else 0
-    desc_len = len(task_description)
-
-    if any(kw in desc_lower for kw in COMPLEX_KEYWORDS) or file_count > 2 or desc_len > 100:
-        return "complex"
-    if any(kw in desc_lower for kw in MEDIUM_KEYWORDS) or file_count >= 1:
-        return "medium"
-    return "trivial"
-
-
-@mcp.tool(
-    name="tm_preflight",
-    description=(
-        "Task pre-flight check: analyze complexity and return quick experience "
-        "search results. MUST be called at the start of every task. "
-        "Returns complexity assessment + top 3 related experiences (~300 tokens)."
-    ),
-)
-async def tm_preflight(
-    task_description: str,
-    current_files: list[str] | None = None,
-    project: str | None = None,
-) -> str:
-    """Pre-flight check before starting any task.
-
-    Analyzes task complexity and returns quick search results to guide
-    whether a full tm_search is needed.
-
-    Args:
-        task_description: What you're about to work on.
-        current_files: List of files that will be modified.
-        project: Project scope.
-    """
-    complexity = _estimate_complexity(task_description, current_files)
-    depth_map = {"trivial": "skip", "medium": "light", "complex": "full"}
-    search_depth = depth_map[complexity]
-
-    quick_results = []
-    if complexity != "trivial":
-        service = _get_service()
-        resolved_project = _resolve_project(project)
-        user = await _get_current_user()
-        try:
-            results = await service.search(
-                query=task_description,
-                max_results=3,
-                min_similarity=0.4,
-                user_name=user,
-                source="preflight",
-                grouped=True,
-                top_k_children=1,
-                project=resolved_project,
-            )
-            for r in results:
-                parent = r.get("parent", r)
-                quick_results.append({
-                    "id": parent.get("id", ""),
-                    "title": parent.get("title", ""),
-                    "score": round(r.get("similarity", 0), 3),
-                    "type": parent.get("experience_type", "general"),
-                    "solution_preview": (parent.get("solution") or "")[:200],
-                })
-        except Exception as exc:
-            logger.debug("tm_preflight quick search failed: %s", exc)
-
-    hint_map = {
-        "trivial": "任务简单，可直接执行。",
-        "medium": "中等复杂度，请参考 quick_results 中的经验。",
-        "complex": "复杂任务，请继续调用 tm_search/tm_solve 做全量检索后再执行。",
-    }
-    return json.dumps({
-        "complexity": complexity,
-        "search_depth": search_depth,
-        "quick_results": quick_results,
-        "action_hint": hint_map[complexity],
-    }, ensure_ascii=False)
-
-
-# ============================================================
-# Task Prompts — execute_task, resume_project
-# ============================================================
-
-
-@mcp.prompt(
-    description=(
-        "Get structured instructions to execute a task or task group. "
-        "Use this to hand over a task to an AI agent for execution."
-    )
-)
-def execute_task(task_id: str | None = None, group_id: str | None = None) -> str:
-    """Generate a prompt for executing a task."""
-    target = f"task_id={task_id}" if task_id else f"group_id={group_id}"
-    short_id = (task_id or "")[:8] if task_id else ""
-    current_task_line = ""
-    if task_id:
-        current_task_line = (
-            f'\n**Current task:** At the start of your reply, state: '
-            f'当前认领任务：TM-{short_id}（<title>）. Get the title from the '
-            'tm_task(action="get", task_id=...) response.\n'
-        )
-    progress_line = ""
-    if group_id:
-        progress_line = (
-            '\n**My progress (我的进度):** When the user asks or at key steps, '
-            'call tm_task(action="list", group_id=...) and summarize e.g. '
-            '本组已完成 x/y，当前任务：TM-xxx（标题）. Optionally combine with '
-            'workflow state from .tm_cursor/plans/workflows/task-execution-workflow_state.md.\n'
-        )
-    return f"""You are executing a TeamMemory task.{current_task_line}{progress_line}
-
-1. First, call `tm_task` with action="get", {target}, with_context=true
-2. Read the task description and any linked experience context carefully.
-3. Execute the task according to the description and acceptance criteria.
-4. When done, call `tm_task` with action="update", task_id=<id>, status="completed",
-   summary="<brief summary of what you did and the outcome>"
-5. Check the update response: if it contains group_completed: true and group_id, the task
-   group is fully done. Then call tm_task(action="list", group_id=<that group_id>) to get
-   tasks and group_progress, and call tm_save_group(..., group_id=<that group_id>) to create
-   the group experience (总-分 or 总-分-分). Optionally tm_message to record "组级复盘已完成".
-6. The summary is automatically saved as a reusable experience; group completion creates
-   a group experience.
-
-Important:
-- If you encounter issues, update status to "in_progress" with a description of the blocker.
-- Reference related experiences from team_memory when applicable.
-- Keep your summary concise but include key decisions and outcomes.
-- After claiming a task, check its description; if empty, do a cold start (fill description)."""
-
-
-@mcp.prompt(
-    description=(
-        "Resume a project by getting the current task context. "
-        "Call this at the start of a new session to restore project state."
-    )
-)
-def resume_project(project: str | None = None) -> str:
-    """Generate a prompt for resuming project context.
-
-    When project is not provided, uses the same resolution as other MCP tools:
-    env TEAM_MEMORY_PROJECT > config default_project (session/window project) > 'default'.
-    """
-    proj = _resolve_project(project)
-    return f"""You are resuming work on project: {proj}
-
-To restore context, run these commands:
-1. `tm_task` action="list", project="{proj}", status="in_progress"
-   → Shows tasks you're currently working on.
-2. `tm_task` action="list", project="{proj}", status="wait"
-   → Shows tasks waiting to be picked up (sorted by importance*urgency).
-3. `tm_task` action="list", project="{proj}", status="completed"
-   → Shows recently completed tasks for context.
-
-After reviewing:
-- Pick up the highest-priority incomplete task.
-- Use `tm_solve` if you need related experience for the task.
-- Update task status as you work: wait → plan → in_progress → completed.
-- WIP limit is 5 tasks in_progress simultaneously.
-- When completing a task, always provide a summary for experience sediment."""
-
-
-# ============================================================
-# Resources — P1-5: Add experiences://stale
-# ============================================================
-
-@mcp.resource("experiences://stale")
-async def stale_experiences() -> str:
-    """Get experiences that may be outdated (unused for N months)."""
-    service = _get_service()
-    settings = _get_settings()
-    months = settings.lifecycle.stale_months
-
-    results = await service.scan_stale(months=months)
-
-    if not results:
-        return f"No stale experiences found (threshold: {months} months of inactivity)."
-
-    lines = [f"# Stale Experiences (unused > {months} months)\n"]
-    for exp in results:
-        tags_str = ", ".join(exp.get("tags", []))
-        last_used = exp.get("last_used_at", "never")
-        lines.append(
-            f"- **{exp['title']}** [{tags_str}] (last used: {last_used})"
-        )
-
-    lines.append(f"\nTotal: {len(results)} stale experience(s)")
-    return "\n".join(lines)
-
-
-# ============================================================
 # Entry point
 # ============================================================
+
 
 def main():
     """Run the MCP server (stdio mode)."""

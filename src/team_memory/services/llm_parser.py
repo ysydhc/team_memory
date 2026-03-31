@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 if TYPE_CHECKING:
-    from team_memory.config import AIBehaviorConfig, LLMConfig
+    from team_memory.config import LLMConfig
 
 logger = logging.getLogger("team_memory.llm_parser")
 
@@ -145,32 +145,6 @@ _BUILTIN_PARSE_GROUP = """你是一个技术文档分析助手。用户会提供
 """
 
 
-def compute_quality_score(parsed: dict) -> int:
-    """Compute quality score (0-5) from parsed experience fields.
-
-    Scoring dimensions:
-    - Has code_snippets: +1
-    - Has decision rationale (not just conclusion): +1
-    - Has problem-solution pair: +1
-    - Has reusable pattern: +1
-    - Has verification steps: +1
-    """
-    score = 0
-    if parsed.get("code_snippets"):
-        score += 1
-    decisions = parsed.get("decisions") or parsed.get("root_cause")
-    if decisions and len(str(decisions)) > 20:
-        score += 1
-    if parsed.get("problem") and parsed.get("solution"):
-        if len(str(parsed["problem"])) > 10 and len(str(parsed["solution"])) > 10:
-            score += 1
-    if parsed.get("patterns"):
-        score += 1
-    if parsed.get("verification"):
-        score += 1
-    return min(score, 5)
-
-
 _BUILTIN_SUGGEST_TYPE = """你是一个经验分类助手。根据以下内容，判断最适合的经验类型。
 
 可选类型:
@@ -207,17 +181,21 @@ _BUILTIN_PARSE_PERSONAL_MEMORY = """你是一个对话分析助手。用户会�
 [
   {
     "content": "一句概括的偏好或习惯（例：喜欢简洁回复、plan 要收口、Web 端 UI 要简洁）",
-    "scope": "generic 或 context",
-    "context_hint": "仅当 scope 为 context 时可填，描述适用场景；否则为 null"
+    "profile_kind": "static 或 dynamic",
+    "scope": "generic 或 context（可选，与 profile_kind 对应：generic≈static，context≈dynamic）",
+    "context_hint": "仅当 profile_kind 为 dynamic 或 scope 为 context 时可填；否则为 null"
   }
 ]
 
 规则:
 - 每条仅一句话，content 不超过 80 字
-- scope: 通用习惯用 "generic"，仅特定场景适用的用 "context"；若无法判断则用 "generic"
-- context_hint: 仅当 scope 为 "context" 时填写，否则为 null
+- profile_kind: 长期稳定的偏好/习惯用 "static"；
+  当前任务、近期语境用 "dynamic"。无法判断则用 "static"。
+- 若只提供 scope 不提供 profile_kind：generic→static，context→dynamic（兼容旧格式）。
+- context_hint: 动态/场景条目可简短说明适用场景，否则 null
 - 若对话中无法提取任何偏好或习惯，返回空数组 []
 - 不要编造：只提取对话中明确体现或可合理推断的内容
+- 不要把团队公共知识写成个人条目
 """
 
 # Map prompt names to built-in defaults
@@ -242,20 +220,17 @@ PARSE_GROUP_PROMPT = _BUILTIN_PARSE_GROUP
 def load_prompt(
     name: str,
     llm_config: "LLMConfig | None" = None,
-    ai_behavior: "AIBehaviorConfig | None" = None,
 ) -> str:
-    """Load a prompt by name with variable substitution and ai_behavior injection.
+    """Load a prompt by name.
 
     Loading order:
       1. File at ``{prompt_dir}/{name}.md`` (if prompt_dir configured and file exists)
       2. Built-in default constant
-      3. Variable substitution: ``{{experience_types}}``, ``{{categories}}``, etc.
-      4. ai_behavior constraints appended at the end
+      3. Variable substitution: ``{{experience_types}}``
 
     Args:
         name: Prompt name (e.g. "parse_single", "parse_group", "suggest_type", "summary").
         llm_config: LLM config (for prompt_dir path).
-        ai_behavior: AI behavior preferences to inject.
 
     Returns:
         Final prompt string ready for LLM consumption.
@@ -277,84 +252,24 @@ def load_prompt(
     if prompt_text is None:
         prompt_text = _BUILTIN_PROMPTS.get(name, "")
 
-    # Step 3: Variable substitution from SchemaRegistry
+    # Step 3: Variable substitution
     if "{{" in prompt_text:
         prompt_text = _substitute_variables(prompt_text)
-
-    # Step 4: Append ai_behavior constraints
-    if ai_behavior is None:
-        try:
-            from team_memory.config import get_settings
-
-            settings = get_settings()
-            ai_behavior = settings.ai_behavior
-        except Exception:
-            pass
-
-    if ai_behavior:
-        behavior_block = _build_behavior_block(ai_behavior)
-        if behavior_block:
-            prompt_text = prompt_text.rstrip() + "\n\n" + behavior_block
 
     return prompt_text
 
 
 def _substitute_variables(prompt_text: str) -> str:
-    """Replace ``{{variable}}`` placeholders with SchemaRegistry values."""
-    try:
-        from team_memory.schemas import get_schema_registry
-
-        registry = get_schema_registry()
-    except Exception:
-        return prompt_text
+    """Replace ``{{variable}}`` placeholders with static values."""
+    from team_memory.schemas import EXPERIENCE_TYPES
 
     replacements = {
-        "{{experience_types}}": registry.types_for_prompt(),
-        "{{categories}}": registry.categories_for_prompt(),
-        "{{severity_levels}}": registry.severity_for_prompt(),
+        "{{experience_types}}": ", ".join(EXPERIENCE_TYPES),
     }
     for placeholder, value in replacements.items():
         prompt_text = prompt_text.replace(placeholder, value)
     return prompt_text
 
-
-def _build_behavior_block(ai_behavior: "AIBehaviorConfig") -> str:
-    """Build an ai_behavior constraints section to append to prompts."""
-    lines: list[str] = []
-    lines.append("## 团队定制要求")
-
-    lang_map = {
-        "zh-CN": "中文",
-        "en": "English",
-        "ja": "日本語",
-        "ko": "한국어",
-        "zh-TW": "繁體中文",
-    }
-    lang_display = lang_map.get(
-        ai_behavior.output_language, ai_behavior.output_language
-    )
-    lines.append(f"- 输出语言：{lang_display}")
-
-    detail_map = {"detailed": "详细", "concise": "简洁"}
-    detail = detail_map.get(ai_behavior.detail_level, ai_behavior.detail_level)
-    lines.append(f"- 详细程度：{detail}")
-
-    if ai_behavior.focus_areas:
-        focus_map = {
-            "root_cause": "根因分析",
-            "solution": "解决方案",
-            "code_snippets": "关键代码",
-            "reproduction_steps": "复现步骤",
-            "performance": "性能数据",
-            "architecture": "架构设计",
-        }
-        focus_labels = [focus_map.get(f, f) for f in ai_behavior.focus_areas]
-        lines.append(f"- 重点关注：{'、'.join(focus_labels)}")
-
-    if ai_behavior.custom_instructions:
-        lines.append(f"- 团队指令：{ai_behavior.custom_instructions}")
-
-    return "\n".join(lines)
 
 
 # ============================================================
@@ -402,7 +317,6 @@ async def parse_content(
     prompt_name = "parse_group" if as_group else "parse_single"
     system_prompt = load_prompt(prompt_name, llm_config=llm_config)
     user_content = content[:max_input_chars]
-    retried = False
 
     while True:
         try:
@@ -438,25 +352,9 @@ async def parse_content(
 
         if as_group:
             result = _normalize_group(parsed)
-            break
         else:
             result = _normalize_single(parsed)
-            # Use raw parsed for score (has decisions/patterns/verification)
-            score = compute_quality_score(parsed)
-            if score >= quality_min_score or not quality_retry_once or retried:
-                break
-            retried = True
-            user_content = (
-                user_content
-                + "\n\n[质量不足请重试] 请重新提取并确保：1) title 只描述一个主题；"
-                "2) problem 与 solution 对应且具体；3) 填写 decisions / patterns / "
-                "verification 中至少一项。"
-            )
-            logger.info(
-                "Parse quality score %s < %s, retrying once",
-                score,
-                quality_min_score,
-            )
+        break
 
     return result
 
@@ -473,7 +371,8 @@ async def parse_personal_memory(
     the main flow: on any exception we log and return [].
 
     Returns:
-        List of {"content": str, "scope": "generic"|"context", "context_hint": str|None}.
+        List of {"content": str, "scope": "generic"|"context", "profile_kind": "static"|"dynamic",
+        "context_hint": str|None}.
     """
     llm_model = "gpt-oss:120b-cloud"
     llm_base_url = "http://localhost:11434"
@@ -549,12 +448,24 @@ async def parse_personal_memory(
         scope = (item.get("scope") or "generic").strip().lower()
         if scope not in ("generic", "context"):
             scope = "generic"
+        pk = item.get("profile_kind")
+        if isinstance(pk, str):
+            profile_kind = pk.strip().lower()
+        else:
+            profile_kind = ""
+        if profile_kind not in ("static", "dynamic"):
+            profile_kind = "dynamic" if scope == "context" else "static"
+        if profile_kind == "dynamic":
+            scope = "context"
+        else:
+            scope = "generic"
         context_hint = item.get("context_hint")
         if context_hint is not None:
             context_hint = str(context_hint).strip() or None
         result.append({
             "content": content_str[:500],
             "scope": scope,
+            "profile_kind": profile_kind,
             "context_hint": context_hint,
         })
 
@@ -589,63 +500,23 @@ def _extract_json(llm_text: str) -> dict:
 
 def _normalize_single(parsed: dict) -> dict:
     """Normalize a single experience parse result."""
+    from team_memory.schemas import EXPERIENCE_TYPES
+
     result = {
         "title": str(parsed.get("title", "")).strip(),
         "problem": str(parsed.get("problem", "")).strip(),
-        "root_cause": str(parsed.get("root_cause", "")).strip() or None,
         "solution": str(parsed.get("solution", "")).strip() or None,
         "tags": parsed.get("tags", []),
-        "language": parsed.get("language") or None,
-        "framework": parsed.get("framework") or None,
-        "code_snippets": parsed.get("code_snippets") or None,
-        # v3: Type system fields
         "experience_type": str(parsed.get("experience_type", "general")).strip(),
-        "type_confidence": float(parsed.get("type_confidence", 0.5)),
-        "severity": parsed.get("severity") or None,
-        "category": parsed.get("category") or None,
-        "structured_data": parsed.get("structured_data") or None,
-        "git_refs": parsed.get("git_refs") or None,
     }
 
     if not isinstance(result["tags"], list):
         result["tags"] = []
     result["tags"] = [str(t).strip().lower() for t in result["tags"] if t]
 
-    # Validate experience_type via SchemaRegistry (dynamic)
-    from team_memory.schemas import get_schema_registry
-
-    registry = get_schema_registry()
-    if not registry.is_valid_type(result["experience_type"]):
+    # Validate experience_type against known types
+    if result["experience_type"] not in EXPERIENCE_TYPES:
         result["experience_type"] = "general"
-        result["type_confidence"] = 0.3
-
-    # Validate severity
-    if result["severity"] and not registry.is_valid_severity(result["severity"]):
-        result["severity"] = None
-
-    # Validate category
-    if result["category"] and not registry.is_valid_category(result["category"]):
-        result["category"] = None
-
-    # Validate structured_data
-    if result["structured_data"] and isinstance(result["structured_data"], dict):
-        from team_memory.schemas import validate_structured_data
-
-        try:
-            result["structured_data"] = validate_structured_data(
-                result["experience_type"], result["structured_data"]
-            )
-        except Exception:
-            result["structured_data"] = None
-
-    # Validate git_refs
-    if result["git_refs"] and isinstance(result["git_refs"], list):
-        from team_memory.schemas import validate_git_refs
-
-        try:
-            result["git_refs"] = validate_git_refs(result["git_refs"])
-        except Exception:
-            result["git_refs"] = None
 
     return result
 
@@ -746,12 +617,11 @@ async def suggest_experience_type(
             "fallback_types": [],
         }
 
-    # Validate and normalize via SchemaRegistry
-    from team_memory.schemas import get_schema_registry
+    # Validate and normalize
+    from team_memory.schemas import EXPERIENCE_TYPES
 
-    registry = get_schema_registry()
     suggested = str(parsed.get("type", "general")).strip()
-    if not registry.is_valid_type(suggested):
+    if suggested not in EXPERIENCE_TYPES:
         suggested = "general"
 
     confidence = float(parsed.get("confidence", 0.5))
@@ -762,7 +632,7 @@ async def suggest_experience_type(
     if not isinstance(fallbacks, list):
         fallbacks = []
     fallbacks = [
-        str(f).strip() for f in fallbacks if registry.is_valid_type(str(f).strip())
+        str(f).strip() for f in fallbacks if str(f).strip() in EXPERIENCE_TYPES
     ][:2]
 
     return {
