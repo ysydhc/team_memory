@@ -47,7 +47,7 @@ class TestSettings:
     def test_ollama_config_defaults(self):
         """Ollama config has sensible defaults."""
         settings = Settings()
-        assert settings.embedding.ollama.model == "nomic-embed-text"
+        assert settings.embedding.ollama.model == "nomic-embed-text:latest"
         assert settings.embedding.ollama.base_url == "http://localhost:11434"
         assert settings.embedding.ollama.dimension == 768
 
@@ -110,38 +110,28 @@ class TestLoadSettings:
         settings = load_settings(config_file)
         assert settings.embedding.openai.api_key == ""
 
-    def test_config_yaml_wins_over_minimal_by_default(
+    def test_team_memory_env_selects_config_file(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        (tmp_path / "config.yaml").write_text(
-            yaml.dump({"auth": {"api_key": "from-main-yaml"}})
+        (tmp_path / "config.development.yaml").write_text(
+            yaml.dump({"auth": {"api_key": "dev-key"}, "web": {"port": 9111}})
         )
-        (tmp_path / "config.minimal.yaml").write_text(
-            yaml.dump({"auth": {"api_key": "from-minimal-yaml"}})
-        )
-        monkeypatch.chdir(tmp_path)
-
-        settings = load_settings()
-        assert settings.auth.api_key == "from-main-yaml"
-
-    def test_minimal_overlay_can_be_enabled_explicitly(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ):
-        (tmp_path / "config.yaml").write_text(
-            yaml.dump({"auth": {"api_key": "from-main-yaml"}})
-        )
-        (tmp_path / "config.minimal.yaml").write_text(
-            yaml.dump({"auth": {"api_key": "from-minimal-yaml"}})
+        (tmp_path / "config.production.yaml").write_text(
+            yaml.dump({"auth": {"api_key": "prod-key"}, "web": {"port": 9200}})
         )
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("TEAM_MEMORY_ENABLE_MINIMAL_OVERLAY", "1")
+        monkeypatch.delenv("TEAM_MEMORY_CONFIG_PATH", raising=False)
 
-        settings = load_settings()
-        assert settings.auth.api_key == "from-minimal-yaml"
+        monkeypatch.setenv("TEAM_MEMORY_ENV", "development")
+        assert load_settings().auth.api_key == "dev-key"
+        monkeypatch.setenv("TEAM_MEMORY_ENV", "production")
+        reset_settings()
+        assert load_settings().auth.api_key == "prod-key"
+        monkeypatch.setenv("TEAM_MEMORY_ENV", "test")
+        reset_settings()
+        assert load_settings().auth.api_key == "dev-key"
 
     def test_environment_variables_override_yaml_values(
         self,
@@ -169,25 +159,3 @@ def test_logging_config_defaults():
     assert lg.log_file_max_bytes == 10 * 1024 * 1024
 
 
-class TestSearchAndFileLocationConfig:
-    """Test SearchConfig.location_weight and file_location binding defaults."""
-
-    def test_search_location_weight_default(self):
-        """Default location_weight is 0.15 (file position weight in final score)."""
-        settings = Settings()
-        assert settings.search.location_weight == 0.15
-
-    def test_file_location_ttl_days_default(self):
-        """Default file_location_ttl_days is 30."""
-        settings = Settings()
-        assert settings.file_location_binding.file_location_ttl_days == 30
-
-    def test_file_location_cleanup_enabled_default(self):
-        """Default file_location_cleanup_enabled is True."""
-        settings = Settings()
-        assert settings.file_location_binding.file_location_cleanup_enabled is True
-
-    def test_file_location_cleanup_interval_hours_default(self):
-        """Default file_location_cleanup_interval_hours is 24."""
-        settings = Settings()
-        assert settings.file_location_binding.file_location_cleanup_interval_hours == 24

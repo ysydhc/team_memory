@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Inspect a single experience to see why it may not appear in tm_search.
 
+**Pre-MVP fields:** ``embedding_status`` was removed in MVP; on MVP DB, ignore
+that line and rely on ``embedding IS NOT NULL``.
+
 Checks: embedding (null or not), embedding_status, fts (null or not),
 project, created_by, visibility, exp_status. Use this to verify why
 experience 4d44f14a (or any id) is or isn't returned by MCP search.

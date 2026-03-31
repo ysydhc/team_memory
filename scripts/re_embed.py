@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Re-embed all experiences with updated embedding text construction.
 
+**Pre-MVP schema only:** references ``root_cause``, ``code_snippets``,
+``embedding_status``, etc., removed in ``002_mvp_cleanup``.
+
 Rebuilds embeddings to include tags and (for parents) children titles.
 Uses the existing EmbeddingQueue for async batch processing.
 

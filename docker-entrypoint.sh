@@ -36,13 +36,15 @@ fi
 
 # --- 3. Check Ollama availability & auto-pull model ---
 OLLAMA_URL="${TEAM_MEMORY_OLLAMA_URL:-http://localhost:11434}"
-OLLAMA_MODEL="${TEAM_MEMORY_OLLAMA_MODEL:-nomic-embed-text}"
+OLLAMA_MODEL="${TEAM_MEMORY_OLLAMA_MODEL:-nomic-embed-text:latest}"
+# /api/tags returns "name":"nomic-embed-text:latest" — never matches a bare "nomic-embed-text" token
+OLLAMA_MODEL_BASE="${OLLAMA_MODEL%%:*}"
 echo "[3/5] Checking Ollama at ${OLLAMA_URL}..."
 if curl -s --max-time 5 "${OLLAMA_URL}/api/tags" >/dev/null 2>&1; then
     echo "  Ollama is available."
     # Auto-pull embedding model if not already present
-    if curl -s --max-time 5 "${OLLAMA_URL}/api/tags" | grep -q "\"${OLLAMA_MODEL}\""; then
-        echo "  Model '${OLLAMA_MODEL}' already available."
+    if curl -s --max-time 5 "${OLLAMA_URL}/api/tags" | grep -q "\"name\":\"${OLLAMA_MODEL_BASE}"; then
+        echo "  Model '${OLLAMA_MODEL}' (family '${OLLAMA_MODEL_BASE}') already available."
     else
         echo "  Pulling model '${OLLAMA_MODEL}'... (first-time only, may take a few minutes)"
         curl -s -X POST "${OLLAMA_URL}/api/pull" \

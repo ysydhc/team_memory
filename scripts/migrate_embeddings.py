@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Embedding migration tool (P3-5).
 
+**Pre-MVP schema only:** requires ORM columns such as ``embedding_status`` removed
+in ``002_mvp_cleanup``. Do not run against a clean MVP database from ``001_initial_mvp``.
+
 Re-generates embedding vectors for all experiences when switching
 embedding models or dimensions.
 

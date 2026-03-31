@@ -12,7 +12,7 @@ COPY pyproject.toml README.md ./
 COPY src/ ./src/
 COPY migrations/ ./migrations/
 COPY alembic.ini ./
-COPY config.yaml ./
+COPY config.development.yaml config.production.yaml ./
 
 # Build the wheel
 RUN pip wheel --no-cache-dir --wheel-dir /wheels .
@@ -29,7 +29,7 @@ RUN pip install --no-cache-dir /wheels/*.whl && rm -rf /wheels
 # Copy migrations, config, and static files
 COPY migrations/ ./migrations/
 COPY alembic.ini ./
-COPY config.yaml ./
+COPY config.development.yaml config.production.yaml ./
 COPY src/team_memory/web/static/ ./src/team_memory/web/static/
 
 # Copy entrypoint script

@@ -31,14 +31,11 @@ from typing import TYPE_CHECKING
 from team_memory.auth.provider import AuthProvider, create_auth_provider
 from team_memory.config import Settings, load_settings
 from team_memory.embedding.base import EmbeddingProvider
-from team_memory.schemas import init_schema_registry
 from team_memory.services.archive import ArchiveService
 from team_memory.services.event_bus import EventBus, Events
 from team_memory.services.experience import ExperienceService
 
 if TYPE_CHECKING:
-    from team_memory.schemas import SchemaRegistry
-    from team_memory.services.embedding_queue import EmbeddingQueue
     from team_memory.services.search_pipeline import SearchPipeline
     from team_memory.services.webhook import WebhookService
 
@@ -74,11 +71,7 @@ def _redact_sensitive(extra: dict) -> dict:
 
 
 class _JsonFormatter(logging.Formatter):
-    """JSON Lines formatter per docs/design-docs/logging-format.md.
-
-    Outputs single-line JSON with required fields: timestamp, level, logger, message.
-    Redacts sensitive keys in extra per logging-format.md.
-    """
+    """JSON Lines formatter per docs/design-docs/logging-format.md."""
 
     def format(self, record: logging.LogRecord) -> str:
         ts = datetime.fromtimestamp(record.created, tz=timezone.utc).strftime(
@@ -99,11 +92,7 @@ class _JsonFormatter(logging.Formatter):
 
 
 def _is_debug_mode() -> bool:
-    """True if TEAM_MEMORY_DEBUG=1 or team_memory logger effective level is DEBUG.
-
-    Per docs/plans/2025-03-10-logging-system-design.md: when debug, LOG_FILE_MAX_BYTES
-    does not apply (no size limit for local debugging).
-    """
+    """True if TEAM_MEMORY_DEBUG=1 or team_memory logger effective level is DEBUG."""
     if os.environ.get("TEAM_MEMORY_DEBUG", "0") == "1":
         return True
     tm_logger = logging.getLogger("team_memory")
@@ -117,22 +106,18 @@ class NonBlockingQueueHandler(QueueHandler):
         try:
             self.queue.put(record, block=False)
         except queue.Full:
-            logger = logging.getLogger("team_memory.bootstrap")
-            logger.warning("io_log queue full, dropping log record")
+            logging.getLogger("team_memory.bootstrap").warning(
+                "io_log queue full, dropping log record"
+            )
 
 
 def _configure_logging(settings: Settings) -> QueueListener | None:
-    """Configure team_memory loggers per config.LOG_FORMAT (L3 only).
-
-    When log_file_enabled, adds QueueHandler + QueueListener + FileHandler/RotatingFileHandler
-    for async file logging. Uses RotatingFileHandler (size-based) unless DEBUG mode.
-    Returns the QueueListener for lifecycle management.
-    """
-    is_debug = _is_debug_mode()  # Check before modifying logger level
+    """Configure team_memory loggers per config.LOG_FORMAT."""
+    is_debug = _is_debug_mode()
     use_json = getattr(settings, "log_format", "human") == "json"
     root = logging.getLogger("team_memory")
     root.setLevel(logging.INFO)
-    root.propagate = False  # Capture all team_memory.* here, avoid duplicate to root
+    root.propagate = False
     for h in root.handlers[:]:
         root.removeHandler(h)
     handler = logging.StreamHandler()
@@ -175,7 +160,6 @@ def _configure_logging(settings: Settings) -> QueueListener | None:
         log_listener.start()
         root.addHandler(NonBlockingQueueHandler(log_queue))
 
-    # request_logger: remove app.py hardcoded handler, inherit from team_memory
     req_log = logging.getLogger("team_memory.web.request")
     for h in req_log.handlers[:]:
         req_log.removeHandler(h)
@@ -193,15 +177,11 @@ class AppContext:
     embedding: EmbeddingProvider
     auth: AuthProvider
     event_bus: EventBus
-    schema_registry: SchemaRegistry
     search_pipeline: SearchPipeline
     service: ExperienceService
     archive_service: ArchiveService
-    embedding_queue: EmbeddingQueue | None = None
     webhook_service: WebhookService | None = None
     _log_listener: QueueListener | None = None
-    _stale_scanner_task: asyncio.Task | None = None
-    _file_location_cleanup_task: asyncio.Task | None = None
 
 
 _instance: AppContext | None = None
@@ -210,7 +190,7 @@ _instance: AppContext | None = None
 def _create_embedding_provider(settings: Settings) -> EmbeddingProvider:
     """Create the configured embedding provider with automatic degradation.
 
-    Priority: configured provider → Ollama → OpenAI → generic → local.
+    Priority: configured provider -> Ollama -> OpenAI -> generic -> local.
     """
     cfg = settings.embedding
     provider = cfg.provider
@@ -279,7 +259,7 @@ def _create_embedding_provider(settings: Settings) -> EmbeddingProvider:
         logger.info("Embedding provider: %s (configured)", provider)
         return result
 
-    logger.warning("Configured embedding provider '%s' unavailable, trying fallbacks…", provider)
+    logger.warning("Configured embedding provider '%s' unavailable, trying fallbacks...", provider)
     fallback_order = ["ollama", "openai", "generic", "local"]
     for fb in fallback_order:
         if fb == provider:
@@ -322,8 +302,8 @@ def bootstrap(
     """Module-level singleton factory.
 
     First call creates and caches, subsequent calls return the same instance.
-    ``enable_background=True`` creates EmbeddingQueue and WebhookService;
-    ``False`` skips them (for lightweight MCP stdio usage).
+    ``enable_background=True`` creates WebhookService;
+    ``False`` skips it (for lightweight MCP stdio usage).
     """
     global _instance
     if _instance is not None:
@@ -335,36 +315,19 @@ def bootstrap(
     embedding = _create_embedding_provider(settings)
     auth = _configure_auth(settings)
 
-    from team_memory.reranker.factory import create_reranker
     from team_memory.services.search_pipeline import SearchPipeline
 
-    reranker = create_reranker(settings.reranker, settings.llm)
     search_pipeline = SearchPipeline(
         embedding_provider=embedding,
-        reranker_provider=reranker,
         search_config=settings.search,
         retrieval_config=settings.retrieval,
         cache_config=settings.cache,
-        pageindex_lite_config=settings.pageindex_lite,
         llm_config=settings.llm,
         tag_synonyms=getattr(settings, "tag_synonyms", None) or {},
         db_url=db_url,
-        file_location_config=settings.file_location_binding,
     )
 
     event_bus = EventBus()
-
-    embedding_queue: EmbeddingQueue | None = None
-    if enable_background:
-        from team_memory.services.embedding_queue import EmbeddingQueue as EQClass
-
-        embedding_queue = EQClass(
-            embedding_provider=embedding,
-            db_url=db_url,
-            max_workers=3,
-            max_retries=3,
-            event_bus=event_bus,
-        )
 
     archive_service = ArchiveService(
         embedding_provider=embedding,
@@ -376,17 +339,11 @@ def bootstrap(
         auth_provider=auth,
         search_pipeline=search_pipeline,
         event_bus=event_bus,
-        embedding_queue=embedding_queue,
         lifecycle_config=settings.lifecycle,
-        memory_config=settings.memory,
         llm_config=settings.llm,
-        pageindex_lite_config=settings.pageindex_lite,
-        file_location_config=settings.file_location_binding,
         db_url=db_url,
         archive_service=archive_service,
     )
-
-    schema_registry = init_schema_registry(settings.custom_schema)
 
     webhook_service: WebhookService | None = None
     if enable_background and settings.webhooks:
@@ -398,19 +355,10 @@ def bootstrap(
             "WebhookService activated with %d target(s)", len(settings.webhooks)
         )
 
-    from team_memory.extensions import ExtensionContext, load_extensions
-
-    ext_ctx = ExtensionContext(
-        event_bus=event_bus,
-        schema_registry=schema_registry,
-        settings=settings,
-    )
-    load_extensions(ext_ctx)
-
     if enable_background:
         _register_cache_invalidation(event_bus, service)
 
-    # Register hook registry with usage tracking so MCP tool calls are written to tool_usage_logs
+    # Register hook registry
     from team_memory.services.hooks import init_hook_registry
     from team_memory.storage.database import get_session_factory
 
@@ -425,11 +373,9 @@ def bootstrap(
         embedding=embedding,
         auth=auth,
         event_bus=event_bus,
-        schema_registry=schema_registry,
         search_pipeline=search_pipeline,
         service=service,
         archive_service=archive_service,
-        embedding_queue=embedding_queue,
         webhook_service=webhook_service,
         _log_listener=log_listener,
     )
@@ -449,7 +395,7 @@ def bootstrap(
 def get_context() -> AppContext:
     """Return the cached AppContext, raising if not yet bootstrapped."""
     if _instance is None:
-        raise RuntimeError("App not bootstrapped — call bootstrap() first")
+        raise RuntimeError("App not bootstrapped -- call bootstrap() first")
     return _instance
 
 
@@ -469,35 +415,17 @@ def _register_cache_invalidation(event_bus: EventBus, service: ExperienceService
         Events.EXPERIENCE_UPDATED,
         Events.EXPERIENCE_DELETED,
         Events.EXPERIENCE_RESTORED,
-        Events.EXPERIENCE_MERGED,
-        Events.EXPERIENCE_ROLLED_BACK,
-        Events.EXPERIENCE_IMPORTED,
-        Events.EXPERIENCE_PUBLISHED,
-        Events.EXPERIENCE_REVIEWED,
     ):
         event_bus.on(evt, _on_data_change)
 
 
 async def start_background_tasks(ctx: AppContext) -> None:
-    """Start embedding queue worker, stale scanner, and file location cleanup (if enabled)."""
-    if ctx.embedding_queue:
-        await ctx.embedding_queue.start()
-    ctx._stale_scanner_task = asyncio.create_task(_stale_scanner_loop(ctx))
-    if ctx.settings.file_location_binding.file_location_cleanup_enabled:
-        ctx._file_location_cleanup_task = asyncio.create_task(
-            _file_location_cleanup_loop(ctx)
-        )
-        logger.info(
-            "File location cleanup task started (interval=%s h)",
-            ctx.settings.file_location_binding.file_location_cleanup_interval_hours,
-        )
-    logger.info("Background tasks started (embedding queue + stale scanner)")
+    """Start background tasks (placeholder for future use)."""
+    logger.info("Background tasks started")
 
 
 async def stop_background_tasks(ctx: AppContext) -> None:
     """Gracefully stop background tasks."""
-    if ctx.embedding_queue:
-        await ctx.embedding_queue.stop()
     if ctx._log_listener is not None:
         try:
             await asyncio.wait_for(
@@ -505,95 +433,4 @@ async def stop_background_tasks(ctx: AppContext) -> None:
             )
         except asyncio.TimeoutError:
             logger.warning("QueueListener.stop() timed out after 5s")
-    if ctx._stale_scanner_task:
-        ctx._stale_scanner_task.cancel()
-        try:
-            await ctx._stale_scanner_task
-        except asyncio.CancelledError:
-            pass
-    if ctx._file_location_cleanup_task:
-        ctx._file_location_cleanup_task.cancel()
-        try:
-            await ctx._file_location_cleanup_task
-        except asyncio.CancelledError:
-            pass
     logger.info("Background tasks stopped")
-
-
-async def _stale_scanner_loop(ctx: AppContext) -> None:
-    """Periodically scan for stale experiences."""
-    from team_memory.storage.database import get_session
-    from team_memory.storage.repository import ExperienceRepository
-
-    while True:
-        interval = ctx.settings.lifecycle.scan_interval_hours
-        await asyncio.sleep(interval * 3600)
-        try:
-            async with get_session(ctx.db_url) as session:
-                repo = ExperienceRepository(session)
-                months = ctx.settings.lifecycle.stale_months
-                stale = await repo.scan_stale(months=months)
-                if stale:
-                    logger.info(
-                        "Stale scanner: found %d stale experiences (unused > %d months)",
-                        len(stale),
-                        months,
-                    )
-        except Exception:
-            logger.warning("Stale scanner error", exc_info=True)
-
-
-async def _file_location_cleanup_loop(ctx: AppContext) -> None:
-    """Periodically delete expired file location bindings when cleanup is enabled."""
-    from team_memory.storage.database import get_session
-    from team_memory.storage.repository import ExperienceRepository
-
-    batch_size = 500
-    cfg = ctx.settings.file_location_binding
-    if not cfg.file_location_cleanup_enabled:
-        return
-    interval_seconds = cfg.file_location_cleanup_interval_hours * 3600
-
-    while True:
-        await asyncio.sleep(interval_seconds)
-        if not ctx.settings.file_location_binding.file_location_cleanup_enabled:
-            continue
-        round_num = 0
-        total_deleted = 0
-        run_start = datetime.now(timezone.utc)
-        try:
-            async with get_session(ctx.db_url) as session:
-                repo = ExperienceRepository(session)
-                while True:
-                    round_num += 1
-                    round_start = datetime.now(timezone.utc)
-                    n = await repo.delete_expired_file_location_bindings(
-                        batch_size=batch_size
-                    )
-                    round_elapsed = (datetime.now(timezone.utc) - round_start).total_seconds()
-                    total_deleted += n
-                    logger.info(
-                        "file_location_cleanup round=%s deleted=%s duration_seconds=%.2f",
-                        round_num,
-                        n,
-                        round_elapsed,
-                        extra={"round": round_num, "deleted": n, "duration_seconds": round_elapsed},
-                    )
-                    if n == 0 or n < batch_size:
-                        break
-            run_elapsed = (datetime.now(timezone.utc) - run_start).total_seconds()
-            logger.info(
-                "file_location_cleanup run completed total_deleted=%s total_duration_seconds=%.2f",
-                total_deleted,
-                run_elapsed,
-                extra={"total_deleted": total_deleted, "total_duration_seconds": run_elapsed},
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.warning(
-                "file_location_cleanup error (round=%s, total_deleted=%s)",
-                round_num,
-                total_deleted,
-                exc_info=True,
-            )

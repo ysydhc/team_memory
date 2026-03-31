@@ -21,6 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "fastmcp>=2.0.0",
+    "jieba>=0.42.1",
     "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.29.0",
     "pgvector>=0.3.0",
@@ -60,7 +61,10 @@ Repository = "https://github.com/ysydhc/team_memory"
 Issues = "https://github.com/ysydhc/team_memory/issues"
 
 [project.scripts]
-team-memory = "team_memory.server:main"
+# Default CLI is Lite MCP; legacy full MCP for migration only.
+team-memory = "team_memory.server_lite:main"
+team-memory-full = "team_memory.server:main"
+team-memory-lite = "team_memory.server_lite:main"
 team-memory-web = "team_memory.web.app:main"
 
 [tool.hatch.build.targets.wheel]

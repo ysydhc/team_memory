@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """One-time batch create experience_links from existing experiences by vector similarity.
 
+**Pre-MVP table:** the ``experience_links`` table was dropped in ``002_mvp_cleanup``.
+
 Creates 'related' links between each experience and its top-k most similar others.
 Idempotent: skips pairs that already have a link.
 

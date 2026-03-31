@@ -1,5 +1,8 @@
 """One-time migration script: convert flat experiences to parent+child hierarchy.
 
+**Pre-MVP schema only:** reads legacy ``Experience`` columns (e.g. ``root_cause``,
+``programming_language``) dropped in ``002_mvp_cleanup``.
+
 For each existing non-deleted experience E:
 1. E stays in place as the parent (parent_id = NULL), preserving original ID
 2. A new child C is created with parent_id = E.id, copying content fields
@@ -202,7 +205,7 @@ def main():
     parser.add_argument(
         "--db-url",
         default="",
-        help="Database URL (defaults to config.yaml)",
+        help="Database URL (defaults to load_settings() / config.development.yaml)",
     )
     args = parser.parse_args()
 

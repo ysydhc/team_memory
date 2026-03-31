@@ -34,13 +34,6 @@ async def search_experiences_api(
     top_k_children = req.top_k_children or (
         retrieval_cfg.top_k_children if retrieval_cfg else 3
     )
-    if req.min_avg_rating is not None:
-        min_avg_rating = req.min_avg_rating
-    elif retrieval_cfg:
-        min_avg_rating = retrieval_cfg.min_avg_rating
-    else:
-        min_avg_rating = 0.0
-    rating_weight = retrieval_cfg.rating_weight if retrieval_cfg else 0.3
 
     results = await _service.search(
         query=req.query,
@@ -51,10 +44,8 @@ async def search_experiences_api(
         source="web",
         grouped=req.grouped,
         top_k_children=top_k_children,
-        min_avg_rating=min_avg_rating,
-        rating_weight=rating_weight,
-        use_pageindex_lite=req.use_pageindex_lite,
         project=resolved_project,
+        include_archives=req.include_archives,
     )
     return {
         "results": results,
@@ -83,13 +74,6 @@ async def search_experiences_debug(
     top_k_children = req.top_k_children or (
         retrieval_cfg.top_k_children if retrieval_cfg else 3
     )
-    if req.min_avg_rating is not None:
-        min_avg_rating = req.min_avg_rating
-    elif retrieval_cfg:
-        min_avg_rating = retrieval_cfg.min_avg_rating
-    else:
-        min_avg_rating = 0.0
-    rating_weight = retrieval_cfg.rating_weight if retrieval_cfg else 0.3
 
     from team_memory.services.search_pipeline import SearchRequest as PipelineSearchRequest
 
@@ -106,9 +90,6 @@ async def search_experiences_debug(
                 source="web-debug",
                 grouped=req.grouped,
                 top_k_children=top_k_children,
-                min_avg_rating=min_avg_rating,
-                rating_weight=rating_weight,
-                use_pageindex_lite=req.use_pageindex_lite,
                 project=resolved_project,
             ),
         )

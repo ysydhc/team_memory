@@ -76,10 +76,22 @@ async def run_e2e():
             "save_experience",
             {
                 "title": "Fix FastAPI CORS for React Frontend",
-                "problem": "React frontend gets CORS errors when calling FastAPI backend on a different port during development.",
-                "solution": "Add CORSMiddleware to FastAPI app with allow_origins=['http://localhost:3000'], allow_methods=['*'], allow_headers=['*']. For production, restrict origins to actual domain.",
+                "problem": (
+                    "React frontend gets CORS errors when calling FastAPI backend "
+                    "on a different port during development."
+                ),
+                "solution": (
+                    "Add CORSMiddleware to FastAPI app with "
+                    "allow_origins=['http://localhost:3000'], "
+                    "allow_methods=['*'], allow_headers=['*']. "
+                    "For production, restrict origins to actual domain."
+                ),
                 "tags": ["fastapi", "cors", "react", "python"],
-                "code_snippets": "from fastapi.middleware.cors import CORSMiddleware\napp.add_middleware(CORSMiddleware, allow_origins=['http://localhost:3000'])",
+                "code_snippets": (
+                    "from fastapi.middleware.cors import CORSMiddleware\n"
+                    "app.add_middleware(CORSMiddleware, "
+                    "allow_origins=['http://localhost:3000'])"
+                ),
                 "language": "python",
                 "framework": "fastapi",
             },
@@ -103,9 +115,7 @@ async def run_e2e():
         search_data = parse_result(result)
         print(f"    Result: {search_data['message']}")
         assert len(search_data["results"]) >= 1
-        found = any(
-            "CORS" in r.get("title", "") for r in search_data["results"]
-        )
+        found = any("CORS" in r.get("title", "") for r in search_data["results"])
         assert found, f"Expected to find CORS experience, got: {search_data['results']}"
         print(f"    ✓ Found {len(search_data['results'])} result(s), including the CORS fix")
 
@@ -130,7 +140,9 @@ async def run_e2e():
             "update_experience",
             {
                 "experience_id": exp_id,
-                "solution_addendum": "Alternative: Use nginx reverse proxy to avoid CORS entirely in production.",
+                "solution_addendum": (
+                    "Alternative: Use nginx reverse proxy to avoid CORS entirely in production."
+                ),
                 "tags": ["nginx", "deployment"],
             },
         )

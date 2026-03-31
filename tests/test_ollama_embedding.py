@@ -21,7 +21,7 @@ class TestOllamaEmbedding:
 
     def test_default_model(self):
         provider = OllamaEmbedding()
-        assert provider._model == "nomic-embed-text"
+        assert provider._model == "nomic-embed-text:latest"
 
     def test_custom_model(self):
         provider = OllamaEmbedding(model="mxbai-embed-large")

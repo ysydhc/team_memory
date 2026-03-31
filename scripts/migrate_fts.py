@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Backfill FTS (full-text search) column for existing experiences (P1-6).
 
+**Pre-MVP or manual repair:** MVP uses a single ``fts`` tsvector + trigger on
+title/description/solution/tags; this script's SQL references ``root_cause`` /
+``code_snippets`` removed in ``002_mvp_cleanup``.
+
 Populates Experience.fts for rows where fts IS NULL so that search_by_fts can
 match them. Uses PostgreSQL to_tsvector('simple', ...) on title, description,
 solution, root_cause, code_snippets.

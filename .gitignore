@@ -16,7 +16,7 @@ env/
 .idea/
 .vscode/
 
-# Config overrides (may contain secrets)
+# Optional single-file override (set TEAM_MEMORY_CONFIG_PATH to this path)
 config.local.yaml
 
 # Environment

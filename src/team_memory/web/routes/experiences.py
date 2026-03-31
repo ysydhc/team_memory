@@ -1,4 +1,4 @@
-"""Experience CRUD, links, versions, groups, drafts, publish routes."""
+"""Experience CRUD, feedback, status routes."""
 
 from __future__ import annotations
 
@@ -6,18 +6,15 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy import distinct, or_, select
 from sqlalchemy import func as sa_func
-from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 
 from team_memory.auth.provider import User
-from team_memory.storage.audit import write_audit_log
-from team_memory.storage.models import Experience, ExperienceLink
+from team_memory.storage.models import Experience
 from team_memory.web import app as app_module
 from team_memory.web.app import (
     ExperienceCreate,
-    ExperienceGroupCreate,
-    ExperienceLinkCreate,
     ExperienceUpdate,
     FeedbackCreate,
     _get_db_url,
@@ -39,8 +36,21 @@ def _svc():
     return app_module._service
 
 
-def _cfg():
-    return app_module._settings
+@router.get("/projects")
+async def list_projects(
+    user: User | None = Depends(get_optional_user),
+):
+    """List distinct project names from experiences."""
+    db_url = _get_db_url()
+    async with app_module.get_session(db_url) as session:
+        result = await session.execute(
+            select(distinct(Experience.project))
+            .where(Experience.is_deleted == False)  # noqa: E712
+            .where(Experience.project.is_not(None))
+            .order_by(Experience.project)
+        )
+        projects = [row[0] for row in result.all() if row[0]]
+    return {"projects": projects}
 
 
 @router.get("/experiences")
@@ -50,35 +60,21 @@ async def list_experiences(
     tag: str | None = None,
     project: str | None = None,
     status: str | None = None,
-    scope: str | None = None,
     visibility: str | None = None,
     experience_type: str | None = None,
-    severity: str | None = None,
-    category: str | None = None,
-    progress_status: str | None = None,
-    quality_tier: str | None = None,
     user: User | None = Depends(get_optional_user),
 ):
-    """List experiences with pagination, multi-dimensional filters, and visibility."""
+    """List experiences with pagination and filters."""
     db_url = _get_db_url()
-    # Support comma-separated multi-project parameter
     project_list = (
         [p.strip() for p in project.split(",") if p.strip()]
         if project and "," in project
         else None
     )
     resolved_project = _resolve_project(project.split(",")[0] if project else project)
-    effective_visibility = visibility or scope
-    if status in ("review", "rejected"):
-        raise HTTPException(
-            status_code=400,
-            detail="status=review and status=rejected are no longer supported",
-        )
-    include_all = status in ("all", "draft")
     current_user = user.name if user else None
 
     def _project_filter(q):
-        """Filter by project(s)."""
         if project_list:
             return q.where(
                 or_(
@@ -94,11 +90,9 @@ async def list_experiences(
         )
 
     def _vis_where(q):
-        """Apply visibility-aware project filter."""
-        vis = effective_visibility
-        if vis and vis != "all":
+        if visibility and visibility != "all":
             vis_map = {"personal": "private", "team": "project", "global": "global"}
-            vis_val = vis_map.get(vis, vis)
+            vis_val = vis_map.get(visibility, visibility)
             q = q.where(Experience.visibility == vis_val)
             if vis_val == "private" and current_user:
                 q = q.where(Experience.created_by == current_user)
@@ -117,23 +111,14 @@ async def list_experiences(
                 q = q.where(Experience.visibility != "private")
         return q
 
-    async with app_module.get_session(db_url) as session:
-        repo = app_module.ExperienceRepository(session)
+    include_all = status in ("all", "draft")
 
-        if status == "draft":
-            experiences = await repo.list_drafts(
-                limit=page_size,
-                offset=(page - 1) * page_size,
-                project=resolved_project,
-                created_by=current_user,
-            )
-            total = await repo.count_drafts(
-                project=resolved_project, created_by=current_user
-            )
-        elif (
-            tag or experience_type or severity or category
-            or progress_status or status or quality_tier
-        ):
+    async with app_module.get_session(db_url) as session:
+        from team_memory.storage.repository import ExperienceRepository
+
+        repo = ExperienceRepository(session)
+
+        if tag or experience_type or status:
             offset = (page - 1) * page_size
             base_q = (
                 select(Experience)
@@ -161,29 +146,6 @@ async def list_experiences(
             if experience_type:
                 base_q = base_q.where(Experience.experience_type == experience_type)
                 count_q = count_q.where(Experience.experience_type == experience_type)
-            if severity:
-                base_q = base_q.where(Experience.severity == severity)
-                count_q = count_q.where(Experience.severity == severity)
-            if category:
-                base_q = base_q.where(Experience.category == category)
-                count_q = count_q.where(Experience.category == category)
-            if progress_status:
-                base_q = base_q.where(Experience.progress_status == progress_status)
-                count_q = count_q.where(Experience.progress_status == progress_status)
-            if quality_tier:
-                tier_ranges = {
-                    "gold": (120, None),
-                    "silver": (60, 120),
-                    "bronze": (20, 60),
-                    "outdated": (None, 1),
-                }
-                lo, hi = tier_ranges.get(quality_tier, (None, None))
-                if lo is not None:
-                    base_q = base_q.where(Experience.quality_score >= lo)
-                    count_q = count_q.where(Experience.quality_score >= lo)
-                if hi is not None:
-                    base_q = base_q.where(Experience.quality_score < hi)
-                    count_q = count_q.where(Experience.quality_score < hi)
 
             base_q = (
                 base_q.order_by(Experience.created_at.desc())
@@ -195,26 +157,19 @@ async def list_experiences(
             total_result = await session.execute(count_q)
             total = total_result.scalar() or 0
         else:
-            if not include_all:
-                total = await repo.count(
-                    project=resolved_project,
-                    scope=effective_visibility,
-                    current_user=current_user,
-                )
-            else:
-                total = await repo.count(
-                    include_deleted=False,
-                    project=resolved_project,
-                    scope=effective_visibility,
-                    current_user=current_user,
-                )
+            total = await repo.count(
+                include_deleted=False if include_all else True,
+                project=resolved_project,
+                scope=visibility,
+                current_user=current_user,
+            )
             offset = (page - 1) * page_size
             experiences = await repo.list_recent(
                 limit=page_size,
                 offset=offset,
                 include_all_statuses=include_all,
                 project=resolved_project,
-                scope=effective_visibility,
+                scope=visibility,
                 current_user=current_user,
             )
 
@@ -234,45 +189,12 @@ async def list_experiences(
         }
 
 
-@router.get("/experiences/drafts")
-async def list_drafts(
-    page: int = 1,
-    page_size: int = 20,
-    project: str | None = None,
-    user: User = Depends(get_current_user),
-):
-    """List draft experiences for the current user."""
-    resolved_project = _resolve_project(project)
-    drafts = await _svc().get_drafts(
-        created_by=user.name,
-        limit=page_size,
-        offset=(page - 1) * page_size,
-        project=resolved_project,
-    )
-    return {
-        "experiences": drafts,
-        "total": len(drafts),
-        "page": page,
-        "project": resolved_project,
-    }
-
-
-@router.post("/experiences/batch-summarize")
-async def batch_summarize(
-    limit: int = 10,
-    user: User = Depends(get_current_user),
-):
-    """Batch generate summaries for experiences without one."""
-    result = await _svc().batch_generate_summaries(limit=limit)
-    return result
-
-
 @router.get("/experiences/{experience_id}")
 async def get_experience(
     experience_id: str,
     user: User | None = Depends(get_optional_user),
 ):
-    """Get a single experience by ID with feedbacks eagerly loaded."""
+    """Get a single experience by ID."""
     db_url = _get_db_url()
     async with app_module.get_session(db_url) as session:
         result = await session.execute(
@@ -288,28 +210,10 @@ async def get_experience(
         if exp is None:
             raise HTTPException(status_code=404, detail="Experience not found")
 
-        repo = app_module.ExperienceRepository(session)
-        await repo.increment_view_count(exp.id)
-
         data = exp.to_dict()
         data["feedbacks"] = [fb.to_dict() for fb in exp.feedbacks]
         data["children"] = [c.to_dict() for c in (exp.children or [])]
-        bindings = await repo.get_file_location_bindings(exp.id)
-        data["file_locations"] = bindings
         return data
-
-
-@router.get("/experiences/{experience_id}/tree-nodes")
-async def get_experience_tree_nodes(
-    experience_id: str,
-    user: User | None = Depends(get_optional_user),
-):
-    """Get PageIndex-Lite tree nodes for one experience."""
-    db_url = _get_db_url()
-    async with app_module.get_session(db_url) as session:
-        repo = app_module.ExperienceRepository(session)
-        nodes = await repo.get_tree_nodes(uuid.UUID(experience_id))
-        return {"experience_id": experience_id, "nodes": [n.to_dict() for n in nodes]}
 
 
 @router.post("/experiences")
@@ -317,7 +221,7 @@ async def create_experience(
     req: ExperienceCreate,
     user: User = Depends(require_role("create")),
 ):
-    """Create a new experience (requires create permission)."""
+    """Create a new experience."""
     db_url = _get_db_url()
     resolved_project = _resolve_project(req.project)
     async with app_module.get_session(db_url) as session:
@@ -328,75 +232,16 @@ async def create_experience(
             solution=req.solution,
             created_by=user.name,
             tags=req.tags,
-            code_snippets=req.code_snippets,
-            language=req.language,
-            framework=req.framework,
             source="web",
-            root_cause=req.root_cause,
             exp_status=req.status,
             visibility=req.visibility,
             skip_dedup=req.skip_dedup_check,
             experience_type=req.experience_type,
-            severity=req.severity,
-            category=req.category,
-            progress_status=req.progress_status,
-            structured_data=req.structured_data,
-            git_refs=req.git_refs,
-            related_links=req.related_links,
-            file_locations=req.file_locations,
             project=resolved_project,
+            group_key=req.group_key,
         )
         if result.get("status") == "duplicate_detected":
             return JSONResponse(status_code=409, content=result)
-        return result
-
-
-@router.post("/experiences/groups")
-async def create_experience_group(
-    req: ExperienceGroupCreate,
-    user: User = Depends(require_role("create")),
-):
-    """Create a parent experience with children (requires create permission)."""
-    db_url = _get_db_url()
-    resolved_project = _resolve_project(req.parent.project)
-
-    parent_data = {
-        "title": req.parent.title,
-        "problem": req.parent.problem,
-        "solution": req.parent.solution,
-        "tags": req.parent.tags,
-        "code_snippets": req.parent.code_snippets,
-        "root_cause": req.parent.root_cause,
-        "language": req.parent.language,
-        "framework": req.parent.framework,
-        "source": "web",
-        "project": resolved_project,
-    }
-
-    children_data = [
-        {
-            "title": c.title,
-            "problem": c.problem,
-            "solution": c.solution,
-            "tags": c.tags,
-            "code_snippets": c.code_snippets,
-            "root_cause": c.root_cause,
-            "language": c.language,
-            "framework": c.framework,
-            "source": "web",
-            "project": resolved_project,
-        }
-        for c in req.children
-    ]
-
-    async with app_module.get_session(db_url) as session:
-        result = await _svc().save_group(
-            session=session,
-            parent=parent_data,
-            children=children_data,
-            created_by=user.name,
-            project=resolved_project,
-        )
         return result
 
 
@@ -416,40 +261,17 @@ async def update_experience_route(
         kwargs["description"] = raw["problem"]
     if "solution" in raw:
         kwargs["solution"] = raw["solution"]
-    if "root_cause" in raw:
-        kwargs["root_cause"] = raw["root_cause"]
     if "tags" in raw:
         kwargs["tags"] = raw["tags"]
-    if "code_snippets" in raw:
-        kwargs["code_snippets"] = raw["code_snippets"]
-    if "language" in raw:
-        kwargs["language"] = raw["language"]
-    if "framework" in raw:
-        kwargs["framework"] = raw["framework"]
     if "experience_type" in raw:
         kwargs["experience_type"] = raw["experience_type"]
-    if "severity" in raw:
-        kwargs["severity"] = raw["severity"]
-    if "category" in raw:
-        kwargs["category"] = raw["category"]
-    if "progress_status" in raw:
-        kwargs["progress_status"] = raw["progress_status"]
-    if "structured_data" in raw:
-        kwargs["structured_data"] = raw["structured_data"]
-    if "git_refs" in raw:
-        kwargs["git_refs"] = raw["git_refs"]
-    if "related_links" in raw:
-        kwargs["related_links"] = raw["related_links"]
-    if "file_locations" in raw:
-        kwargs["file_locations"] = raw["file_locations"]
     if "exp_status" in raw:
         kwargs["exp_status"] = raw["exp_status"]
-    if "solution_addendum" in raw:
-        kwargs["solution_addendum"] = raw["solution_addendum"]
     if "visibility" in raw:
         kwargs["visibility"] = raw["visibility"]
-    if "project" in raw:
-        kwargs["project"] = raw["project"]
+    if "solution_addendum" in raw:
+        kwargs["solution_addendum"] = raw["solution_addendum"]
+
     result = await _svc().update(
         experience_id=experience_id,
         user=user.name,
@@ -462,147 +284,23 @@ async def update_experience_route(
 
 @router.delete("/experiences/{experience_id}")
 async def delete_experience(
-    request: Request,
     experience_id: str,
     hard: bool = False,
     user: User = Depends(require_role("delete")),
 ):
     """Soft-delete an experience (or hard-delete with ?hard=true)."""
     db_url = _get_db_url()
-    async with app_module.get_session(db_url) as session:
-        if hard:
-            repo = app_module.ExperienceRepository(session)
+    if hard:
+        async with app_module.get_session(db_url) as session:
+            from team_memory.storage.repository import ExperienceRepository
+
+            repo = ExperienceRepository(session)
             deleted = await repo.delete(uuid.UUID(experience_id))
-        else:
-            deleted = await _svc().soft_delete(experience_id)
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Experience not found")
-        ip = request.client.host if request.client else None
-        await write_audit_log(
-            session,
-            user_name=user.name,
-            action="delete",
-            target_type="experience",
-            target_id=experience_id,
-            ip_address=ip,
-        )
-        return {"message": "Experience deleted"}
-
-
-@router.post("/experiences/{experience_id}/promote")
-async def promote_experience(
-    experience_id: str,
-    user: User = Depends(require_role("create")),
-):
-    """Promote a personal experience to team scope. May trigger review."""
-    db_url = _get_db_url()
-    async with app_module.get_session(db_url) as session:
-        result = await session.execute(
-            select(Experience).where(
-                Experience.id == uuid.UUID(experience_id),
-                Experience.is_deleted == False,  # noqa: E712
-            )
-        )
-        exp = result.scalar_one_or_none()
-        if exp is None:
-            raise HTTPException(status_code=404, detail="Experience not found")
-        if exp.visibility == "project":
-            return {"message": "Already project visibility"}
-        exp.visibility = "project"
-        if exp.exp_status == "draft":
-            exp.exp_status = "published"
-        await session.commit()
-        return {"message": "Experience promoted to team", "experience": exp.to_dict()}
-
-
-@router.post("/experiences/{experience_id}/links")
-async def create_experience_link(
-    experience_id: str,
-    req: ExperienceLinkCreate,
-    user: User = Depends(require_role("create")),
-):
-    """Create a link between two experiences."""
-    db_url = _get_db_url()
-    async with app_module.get_session(db_url) as session:
-        link = ExperienceLink(
-            source_id=uuid.UUID(experience_id),
-            target_id=uuid.UUID(req.target_id),
-            link_type=req.link_type,
-            created_by=user.name,
-        )
-        session.add(link)
-        try:
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise HTTPException(
-                status_code=409, detail="Link already exists or invalid IDs"
-            )
-        return {"message": "Link created", "link": link.to_dict()}
-
-
-@router.get("/experiences/{experience_id}/links")
-async def get_experience_links(
-    experience_id: str,
-    user: User | None = Depends(get_optional_user),
-):
-    """Get all links for an experience (both directions) with other experience id/title."""
-    db_url = _get_db_url()
-    exp_uuid = uuid.UUID(experience_id)
-    async with app_module.get_session(db_url) as session:
-        result = await session.execute(
-            select(ExperienceLink).where(
-                or_(
-                    ExperienceLink.source_id == exp_uuid,
-                    ExperienceLink.target_id == exp_uuid,
-                )
-            )
-        )
-        links = result.scalars().all()
-        if not links:
-            return {"links": []}
-        other_ids = [
-            str(link.target_id if link.source_id == exp_uuid else link.source_id)
-            for link in links
-        ]
-        exp_result = await session.execute(
-            select(Experience.id, Experience.title).where(
-                Experience.id.in_([uuid.UUID(oid) for oid in other_ids])
-            )
-        )
-        id_to_title = {str(row[0]): row[1] for row in exp_result.all()}
-        out = []
-        for link in links:
-            other_id = (
-                str(link.target_id)
-                if link.source_id == exp_uuid
-                else str(link.source_id)
-            )
-            d = link.to_dict()
-            d["other_id"] = other_id
-            d["other_title"] = id_to_title.get(other_id, "")
-            out.append(d)
-        return {"links": out}
-
-
-@router.delete("/experiences/{experience_id}/links/{link_id}")
-async def delete_experience_link(
-    experience_id: str,
-    link_id: str,
-    user: User = Depends(require_role("delete")),
-):
-    """Delete a link between experiences."""
-    from sqlalchemy import delete
-
-    db_url = _get_db_url()
-    async with app_module.get_session(db_url) as session:
-        result = await session.execute(
-            delete(ExperienceLink).where(ExperienceLink.id == uuid.UUID(link_id))
-        )
-        await session.commit()
-        if result.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Link not found")
-        return {"message": "Link deleted"}
+    else:
+        deleted = await _svc().soft_delete(experience_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Experience not found")
+    return {"message": "Experience deleted"}
 
 
 @router.post("/experiences/{experience_id}/restore")
@@ -610,7 +308,7 @@ async def restore_experience(
     experience_id: str,
     user: User = Depends(get_current_user),
 ):
-    """Restore a soft-deleted experience (requires auth)."""
+    """Restore a soft-deleted experience."""
     restored = await _svc().restore(experience_id)
     if not restored:
         raise HTTPException(
@@ -625,7 +323,7 @@ async def add_feedback(
     req: FeedbackCreate,
     user: User = Depends(get_current_user),
 ):
-    """Add feedback to an experience (requires auth)."""
+    """Add feedback to an experience."""
     success = await _svc().feedback(
         experience_id=experience_id,
         rating=req.rating,
@@ -637,59 +335,15 @@ async def add_feedback(
     return {"message": "Feedback recorded"}
 
 
-@router.get("/experiences/{experience_id}/versions")
-async def get_versions(
-    experience_id: str,
-    user: User = Depends(get_current_user),
-):
-    """Get version history for an experience."""
-    versions = await _svc().get_versions(experience_id)
-    return {"versions": versions, "total": len(versions)}
-
-
-@router.get("/experiences/{experience_id}/versions/{version_id}")
-async def get_version_detail(
-    experience_id: str,
-    version_id: str,
-    user: User = Depends(get_current_user),
-):
-    """Get a specific version snapshot."""
-    version = await _svc().get_version_detail(version_id)
-    if version is None:
-        raise HTTPException(status_code=404, detail="Version not found")
-    return version
-
-
-@router.post("/experiences/{experience_id}/rollback/{version_id}")
-async def rollback_to_version(
-    experience_id: str,
-    version_id: str,
-    user: User = Depends(get_current_user),
-):
-    """Rollback an experience to a specific version."""
-    result = await _svc().rollback_to_version(
-        experience_id=experience_id,
-        version_id=version_id,
-        user=user.name,
-    )
-    if result is None:
-        raise HTTPException(
-            status_code=404, detail="Experience or version not found"
-        )
-    return {"message": "Rollback successful", "experience": result}
-
-
-
 @router.post("/experiences/{experience_id}/status")
 async def change_experience_status(
     experience_id: str,
     request: Request,
     user: User = Depends(get_current_user),
 ):
-    """Change experience status (new unified endpoint).
+    """Change experience status.
 
-    Body: { "status": "review"|"published"|"draft"|"rejected",
-            "visibility": "private"|"project"|"global" }
+    Body: { "status": "published"|"draft", "visibility": "private"|"project"|"global" }
     """
     body = {}
     try:
@@ -710,7 +364,9 @@ async def change_experience_status(
 
     db_url = _get_db_url()
     async with app_module.get_session(db_url) as session:
-        repo = app_module.ExperienceRepository(session)
+        from team_memory.storage.repository import ExperienceRepository
+
+        repo = ExperienceRepository(session)
         exp_uuid = uuid.UUID(experience_id)
 
         if new_status:
@@ -731,16 +387,6 @@ async def change_experience_status(
         if result is None:
             raise HTTPException(status_code=404, detail="Experience not found")
 
-        ip = request.client.host if request.client else None
-        await write_audit_log(
-            session,
-            user_name=user.name,
-            action="change_status",
-            target_type="experience",
-            target_id=experience_id,
-            detail={"status": new_status, "visibility": new_visibility},
-            ip_address=ip,
-        )
         status_messages = {
             "draft": "已退回草稿",
             "published": "已发布",
@@ -753,89 +399,10 @@ async def change_experience_status(
     if new_status and result is not None:
         try:
             from team_memory.bootstrap import get_context
-            await get_context().archive_service.update_archive_status_for_experience(exp_uuid)
+
+            await get_context().archive_service.update_archive_status_for_experience(
+                exp_uuid
+            )
         except Exception:
             pass
     return {"message": msg, "experience": result.to_dict()}
-
-
-@router.post("/experiences/{experience_id}/publish")
-async def publish_experience(
-    experience_id: str,
-    request: Request,
-    user: User = Depends(get_current_user),
-):
-    """Legacy publish endpoint — delegates to change_status."""
-    body = {}
-    try:
-        body = await request.json()
-    except Exception:
-        pass
-    target = body.get("target", "personal")
-
-    db_url = _get_db_url()
-    async with app_module.get_session(db_url) as session:
-        repo = app_module.ExperienceRepository(session)
-        exp_uuid = uuid.UUID(experience_id)
-        is_admin = user.role == "admin"
-
-        if target == "team":
-            try:
-                result = await repo.change_status(
-                    experience_id=exp_uuid,
-                    new_status="published" if is_admin else "review",
-                    visibility="project",
-                    changed_by=user.name,
-                    is_admin=is_admin,
-                )
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=str(e))
-            msg = "已发布到团队" if is_admin else "已提交团队审批"
-        else:
-            try:
-                result = await repo.change_status(
-                    experience_id=exp_uuid,
-                    new_status="published",
-                    visibility="private",
-                    changed_by=user.name,
-                    is_admin=True,  # personal publish always allowed
-                )
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=str(e))
-            msg = "已设为个人可见"
-
-    if result is None:
-        raise HTTPException(status_code=404, detail="Experience not found")
-    try:
-        from team_memory.bootstrap import get_context
-        await get_context().archive_service.update_archive_status_for_experience(exp_uuid)
-    except Exception:
-        pass
-    db_url = _get_db_url()
-    async with app_module.get_session(db_url) as session:
-        ip = request.client.host if request.client else None
-        await write_audit_log(
-            session,
-            user_name=user.name,
-            action="publish",
-            target_type="experience",
-            target_id=experience_id,
-            detail={"target": target},
-            ip_address=ip,
-        )
-    return {"message": msg, "experience": result.to_dict()}
-
-
-@router.post("/experiences/{experience_id}/summarize")
-async def summarize_experience(
-    experience_id: str,
-    user: User = Depends(get_current_user),
-):
-    """Generate an LLM summary for a single experience."""
-    result = await _svc().generate_summary(experience_id)
-    if result is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Experience not found or summary generation failed",
-        )
-    return {"message": "Summary generated", "experience": result}

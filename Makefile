@@ -6,8 +6,23 @@
 # 屏蔽 jieba/pkg_resources 等第三方库的 DeprecationWarning；可覆盖：make web PYTHONWARNINGS=
 export PYTHONWARNINGS ?= ignore::DeprecationWarning
 
+# 测试默认走项目依赖（SQLAlchemy 2.x）。优先级：uv（含 dev 额外依赖里的 pytest）→ .venv python -m pytest → …
+# 勿用裸「uv run pytest」：无 .venv/bin/pytest 时会调用 PATH 上 conda 的 pytest → 旧 SQLAlchemy。
+# 覆盖示例：make test PYTEST='python -m pytest'
+PYTEST ?= $(shell \
+	if command -v uv >/dev/null 2>&1; then echo "uv run --extra dev python -m pytest"; \
+	elif [ -x .venv/bin/python ]; then echo ".venv/bin/python -m pytest"; \
+	elif [ -x .venv/bin/pytest ]; then echo ".venv/bin/pytest"; \
+	else echo pytest; fi)
+
+# 迁移须与项目 SQLAlchemy 2.x 同源；勿运行 PATH 上 conda 的 alembic（会 import 旧版 sqlalchemy）。
+ALEMBIC ?= $(shell \
+	if command -v uv >/dev/null 2>&1; then echo "uv run python -m alembic"; \
+	elif [ -x .venv/bin/python ]; then echo ".venv/bin/python -m alembic"; \
+	else echo alembic; fi)
+
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp test lint lint-fix lint-js harness-check harness-doc-check harness-plan-check verify verify-web backup health clean migrate migrate-fts install-knowledge release-9111 hooks-install
+.PHONY: help setup dev web mcp mcp-full test lint lint-fix lint-js harness-check harness-doc-check harness-plan-check verify verify-web backup health clean migrate migrate-fts install-knowledge release-9111 hooks-install
 
 help:           ## 显示所有可用命令
 	@echo ""
@@ -42,11 +57,12 @@ setup:          ## 首次安装：启动 Docker + 安装依赖 + 初始化数据
 	  docker compose --profile ollama up -d; \
 	fi
 	pip install -e ".[dev]"
-	alembic upgrade head
+	python -m alembic upgrade head
 	@echo ""
 	@echo "  ✔ Setup complete!"
 	@echo "  Run 'make web' to start the Web UI."
-	@echo "  Run 'make mcp' to start the MCP server."
+	@echo "  Run 'make mcp' to start the Lite MCP server (memory_* tools)."
+	@echo "  Run 'make mcp-full' only if you still need legacy tm_* tools (deprecated)."
 	@echo "  If Ollama is unavailable, set embedding.provider to openai in config for embedding."
 	@echo ""
 
@@ -60,11 +76,27 @@ web:            ## 仅启动 Web 管理界面（默认端口 9111）；自动释
 	@$(MAKE) -s release-9111 || true
 	python -m team_memory.web.app
 
-mcp:            ## 仅启动 MCP Server（供 Cursor / Claude Desktop 使用）
+mcp:            ## 启动 Lite MCP（memory_save / recall / context / feedback）
+	python -m team_memory.server_lite
+
+mcp-full:       ## 启动完整 MCP（tm_*，遗留；计划移除，见 ops/mcp-lite-default.md）
 	python -m team_memory.server
 
-test:           ## 运行全部测试
-	pytest tests/ -v
+test:           ## 运行全部测试（默认 uv / .venv 中的 pytest）
+	@case "$(PYTEST)" in \
+	  pytest) \
+	    if ! python -c "from sqlalchemy.orm import DeclarativeBase" 2>/dev/null; then \
+	      echo ""; \
+	      echo "  错误: 当前将使用 PATH 上的 pytest，且默认 python 无法导入 SQLAlchemy 2.x（需要 DeclarativeBase）。"; \
+	      echo "  你多半在用 conda base 等全局环境，与项目 pyproject 不一致。"; \
+	      echo "  请在本仓库根目录任选其一后重试 make verify："; \
+	      echo "    uv sync"; \
+	      echo "    或  python3 -m venv .venv && .venv/bin/pip install -U pip && .venv/bin/pip install -e '.[dev]'"; \
+	      echo ""; \
+	      exit 1; \
+	    fi ;; \
+	esac
+	$(PYTEST) tests/ -v
 
 lint:           ## Ruff 代码检查
 	ruff check src/
@@ -95,7 +127,7 @@ verify-web:     ## Web 验收：lint + lint-js + web测试 + health/stats smoke
 	@$(MAKE) -s release-9111 || true
 	@$(MAKE) lint
 	@$(MAKE) lint-js
-	pytest tests/test_web.py -v
+	$(PYTEST) tests/test_web.py -v
 	@API_KEY=$${TEAM_MEMORY_API_KEY:-dev-key}; \
 	echo "  Starting Web for smoke on :9111 ..."; \
 	python -m team_memory.web.app >/tmp/tm-web-smoke.log 2>&1 & \
@@ -107,8 +139,19 @@ verify-web:     ## Web 验收：lint + lint-js + web测试 + health/stats smoke
 	done; \
 	TEAM_MEMORY_API_KEY=$$API_KEY python scripts/smoke/smoke_web_dashboard.py --api-key $$API_KEY --port 9111
 
-migrate:        ## 运行数据库迁移
-	alembic upgrade head
+migrate:        ## 运行数据库迁移（默认 uv / .venv 内 python -m alembic）
+	@case "$(ALEMBIC)" in \
+	  alembic) \
+	    if ! python -c "from sqlalchemy.orm import DeclarativeBase" 2>/dev/null; then \
+	      echo ""; \
+	      echo "  错误: 将使用 PATH 上的 alembic，且当前 python 无 SQLAlchemy 2.x。"; \
+	      echo "  请在本仓库根目录执行:  uv sync   或   pip install -e .   后重试，或使用:"; \
+	      echo "    uv run python -m alembic upgrade head"; \
+	      echo ""; \
+	      exit 1; \
+	    fi ;; \
+	esac
+	$(ALEMBIC) upgrade head
 
 migrate-fts:    ## 补齐经验表 FTS 字段（存量迁移）；可用 --dry-run 预览
 	python scripts/migrate_fts.py

@@ -44,7 +44,7 @@ jobs:
       - name: Secrets check (lightweight)
         run: |
           if grep -rE '(aws_secret_access_key|AKIA[0-9A-Z]{16}|password\s*=\s*["\'][^"\']{12,}["\'])' \
-            --include='*.py' --include='*.yaml' --include='*.yml' src/ config.yaml 2>/dev/null; then
+            --include='*.py' --include='*.yaml' --include='*.yml' src/ config.development.yaml config.production.yaml 2>/dev/null; then
             echo "::warning::Possible secret pattern found; fix or add to allowlist. Set continue-on-error to false to enforce."
             exit 1
           fi

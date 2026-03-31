@@ -1,19 +1,17 @@
-"""Core path tests for team_memory visibility model, search, and tool tracking.
+"""Core path tests for team_memory visibility model, search, and hook system.
 
-Tests the critical paths introduced in the visibility + analytics plan:
+Tests the critical paths:
 - Personal visibility: _active_filter with current_user
-- Team publishing: publish_to_team / publish_personal repository methods
+- Status defaults: exp_status, visibility
 - Hook system: HookRegistry event dispatching
-- Tool usage tracking: ToolUsageLog model
+- SearchRequest: current_user field
 """
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 
-from team_memory.storage.models import Experience, ToolUsageLog
+from team_memory.storage.models import Experience
 
 
 class TestActiveFilter:
@@ -57,84 +55,6 @@ class TestPublishStatusDefaults:
             title="test", description="test", exp_status="published", visibility="project"
         )
         assert exp.exp_status in valid
-
-
-class TestPublishToTeam:
-    """Tests for publish_to_team and publish_personal (now change_status wrappers)."""
-
-    @pytest.mark.asyncio
-    async def test_publish_to_team_sets_published(self):
-        """publish_to_team calls change_status(published)."""
-        from team_memory.storage.repository import ExperienceRepository
-
-        mock_session = AsyncMock()
-        repo = ExperienceRepository(mock_session)
-        mock_exp = MagicMock(spec=Experience)
-        mock_exp.exp_status = "published"
-        mock_exp.visibility = "project"
-
-        with patch.object(repo, "change_status", new_callable=AsyncMock, return_value=mock_exp):
-            result = await repo.publish_to_team(experience_id="test-id", is_admin=False)
-        assert result.exp_status == "published"
-
-    @pytest.mark.asyncio
-    async def test_publish_to_team_admin_sets_published(self):
-        """Admin also gets published (no pending_team)."""
-        from team_memory.storage.repository import ExperienceRepository
-
-        mock_session = AsyncMock()
-        repo = ExperienceRepository(mock_session)
-        mock_exp = MagicMock(spec=Experience)
-        mock_exp.exp_status = "published"
-
-        with patch.object(repo, "change_status", new_callable=AsyncMock, return_value=mock_exp):
-            result = await repo.publish_to_team(experience_id="test-id", is_admin=True)
-        assert result.exp_status == "published"
-
-    @pytest.mark.asyncio
-    async def test_publish_personal_from_draft(self):
-        """Draft -> visibility=private (personal)."""
-        from team_memory.storage.repository import ExperienceRepository
-
-        mock_session = AsyncMock()
-        repo = ExperienceRepository(mock_session)
-        mock_exp = MagicMock(spec=Experience)
-        mock_exp.exp_status = "draft"
-        mock_exp.visibility = "private"
-
-        with patch.object(repo, "get_by_id", return_value=mock_exp), patch.object(
-            repo, "change_status", new_callable=AsyncMock, return_value=mock_exp
-        ):
-            result = await repo.publish_personal(experience_id="test-id")
-        assert result.visibility == "private"
-
-    @pytest.mark.asyncio
-    async def test_publish_personal_noop_if_not_draft(self):
-        """publish_personal returns exp unchanged if not draft."""
-        from team_memory.storage.repository import ExperienceRepository
-
-        mock_session = AsyncMock()
-        repo = ExperienceRepository(mock_session)
-        mock_exp = MagicMock(spec=Experience)
-        mock_exp.exp_status = "published"
-
-        with patch.object(repo, "get_by_id", return_value=mock_exp):
-            result = await repo.publish_personal(experience_id="test-id")
-        assert result.exp_status == "published"
-
-    @pytest.mark.asyncio
-    async def test_publish_to_team_not_found(self):
-        """Should return None if experience not found."""
-        from team_memory.storage.repository import ExperienceRepository
-
-        mock_session = AsyncMock()
-        repo = ExperienceRepository(mock_session)
-
-        with patch.object(repo, "get_by_id", return_value=None):
-            result = await repo.publish_to_team(
-                experience_id="nonexistent", is_admin=False
-            )
-        assert result is None
 
 
 class TestHooksAndTracking:
@@ -204,45 +124,6 @@ class TestHooksAndTracking:
 
         registry = init_hook_registry()
         assert registry is not None
-
-
-class TestToolUsageLog:
-    """Tests for the ToolUsageLog model."""
-
-    def test_tool_usage_log_to_dict(self):
-        """ToolUsageLog.to_dict() should return proper structure."""
-        log = ToolUsageLog(
-            tool_name="tm_search",
-            tool_type="mcp",
-            user="alice",
-            project="team-memory",
-            duration_ms=150,
-            success=True,
-        )
-        d = log.to_dict()
-        assert d["tool_name"] == "tm_search"
-        assert d["tool_type"] == "mcp"
-        assert d["user"] == "alice"
-        assert d["duration_ms"] == 150
-        assert d["success"] is True
-
-    def test_tool_usage_log_with_all_fields(self):
-        """ToolUsageLog should handle all fields properly."""
-        log = ToolUsageLog(
-            tool_name="test_tool",
-            tool_type="skill",
-            user="bob",
-            project="my-project",
-            duration_ms=200,
-            success=False,
-            error_message="timeout",
-            api_key_name="cursor-key",
-        )
-        d = log.to_dict()
-        assert d["tool_type"] == "skill"
-        assert d["success"] is False
-        assert d["error_message"] == "timeout"
-        assert d["api_key_name"] == "cursor-key"
 
 
 class TestSearchPipelineRequest:

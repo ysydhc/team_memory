@@ -3,7 +3,7 @@
 # Usage: ./scripts/healthcheck.sh [web_port]
 #
 # Checks all team_memory components and reports their status.
-# Ollama URL and embedding model are read from config.yaml (same as app);
+# Ollama URL and embedding model are read from config.development.yaml / load_settings (same as app);
 # override with TEAM_MEMORY_EMBEDDING__OLLAMA__BASE_URL / TEAM_MEMORY_OLLAMA_MODEL.
 # Exit code 0 = all critical services OK, non-zero = at least one FAIL.
 
@@ -11,25 +11,25 @@ PORT="${1:-9111}"
 WEB_URL="http://localhost:${PORT}"
 FAILURES=0
 
-# Resolve project root (directory containing config.yaml)
+# Resolve project root (directory containing config.*.yaml)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Load Ollama base_url and embedding model from config (same as app); fallback to defaults
 OLLAMA_BASE_URL="http://localhost:11434"
-OLLAMA_EMBED_MODEL="nomic-embed-text"
+OLLAMA_EMBED_MODEL="nomic-embed-text:latest"
 OLLAMA_LLM_MODEL_CONFIG=""
-if [ -f "${ROOT_DIR}/config.yaml" ]; then
+if [ -f "${ROOT_DIR}/config.development.yaml" ] || [ -f "${ROOT_DIR}/config.production.yaml" ]; then
   CONFIG_OUT=$(cd "${ROOT_DIR}" && python3 -c "
 try:
     from team_memory.config import load_settings
     s = load_settings()
     if getattr(s.embedding, 'ollama', None) and getattr(s.embedding, 'provider', None) == 'ollama':
         print(s.embedding.ollama.base_url.rstrip('/'))
-        print(s.embedding.ollama.model or 'nomic-embed-text')
+        print(s.embedding.ollama.model or 'nomic-embed-text:latest')
     else:
         print('http://localhost:11434')
-        print('nomic-embed-text')
+        print('nomic-embed-text:latest')
     if getattr(s, 'llm', None) and getattr(s.llm, 'model', None):
         print(s.llm.model)
 except Exception:
@@ -40,7 +40,7 @@ except Exception:
     OLLAMA_EMBED_MODEL=$(echo "$CONFIG_OUT" | sed -n '2p')
     OLLAMA_LLM_MODEL_CONFIG=$(echo "$CONFIG_OUT" | sed -n '3p')
     [ -z "$OLLAMA_BASE_URL" ] && OLLAMA_BASE_URL="http://localhost:11434"
-    [ -z "$OLLAMA_EMBED_MODEL" ] && OLLAMA_EMBED_MODEL="nomic-embed-text"
+    [ -z "$OLLAMA_EMBED_MODEL" ] && OLLAMA_EMBED_MODEL="nomic-embed-text:latest"
   fi
 fi
 # Env overrides (same prefix as app)
@@ -69,11 +69,12 @@ else
     fi
 fi
 
-# 2. Ollama (base_url from config.yaml / TEAM_MEMORY_EMBEDDING__OLLAMA__BASE_URL)
+# 2. Ollama (base_url from config / TEAM_MEMORY_EMBEDDING__OLLAMA__BASE_URL)
 printf "  %-22s" "Ollama:"
 if curl -sf --max-time 3 "${OLLAMA_BASE_URL}/api/tags" >/dev/null 2>&1; then
-    # Check if embedding model is available (Ollama returns name with tag e.g. "nomic-embed-text:latest")
-    if curl -sf --max-time 3 "${OLLAMA_BASE_URL}/api/tags" | grep -qE "\"${OLLAMA_EMBED_MODEL}(\"|:)"; then
+    # Tags use "name":"model:tag" — match base name so both nomic-embed-text and nomic-embed-text:latest work
+    OLLAMA_EMBED_MODEL_BASE="${OLLAMA_EMBED_MODEL%%:*}"
+    if curl -sf --max-time 3 "${OLLAMA_BASE_URL}/api/tags" | grep -q "\"name\":\"${OLLAMA_EMBED_MODEL_BASE}"; then
         echo "OK (model: ${OLLAMA_EMBED_MODEL})"
     else
         echo "WARN  (service up, but model '${OLLAMA_EMBED_MODEL}' not pulled)"
@@ -117,7 +118,8 @@ fi
 printf "  %-22s" "LLM model (optional):"
 LLM_MODEL="${TEAM_MEMORY_LLM_MODEL:-${OLLAMA_LLM_MODEL_CONFIG:-}}"
 if [ -n "$LLM_MODEL" ]; then
-    if curl -sf --max-time 3 "${OLLAMA_BASE_URL}/api/tags" | grep -qE "\"${LLM_MODEL}(\"|:)"; then
+    LLM_MODEL_BASE="${LLM_MODEL%%:*}"
+    if curl -sf --max-time 3 "${OLLAMA_BASE_URL}/api/tags" | grep -q "\"name\":\"${LLM_MODEL_BASE}"; then
         echo "OK (model: ${LLM_MODEL})"
     else
         echo "WARN  (model '${LLM_MODEL}' not found)"

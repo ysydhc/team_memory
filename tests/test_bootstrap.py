@@ -87,45 +87,10 @@ async def test_stop_background_tasks_stops_log_listener() -> None:
     log_listener = QueueListener(log_queue, logging.NullHandler())
     log_listener.start()
     ctx = MagicMock()
-    ctx.embedding_queue = None
     ctx._stale_scanner_task = None
-    ctx._file_location_cleanup_task = None
     ctx._log_listener = log_listener
     await stop_background_tasks(ctx)
     assert log_listener._thread is None or not log_listener._thread.is_alive()
-
-
-@pytest.mark.asyncio
-async def test_start_background_tasks_starts_file_location_cleanup_when_enabled() -> None:
-    """When file_location_cleanup_enabled is True, start_background_tasks creates cleanup task."""
-    from unittest.mock import MagicMock
-
-    from team_memory.bootstrap import start_background_tasks
-
-    ctx = MagicMock()
-    ctx.embedding_queue = None
-    ctx._stale_scanner_task = None
-    ctx._file_location_cleanup_task = None
-    ctx.settings.file_location_binding.file_location_cleanup_enabled = True
-    ctx.settings.file_location_binding.file_location_cleanup_interval_hours = 24
-    await start_background_tasks(ctx)
-    assert ctx._file_location_cleanup_task is not None
-
-
-@pytest.mark.asyncio
-async def test_start_background_tasks_skips_file_location_cleanup_when_disabled() -> None:
-    """When file_location_cleanup_enabled is False, no cleanup task is created."""
-    from unittest.mock import MagicMock
-
-    from team_memory.bootstrap import start_background_tasks
-
-    ctx = MagicMock()
-    ctx.embedding_queue = None
-    ctx._stale_scanner_task = None
-    ctx._file_location_cleanup_task = None
-    ctx.settings.file_location_binding.file_location_cleanup_enabled = False
-    await start_background_tasks(ctx)
-    assert ctx._file_location_cleanup_task is None
 
 
 def test_configure_logging_adds_queue_handler_when_file_enabled(tmp_path: str) -> None:

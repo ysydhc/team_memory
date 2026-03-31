@@ -12,12 +12,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from team_memory.auth.provider import ApiKeyAuth
+from team_memory.config import UploadsConfig
+from team_memory.services.archive import ArchiveUploadError
 from team_memory.web import app as web_module
 from team_memory.web.app import app
 
 # ============================================================
 # Fixtures
 # ============================================================
+
 
 @pytest.fixture(autouse=True)
 def setup_app():
@@ -65,17 +68,6 @@ def setup_app():
         cross_encoder=MagicMock(model_name="", device="cpu", top_k=10),
         jina=MagicMock(model="", top_k=10, api_key=""),
     )
-    web_module._settings.pageindex_lite = MagicMock(
-        enabled=True,
-        only_long_docs=True,
-        min_doc_chars=800,
-        max_tree_depth=4,
-        max_nodes_per_doc=40,
-        max_node_chars=1200,
-        tree_weight=0.15,
-        min_node_score=0.01,
-        include_matched_nodes=True,
-    )
     web_module._settings.installable_catalog = MagicMock(
         sources=["local"],
         local_base_dir=".debug/knowledge-pack",
@@ -98,36 +90,70 @@ def setup_app():
         log_file_max_bytes=10 * 1024 * 1024,
         log_file_backup_count=5,
     )
+    web_module._settings.uploads = UploadsConfig()
 
     mock_service = MagicMock()
     mock_service.search = AsyncMock(return_value=[])
-    mock_service.save = AsyncMock(return_value={
-        "id": str(uuid.uuid4()),
-        "title": "Test",
-        "created_at": "2026-01-01T00:00:00+00:00",
-    })
+    mock_service.save = AsyncMock(
+        return_value={
+            "id": str(uuid.uuid4()),
+            "title": "Test",
+            "created_at": "2026-01-01T00:00:00+00:00",
+        }
+    )
     mock_service.feedback = AsyncMock(return_value=True)
-    mock_service.update = AsyncMock(return_value={
-        "id": str(uuid.uuid4()),
-        "title": "Updated",
-        "solution": "Updated solution",
-        "tags": ["test"],
-    })
+    mock_service.update = AsyncMock(
+        return_value={
+            "id": str(uuid.uuid4()),
+            "title": "Updated",
+            "solution": "Updated solution",
+            "tags": ["test"],
+        }
+    )
     mock_service.get_recent = AsyncMock(return_value=[])
-    mock_service.get_stats = AsyncMock(return_value={
-        "total_experiences": 5,
-        "tag_distribution": {"python": 3, "docker": 2},
-        "recent_7days": 2,
-    })
+    mock_service.get_stats = AsyncMock(
+        return_value={
+            "total_experiences": 5,
+            "tag_distribution": {"python": 3, "docker": 2},
+            "recent_7days": 2,
+        }
+    )
     mock_service.soft_delete = AsyncMock(return_value=True)
     mock_service.restore = AsyncMock(return_value=True)
-    mock_service.get_query_logs = AsyncMock(return_value=[])
-    mock_service.get_query_stats = AsyncMock(return_value={
-        "total_queries": 0,
-        "recent_7days": 0,
-        "search_type_distribution": {},
-    })
+    mock_service.invalidate_search_cache = AsyncMock(return_value=None)
+    mock_service.find_duplicate_pairs = AsyncMock(
+        return_value={
+            "pairs": [],
+            "threshold": 0.85,
+            "limit": 50,
+            "project": "default",
+        }
+    )
+    mock_service.reembed_group_parent_vectors = AsyncMock(
+        return_value={
+            "updated": 0,
+            "errors": 0,
+            "total_groups": 0,
+            "project": "default",
+        }
+    )
     web_module._service = mock_service
+
+    mock_archive_svc = MagicMock()
+    mock_archive_svc.list_archives = AsyncMock(return_value=([], 0))
+    mock_archive_svc.get_archive = AsyncMock(return_value=None)
+    mock_archive_svc.upload_archive_attachment = AsyncMock(
+        return_value={
+            "id": str(uuid.uuid4()),
+            "archive_id": str(uuid.uuid4()),
+            "kind": "file",
+            "path": "x/y",
+            "download_api_path": "/api/v1/archives/x/attachments/y/file",
+        }
+    )
+    mock_archive_svc.read_archive_attachment_file = AsyncMock(return_value=None)
+    mock_archive_svc.list_upload_failures = AsyncMock(return_value=[])
+    mock_archive_svc.mark_upload_failure_resolved = AsyncMock(return_value=False)
 
     # Patch bootstrap so lifespan can complete without real DB/embedding;
     # routes are registered inside lifespan, so tests would get 404 without this.
@@ -135,10 +161,13 @@ def setup_app():
     mock_ctx.settings = web_module._settings
     mock_ctx.service = mock_service
     mock_ctx.auth = web_module._auth
-    with patch("team_memory.web.app.bootstrap", return_value=mock_ctx), patch(
-        "team_memory.web.app.start_background_tasks", new_callable=AsyncMock
-    ), patch(
-        "team_memory.web.app.stop_background_tasks", new_callable=AsyncMock
+    mock_ctx.archive_service = mock_archive_svc
+    with (
+        patch("team_memory.web.app.bootstrap", return_value=mock_ctx),
+        patch("team_memory.bootstrap.get_context", return_value=mock_ctx),
+        patch("team_memory.web.routes.archives.get_context", return_value=mock_ctx),
+        patch("team_memory.web.app.start_background_tasks", new_callable=AsyncMock),
+        patch("team_memory.web.app.stop_background_tasks", new_callable=AsyncMock),
     ):
         yield mock_service
 
@@ -168,6 +197,7 @@ def member_headers():
 # ============================================================
 # Auth Tests
 # ============================================================
+
 
 class TestAuth:
     def test_login_success(self, client):
@@ -304,8 +334,9 @@ class TestAuth:
             return cm
 
         db_auth = TestDbApiKeyAuth(db_url="sqlite+aiosqlite:///:memory:", keys={})
-        with patch("team_memory.web.routes.auth.app_module._auth", db_auth), patch(
-            "team_memory.web.routes.auth.get_session", side_effect=mock_get_session
+        with (
+            patch("team_memory.web.routes.auth.app_module._auth", db_auth),
+            patch("team_memory.web.routes.auth.get_session", side_effect=mock_get_session),
         ):
             resp = client.post(
                 "/api/v1/auth/admin/reset-password",
@@ -326,7 +357,7 @@ class TestAuth:
         assert resp.status_code == 422
 
     def test_change_password_validation_empty_old_password(self, client, auth_headers):
-        """PUT /auth/password with empty old_password returns 422."""
+        """PUT /auth/password with empty old_password returns 400."""
         resp = client.put(
             "/api/v1/auth/password",
             headers=auth_headers,
@@ -335,26 +366,27 @@ class TestAuth:
                 "new_password": "newpass123",
             },
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 400
 
 
 # ============================================================
 # Experience CRUD Tests
 # ============================================================
 
+
 class TestExperienceList:
     def test_list_anonymous_access(self, client):
         """List experiences supports anonymous access (no auth required)."""
-        with patch("team_memory.web.app.get_session") as mock_gs:
+        with patch("team_memory.web.routes.experiences.app_module.get_session") as mock_gs:
             mock_sess = AsyncMock()
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch("team_memory.web.app.ExperienceRepository") as MockRepo:
+            with patch("team_memory.storage.repository.ExperienceRepository") as mock_repo_cls:
                 mock_repo = MagicMock()
                 mock_repo.count = AsyncMock(return_value=0)
                 mock_repo.list_recent = AsyncMock(return_value=[])
-                MockRepo.return_value = mock_repo
+                mock_repo_cls.return_value = mock_repo
 
                 resp = client.get("/api/v1/experiences")
                 assert resp.status_code == 200
@@ -362,16 +394,16 @@ class TestExperienceList:
                 assert "experiences" in data
 
     def test_list_experiences(self, client, auth_headers):
-        with patch("team_memory.web.app.get_session") as mock_gs:
+        with patch("team_memory.web.routes.experiences.app_module.get_session") as mock_gs:
             mock_sess = AsyncMock()
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch("team_memory.web.app.ExperienceRepository") as MockRepo:
+            with patch("team_memory.storage.repository.ExperienceRepository") as mock_repo_cls:
                 mock_repo = MagicMock()
                 mock_repo.count = AsyncMock(return_value=2)
                 mock_repo.list_recent = AsyncMock(return_value=[])
-                MockRepo.return_value = mock_repo
+                mock_repo_cls.return_value = mock_repo
 
                 resp = client.get("/api/v1/experiences", headers=auth_headers)
                 assert resp.status_code == 200
@@ -383,7 +415,9 @@ class TestExperienceList:
 
 class TestCreateExperience:
     def test_create_requires_auth(self, client):
-        resp = client.post("/api/v1/experiences", json={"title": "t", "problem": "p", "solution": "s"})
+        resp = client.post(
+            "/api/v1/experiences", json={"title": "t", "problem": "p", "solution": "s"}
+        )
         assert resp.status_code == 401
 
     def test_create_experience(self, client, auth_headers, setup_app):
@@ -410,8 +444,8 @@ class TestCreateExperience:
             assert kwargs["created_by"] == "test_admin"
             assert kwargs["source"] == "web"
 
-    def test_create_experience_with_file_locations(self, client, auth_headers, setup_app):
-        """Create experience with file_locations; service.save receives file_locations."""
+    def test_create_experience_with_group_key(self, client, auth_headers, setup_app):
+        """Create experience with group_key; service.save receives group_key."""
         with patch("team_memory.web.app.get_session") as mock_gs:
             mock_sess = AsyncMock()
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
@@ -421,13 +455,10 @@ class TestCreateExperience:
                 "/api/v1/experiences",
                 headers=auth_headers,
                 json={
-                    "title": "Location-bound experience",
+                    "title": "Grouped experience",
                     "problem": "Problem",
                     "solution": "Solution",
-                    "file_locations": [
-                        {"path": "src/foo.py", "start_line": 1, "end_line": 1},
-                        {"path": "src/bar.js", "start_line": 10, "end_line": 20},
-                    ],
+                    "group_key": "sprint-1",
                 },
             )
             assert resp.status_code == 200
@@ -435,10 +466,7 @@ class TestCreateExperience:
 
             setup_app.save.assert_called_once()
             kwargs = setup_app.save.call_args.kwargs
-            assert kwargs.get("file_locations") == [
-                {"path": "src/foo.py", "start_line": 1, "end_line": 1},
-                {"path": "src/bar.js", "start_line": 10, "end_line": 20},
-            ]
+            assert kwargs.get("group_key") == "sprint-1"
 
 
 class TestDeleteExperience:
@@ -460,15 +488,15 @@ class TestDeleteExperience:
 
     def test_hard_delete(self, client, auth_headers):
         """Hard delete with ?hard=true."""
-        with patch("team_memory.web.app.get_session") as mock_gs:
+        with patch("team_memory.web.routes.experiences.app_module.get_session") as mock_gs:
             mock_sess = AsyncMock()
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch("team_memory.web.app.ExperienceRepository") as MockRepo:
+            with patch("team_memory.storage.repository.ExperienceRepository") as mock_repo_cls:
                 mock_repo = MagicMock()
                 mock_repo.delete = AsyncMock(return_value=True)
-                MockRepo.return_value = mock_repo
+                mock_repo_cls.return_value = mock_repo
 
                 resp = client.delete(
                     f"/api/v1/experiences/{uuid.uuid4()}?hard=true",
@@ -491,6 +519,7 @@ class TestDeleteExperience:
 # Search Tests
 # ============================================================
 
+
 class TestSearch:
     def test_search_anonymous_access(self, client, setup_app):
         """Search supports anonymous access."""
@@ -505,9 +534,9 @@ class TestSearch:
             assert "results" in data
 
     def test_search(self, client, auth_headers, setup_app):
-        setup_app.search = AsyncMock(return_value=[
-            {"id": str(uuid.uuid4()), "title": "Result", "similarity": 0.85}
-        ])
+        setup_app.search = AsyncMock(
+            return_value=[{"id": str(uuid.uuid4()), "title": "Result", "similarity": 0.85}]
+        )
 
         with patch("team_memory.web.app.get_session") as mock_gs:
             mock_sess = AsyncMock()
@@ -523,136 +552,6 @@ class TestSearch:
             data = resp.json()
             assert len(data["results"]) == 1
             assert data["results"][0]["title"] == "Result"
-
-
-class TestPageIndexConfig:
-    def test_get_pageindex_config(self, client, auth_headers):
-        resp = client.get("/api/v1/config/pageindex-lite", headers=auth_headers)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["enabled"] is True
-        assert "tree_weight" in data
-
-    def test_update_pageindex_config_admin(self, client, auth_headers):
-        resp = client.put(
-            "/api/v1/config/pageindex-lite",
-            headers=auth_headers,
-            json={
-                "enabled": True,
-                "only_long_docs": True,
-                "min_doc_chars": 1000,
-                "max_tree_depth": 3,
-                "max_nodes_per_doc": 30,
-                "max_node_chars": 1000,
-                "tree_weight": 0.2,
-                "min_node_score": 0.02,
-                "include_matched_nodes": True,
-            },
-        )
-        assert resp.status_code == 200
-        assert resp.json()["config"]["tree_weight"] == 0.2
-
-
-class TestLoggingConfig:
-    """Logging config hot reload API."""
-
-    def test_get_logging_config(self, client, auth_headers):
-        resp = client.get("/api/v1/config/logging", headers=auth_headers)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "log_io_enabled" in data
-        assert "log_io_detail" in data
-        assert data["log_io_detail"] == "mcp"
-        assert data["log_io_truncate"] == 300
-        assert "log_file_path" in data
-
-    def test_get_logging_config_requires_auth(self, client):
-        resp = client.get("/api/v1/config/logging")
-        assert resp.status_code in (401, 403)
-
-    def test_update_logging_config_admin(self, client, auth_headers):
-        resp = client.put(
-            "/api/v1/config/logging",
-            headers=auth_headers,
-            json={
-                "log_io_enabled": True,
-                "log_io_detail": "service",
-                "log_io_truncate": 500,
-            },
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["message"] == "Logging config updated (hot reload)"
-        assert data["config"]["log_io_enabled"] is True
-        assert data["config"]["log_io_detail"] == "service"
-        assert data["config"]["log_io_truncate"] == 500
-
-    def test_update_logging_config_invalid_detail(self, client, auth_headers):
-        resp = client.put(
-            "/api/v1/config/logging",
-            headers=auth_headers,
-            json={"log_io_detail": "invalid"},
-        )
-        assert resp.status_code == 422
-
-
-class TestInstallables:
-    def test_list_installables(self, client, auth_headers):
-        mock_catalog = MagicMock()
-        item = MagicMock()
-        item.model_dump.return_value = {
-            "id": "rule.demo",
-            "type": "rule",
-            "name": "demo",
-            "version": "1.0.0",
-            "source": "local",
-        }
-        mock_catalog.list_items = AsyncMock(return_value=[item])
-        with patch("team_memory.web.app._get_catalog_service", return_value=mock_catalog):
-            resp = client.get("/api/v1/installables", headers=auth_headers)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["total"] == 1
-        assert data["items"][0]["id"] == "rule.demo"
-
-    def test_preview_installable(self, client, auth_headers):
-        mock_catalog = MagicMock()
-        mock_catalog.preview = AsyncMock(
-            return_value={"item": {"id": "rule.demo"}, "content": "abc", "truncated": False}
-        )
-        with patch("team_memory.web.app._get_catalog_service", return_value=mock_catalog):
-            resp = client.get(
-                "/api/v1/installables/preview?id=rule.demo&source=local",
-                headers=auth_headers,
-            )
-        assert resp.status_code == 200
-        assert resp.json()["content"] == "abc"
-
-    def test_install_requires_admin(self, client, member_headers):
-        resp = client.post(
-            "/api/v1/installables/install",
-            headers=member_headers,
-            json={"id": "rule.demo", "source": "local"},
-        )
-        assert resp.status_code == 403
-
-    def test_install_success(self, client, auth_headers):
-        mock_catalog = MagicMock()
-        mock_catalog.install = AsyncMock(
-            return_value={
-                "installed": True,
-                "item": {"id": "rule.demo"},
-                "target_path": ".cursor/rules/demo.mdc",
-            }
-        )
-        with patch("team_memory.web.app._get_catalog_service", return_value=mock_catalog):
-            resp = client.post(
-                "/api/v1/installables/install",
-                headers=auth_headers,
-                json={"id": "rule.demo", "source": "local"},
-            )
-        assert resp.status_code == 200
-        assert resp.json()["installed"] is True
 
 
 class TestProjectParam:
@@ -684,38 +583,11 @@ class TestProjectParam:
         assert resp.status_code == 200
         assert setup_app.save.call_args.kwargs["project"] == "proj-x"
 
-# ============================================================
-# Stats Tests
-# ============================================================
-
-class TestStats:
-    def test_stats_anonymous_access(self, client, setup_app):
-        """Stats supports anonymous access."""
-        with patch("team_memory.web.app.get_session") as mock_gs:
-            mock_sess = AsyncMock()
-            mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
-            mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            resp = client.get("/api/v1/stats")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["total_experiences"] == 5
-
-    def test_stats_with_auth(self, client, auth_headers, setup_app):
-        with patch("team_memory.web.app.get_session") as mock_gs:
-            mock_sess = AsyncMock()
-            mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
-            mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            resp = client.get("/api/v1/stats", headers=auth_headers)
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["total_experiences"] == 5
-
 
 # ============================================================
 # Feedback Tests
 # ============================================================
+
 
 class TestFeedback:
     def test_feedback_requires_auth(self, client):
@@ -756,6 +628,7 @@ class TestFeedback:
 # Review Tests
 # ============================================================
 
+
 class TestReviewRemoved:
     """Review routes have been removed; verify they return 404/405."""
 
@@ -775,6 +648,7 @@ class TestReviewRemoved:
 # ============================================================
 # Restore Tests
 # ============================================================
+
 
 class TestRestore:
     def test_restore_requires_auth(self, client):
@@ -796,352 +670,13 @@ class TestRestore:
 
 
 # ============================================================
-# Query Logs Tests
-# ============================================================
-
-class TestQueryLogs:
-    def test_query_logs_requires_auth(self, client):
-        resp = client.get("/api/v1/query-logs")
-        assert resp.status_code == 401
-
-    def test_query_logs(self, client, auth_headers, setup_app):
-        with patch("team_memory.web.app.get_session") as mock_gs:
-            mock_sess = AsyncMock()
-            mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
-            mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            resp = client.get("/api/v1/query-logs", headers=auth_headers)
-            assert resp.status_code == 200
-            assert "logs" in resp.json()
-
-    def test_query_stats_requires_auth(self, client):
-        resp = client.get("/api/v1/query-stats")
-        assert resp.status_code == 401
-
-    def test_query_stats(self, client, auth_headers, setup_app):
-        with patch("team_memory.web.app.get_session") as mock_gs:
-            mock_sess = AsyncMock()
-            mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
-            mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            resp = client.get("/api/v1/query-stats", headers=auth_headers)
-            assert resp.status_code == 200
-            data = resp.json()
-            assert "total_queries" in data
-
-
-# ============================================================
-# Parse Document Tests
-# ============================================================
-
-class TestParseDocument:
-    def test_parse_requires_auth(self, client):
-        resp = client.post("/api/v1/experiences/parse-document", json={"content": "some doc"})
-        assert resp.status_code == 401
-
-    def test_parse_empty_content(self, client, auth_headers):
-        resp = client.post(
-            "/api/v1/experiences/parse-document",
-            headers=auth_headers,
-            json={"content": "   "},
-        )
-        assert resp.status_code == 400
-        assert "empty" in resp.json()["detail"].lower()
-
-    def test_parse_success(self, client, auth_headers):
-        """Test successful document parsing with mocked llm_parser."""
-        parsed_result = {
-            "title": "Docker端口冲突解决方案",
-            "problem": "在使用Docker部署FastAPI时，端口8000被占用导致容器启动失败",
-            "solution": "通过修改docker-compose.yml中的端口映射解决",
-            "tags": ["docker", "fastapi", "devops"],
-            "language": "python",
-            "framework": "fastapi",
-            "code_snippets": "ports:\n  - '8001:8000'"
-        }
-
-        with patch("team_memory.services.llm_parser.parse_content", new_callable=AsyncMock, return_value=parsed_result):
-            resp = client.post(
-                "/api/v1/experiences/parse-document",
-                headers=auth_headers,
-                json={"content": "# Docker端口冲突\n部署FastAPI时8000端口被占用..."},
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["title"] == "Docker端口冲突解决方案"
-            assert "docker" in data["tags"]
-            assert data["language"] == "python"
-            assert data["framework"] == "fastapi"
-
-    def test_parse_handles_markdown_fenced_json(self, client, auth_headers):
-        """Test that the endpoint handles LLM results correctly."""
-        parsed_result = {
-            "title": "Test",
-            "problem": "Test problem",
-            "solution": "Test solution",
-            "tags": ["test"],
-            "language": None,
-            "framework": None,
-            "code_snippets": None,
-        }
-
-        with patch("team_memory.services.llm_parser.parse_content", new_callable=AsyncMock, return_value=parsed_result):
-            resp = client.post(
-                "/api/v1/experiences/parse-document",
-                headers=auth_headers,
-                json={"content": "some document text"},
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["title"] == "Test"
-            assert data["tags"] == ["test"]
-
-    def test_parse_ollama_unavailable(self, client, auth_headers):
-        """Test error when Ollama is not running."""
-        from team_memory.services.llm_parser import LLMParseError
-
-        with patch("team_memory.services.llm_parser.parse_content", new_callable=AsyncMock, side_effect=LLMParseError("Cannot connect to Ollama")):
-            resp = client.post(
-                "/api/v1/experiences/parse-document",
-                headers=auth_headers,
-                json={"content": "some doc"},
-            )
-            assert resp.status_code == 503
-
-
-# ============================================================
-# Personal Memory & User Expansion (Task 6)
-# ============================================================
-
-
-class TestPersonalMemoryAPI:
-    """Personal memory list/get/put/delete require auth."""
-
-    def test_list_requires_auth(self, client):
-        resp = client.get("/api/v1/personal-memory/list")
-        assert resp.status_code == 401
-
-    def test_list_with_auth(self, client, auth_headers):
-        with patch(
-            "team_memory.web.routes.personal_memory.get_context"
-        ) as mock_ctx, patch(
-            "team_memory.storage.database.get_session"
-        ) as mock_session, patch(
-            "team_memory.services.personal_memory.PersonalMemoryRepository"
-        ) as mock_repo_cls:
-            mock_ctx.return_value.embedding = MagicMock()
-            mock_ctx.return_value.embedding.encode_single = AsyncMock(
-                return_value=[0.1] * 768
-            )
-            mock_ctx.return_value.db_url = "sqlite:///"
-            mock_session.return_value.__aenter__ = AsyncMock(
-                return_value=MagicMock()
-            )
-            mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_repo = MagicMock()
-            mock_repo.list_by_user = AsyncMock(return_value=[])
-            mock_repo_cls.return_value = mock_repo
-            resp = client.get(
-                "/api/v1/personal-memory/list",
-                headers=auth_headers,
-            )
-        assert resp.status_code == 200
-        assert "items" in resp.json()
-
-
-class TestUserExpansionAPI:
-    """User expansion GET works for anonymous (empty); PUT requires auth."""
-
-    def test_get_anonymous_returns_empty(self, client):
-        resp = client.get("/api/v1/user-expansion-config")
-        assert resp.status_code == 200
-        assert resp.json()["tag_synonyms"] == {}
-
-    def test_put_requires_auth(self, client):
-        resp = client.put(
-            "/api/v1/user-expansion-config",
-            json={"tag_synonyms": {"PG": "PostgreSQL"}},
-        )
-        assert resp.status_code == 401
-
-
-# ============================================================
-# Parse URL Tests
-# ============================================================
-
-class TestParseURL:
-    def test_parse_url_requires_auth(self, client):
-        resp = client.post("/api/v1/experiences/parse-url", json={"url": "https://example.com"})
-        assert resp.status_code == 401
-
-    def test_parse_url_empty(self, client, auth_headers):
-        resp = client.post(
-            "/api/v1/experiences/parse-url",
-            headers=auth_headers,
-            json={"url": "  "},
-        )
-        assert resp.status_code == 400
-        assert "empty" in resp.json()["detail"].lower()
-
-    def test_parse_url_invalid_scheme(self, client, auth_headers):
-        resp = client.post(
-            "/api/v1/experiences/parse-url",
-            headers=auth_headers,
-            json={"url": "ftp://example.com/file"},
-        )
-        assert resp.status_code == 400
-        assert "http" in resp.json()["detail"].lower()
-
-    def test_parse_url_success_html(self, client, auth_headers):
-        """Test URL parsing with an HTML page."""
-        html_content = """
-        <html><head><title>Fix Docker Issue</title></head>
-        <body>
-        <h1>Docker Port Conflict</h1>
-        <p>Port 8000 was already in use when deploying FastAPI.</p>
-        <h2>Solution</h2>
-        <p>Changed port mapping in docker-compose.yml to 8001:8000.</p>
-        </body></html>
-        """
-
-        parsed_result = {
-            "title": "Docker端口冲突",
-            "problem": "部署FastAPI时8000端口被占用",
-            "solution": "修改docker-compose端口映射",
-            "tags": ["docker", "fastapi"],
-            "language": None,
-            "framework": "fastapi",
-            "code_snippets": None,
-        }
-
-        # Mock URL fetch response
-        mock_url_resp = MagicMock()
-        mock_url_resp.status_code = 200
-        mock_url_resp.raise_for_status = MagicMock()
-        mock_url_resp.headers = {"content-type": "text/html; charset=utf-8"}
-        mock_url_resp.text = html_content
-
-        with patch("team_memory.web.app.httpx") as mock_httpx, \
-             patch("team_memory.services.llm_parser.parse_content", new_callable=AsyncMock, return_value=parsed_result):
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(return_value=mock_url_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_httpx.AsyncClient.return_value = mock_client
-            mock_httpx.ConnectError = ConnectionError
-            mock_httpx.HTTPStatusError = Exception
-            mock_httpx.TimeoutException = TimeoutError
-            mock_httpx.InvalidURL = ValueError
-
-            resp = client.post(
-                "/api/v1/experiences/parse-url",
-                headers=auth_headers,
-                json={"url": "https://example.com/blog/docker-fix"},
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["title"] == "Docker端口冲突"
-            assert "docker" in data["tags"]
-
-    def test_parse_url_success_markdown(self, client, auth_headers):
-        """Test URL parsing with a markdown file."""
-        md_content = "# Fix\n\n## Problem\nSomething broke.\n\n## Solution\nFixed it."
-
-        parsed_result = {
-            "title": "Fix",
-            "problem": "Something broke.",
-            "solution": "Fixed it.",
-            "tags": ["fix"],
-            "language": None,
-            "framework": None,
-            "code_snippets": None,
-        }
-
-        mock_url_resp = MagicMock()
-        mock_url_resp.status_code = 200
-        mock_url_resp.raise_for_status = MagicMock()
-        mock_url_resp.headers = {"content-type": "text/markdown"}
-        mock_url_resp.text = md_content
-
-        with patch("team_memory.web.app.httpx") as mock_httpx, \
-             patch("team_memory.services.llm_parser.parse_content", new_callable=AsyncMock, return_value=parsed_result):
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(return_value=mock_url_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_httpx.AsyncClient.return_value = mock_client
-            mock_httpx.ConnectError = ConnectionError
-            mock_httpx.HTTPStatusError = Exception
-            mock_httpx.TimeoutException = TimeoutError
-            mock_httpx.InvalidURL = ValueError
-
-            resp = client.post(
-                "/api/v1/experiences/parse-url",
-                headers=auth_headers,
-                json={"url": "https://example.com/doc.md"},
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["title"] == "Fix"
-
-    def test_parse_url_connect_error(self, client, auth_headers):
-        """Test error when URL cannot be reached."""
-        import httpx as real_httpx
-
-        with patch("team_memory.web.app.httpx") as mock_httpx:
-            mock_httpx.ConnectError = real_httpx.ConnectError
-            mock_httpx.HTTPStatusError = real_httpx.HTTPStatusError
-            mock_httpx.TimeoutException = real_httpx.TimeoutException
-            mock_httpx.InvalidURL = real_httpx.InvalidURL
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(side_effect=real_httpx.ConnectError("Connection refused"))
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_httpx.AsyncClient.return_value = mock_client
-
-            resp = client.post(
-                "/api/v1/experiences/parse-url",
-                headers=auth_headers,
-                json={"url": "https://unreachable.example.com"},
-            )
-            assert resp.status_code == 502
-            assert "connect" in resp.json()["detail"].lower()
-
-    def test_parse_url_empty_content(self, client, auth_headers):
-        """Test error when URL returns empty content."""
-        mock_url_resp = MagicMock()
-        mock_url_resp.status_code = 200
-        mock_url_resp.raise_for_status = MagicMock()
-        mock_url_resp.headers = {"content-type": "text/plain"}
-        mock_url_resp.text = "   "
-
-        with patch("team_memory.web.app.httpx") as mock_httpx:
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(return_value=mock_url_resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_httpx.AsyncClient.return_value = mock_client
-            mock_httpx.ConnectError = ConnectionError
-            mock_httpx.HTTPStatusError = Exception
-            mock_httpx.TimeoutException = TimeoutError
-            mock_httpx.InvalidURL = ValueError
-
-            resp = client.post(
-                "/api/v1/experiences/parse-url",
-                headers=auth_headers,
-                json={"url": "https://example.com/empty"},
-            )
-            assert resp.status_code == 502
-            assert "empty" in resp.json()["detail"].lower()
-
-
-# ============================================================
 # Session Token Encode/Decode (Task 4)
 # ============================================================
 
 
 def test_session_token_encode_decode_roundtrip():
     from team_memory.web.app import _decode_session_token, _encode_session_token
+
     token = _encode_session_token("admin", secret="test-secret")
     assert token.startswith("sess:")
     user = _decode_session_token(token, secret="test-secret")
@@ -1149,8 +684,286 @@ def test_session_token_encode_decode_roundtrip():
 
 
 # ============================================================
+# Runtime config (retrieval / search)
+# ============================================================
+
+
+class TestRuntimeConfig:
+    _RETRIEVAL_JSON = {
+        "max_tokens": None,
+        "max_count": 20,
+        "trim_strategy": "top_k",
+        "top_k_children": 3,
+        "min_avg_rating": 0.0,
+        "rating_weight": 0.0,
+        "summary_model": None,
+    }
+
+    def test_get_retrieval_requires_auth(self, client):
+        resp = client.get("/api/v1/config/retrieval")
+        assert resp.status_code == 401
+
+    def test_get_retrieval_ok(self, client, auth_headers):
+        resp = client.get("/api/v1/config/retrieval", headers=auth_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["max_count"] == 20
+        assert data["trim_strategy"] == "top_k"
+
+    def test_put_retrieval_ok(self, client, auth_headers, setup_app):
+        resp = client.put(
+            "/api/v1/config/retrieval",
+            headers=auth_headers,
+            json={
+                **self._RETRIEVAL_JSON,
+                "max_count": 12,
+                "top_k_children": 5,
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["max_count"] == 12
+        assert resp.json()["top_k_children"] == 5
+        setup_app.invalidate_search_cache.assert_awaited()
+
+    def test_put_retrieval_forbidden_member(self, client, member_headers):
+        resp = client.put(
+            "/api/v1/config/retrieval",
+            headers=member_headers,
+            json=self._RETRIEVAL_JSON,
+        )
+        assert resp.status_code == 403
+
+    def test_get_search_ok(self, client, auth_headers):
+        resp = client.get("/api/v1/config/search", headers=auth_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["mode"] == "hybrid"
+        assert data["rrf_k"] == 60
+
+
+class TestDedupApi:
+    def test_duplicates_requires_auth(self, client):
+        resp = client.get("/api/v1/dedup/pairs")
+        assert resp.status_code == 401
+
+    def test_duplicates_ok(self, client, auth_headers, setup_app):
+        resp = client.get(
+            "/api/v1/dedup/pairs?threshold=0.1&limit=10",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "pairs" in data
+        setup_app.find_duplicate_pairs.assert_awaited_once()
+        call_kw = setup_app.find_duplicate_pairs.call_args.kwargs
+        assert call_kw["threshold"] == 0.1
+        assert call_kw["limit"] == 10
+
+    def test_reembed_forbidden_member(self, client, member_headers):
+        resp = client.post(
+            "/api/v1/dedup/reembed-group-vectors",
+            headers=member_headers,
+        )
+        assert resp.status_code == 403
+
+    def test_reembed_ok(self, client, auth_headers, setup_app):
+        resp = client.post(
+            "/api/v1/dedup/reembed-group-vectors",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        setup_app.reembed_group_parent_vectors.assert_awaited_once()
+
+
+# ============================================================
+# Archives API
+# ============================================================
+
+
+class TestArchivesApi:
+    def test_archives_list_ok_anonymous(self, client):
+        from team_memory.bootstrap import get_context
+
+        get_context().archive_service.list_archives.return_value = ([], 0)
+        resp = client.get("/api/v1/archives")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["items"] == []
+        assert data["total"] == 0
+        get_context().archive_service.list_archives.assert_awaited()
+
+    def test_archives_list_with_auth_viewer(self, client, auth_headers):
+        from team_memory.bootstrap import get_context
+
+        get_context().archive_service.list_archives.return_value = (
+            [
+                {
+                    "id": str(uuid.uuid4()),
+                    "title": "Doc",
+                    "status": "published",
+                    "solution_preview": "x",
+                    "overview_preview": "",
+                    "attachment_count": 0,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "created_by": "u",
+                    "project": "default",
+                },
+            ],
+            1,
+        )
+        resp = client.get("/api/v1/archives", headers=auth_headers)
+        assert resp.status_code == 200
+        kw = get_context().archive_service.list_archives.call_args.kwargs
+        assert kw.get("viewer") == "test_admin"
+
+    def test_archives_detail_not_found(self, client):
+        from team_memory.bootstrap import get_context
+
+        get_context().archive_service.get_archive.return_value = None
+        aid = str(uuid.uuid4())
+        resp = client.get(f"/api/v1/archives/{aid}")
+        assert resp.status_code == 404
+
+    def test_archives_attachment_upload_ok(self, client, auth_headers):
+        from team_memory.bootstrap import get_context
+
+        aid = uuid.uuid4()
+        att_id = uuid.uuid4()
+        get_context().archive_service.upload_archive_attachment = AsyncMock(
+            return_value={
+                "id": str(att_id),
+                "archive_id": str(aid),
+                "kind": "file",
+                "path": f"{aid}/{att_id}.md",
+                "download_api_path": f"/api/v1/archives/{aid}/attachments/{att_id}/file",
+            }
+        )
+        files = {"file": ("note.md", b"# hello", "text/markdown")}
+        data = {"kind": "file", "note": "n1"}
+        resp = client.post(
+            f"/api/v1/archives/{aid}/attachments/upload",
+            files=files,
+            data=data,
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["id"] == str(att_id)
+        assert body["download_api_path"].endswith("/file")
+        get_context().archive_service.upload_archive_attachment.assert_awaited_once()
+
+    def test_archives_attachment_upload_service_error(self, client, auth_headers):
+        from team_memory.bootstrap import get_context
+
+        aid = uuid.uuid4()
+        get_context().archive_service.upload_archive_attachment = AsyncMock(
+            side_effect=ArchiveUploadError(
+                "disabled",
+                "File uploads are disabled",
+                http_status=503,
+            )
+        )
+        files = {"file": ("x.md", b"x", "text/plain")}
+        resp = client.post(
+            f"/api/v1/archives/{aid}/attachments/upload",
+            files=files,
+            headers=auth_headers,
+        )
+        assert resp.status_code == 503
+        assert "disabled" in resp.json().get("detail", "").lower()
+
+    def test_archives_attachment_download_ok(self, client, auth_headers, tmp_path):
+        from pathlib import Path
+
+        from team_memory.bootstrap import get_context
+
+        aid = uuid.uuid4()
+        att_id = uuid.uuid4()
+        fpath = tmp_path / "blob.md"
+        fpath.write_bytes(b"attachment-bytes")
+        get_context().archive_service.read_archive_attachment_file = AsyncMock(
+            return_value=(fpath, "blob.md")
+        )
+        resp = client.get(
+            f"/api/v1/archives/{aid}/attachments/{att_id}/file",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.content == b"attachment-bytes"
+
+    def test_archives_upload_failures_not_found(self, client, auth_headers):
+        from team_memory.bootstrap import get_context
+
+        aid = uuid.uuid4()
+        get_context().archive_service.get_archive.return_value = None
+        resp = client.get(
+            f"/api/v1/archives/{aid}/upload-failures",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 404
+
+    def test_archives_upload_failures_ok(self, client, auth_headers):
+        from team_memory.bootstrap import get_context
+
+        aid = uuid.uuid4()
+        fid = uuid.uuid4()
+        get_context().archive_service.get_archive.return_value = {"id": str(aid)}
+        get_context().archive_service.list_upload_failures = AsyncMock(
+            return_value=[
+                {
+                    "id": str(fid),
+                    "archive_id": str(aid),
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "created_by": "u",
+                    "source": "web",
+                    "error_code": "413",
+                    "error_message": "too big",
+                    "client_filename_hint": "big.pdf",
+                    "resolved_at": None,
+                },
+            ]
+        )
+        resp = client.get(
+            f"/api/v1/archives/{aid}/upload-failures",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        items = resp.json().get("items", [])
+        assert len(items) == 1
+        assert items[0]["error_code"] == "413"
+
+    def test_archives_upload_failure_resolve_ok(self, client, auth_headers):
+        from team_memory.bootstrap import get_context
+
+        aid = uuid.uuid4()
+        fid = uuid.uuid4()
+        get_context().archive_service.mark_upload_failure_resolved = AsyncMock(return_value=True)
+        resp = client.patch(
+            f"/api/v1/archives/{aid}/upload-failures/{fid}",
+            json={"resolved": True},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json().get("ok") is True
+
+    def test_archives_upload_failure_resolve_not_found(self, client, auth_headers):
+        from team_memory.bootstrap import get_context
+
+        aid = uuid.uuid4()
+        fid = uuid.uuid4()
+        get_context().archive_service.mark_upload_failure_resolved = AsyncMock(return_value=False)
+        resp = client.patch(
+            f"/api/v1/archives/{aid}/upload-failures/{fid}",
+            json={"resolved": True},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 404
+
+
+# ============================================================
 # SPA Tests
 # ============================================================
+
 
 class TestSPA:
     def test_index_html_served(self, client):
@@ -1158,18 +971,3 @@ class TestSPA:
         assert resp.status_code == 200
         assert "TeamMemory" in resp.text
         assert "<!DOCTYPE html>" in resp.text
-
-    def test_workflow_viewer_page_and_js(self, client):
-        """Workflow viewer: nav entry, page container, and no duplicate collectFilesFromEntry in workflow-viewer.js."""
-        resp = client.get("/")
-        assert resp.status_code == 200
-        assert "workflow-viewer" in resp.text
-        assert "工作流可视化" in resp.text
-        # Verify workflow-viewer.js has no duplicate collectFilesFromEntry (causes "already declared" error)
-        import os
-        wv_path = os.path.join(os.path.dirname(__file__), "..", "src", "team_memory", "web", "static", "js", "workflow-viewer.js")
-        wv_path = os.path.normpath(wv_path)
-        assert os.path.exists(wv_path), "workflow-viewer.js not found"
-        content = open(wv_path, encoding="utf-8").read()
-        count = content.count("async function collectFilesFromEntry")
-        assert count == 1, f"collectFilesFromEntry declared {count} times (expected 1)"

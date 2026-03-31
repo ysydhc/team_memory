@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Backfill fts_title_text, fts_desc_text, fts_solution_text for FTS scheme C.
 
+**Pre-MVP schema only:** those columns were dropped in ``002_mvp_cleanup``; MVP
+uses ``fts`` only.
+
 Populates jieba-tokenized columns for existing experiences. The DB trigger
 will then update the fts tsvector with setweight (title A, desc B, solution C).
 

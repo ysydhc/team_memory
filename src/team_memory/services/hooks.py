@@ -115,7 +115,13 @@ class HookRegistry:
 
 
 class UsageTrackingHandler:
-    """Tracks tool usage by writing to tool_usage_logs table."""
+    """Hook slot for tool-call timing (MVP: no persistence).
+
+    The pre-MVP ``tool_usage_logs`` table was removed. This handler stays
+    registered so callers can rely on ``init_hook_registry(session_factory=...)``
+    without importing removed ORM models; it does not write to the database.
+    Re-introduce persistence only with a migration + model.
+    """
 
     def __init__(
         self,
@@ -124,51 +130,12 @@ class UsageTrackingHandler:
     ) -> None:
         self._session_factory = session_factory
         self._project = project
-        self._pending: dict[str, HookContext] = {}
 
     @property
     def supported_events(self) -> list[HookEvent]:
         return [HookEvent.PRE_TOOL_CALL, HookEvent.POST_TOOL_CALL]
 
     async def handle(self, context: HookContext) -> list[Observation] | None:
-        if context.event == HookEvent.PRE_TOOL_CALL:
-            key = f"{context.session_id}:{context.tool_name}"
-            self._pending[key] = context
-            return None
-
-        if context.event == HookEvent.POST_TOOL_CALL:
-            key = f"{context.session_id}:{context.tool_name}"
-            pre_ctx = self._pending.pop(key, None)
-            duration_ms = None
-            if pre_ctx:
-                delta = context.timestamp - pre_ctx.timestamp
-                duration_ms = int(delta.total_seconds() * 1000)
-
-            success = context.metadata.get("success", True)
-            error_msg = context.metadata.get("error_message")
-
-            try:
-                from team_memory.storage.models import ToolUsageLog
-
-                async with self._session_factory() as session:
-                    log = ToolUsageLog(
-                        tool_name=context.tool_name or "unknown",
-                        tool_type="mcp",
-                        user=context.user or "anonymous",
-                        project=context.project or self._project,
-                        duration_ms=duration_ms,
-                        success=success,
-                        error_message=error_msg,
-                        session_id=context.session_id,
-                        metadata_extra=context.metadata,
-                        api_key_name=context.api_key_name,
-                    )
-                    session.add(log)
-                    await session.commit()
-            except Exception:
-                pass  # Best-effort tracking
-            return None
-
         return None
 
 

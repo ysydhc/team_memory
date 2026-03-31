@@ -26,7 +26,7 @@
         },
         {
           "name": "TEAM_MEMORY_CONFIG",
-          "description": "Path to config.yaml (optional)",
+          "description": "Path to config YAML (optional); default config.development.yaml",
           "isRequired": false,
           "format": "string",
           "isSecret": false
