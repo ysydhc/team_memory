@@ -1,0 +1,19 @@
+# Doc-harness：项目层配置。维护约定与 rule_id 说明内嵌于 doc-health skill（.claude / .cursor）。
+version: 1
+project_id: team_memory
+
+design_docs:
+  root: docs/design-docs
+  index: docs/design-docs/README.md
+
+commands:
+  doc_check: make harness-doc-check
+
+whitelists:
+  doc_gardening: scripts/doc-gardening-whitelist.txt
+
+sync_reminders:
+  - docs/design-docs/README.md
+  - README.md
+  - docs/架构设计图.md
+  - AGENTS.md
