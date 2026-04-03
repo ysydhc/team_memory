@@ -22,9 +22,9 @@
 ### 2025-03-10 — Task 8 完成
 
 - **动作**：派发 plan-implementer 执行 Task 8
-- **产出**：docs/mcp-patterns.md 更新；make lint/test 通过
+- **产出**：README / MCP 文档更新；make lint/test 通过
 - **Subagent**：task-8 派发 plan-implementer；完成
-- **问题记录**：docs/mcpPatterns.md 不存在，已用 docs/mcp-patterns.md
+- **问题记录**：历史命名 mcp-patterns，现以 README + `docs/design-docs/ops/mcp-server.md` 为准
 
 ### 2025-03-10 — Task 7b 完成
 

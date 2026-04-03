@@ -38,7 +38,7 @@
 | V8 | 经验挂载 | ✅ 通过 | 创建/编辑有 create-architecture-nodes、edit-architecture-nodes；test_create_experience_with_architecture_nodes 通过；节点侧栏可查看关联经验 |
 | V9 | 降级 | ✅ 通过 | bridge_url 空时 context 返回 available:false；架构页显示「未配置或不可用」 |
 
-**文档产出**：README 增加架构可视化入口；docs/getting-started.md 增加架构可视化配置与功能概览；troubleshooting.md 增加「架构页显示未配置」排查步骤。
+**文档产出**：README 增加架构可视化入口与配置说明；troubleshooting.md 增加「架构页显示未配置」排查步骤。
 
 ## 执行日志（按时间倒序，最新在上）
 
@@ -61,7 +61,7 @@
 
 ### 2025-03-10 — T9 文档与验收完成
 
-- **动作**：更新 README、docs/getting-started.md（架构可视化配置、Bridge 启动、npx gitnexus analyze）；troubleshooting.md 增加架构排查；执行 V1～V9 验收并记录
+- **动作**：更新 README（架构可视化配置、Bridge 启动、npx gitnexus analyze）；troubleshooting.md 增加架构排查；执行 V1～V9 验收并记录
 - **产出**：文档更新；execute.md T9 验收表
 - **Subagent**：task-T9 完成（Technical Writer）
 
@@ -69,7 +69,7 @@
 
 ### 2025-03-10 — Plan 开始 + step-0 摸底
 
-- **已加载文档**：HARNESS-SPEC（docs/design-docs/harness/harness-spec.md）、plan.md、code-arch-viz-provider-interface.md
+- **已加载文档**：Harness（.harness/docs/harness-spec.md）、plan.md、code-arch-viz-provider-interface.md
 - **动作**：step-0 摸底；确认 Plan 已加载、execute 已创建；验证 T1/T2 已实现；运行 make harness-check、make test
 - **产出**：harness-check 通过；478 passed；T1/T2 基线确认
 - **下一步**：派发 T4 路由层（Backend Architect）

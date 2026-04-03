@@ -1,7 +1,7 @@
 # 经验文件位置绑定 — 项目完成度与质量总结
 
-> Plan: docs/plans/2025-03-10-experience-file-location-binding.md  
-> 执行记录: docs/exec-plans/executing/experience-file-location-binding/2025-03-10-experience-file-location-binding-execute.md
+> Plan: [1-plan/plan.md](../1-plan/plan.md)  
+> 执行记录: [2-plan/execute.md](../2-plan/execute.md)
 
 ## 需求覆盖
 
@@ -24,7 +24,7 @@
 - **MCP**：tm_save/tm_save_typed 的 file_locations；tm_search/tm_solve 的 current_file_locations
 - **Web**：API schema、创建/更新/详情 file_locations；设置项 location_weight 与文件位置绑定配置；录入与展示 UI
 - **运维**：bootstrap 中 file_location 清理循环与日志
-- **文档**：experience-file-line-binding-and-expiration.md 实现小节、GETTING-STARTED、mcp-patterns 参数说明
+- **文档**：README、MCP 运维文档参数说明（当时另有一份设计稿；现已并入根 README / design-docs）
 - **测试**：test_config、test_repository_file_locations、test_location_fingerprint、test_service、test_server、test_search_pipeline、test_web、test_bootstrap、test_integration（E2E）
 
 ## 测试结果

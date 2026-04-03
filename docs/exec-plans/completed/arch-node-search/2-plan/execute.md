@@ -63,7 +63,7 @@
 
 ### 2025-03-10 — Plan 开始 + step-0 摸底
 
-- **已加载文档**：HARNESS-SPEC（docs/design-docs/harness/harness-spec.md）、project-director-subagent-driven.md、plan（/Users/yeshouyou/.cursor/plans/架构节点搜索功能_8f85648c.plan.md）
+- **已加载文档**：Harness（.harness/docs/harness-spec.md）、project-director-subagent-driven.md、plan（/Users/yeshouyou/.cursor/plans/架构节点搜索功能_8f85648c.plan.md）
 - **动作**：step-0 摸底；创建 execute；运行 make harness-check、make test；修复 harness_ref_verify（code-arch-viz-gitnexus 已移至 completed）
 - **产出**：harness-check 通过；make test 486 passed；execute 已创建
 - **下一步**：派发 Task 1（Bridge GET /search）给 engineering-backend-architect 或 engineering-rapid-prototyper

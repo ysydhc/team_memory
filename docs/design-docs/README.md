@@ -2,6 +2,8 @@
 
 设计文档存放目录。用于架构设计、技术方案、决策记录等。
 
+**Agent / 贡献者请先读**：[../../README.md](../../README.md) · [../../AGENTS.md](../../AGENTS.md)（再按需查阅本目录索引与具体文档）。
+
 ---
 
 ## 路径约定（Markdown 链接）
@@ -22,15 +24,17 @@ Markdown 链接 `[text](path)` 按**相对当前文件**解析。跨目录引用
 
 ## 索引
 
-### harness/ — Harness 规范
+### 架构、Harness 与文档门禁
 
 | 文档 | 说明 |
 |------|------|
-| [harness-spec](harness/harness-spec.md) | 通用 Harness 规范（核心原则、Plan 执行、反馈回路、流程图） |
-| [project-extension](harness/project-extension.md) | team_doc 项目扩展（架构分层、质量门禁、收尾清单、tm 边界） |
-| [doc-maintenance-guide](harness/doc-maintenance-guide.md) | 文档维护规范（第一章）+ 扫描设计（第二章） |
-| [plan-document-structure](harness/plan-document-structure.md) | Plan 文档结构规范（调研/计划/复盘）+ 扫描规则 |
-| [doc-admin-organize](../../.cursor/agents/doc-admin-organize.md) | 文档整理 Agent（按规范实际整理） |
+| [架构设计图.md](../架构设计图.md) | Mermaid 分层与数据流 |
+| `scripts/harness_import_check.py` | **L0～L3** 模块映射（`LAYER_MAP`），与 `make harness-check` 一致 |
+| [AGENTS.md](../../AGENTS.md) | 分层约定、MCP 开发与完成标准 |
+| [.harness/docs/harness-spec.md](../../.harness/docs/harness-spec.md) | 可移植 Harness 框架总览（编排见 `.harness/orchestration/`） |
+| [doc-health skill](../../.claude/skills/doc-health/SKILL.md) | 设计文档维护约定与 rule_id（配合 `doc-harness.project.yaml`） |
+| [doc-admin-organize](../../.cursor/agents/doc-admin-organize.md) | 文档整理 Agent |
+| [doc-harness.project.yaml](../../doc-harness.project.yaml) | 文档门禁项目配置 |
 
 ### backend-architecture/ — 存储与检索架构
 
@@ -70,17 +74,14 @@ Markdown 链接 `[text](path)` 按**相对当前文件**解析。跨目录引用
 | [alembic-multiple-heads-fix](ops/alembic-multiple-heads-fix.md) | Alembic 多 head 修复 |
 | [ci-cd](ops/ci-cd.md) | CI/CD |
 
-### extraction/ — 经验提取
-
-| 文档 | 说明 |
-|------|------|
-| [extraction-build-guide](extraction/extraction-build-guide.md) | 经验提取能力构建、状态文件、触发条件、防抖 |
-
 ### 根级
 
 | 文档 | 说明 |
 |------|------|
 | [logging-format](logging-format.md) | JSON 行日志规范、生产/CI 切换（Phase 4） |
+| [agent-memory-projects-survey](agent-memory-projects-survey.md) | Agent 记忆类产品调研 |
+| [experience-commit-binding-survey](experience-commit-binding-survey.md) | 经验与提交绑定等调研 |
+| [archive-attachment-to-experience](archive-attachment-to-experience.md) | 档案馆与经验关联方案 |
 
 ---
 

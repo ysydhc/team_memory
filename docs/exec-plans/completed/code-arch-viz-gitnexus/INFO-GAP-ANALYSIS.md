@@ -1,6 +1,6 @@
 # code-arch-viz-gitnexus 整理前后信息差分析
 
-> 按 plan-document-structure 的「复盘必需保留清单」逐项对比，量化经验复盘的信息差。
+> 按当时沿用的「复盘必需保留清单」逐项对比，量化经验复盘的信息差（原独立 Plan 结构文档已移除）。
 
 ---
 
@@ -96,7 +96,7 @@
 
 ## 五、结论
 
-1. **结构改进**：1-research/ + 2-plan/ 符合 plan-document-structure 规范，便于 Agent 扫描与维护。
+1. **结构改进**：1-research/ + 2-plan/ 目录布局便于 Agent 扫描与维护。
 2. **内容保留**：5 个根级文件（balanced-solution、provider-interface、operations、integration、data-mapping）完整保留，合并后的 assessment、options 通过引用保留细节。
 3. **确认丢失**：design-brief 的「§5 综合结果（已完成）」整节被删，包括：
    - 三方案产出路径（A/B/C 对应文件链接）

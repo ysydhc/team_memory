@@ -1,6 +1,6 @@
 # Execute：个人记忆 / 用户画像（Supermemory 对齐）
 
-> **计划本体**： [2026-04-01-personal-memory-profile-supermemory-alignment.md](../../../plans/2026-04-01-personal-memory-profile-supermemory-alignment.md)  
+> **计划本体**：[1-plan/plan.md](1-plan/plan.md)  
 > **任务清单（按条验收）**： [tasks.md](./tasks.md)
 
 ## 使用方式
@@ -31,14 +31,14 @@
 | Phase A | 已完成 | 迁移 `004_profile_kind`、ORM、Repository、`build_profile_for_user` |
 | Phase B | 已完成 | `parse_personal_memory`、`_try_extract_*`、`upsert` 按 kind |
 | Phase C | 已完成 | Lite `memory_context` / `include_user_profile`、Web 分组与筛选 |
-| Phase D | 已完成 | Instructions、规则、`supermemory-comparison`、troubleshooting、本 execute 常量 |
+| Phase D | 已完成 | Instructions、规则、troubleshooting（含与 Supermemory 能力对齐的表述）、本 execute 常量 |
 | T-V01 / T-V02 | T-V02 绿 / T-V01 待人测 | `make verify`；§9.3 需人工 dogfood |
 | Phase E | 未开始 | `valid_until` 续包 |
 
 ## 仓库默认 MCP（与画像 Plan 一致）
 
 - **决策记录**：[mcp-lite-default.md](../../../design-docs/ops/mcp-lite-default.md)  
-- **`make mcp`**、**`team-memory`** 默认已切到 **Lite**；完整 `tm_*` 仅 **`make mcp-full` / `team-memory-full`**。
+- **`make mcp`**、**`team-memory`** → **`python -m team_memory.server`**（仅 **`memory_*`**）。
 
 ## 变更记录
 
@@ -49,4 +49,4 @@
 | 2026-03-30 | 链接 **mcp-lite-default**：make / pyproject 默认 Lite |
 | 2026-03-30 | **CHANGELOG.md**；tasks **T-W01**（发版闭环）；mcp-lite-default：**PyPI 清单** + **test_server 时间线** |
 | 2026-03-30 | **执行**：`004_profile_kind`；`build_profile_for_user`；Lite `memory_context` / `memory_recall(include_user_profile)`；解析与语义 upsert 按 kind 隔离 |
-| 2026-03-30 | **Plan 收口**：execute 补充阈值/去重/E4；**p2-backlog.md**；parse_personal_memory 非法 kind 单测；getting-started/security 画像句 |
+| 2026-03-30 | **Plan 收口**：execute 补充阈值/去重/E4；**p2-backlog.md**；parse_personal_memory 非法 kind 单测；README/security 画像句 |

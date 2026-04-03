@@ -111,7 +111,7 @@
 ### 2025-03-10 — Task 12 完成，派发 Task 13
 
 - **动作**：验收 Task 12 回报；更新执行摘要。
-- **产出**：设计文档 experience-file-line-binding-and-expiration.md 实现小节、GETTING-STARTED、mcp-patterns 文件位置绑定参数。
+- **产出**：README、MCP 文档与文件位置绑定参数（独立设计稿已收敛删除）。
 - **验收结论**：Task 12 完成。
 - **下一步**：派发 Task 13（E2E 必做 + lint 修复）。
 - **Subagent**：task-12 完成（plan-implementer）；task-13 派发 plan-implementer（待回报）。
@@ -133,7 +133,7 @@
 
 ### 2025-03-10 — step-0 摸底完成，派发 Task 1
 
-- **已加载文档**：HARNESS-SPEC（`docs/design-docs/harness/harness-spec.md`）、Plan（`docs/plans/2025-03-10-experience-file-location-binding.md`）。
+- **已加载文档**：Harness（`.harness/docs/harness-spec.md`）、Plan（`docs/exec-plans/completed/experience-file-location-binding/1-plan/plan.md`）。
 - **动作**：创建执行记录目录 `docs/exec-plans/executing/experience-file-location-binding/`；执行 step-0 摸底（`make harness-check`）。
 - **产出**：本 execute 文件；摸底结果：`harness-check` 当前存在既有 ruff 问题（E501/E402/I001 等，主要在 `src/team_memory/__init__.py`、`server.py`），非本计划引入。
 - **基线决策**：门控以「本计划相关改动不新增 lint/测试失败」为准；既有 lint 问题不阻塞派发，后续可在计划外单独处理。

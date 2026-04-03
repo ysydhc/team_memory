@@ -7,11 +7,11 @@
 
 | 术语 | 说明 |
 |------|------|
-| **tm_search** | MCP 工具，语义搜索经验库 |
-| **tm_save** | MCP 工具，保存新经验 |
+| **memory_recall** | MCP 工具，按 problem / query / file_path 检索经验（与档案预览等） |
+| **memory_save** | MCP 工具，保存或 `content` 长文解析保存经验 |
 | **API Key** | 登录凭证，在 `config.development.yaml` 或通过环境变量配置 |
 | **经验** | 问题-方案对，可被检索和复用 |
-| **MCP** | Model Context Protocol，让 Cursor 等 AI 客户端调用 tm_search、tm_save 等工具 |
+| **MCP** | Model Context Protocol，让 Cursor 等 AI 客户端调用 `memory_*` 工具（见 [mcp-server.md](mcp-server.md)） |
 
 ## 前提条件
 
@@ -36,7 +36,7 @@ make web
 
 浏览器打开 http://localhost:9111 ，输入环境变量或开发配置中设定的 API Key 登录。
 
-> **简化配置**: 如果不想面对 100+ 行的完整配置，只需修改 `config.minimal.yaml` 中的 `auth.api_key` 即可启动。
+> **简化配置**：本地开发可优先编辑 `config.development.yaml` 中的 `auth` 段；勿依赖已移除的 `config.minimal.yaml` 示例文件。
 
 **首次运行可能看到的输出**：`make setup` 会拉取 Docker 镜像、创建虚拟环境、执行 alembic 迁移；`make web` 启动后终端显示 `Uvicorn running on http://0.0.0.0:9111`。**常见首次错误**：端口 5432 或 9111 被占用，见 [troubleshooting](troubleshooting.md)。
 

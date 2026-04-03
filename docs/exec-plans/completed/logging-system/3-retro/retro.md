@@ -25,14 +25,14 @@
 
 | 类型 | 路径 |
 |------|------|
-| 设计文档 | docs/plans/2025-03-10-logging-system-design.md |
+| 设计文档 | docs/exec-plans/completed/logging-system/1-plan/plan.md |
 | 配置 | src/team_memory/config.py（LoggingConfig、Settings.logging） |
 | 核心模块 | src/team_memory/io_logger.py |
 | Bootstrap | src/team_memory/bootstrap.py（QueueHandler、QueueListener、RotatingFileHandler、_is_debug_mode） |
 | MCP 集成 | src/team_memory/server.py（track_usage → log_mcp_io） |
 | 内部节点 | search_pipeline.py、experience.py、cache.py、server.py（tm_solve） |
 | 热加载 API | web/routes/config.py（GET/PUT /api/v1/config/logging） |
-| 文档 | docs/design-docs/logging-format.md（八节）、docs/getting-started.md（可观测性） |
+| 文档 | docs/design-docs/logging-format.md（八节）、根 README（可观测性） |
 | 测试 | tests/test_io_logger.py、test_bootstrap.py、test_server.py、test_web.py、test_e2e_logging.py |
 
 ---
@@ -61,7 +61,7 @@
 | 项目 | 说明 |
 |------|------|
 | 热加载 E2E | test_logging_config_hot_reload 未实现（需 HTTP 调用 MCP，成本较高），可选后续补充 |
-| 文档登记 | 若 doc-maintenance-guide 要求，需在 docs/design-docs/README.md 登记 logging-system-design |
+| 文档登记 | 若需入库设计文档，应在 docs/design-docs/README.md 登记 logging-system-design（参见 doc-health skill） |
 | 生产配置 | 生产环境可配置 log_file_max_bytes=100*1024*1024 或按需调整 |
 
 ---

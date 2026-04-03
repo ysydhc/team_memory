@@ -10,7 +10,7 @@
 | 交付物 | ✅ 完整 | 见下方交付物清单 |
 | 测试 | ✅ 通过 | make lint 零报错；make test 486 passed |
 | 规格合规 | ✅ 通过 | spec-reviewer 逐项核对，实现与 Plan 一致 |
-| 文档同步 | ✅ 完成 | README、getting-started、troubleshooting 已更新 |
+| 文档同步 | ✅ 完成 | README、troubleshooting 已更新 |
 
 ## 二、交付物清单
 
@@ -24,7 +24,7 @@
 | Bridge | `tools/gitnexus-bridge/`（Node + Express，暴露 GitNexus HTTP API） |
 | 前端 | 主导航「架构」、page-architecture、architecture-viewer.js（概览/集群/图/影响面 Tab） |
 | 经验挂载 | 创建/编辑「挂载点」选择；节点侧栏查看关联经验 |
-| 文档 | README、docs/getting-started.md、troubleshooting.md 架构相关更新 |
+| 文档 | README、troubleshooting.md 架构相关更新 |
 
 ## 三、测试结果
 

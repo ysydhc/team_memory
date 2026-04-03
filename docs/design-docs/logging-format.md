@@ -212,7 +212,7 @@ class JsonFormatter(logging.Formatter):
 
 ## 八、I/O 与内部节点日志
 
-I/O 日志（io_logger）与文件日志的完整设计、内部节点映射、QueueListener 架构等，见 [日志系统设计文档](../plans/2025-03-10-logging-system-design.md)。
+I/O 日志（io_logger）与文件日志的完整设计、内部节点映射、QueueListener 架构等，见 [日志系统设计文档](../exec-plans/completed/logging-system/1-plan/plan.md)。
 
 ### 8.1 环境变量
 

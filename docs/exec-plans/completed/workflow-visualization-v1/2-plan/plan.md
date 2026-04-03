@@ -69,7 +69,7 @@
 | 修改 | `src/team_memory/web/static/index.html` | Task 2 |
 | 修改 | `src/team_memory/web/static/js/app.js` | Task 2 |
 | 修改 | `src/team_memory/web/static/js/pages.js` | Task 2 |
-| 新增 | `docs/design-docs/harness/workflows/harness-plan-execution.yaml` | Task 1 |
+| 新增 | （历史）拟增工作流 YAML；`docs/design-docs/harness/` 已删除，Task 未按该路径落地 | Task 1 |
 
 ---
 

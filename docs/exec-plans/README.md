@@ -4,7 +4,9 @@
 
 ## 查找指南
 
-Plan 生命周期（wait / executing / completed）详见 [doc-maintenance-guide](../design-docs/harness/doc-maintenance-guide.md) 第六章。
+- **目录与编排**：wait / executing / completed 见本 README 各节；框架级 Phase 流程见 [.harness/orchestration/task-flow.md](../../.harness/orchestration/task-flow.md)、框架总览见 [.harness/docs/harness-spec.md](../../.harness/docs/harness-spec.md)。
+- **Plan 门控与 execute**：见 Cursor 规则 [.cursor/rules/harness-plan-execution.mdc](../../.cursor/rules/harness-plan-execution.mdc)（与设计版 harness-spec 等价约定）。
+- **设计文档维护**（链接、索引、白名单）：**doc-health** skill（`.claude/skills/doc-health/SKILL.md`）与根目录 `doc-harness.project.yaml`。
 
 **示例**：harness-phase 文档在 `completed/harness-phase/` 下。
 
@@ -26,13 +28,76 @@ Plan 生命周期（wait / executing / completed）详见 [doc-maintenance-guide
 
 ## executing/
 
-执行中计划的 execute 文档存放目录。一个 Plan 对应一个 `{plan-id}-execute.md`，格式见 [harness-spec](../design-docs/harness/harness-spec.md)。记录 Plan 执行日志，中断后重启仍写入同一文件；供 AI 加载、人类回溯。
+执行中计划的 execute 文档存放目录。一个 Plan 对应一个 `{plan-id}-execute.md`（或 `execute.md`），记录状态、当前 Task、按时间倒序的日志；中断后重启仍**追加同一文件**。字段与 step-0 门控见 [.cursor/rules/harness-plan-execution.mdc](../../.cursor/rules/harness-plan-execution.mdc)。
 
-（当前无执行中计划）
+### experience-node-binding-loop/
+
+| 文档 | 说明 |
+|------|------|
+| [execute.md](executing/experience-node-binding-loop/execute.md) | 执行记录（进行中或未归档部分） |
 
 ---
 
 ## completed/
+
+### experience-file-location-binding/
+
+经验与文件路径/行范围绑定（location 加分、TTL、批量查询）。
+
+| 文档 | 说明 |
+|------|------|
+| [1-plan/plan.md](completed/experience-file-location-binding/1-plan/plan.md) | 计划正文（自 `docs/plans` 迁入） |
+| [2-plan/execute.md](completed/experience-file-location-binding/2-plan/execute.md) | 执行记录 |
+| [3-retro/retro.md](completed/experience-file-location-binding/3-retro/retro.md) | 复盘 |
+
+### logging-system/
+
+I/O 日志、文件日志、热加载等；计划正文已迁入本目录 `1-plan/plan.md`。
+
+| 文档 | 说明 |
+|------|------|
+| [1-plan/plan.md](completed/logging-system/1-plan/plan.md) | 计划 / 设计正文 |
+| [2-plan/execute.md](completed/logging-system/2-plan/execute.md) | 执行记录索引（详见 3-retro） |
+| [3-retro/retro.md](completed/logging-system/3-retro/retro.md) | 复盘 |
+
+### archive-attachment/
+
+档案馆首版能力（表结构、检索含档案、L0/L1/L2）。
+
+| 文档 | 说明 |
+|------|------|
+| [1-plan/plan.md](completed/archive-attachment/1-plan/plan.md) | 计划正文 |
+| [2-plan/execute.md](completed/archive-attachment/2-plan/execute.md) | 执行记录 |
+
+### archive-knowledge-system/
+
+档案馆知识归档与上传 MVP 收口（取代 `2026-03-30` 独立 executing）。
+
+| 文档 | 说明 |
+|------|------|
+| [1-plan/plan.md](completed/archive-knowledge-system/1-plan/plan.md) | 计划正文 |
+| [2-plan/execute.md](completed/archive-knowledge-system/2-plan/execute.md) | 总执行记录 |
+| [2-plan/archives-progressive-disclosure-execute.md](completed/archive-knowledge-system/2-plan/archives-progressive-disclosure-execute.md) | 渐进式披露 / MCP 双阶段相关记录 |
+
+### archive-file-upload-mvp/
+
+原「文件上传 MVP」Plan 已被 2026-03-31 总 Plan 取代；无独立 executing，仅存指针。
+
+| 文档 | 说明 |
+|------|------|
+| [1-plan/plan.md](completed/archive-file-upload-mvp/1-plan/plan.md) | 历史 Plan 正文（[SUPERSEDED]） |
+| [README.md](completed/archive-file-upload-mvp/README.md) | 归档说明与链接 |
+
+### personal-memory-profile-alignment/
+
+个人记忆 / 用户画像（Supermemory 形 profile、可选 Phase E）。
+
+| 文档 | 说明 |
+|------|------|
+| [1-plan/plan.md](completed/personal-memory-profile-alignment/1-plan/plan.md) | 计划正文 |
+| [execute.md](completed/personal-memory-profile-alignment/execute.md) | 执行记录与常量 |
+| [tasks.md](completed/personal-memory-profile-alignment/tasks.md) | 任务清单 |
+| [p2-backlog.md](completed/personal-memory-profile-alignment/p2-backlog.md) | P2 / Phase E 备忘 |
 
 ### arch-node-search/
 

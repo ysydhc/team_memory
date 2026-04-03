@@ -4,8 +4,8 @@
 
 ## 已加载文档
 
-- HARNESS-SPEC: `docs/design-docs/harness/harness-spec.md`
-- Plan: `docs/plans/2025-03-16-archive-attachment.md`
+- 框架/编排: `.harness/docs/harness-spec.md`, `.harness/orchestration/task-flow.md`
+- Plan: `docs/exec-plans/completed/archive-attachment/1-plan/plan.md`
 - 设计文档: `docs/design-docs/archive-attachment-to-experience.md`
 
 ## 执行摘要
@@ -42,8 +42,8 @@
   - 提交: `feat(archive): derive archive status from linked experiences on exp change`
 
 - **Task 9（文档）**：
-  - `docs/mcp-patterns.md` 登记 `tm_archive_save`、`tm_get_archive`、`include_archives` 参数
-  - 提交: `docs(mcp-patterns): register tm_archive_save, tm_get_archive; document include_archives`
+  - README / `docs/design-docs/ops/mcp-server.md` 登记档案相关 MCP 行为与 `include_archives`（历史曾写 mcp-patterns）
+  - 提交: `docs: archive MCP + include_archives`（示例）
 
 - **lint/test 修复**：
   - `pyproject.toml`: server.py per-file-ignores E402

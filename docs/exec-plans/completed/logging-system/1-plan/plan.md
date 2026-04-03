@@ -1,5 +1,8 @@
 # 日志系统设计文档
 
+> **状态**：✅ 已完成  
+> **执行记录**：[execute.md](../2-plan/execute.md) · [复盘](../3-retro/retro.md)
+
 > **创建日期**：2025-03-10  
 > **Plan ID**：logging-system-impl  
 > **用途**：为 io_logger、文件日志、QueueListener 等实现提供设计依据。

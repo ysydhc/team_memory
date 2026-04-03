@@ -98,7 +98,7 @@
 
 ### 文档结构（docs/、.cursor/、.debug/）
 
-- **docs/**：GETTING-STARTED、EXTENDED、plans、res、templates
+- **docs/**：根 README（长指南已并入）、plans、res、templates
 - **.cursor/**：plans、rules、prompts、skills、agents
 - **.debug/**：docs、knowledge-pack、tm、mcp_logs
 

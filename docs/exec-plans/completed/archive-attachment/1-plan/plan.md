@@ -1,5 +1,8 @@
 # 档案馆（Archive）能力实现计划
 
+> **状态**：✅ 已完成  
+> **执行记录**：[execute.md](../2-plan/execute.md)
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** 实现档案馆能力：新增 archives（含 **overview**）/ archive_experience_links / archive_attachments 三张表，提供 tm_archive_save（写入时生成或传入 overview）、tm_search/tm_solve 的 include_archives 检索扩展（**双阶段**：先返 L0/L1 列表，再按需 **tm_get_archive(id)** 拉 L2），使历史方案可随经验一起被检索；字段选择与返回以**不丢失命中率为目标**，与 OpenViking L0/L1/L2 对齐。
@@ -8,7 +11,7 @@
 
 **Tech Stack:** SQLAlchemy async ORM、Alembic 迁移（migrations/）、FastMCP、现有 SearchPipeline/ExperienceRepository 模式。
 
-**设计文档:** [docs/design-docs/archive-attachment-to-experience.md](../design-docs/archive-attachment-to-experience.md)
+**设计文档:** [archive-attachment-to-experience.md](../../../../design-docs/archive-attachment-to-experience.md)
 
 ---
 
@@ -123,7 +126,7 @@
 | ExperienceService.search | src/team_memory/services/experience.py | +2 行传 include_archives |
 | server.py | src/team_memory/server.py | tm_archive_save ~80 行；**tm_get_archive** ~30 行；tm_search/tm_solve 各 +2 参数 |
 | 测试 | tests/test_server.py 或 tests/test_archive*.py | tm_archive_save、tm_get_archive、include_archives 检索 |
-| 文档 | docs/mcp-patterns.md | 登记 tm_archive_save、tm_get_archive、include_archives |
+| 文档 | README / docs/design-docs/ops/mcp-server.md | 登记档案 MCP 与 include_archives（历史路径 mcp-patterns 已删除） |
 
 **Repository 放置决策：** 与现有 ExperienceRepository 同文件会令 repository.py 继续膨胀；**新建 `src/team_memory/storage/archive_repository.py`** 仅负责 Archive/ArchiveExperienceLink/ArchiveAttachment 的 CRUD 与「按 project/status 查 archives」的检索接口，便于单测与后续扩展。Service 层依赖 ArchiveRepository + ExperienceRepository（查经验是否全发布）。
 
@@ -470,15 +473,15 @@ git commit -m "feat(archive): derive archive status from linked experiences and 
 ### Task 9: 文档与 MCP 登记
 
 **Files:**
-- Modify: `docs/mcp-patterns.md`
+- Modify: `README.md` / `docs/design-docs/ops/mcp-server.md`（原 mcp-patterns）
 
 **Step 1:** 在已注册工具列表中增加 `tm_archive_save`、`tm_get_archive`；在参数说明中增加 tm_search / tm_solve 的 `include_archives`；说明检索返回 L0/L1、solution_preview 约 300–500 字、详情用 tm_get_archive(id) 拉 L2。
 
 **Step 2: Commit**
 
 ```bash
-git add docs/mcp-patterns.md
-git commit -m "docs: register tm_archive_save and include_archives in mcp-patterns"
+git add README.md docs/design-docs/ops/mcp-server.md
+git commit -m "docs: register archive MCP and include_archives"
 ```
 
 ---
@@ -504,10 +507,10 @@ git commit -m "docs: register tm_archive_save and include_archives in mcp-patter
    - `make lint` 零报错。
    - `make test` 全绿；新增/修改的 MCP 与 repository 有对应测试；**创建者 vs 团队**检索、**tm_get_archive 无效 id / 空 attachments**、**经验回写（draft→draft 与 draft→published）** 有明确用例。
    - 无硬编码密钥、无裸 `print()`。
-   - **可观测性**：档案馆相关 MCP（tm_archive_save、tm_get_archive、include_archives 检索）遵循 [logging-format](../design-docs/logging-format.md)，至少记录 tool 名、archive_id（如有）、duration_ms、error（如有）；便于排查与容量评估。
+   - **可观测性**：档案馆相关 MCP（tm_archive_save、tm_get_archive、include_archives 检索）遵循 [logging-format.md](../../../../design-docs/logging-format.md)，至少记录 tool 名、archive_id（如有）、duration_ms、error（如有）；便于排查与容量评估。
 
 5. **文档**
-   - `docs/mcp-patterns.md` 已登记 tm_archive_save、**tm_get_archive** 及 tm_search/tm_solve 的 include_archives；说明 L0/L1 与 solution_preview 长度约定。
+   - MCP 文档已登记档案工具与 **include_archives**；说明 L0/L1 与 solution_preview 长度约定（历史文件名 mcp-patterns）。
 
 **边界说明（不阻塞本次验收）：** 本阶段**不实现**从会话自动生成 solution_doc/overview 的档案馆 Agent，由调用方传入；**tm_preflight 返回 archive_summaries**、archives 表 FTS 列为后续迭代。
 

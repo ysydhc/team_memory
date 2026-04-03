@@ -1,6 +1,6 @@
 # workflow-optimization 整理前后信息差分析
 
-> 按 plan-document-structure 的「复盘必需保留清单」逐项对比，量化经验复盘的信息差。
+> 按当时沿用的「复盘必需保留清单」逐项对比，量化经验复盘的信息差（原独立 Plan 结构文档已移除）。
 
 ---
 
@@ -77,7 +77,7 @@
 
 ## 五、结论
 
-1. **结构优化**：从 9 个平铺文件重组为 1-research/ + 2-plan/ + 6 保留，符合 plan-document-structure 的完整版结构，目录清晰、可扫描性提升。
+1. **结构优化**：从 9 个平铺文件重组为 1-research/ + 2-plan/ + 6 保留，目录清晰、可扫描性提升。
 2. **信息差**：合并时 workflow-optimization-execution-plan、workflow-pm-final-three-solutions、workflow-optimization 三文件被压缩为 brief + options + plan + execute，**约 45% 的复盘所需信息未保留**（按 checklist 7 项加权）。
 3. **主要丢失**：
    - 每任务（1.1～6.6）的「状态 + 说明」明细；
@@ -93,4 +93,4 @@
 
 ---
 
-**分析依据**：plan-document-structure 第 86 行「复盘必需保留清单」；git show 69706a59 整理前内容；当前整理后文件内容。
+**分析依据**：历史复盘保留清单约定；git show 69706a59 整理前内容；当前整理后文件内容。

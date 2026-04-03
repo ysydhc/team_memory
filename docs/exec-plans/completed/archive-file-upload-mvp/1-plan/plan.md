@@ -1,8 +1,17 @@
-# 档案馆文件上传 MVP 实施计划
+# ~~档案馆文件上传 MVP 实施计划~~ [SUPERSEDED]
+
+> **归档索引**：✅ 执行过程已并入 2026-03-31 总 Plan；指针见 [README.md](../README.md)
+
+> **状态**：已被 [档案馆知识归档系统总 Plan](../../archive-knowledge-system/1-plan/plan.md) 取代。
+> 以下内容仅作历史参考。
+
+---
+
+# 档案馆文件上传 MVP 实施计划（原文）
 
 > **目标**：在**不引入对象存储**的前提下，用 **multipart 落盘 + 可配置本地目录**，实现与**档案馆（Archive）同一套数据模型与权限**的文件归档能力。大文件走磁盘引用；检索仍以 **title + overview + 可选小片段** 为主以节省 Token。**上传失败**时落库可查，Web 提示并给出 **本机可执行的 curl**，由人工补救（与 Agent 触发场景衔接）。
 
-**前置阅读**：`docs/design-docs/archive-attachment-to-experience.md`、`docs/plans/2025-03-16-archive-attachment.md`。
+**前置阅读**：[archive-attachment-to-experience.md](../../../../design-docs/archive-attachment-to-experience.md)、[档案馆首版 Plan](../../archive-attachment/1-plan/plan.md)。
 
 **修订说明**：综合评审结论、**人机补救（curl）** 与 **失败记录表** 后的统一版本；冲突巡检与验证方式见 **§七**、**§九**。
 
@@ -139,7 +148,7 @@
 **不写记录**：请求在「档案不可见 / 未授权」路径即以 404/401 结束。
 
 **Web**：详情页可折叠横幅「有 N 次上传未成功」→ 时间、来源、错误摘要、文件名提示 → **「复制上传命令」**。  
-命令由前端用 `window.location.origin`、当前 `archive_id`、**占位符** `YOUR_API_KEY` 与 `@/path/to/your/file` 生成；**页面永不持久化、不展示真实 Key**。若生产环境 **仅 cookie、无 API Key**，须在 `GETTING-STARTED`/Web 文档说明 **curl 的认证替代方案**（与现网一致）。
+命令由前端用 `window.location.origin`、当前 `archive_id`、**占位符** `YOUR_API_KEY` 与 `@/path/to/your/file` 生成；**页面永不持久化、不展示真实 Key**。若生产环境 **仅 cookie、无 API Key**，须在根目录 **README** / Web 文档说明 **curl 的认证替代方案**（与现网一致）。
 
 **Agent**：失败响应可提示用户到 Web 该档案详情使用 curl。
 
@@ -162,7 +171,7 @@
 | 5 | `uploads.disabled` | POST 503；GET 行为与 **§4.1** 一致且测试固定 |
 | 6 | Web：下载 + 可选上传入口 | `aria-label`、`lint-js`、**非手测唯一依据** |
 | 7 | L2：`storage`、`download_api_path` | `_build_l2_dict`/快照；Lite 与 Full 若测 JSON 则同步 |
-| 8 | 文档 | `mcp-patterns.md`、GETTING-STARTED 或 `web-server.md` |
+| 8 | 文档 | 根 `README.md`、`docs/design-docs/ops/mcp-server.md` 或 `web-server.md` |
 | 9 | **§4.11** 迁移 + 失败写入 + `GET`（+ 可选 `PATCH`） | 权限同 L2；**鉴权失败路径 0 行** |
 | 10 | Web 失败横幅 + 复制 curl | `lint-js`；可用 mock JSON 单测渲染/剪贴板逻辑（若有） |
 | 11 | （可选）列表 `has_upload_failure` | Phase 2 |

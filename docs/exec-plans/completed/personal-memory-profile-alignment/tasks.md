@@ -1,6 +1,6 @@
 # 任务清单：个人记忆 / 用户画像（Supermemory 对齐）
 
-> **来源 Plan**： [2026-04-01-personal-memory-profile-supermemory-alignment.md](../../../plans/2026-04-01-personal-memory-profile-supermemory-alignment.md)  
+> **来源 Plan**：[1-plan/plan.md](1-plan/plan.md)  
 > **MCP 范围**：对外 **仅 Lite**（`memory_save` / `memory_recall` / `memory_context` / `memory_feedback`）；**不包含** 完整 `tm_*` 工具验收。  
 > **任务拆分口径**：对齐「产品经理」关注点——**是否解决用户痛点、与需求对齐、MVP 可验收、成功标准可检查**；每条任务区分 **工程验收** 与 **产品/对齐验收**（可合并为勾选表）。  
 > **执行顺序**：按 **依赖列** 串行；同 Phase 内可按 **ID 序号** 执行。  
@@ -33,7 +33,7 @@
 | **业务价值** | 装包用户与集成方从 **CHANGELOG + 文档** 得知 **`team-memory` → Lite**；降低 silent break。 |
 | **范围** | 根目录 **[CHANGELOG.md](../../../../CHANGELOG.md)** 维护 `[Unreleased]` / 版本条目；下次 **PyPI 发布** 按 **mcp-lite-default § PyPI/发版公告** 核对清单（版本号与 CHANGELOG 对齐、Release 摘要含 Breaking）。 |
 | **工程验收** | 仓库内存在可追溯的 CHANGELOG；mcp-lite-default 已与本文链互通。 |
-| **产品验收** | 新用户按 getting-started / README 配置 **server_lite**；旧 **`tm_*`** 用户能查到迁移路径（`team-memory-full` / `make mcp-full`）。 |
+| **产品验收** | 新用户按 README 配置 **`python -m team_memory.server`**（`memory_*`）。 |
 
 ---
 
@@ -142,7 +142,7 @@
 | **依赖** | T-A03、T-B02（读路径需有数据可选；可 mock） |
 | **业务价值** | Cursor Lite 用户在 **单次调用** 内同时拿到 **用户画像 + 相关团队知识**，对齐「任务开始」心智。 |
 | **范围** | `memory_context` JSON 增加或改为 `profile: { static: [], dynamic: [] }`；匿名：`{ static: [], dynamic: [] }`（Plan §7）；旧字段若保留须登记废弃日（Plan §6）。 |
-| **工程验收** | `test_server_lite.py`（或等价）断言结构与非空场景；`make verify`。 |
+| **工程验收** | `tests/test_server.py` 中断言 `memory_context` 等结构与非空场景；`make verify`。 |
 | **产品验收** | **不新增工具名**；与 Plan §0 已决一致。 |
 | **成功信号** | L0：Lite 侧 E2E 或契约测试绿。 |
 
@@ -157,8 +157,8 @@
 | **依赖** | T-A03 |
 | **业务价值** | **只调 recall、不调 `memory_context`** 的集成仍能捎带 `profile`，不新增 MCP 工具。 |
 | **范围** | `memory_recall` 增加 **`include_user_profile: bool = False`**；`True` 时在返回 JSON 附加 `build_profile_for_user` 结果。 |
-| **工程验收** | **`test_server_lite.py`**：`False` 行为不变；`True` 带回 `profile`。 |
-| **产品验收** | Plan §3.4 / §7：P0/P1 在 execute 勾选；**`mcp-patterns.md` 只写 Lite 工具**。 |
+| **工程验收** | **`test_server.py`**：`include_user_profile=False` 行为不变；`True` 带回 `profile`。 |
+| **产品验收** | Plan §3.4 / §7：P0/P1 在 execute 勾选；**README / mcp-server 文档只写 Lite 工具**。 |
 | **成功信号** | L0：测试 + 文档同时落地。 |
 
 ---
@@ -188,7 +188,7 @@
 | **优先级** | P0 |
 | **依赖** | T-C01 |
 | **业务价值** | **实际 Agent** 在任务开始时拉取画像；否则功能「做了但无人用」，ROI 为 0。 |
-| **范围** | **`server_lite.py` Instructions** + `.cursor/rules`：**任务开始 `memory_context`**；消费返回中的 **`profile`**；**不提 `tm_*` MCP**；不写幽灵 **`tm_preflight`**。与 Plan **§1.4**（profile vs Experience）一致。 |
+| **范围** | **`server.py` Instructions** + `.cursor/rules`：**任务开始 `memory_context`**；消费返回中的 **`profile`**；**不提 `tm_*` MCP**。与 Plan **§1.4**（profile vs Experience）一致。 |
 | **工程验收** | 文本 diff 评审；面向用户的文档/规则中 **不得** 将 **`tm_suggest` / `tm_search` / `tm_learn`** 列为必选接入（除非代码仓库恢复完整 MCP）。 |
 | **产品验收** | **§9.3 前置条件**：规则可被 dogfood 执行（非僵尸文档）。 |
 | **成功信号** | L2 准备就绪：可按 Plan §9.3 做 A/B。 |
@@ -203,7 +203,7 @@
 | **优先级** | P0 |
 | **依赖** | T-B02、T-C01 |
 | **业务价值** | 降低支持成本；对齐竞品叙事便于对外沟通。 |
-| **范围** | `troubleshooting.md` §12 / 个人记忆；`supermemory-comparison.md` 用户画像行更新为 **「部分/全部支持」**（以实际 MVP 为准）；`getting-started` 或 `security` **一句** 信任与删除（Plan §10）。 |
+| **范围** | `troubleshooting.md` §12 / 个人记忆；对外产品对照（Supermemory 官方文档或 Plan 内表述）与 **「部分/全部支持」** 一致（以实际 MVP 为准）；根 `README.md` 或 `security` **一句** 信任与删除（Plan §10）。 |
 | **工程验收** | 文档 PR 通过 harness/doc 约定（若有）。 |
 | **产品验收** | 对比表 **不夸大**（无 `valid_until` 前勿写「自动遗忘」）。 |
 | **成功信号** | L0：新人按文档可完成一次排错。 |
@@ -327,7 +327,7 @@
 | **优先级** | P0（随 E 发布） |
 | **依赖** | T-E03 |
 | **业务价值** | 对外承诺与实际一致，利于信任与选型沟通。 |
-| **范围** | `supermemory-comparison.md`、troubleshooting 更新；**不** 宣称全量矛盾处理。 |
+| **范围** | troubleshooting 更新，及 Plan / 根 `README.md` 中与 Supermemory 能力对齐的表述；**不** 宣称全量矛盾处理。 |
 | **工程验收** | 文档 PR。 |
 | **产品验收** | PM 快速审：无营销夸大。 |
 | **成功信号** | L0：与 Plan §3.6 表一致。 |

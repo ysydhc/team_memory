@@ -1,5 +1,8 @@
 # 经验文件位置绑定 — 实现计划
 
+> **状态**：✅ 已完成  
+> **执行记录**：[execute.md](../2-plan/execute.md) · [复盘](../3-retro/retro.md)
+
 > **For Claude:** 执行本计划时请使用 executing-plans 子技能，按任务逐步实现。
 >
 > **版本说明：** 本版已按多专家评审报告落实 Blockers（检索批量化、过期清理）、High Risks（量纲与得分、指纹单点、迁移回滚、Web 录入展示、TTL 可配置）、体验与价值（location_weight 说明与引导、Web 首版录入方式）、质量保障（得分与边界规则集中定义、指纹/重叠边界成文、E2E 必做与量化验收、可观测性）。
@@ -195,9 +198,9 @@
 ### 任务 12：文档与规范
 
 **涉及文件：**
-- 新建或修改：[docs/design-docs/experience-file-line-binding-and-expiration.md](docs/design-docs/experience-file-line-binding-and-expiration.md)
-- 修改：[README.md](README.md) 或 [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md)（一句说明 file_locations）
-- 修改：[docs/mcp-patterns.md](docs/mcp-patterns.md) 或工具列表：说明 tm_save/tm_save_typed 的 file_locations、tm_search/tm_solve 的 current_file_locations
+- 设计细节已收敛至根 [README.md](../../../../README.md)、[`mcp-server.md`](../../../../design-docs/ops/mcp-server.md) 与实现代码（原独立设计稿已删除；本计划保留历史性任务描述）
+- 修改：[README.md](../../../../README.md)（一句说明 file_locations）
+- 修改：根 README 或 [`mcp-server.md`](../../../../design-docs/ops/mcp-server.md) 工具说明（现为 `memory_*`）：`file_locations`、`current_file_locations`
 
 **步骤 1：** 在设计文档中增加「实现：内容指纹与 location_weight」小节并引用本计划；写明 file_locations、current_file_locations 的字段（path、start_line、end_line，可选 snippet、file_mtime、file_content_hash）。在 MCP 工具列表中补充上述参数。补充「过期绑定清理」策略与配置项（cleanup_enabled、interval_hours）、以及检索路径可观测性（批量查询与 location 步骤的日志/指标）。提交：`docs: 文件位置绑定、MCP 参数与清理/可观测性`
 
