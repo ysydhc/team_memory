@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING
 
 from team_memory.auth.provider import AuthProvider, create_auth_provider
 from team_memory.config import Settings, load_settings
-from team_memory.embedding.base import EmbeddingProvider
+from team_memory.embedding.base import ConcurrencyLimitedEmbedding, EmbeddingProvider
 from team_memory.services.archive import ArchiveService
 from team_memory.services.event_bus import EventBus, Events
 from team_memory.services.experience import ExperienceService
@@ -363,6 +363,7 @@ def bootstrap(
     log_listener = _configure_logging(settings)
     db_url = _resolve_db_url(settings)
     embedding = _create_embedding_provider(settings)
+    embedding = ConcurrencyLimitedEmbedding(embedding, max_concurrent=10)
     _validate_embedding_dimension(settings)
     auth = _configure_auth(settings)
 

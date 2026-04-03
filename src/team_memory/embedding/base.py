@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 
 
@@ -42,3 +43,27 @@ class EmbeddingProvider(ABC):
         """
         results = await self.encode([text])
         return results[0]
+
+
+class ConcurrencyLimitedEmbedding(EmbeddingProvider):
+    """Wraps an EmbeddingProvider with a concurrency semaphore.
+
+    Prevents overwhelming the embedding backend (Ollama, OpenAI, etc.)
+    when many coroutines request embeddings concurrently.
+    """
+
+    def __init__(self, provider: EmbeddingProvider, max_concurrent: int = 10) -> None:
+        self._provider = provider
+        self._semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def encode(self, texts: list[str]) -> list[list[float]]:
+        async with self._semaphore:
+            return await self._provider.encode(texts)
+
+    async def encode_single(self, text: str) -> list[float]:
+        async with self._semaphore:
+            return await self._provider.encode_single(text)
+
+    @property
+    def dimension(self) -> int:
+        return self._provider.dimension

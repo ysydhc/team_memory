@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from team_memory.storage.database import get_session
 from team_memory.storage.models import BackgroundTask
@@ -43,35 +43,52 @@ async def enqueue(task_type: str, payload: dict[str, Any], *, db_url: str) -> No
 
 
 async def poll_and_execute(db_url: str, *, batch_size: int = 5) -> int:
-    """Claim pending tasks and execute them. Returns count processed."""
+    """Claim pending tasks atomically and execute them.
+
+    Uses ``FOR UPDATE SKIP LOCKED`` so multiple workers can poll
+    concurrently without double-claiming the same task.
+
+    Returns count of successfully processed tasks.
+    """
     processed = 0
     async with get_session(db_url) as session:
-        stmt = (
-            select(BackgroundTask)
-            .where(BackgroundTask.status == "pending")
-            .order_by(BackgroundTask.created_at)
-            .limit(batch_size)
-        )
-        result = await session.execute(stmt)
-        tasks = result.scalars().all()
+        for _ in range(batch_size):
+            # Atomic claim: SELECT … FOR UPDATE SKIP LOCKED + UPDATE in one statement
+            claim_subq = (
+                select(BackgroundTask.id)
+                .where(BackgroundTask.status == "pending")
+                .order_by(BackgroundTask.created_at)
+                .limit(1)
+                .with_for_update(skip_locked=True)
+            ).scalar_subquery()
 
-        for task in tasks:
-            handler = _handlers.get(task.task_type)
-            if handler is None:
-                logger.warning("No handler for task type '%s', skipping", task.task_type)
-                continue
+            stmt = (
+                update(BackgroundTask)
+                .where(BackgroundTask.id == claim_subq)
+                .values(
+                    status="running",
+                    started_at=datetime.now(timezone.utc),
+                )
+                .returning(BackgroundTask)
+            )
+            result = await session.execute(stmt)
+            task = result.scalar_one_or_none()
+            if task is None:
+                break  # No more pending tasks
 
-            task.status = "running"
-            task.started_at = datetime.now(timezone.utc)
             await session.flush()
 
+            handler = _handlers.get(task.task_type)
+            if handler is None:
+                logger.warning("No handler for task type '%s'", task.task_type)
+                continue
+
+            start = time.monotonic()
             try:
-                start = time.monotonic()
                 await handler(task.payload)
-                duration_ms = int((time.monotonic() - start) * 1000)
                 task.status = "completed"
                 task.completed_at = datetime.now(timezone.utc)
-                processed += 1
+                duration_ms = int((time.monotonic() - start) * 1000)
                 logger.info(
                     "Task completed: %s",
                     task.task_type,
@@ -81,6 +98,7 @@ async def poll_and_execute(db_url: str, *, batch_size: int = 5) -> int:
                         "duration_ms": duration_ms,
                     },
                 )
+                processed += 1
             except Exception as e:
                 duration_ms = int((time.monotonic() - start) * 1000)
                 task.retry_count += 1
@@ -99,14 +117,13 @@ async def poll_and_execute(db_url: str, *, batch_size: int = 5) -> int:
                         },
                     )
                 else:
-                    task.status = "pending"  # retry later
+                    task.status = "pending"
                     task.error_message = str(e)[:500]
                     logger.info(
-                        "Task %s will retry (%d/%d): %s",
-                        task.id,
+                        "Task %s will retry (%d/%d)",
+                        task.task_type,
                         task.retry_count,
                         task.max_retries,
-                        e,
                         extra={
                             "task_id": str(task.id),
                             "duration_ms": duration_ms,
