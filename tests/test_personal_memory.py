@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from team_memory.services.personal_memory import PersonalMemoryService
 from team_memory.storage.models import Base
-from team_memory.storage.repository import (
+from team_memory.storage.personal_memory_repository import (
     PERSONAL_MEMORY_OVERWRITE_THRESHOLD,
     PersonalMemoryRepository,
 )

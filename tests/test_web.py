@@ -111,7 +111,6 @@ def setup_app():
             "tags": ["test"],
         }
     )
-    mock_service.get_recent = AsyncMock(return_value=[])
     mock_service.get_stats = AsyncMock(
         return_value={
             "total_experiences": 5,

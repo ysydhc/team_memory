@@ -473,34 +473,6 @@ class ExperienceService:
                 )
             return result
 
-    async def hard_delete_and_rebuild(
-        self,
-        experience_id: str,
-        new_data: dict,
-        created_by: str = "system",
-    ) -> dict:
-        """Hard-delete an experience, then create a new one.
-
-        Used for the "edit and confirm" flow where the user edits fields
-        and we replace the old record with a new one.
-        """
-        async with self._session() as session:
-            repo = ExperienceRepository(session)
-            old_uuid = uuid.UUID(experience_id)
-
-            deleted = await repo.delete(old_uuid)
-            if not deleted:
-                return None
-
-            return await self.save(
-                session=session,
-                title=new_data.get("title", ""),
-                problem=new_data.get("problem", ""),
-                solution=new_data.get("solution", ""),
-                created_by=created_by,
-                tags=new_data.get("tags"),
-            )
-
     async def feedback(
         self,
         experience_id: str,
@@ -540,22 +512,6 @@ class ExperienceService:
             )
             return True
 
-    async def get_recent(
-        self,
-        limit: int = 10,
-        include_all_statuses: bool = False,
-        project: str | None = None,
-    ) -> list[dict]:
-        """Get recent experiences."""
-        async with self._session() as session:
-            repo = ExperienceRepository(session)
-            experiences = await repo.list_recent(
-                limit=limit,
-                include_all_statuses=include_all_statuses,
-                project=project,
-            )
-            return [exp.to_dict() for exp in experiences]
-
     async def list_projects(self) -> list[str]:
         """Return distinct project names."""
         async with self._session() as session:
@@ -589,12 +545,3 @@ class ExperienceService:
                 "page": page,
                 "page_size": page_size,
             }
-
-    async def get_experience(self, experience_id: str) -> dict | None:
-        """Retrieve a single experience by ID."""
-        async with self._session() as session:
-            repo = ExperienceRepository(session)
-            exp = await repo.get_by_id(experience_id)
-            if exp is None:
-                return None
-            return repo.experience_to_dict(exp)

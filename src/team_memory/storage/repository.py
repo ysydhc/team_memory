@@ -567,15 +567,6 @@ class ExperienceRepository:
         await self._session.flush()
         return True
 
-    async def delete_group(self, root_id: uuid.UUID) -> bool:
-        """Hard-delete a parent and all its children."""
-        root = await self.get_with_children(root_id, include_deleted=True)
-        if root is None:
-            return False
-        await self._session.delete(root)
-        await self._session.flush()
-        return True
-
     # ======================== FEEDBACK ========================
 
     async def add_feedback(
@@ -628,14 +619,3 @@ class ExperienceRepository:
                 UNBOUNDED_QUERY_LIMIT,
             )
         return rows
-
-
-# ============================================================
-# PersonalMemoryRepository — extracted to its own module;
-# re-exported here for backward compatibility.
-# ============================================================
-
-from team_memory.storage.personal_memory_repository import (  # noqa: E402, F401
-    PERSONAL_MEMORY_OVERWRITE_THRESHOLD,
-    PersonalMemoryRepository,
-)
