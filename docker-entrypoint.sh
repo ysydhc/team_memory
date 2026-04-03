@@ -27,11 +27,16 @@ echo "  PostgreSQL is ready!"
 
 # --- 2. Run database migrations ---
 echo "[2/5] Running database migrations..."
-if command -v alembic &>/dev/null; then
-    alembic upgrade head
-    echo "  Migrations complete."
+if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
+    if command -v alembic &>/dev/null; then
+        alembic upgrade head
+        echo "  Migrations complete."
+    else
+        echo "  ERROR: alembic not found but RUN_MIGRATIONS=true. Aborting."
+        exit 1
+    fi
 else
-    echo "  WARNING: alembic not found, skipping migrations."
+    echo "  Skipping migrations (RUN_MIGRATIONS not set)."
 fi
 
 # --- 3. Check Ollama availability & auto-pull model ---

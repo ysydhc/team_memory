@@ -75,11 +75,11 @@ search:
 
 cache:
   enabled: true
-  backend: memory
-  redis_url: "redis://localhost:6379/0"
-  ttl_seconds: 600
-  max_size: 500
-  embedding_cache_size: 200
+  backend: redis
+  redis_url: "redis://redis:6379/0"
+  ttl_seconds: 300
+  max_size: 200
+  embedding_cache_size: 500
 
 lifecycle:
   dedup_on_save: true
@@ -100,8 +100,17 @@ tag_synonyms: {}
 # 档案附件上传：生产请挂卷到 root_dir，并按需 TEAM_MEMORY_UPLOADS__ENABLED 等覆盖
 uploads:
   enabled: true
-  root_dir: "data/uploads"
+  # Mount a persistent volume at /data/uploads in production
+  root_dir: "/data/uploads"
   max_bytes: 52428800
   allowed_extensions: [".md", ".txt", ".json", ".pdf"]
+
+logging:
+  log_io_enabled: false
+  log_file_enabled: true
+  # Mount a persistent volume at /data/logs in production
+  log_file_path: "/data/logs/team_memory.log"
+  log_file_backup_count: 10
+  log_file_max_bytes: 52428800  # 50 MB
 
 log_format: json

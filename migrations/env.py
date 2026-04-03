@@ -9,7 +9,7 @@ import os
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import pool
+from sqlalchemy import pool, text
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 # Import all models so Alembic can detect them for autogenerate
@@ -65,7 +65,13 @@ async def run_async_migrations() -> None:
     )
 
     async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
+        # Acquire advisory lock to prevent concurrent migrations
+        await connection.execute(text("SELECT pg_advisory_lock(1)"))
+        try:
+            await connection.run_sync(do_run_migrations)
+        finally:
+            await connection.execute(text("SELECT pg_advisory_unlock(1)"))
+        await connection.commit()
 
     await connectable.dispose()
 
