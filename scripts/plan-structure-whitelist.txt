@@ -1,9 +1,0 @@
-# Plan structure whitelist: path or path:rule_id
-# Lines starting with # are ignored
-# See docs/design-docs/harness/plan-document-structure.md
-
-# <3 .md files: exempt per user decision
-docs/exec-plans/wait/debug-migration
-docs/exec-plans/completed/verification
-docs/exec-plans/completed/mcp-io-debug-log
-docs/exec-plans/completed/dedup-group-misjudge

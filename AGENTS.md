@@ -11,14 +11,14 @@ make help           # 列出可用命令
 make setup          # 首次安装（Docker + 依赖 + 数据库迁移）
 make dev            # 启动全部服务（Docker + Web）
 make web            # 仅启动 Web（http://localhost:9111）
-make mcp            # Lite MCP（memory_*）；遗留 tm_* 用 make mcp-full
+make mcp            # MCP（memory_* 五工具，team_memory.server）
 make test           # 运行全部测试
 make lint           # Ruff 代码检查
 make verify         # 标准验收：lint + 全量测试
 make harness-check  # Harness 门禁：import 检查 + ruff + lint-js
 
 # 单测 / 筛选
-pytest tests/test_server.py::test_tm_search -v
+pytest tests/test_server.py::TestLiteToolRegistration::test_exactly_five_tools -v
 pytest -k "search" -v
 ```
 
@@ -28,7 +28,7 @@ pytest -k "search" -v
 
 ```
 ┌─────────────────────────────────────────┐
-│  MCP Server (server.py)                 │  ← AI 入口，tm_* 工具
+│  MCP Server (server.py)                 │  ← AI 入口，memory_* 工具
 │  Web Routes (web/routes/)               │  ← HTTP API 入口
 ├─────────────────────────────────────────┤
 │  Services (services/)                   │  ← 业务逻辑
@@ -48,14 +48,16 @@ pytest -k "search" -v
 
 - **Experience**：title/problem/solution/tags/score/status；状态流 draft → review → published/rejected
 - **Search Pipeline**：向量检索 + 全文检索 → RRF 融合 → 重排 → Token 裁剪 → Top-N
-- **MCP Tools**：`server.py` 内 `tm_*` 命名空间；只能调用 Services 层
+- **MCP Tools**：`server.py` 内 `memory_*` 工具；只能调用 Services 层
 
 ## 开发指南
 
+新进仓库或要做跨模块改动时，建议先读 [README.md](README.md)，再按需查 [docs/design-docs/README.md](docs/design-docs/README.md) 索引。
+
 ### MCP 工具开发
 
-1. 在 [docs/mcp-patterns.md](docs/mcp-patterns.md) 登记
-2. `@mcp.tool` + `@track_usage` 装饰 `async def tm_xxx(...) -> str`
+1. 在 [README.md](README.md)（MCP 工具表）与 [docs/design-docs/ops/mcp-server.md](docs/design-docs/ops/mcp-server.md) 保持叙述一致；契约以 [src/team_memory/server.py](src/team_memory/server.py) 为准
+2. `@mcp.tool` + `@track_usage` 装饰 `async def memory_xxx(...) -> str`
 3. 在 `tests/test_server.py` 补充测试
 4. `make verify` 验收
 
@@ -65,13 +67,11 @@ pytest -k "search" -v
 - **类型注解**：函数签名须标注
 - **校验**：外部输入经 Pydantic 校验
 - **日志**：项目 logger，禁止裸 `print()`
-- **密钥**：禁止硬编码
-
-详见 [docs/conventions.md](docs/conventions.md)
+- **密钥**：禁止硬编码；分层与 import 方向以 `make harness-check` / `scripts/harness_import_check.py` 为准
 
 ### 测试
 
-覆盖率：MCP ≥ 90%，Services ≥ 80%。详见 [docs/testing.md](docs/testing.md)
+覆盖率：MCP ≥ 90%，Services ≥ 80%。运行方式见 README「开发」与 `make test`。
 
 ### 数据库迁移
 
@@ -87,23 +87,23 @@ alembic upgrade head
 - [ ] `make lint` 零报错
 - [ ] `make test` 全绿（新功能须有测试）
 - [ ] 若修改 model，须有 Alembic 迁移
-- [ ] 若新增 MCP 工具，已在 mcp-patterns.md 登记
+- [ ] 若新增 MCP 工具，已更新 [README.md](README.md) / [docs/design-docs/ops/mcp-server.md](docs/design-docs/ops/mcp-server.md) 且 `tests/test_server.py` 覆盖
 - [ ] 无硬编码密钥、无裸 `print()`
 - [ ] Web 改动通过 `make lint-js`
+- [ ] 若变更架构分层、MCP 对外契约或用户可见文档，已同步更新 [README.md](README.md)、本文件与 [docs/design-docs/](docs/design-docs/) 相关篇目
 
 ## 导航
 
 | 主题 | 文件 |
 |------|------|
-| 架构约束与分层 | [docs/architecture.md](docs/architecture.md) · [project-extension](docs/design-docs/harness/project-extension.md) |
-| MCP 工具开发 | [docs/mcp-patterns.md](docs/mcp-patterns.md) |
-| Python 约定 | [docs/conventions.md](docs/conventions.md) |
-| 测试 | [docs/testing.md](docs/testing.md) |
-| 安全 | [docs/security.md](docs/security.md) |
-| 设计文档 | [docs/design-docs/](docs/design-docs/) |
+| 人类指南与 MCP 说明 | [README.md](README.md) |
+| 架构可视化（Mermaid） | [docs/架构设计图.md](docs/架构设计图.md) |
+| Import 分层（L0–L3） | `scripts/harness_import_check.py`（`LAYER_MAP`） |
+| MCP 实现 | [src/team_memory/server.py](src/team_memory/server.py) |
+| MCP 运维与配置 | [docs/design-docs/ops/mcp-server.md](docs/design-docs/ops/mcp-server.md)、[docs/design-docs/ops/mcp-lite-default.md](docs/design-docs/ops/mcp-lite-default.md) |
+| 设计文档索引 | [docs/design-docs/README.md](docs/design-docs/README.md) |
 | Harness 框架 | [.harness/docs/harness-spec.md](.harness/docs/harness-spec.md) |
 | Harness 配置 | [.harness/harness-config.yaml](.harness/harness-config.yaml) |
-| 入门 | [docs/getting-started.md](docs/getting-started.md) |
 
 ## 调试
 

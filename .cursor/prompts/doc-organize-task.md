@@ -1,25 +1,18 @@
 # 文档整理任务
 
-## 0. 前置：读取规范
+## 0. 配置
 
-**必须**先读取 `doc-maintenance-guide.md`、`plan-document-structure.md` 的完整内容。
+Read `doc-harness.project.yaml` 与 doc-health skill（`.claude/skills/doc-health/SKILL.md`）。
 
 ## 1. 扫描
 
-- 执行 `make harness-doc-check`、`make harness-plan-check`
-- 按**主题**汇总问题
+- 仅执行 `commands.doc_check`，按主题汇总。
 
-## 2. 输出问题列表并提问
+## 2. 确认
 
-| 主题 | 违规 | 请确认 |
-|------|------|--------|
-| (主题) | (规则 ID) | 白名单 / 整理？ |
+| 主题 | rule_id | 白名单 / 修复？ |
 
-若无问题，输出「无待确认项」并结束。
+## 3. 执行
 
-## 3. 按用户决策执行
-
-- **白名单**：加入 `scripts/plan-structure-whitelist.txt` 或 `scripts/doc-gardening-whitelist.txt`
-- **整理**：按 plan-document-structure 执行（1-research/2-plan/3-retro 重组），合并时按「复盘必需保留清单」逐项核对
-- 结构变更后同步 `docs/design-docs/README.md`、`AGENTS.md`
-- 输出整理前后对比
+- 白名单 → 只改 `whitelists.doc_gardening` 指向的文件。
+- 修复 → 链接、`design_docs.index`、`sync_reminders` 入口；**不**做 Plan 目录 1-research/2-plan/3-retro 重组。

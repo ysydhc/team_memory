@@ -21,7 +21,7 @@ import re
 import sys
 from pathlib import Path
 
-# Rule IDs (from docs/design-docs/harness/doc-maintenance-guide.md 第二章)
+# Rule IDs: align with .claude/skills/doc-health/SKILL.md (文档扫描与 rule_id)
 RULE_LINK_404 = "DOC_LINK_404"
 RULE_LINK_BROKEN = "DOC_LINK_BROKEN"
 RULE_DEPRECATED_REF = "DOC_DEPRECATED_REF"
@@ -56,9 +56,7 @@ def _is_internal_link(url: str) -> bool:
     return False
 
 
-def _resolve_link_target(
-    source_file: Path, link_url: str, root: Path
-) -> Path | None:
+def _resolve_link_target(source_file: Path, link_url: str, root: Path) -> Path | None:
     """Resolve link URL to absolute path. Returns None if not resolvable."""
     url = link_url.strip()
     # Strip anchor
@@ -76,8 +74,10 @@ def _resolve_link_target(
             return None
 
     # Relative to source file's directory
-    if url.startswith("./") or url.startswith("../") or (
-        not url.startswith("/") and "://" not in url
+    if (
+        url.startswith("./")
+        or url.startswith("../")
+        or (not url.startswith("/") and "://" not in url)
     ):
         base = source_file.parent
         try:
@@ -115,9 +115,7 @@ def _load_whitelist(whitelist_path: Path | None) -> set[str]:
     return entries
 
 
-def _is_whitelisted(
-    rel_path: str, line_no: int, rule_id: str, whitelist: set[str]
-) -> bool:
+def _is_whitelisted(rel_path: str, line_no: int, rule_id: str, whitelist: set[str]) -> bool:
     """Check if this violation is whitelisted."""
     # Full path
     if rel_path in whitelist:
@@ -193,9 +191,7 @@ def check_file(
 
         resolved = _resolve_link_target(file_path, url, root)
         if resolved is None:
-            violations.append(
-                (line_no, RULE_LINK_BROKEN, f"Unresolvable link: {url}")
-            )
+            violations.append((line_no, RULE_LINK_BROKEN, f"Unresolvable link: {url}"))
             continue
 
         # Resolve to path relative to root for existence check
@@ -238,9 +234,7 @@ def check_file(
 
     # DOC_STALE_MARKER (optional)
     for line_no, marker in _extract_stale_markers(content):
-        violations.append(
-            (line_no, RULE_STALE_MARKER, f"Contains stale marker: {marker}")
-        )
+        violations.append((line_no, RULE_STALE_MARKER, f"Contains stale marker: {marker}"))
 
     # Apply whitelist
     filtered: list[tuple[int, str, str]] = []

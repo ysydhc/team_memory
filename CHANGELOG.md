@@ -17,10 +17,9 @@
 
 ### Changed（破坏性 · CLI / 本地开发）
 
-- **`make mcp`**：默认启动 **Lite** MCP（`python -m team_memory.server_lite`，`memory_*` 工具）。
-- **`make mcp-full`**（新增）：启动遗留完整 MCP（`python -m team_memory.server`，`tm_*`）。
-- **Console `team-memory`**（`pip install` 后）：现等同于 **`team_memory.server_lite`**。依赖旧 **`tm_*`** 进程的脚本请改为 **`team-memory-full`** 或 **`python -m team_memory.server`**。
-- **`team-memory-full`**（新增）：入口为 **`team_memory.server`**（遗留）。
+- **`make mcp`**：启动 MCP（**`python -m team_memory.server`**，仅 **`memory_*`** 五工具）。
+- **`team_memory.server_lite`**、**`make mcp-full`**、**`team-memory-full`**：**已移除**；统一入口为 **`team_memory.server`** / **`team-memory`**。
+- **Console `team-memory`**：等同 **`python -m team_memory.server`**。
 
 
 ### Changed（Lite MCP JSON）
@@ -31,7 +30,7 @@
 
 ### Documentation
 
-- README、getting-started、`docs/design-docs/ops/mcp-server.md`：默认示例改为 `server_lite`；决策见 [docs/design-docs/ops/mcp-lite-default.md](docs/design-docs/ops/mcp-lite-default.md)。
+- README、`docs/design-docs/ops/mcp-server.md`：MCP 示例统一为 **`team_memory.server`**；决策见 [docs/design-docs/ops/mcp-lite-default.md](docs/design-docs/ops/mcp-lite-default.md)。
 
 ---
 

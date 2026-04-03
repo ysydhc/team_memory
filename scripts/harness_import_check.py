@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Import direction checker for team_memory architecture layers.
 
-Validates that imports respect the layer rules defined in
-docs/design-docs/harness/project-extension.md.
+Validates import directions for team_memory (L0～L3). Authoritative mapping is
+LAYER_MAP in this file (keep in sync with contributor docs / README).
 
 Usage:
   python scripts/harness_import_check.py [--root PATH]
@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Layer mapping (from docs/design-docs/harness/project-extension.md)
+# Layer mapping (document for contributors in README / AGENTS / design-docs)
 # ---------------------------------------------------------------------------
 
 # (path_pattern, layer) - order matters for prefix matching
@@ -186,8 +186,13 @@ def check_file(file_path: Path, root: Path) -> list[tuple[int, str, str]]:
         if not is_forbidden_import(imported):
             continue
 
-        if layer in ("L0", "L1", "L2") and imported in ("team_memory.server", "team_memory.bootstrap"):
-            violations.append((lineno, RULE_L0_L2_IMPORTS_BOOTSTRAP_SERVER, f"L0-L2 must not import {imported}"))
+        if layer in ("L0", "L1", "L2") and imported in (
+            "team_memory.server",
+            "team_memory.bootstrap",
+        ):
+            violations.append(
+                (lineno, RULE_L0_L2_IMPORTS_BOOTSTRAP_SERVER, f"L0-L2 must not import {imported}")
+            )
         elif layer == "L2" and imported == "team_memory.web":
             violations.append((lineno, RULE_L2_IMPORTS_L3, "L2 must not import L3 (web)"))
         elif layer in ("L0", "L1") and imported == "team_memory.web":

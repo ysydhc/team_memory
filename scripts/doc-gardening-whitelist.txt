@@ -1,10 +1,6 @@
 # Doc gardening whitelist: path, path:line, path:line:rule_id, or path:rule_id
 # Lines starting with # are ignored
 
-# doc-maintenance-guide.md: example links in scanning design section (rule description)
-docs/design-docs/harness/doc-maintenance-guide.md:DOC_LINK_404
-docs/design-docs/harness/doc-maintenance-guide.md:DOC_STALE_MARKER
-
 # index: intentionally lists archive docs for navigation
 docs/exec-plans/README.md:DOC_DEPRECATED_REF
 
