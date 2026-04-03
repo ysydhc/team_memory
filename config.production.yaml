@@ -41,14 +41,6 @@ web:
   host: "0.0.0.0"
   port: 9111
 
-installable_catalog:
-  sources: ["local"]
-  local_base_dir: "docs/res"
-  registry_manifest_url: ""
-  target_rules_dir: ".cursor/rules"
-  target_prompts_dir: ".cursor/prompts"
-  request_timeout_seconds: 8
-
 retrieval:
   max_tokens: null
   max_count: 20
@@ -102,8 +94,6 @@ vector:
 mcp:
   max_output_tokens: 4000
   truncate_solution_at: 2000
-
-webhooks: []
 
 tag_synonyms: {}
 

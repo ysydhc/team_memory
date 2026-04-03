@@ -5,17 +5,19 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from team_memory.auth.provider import User
+from team_memory.bootstrap import get_context
 from team_memory.storage.database import get_session
 from team_memory.web import app as app_module
-from team_memory.web.app import (
-    SearchRequest,
-    _get_db_url,
-    _resolve_project,
-    get_current_user,
-    get_optional_user,
-)
+from team_memory.web.app import _get_db_url, _resolve_project
+from team_memory.web.auth_session import get_current_user, get_optional_user
+from team_memory.web.schemas import SearchRequest
 
 router = APIRouter(tags=["search"])
+
+
+def _get_search_orchestrator():
+    """Get SearchOrchestrator from bootstrap context."""
+    return get_context().search_orchestrator
 
 
 @router.post("/search")
@@ -24,18 +26,16 @@ async def search_experiences_api(
     user: User | None = Depends(get_optional_user),
 ):
     """Semantic search for experiences. Supports anonymous access."""
-    _service = app_module._service
     _settings = app_module._settings
     user_name = user.name if user else "anonymous"
 
     retrieval_cfg = _settings.retrieval if _settings else None
     resolved_project = _resolve_project(req.project)
     max_results = req.max_results or (retrieval_cfg.max_count if retrieval_cfg else 10)
-    top_k_children = req.top_k_children or (
-        retrieval_cfg.top_k_children if retrieval_cfg else 3
-    )
+    top_k_children = req.top_k_children or (retrieval_cfg.top_k_children if retrieval_cfg else 3)
 
-    results = await _service.search(
+    search_orchestrator = _get_search_orchestrator()
+    results = await search_orchestrator.search(
         query=req.query,
         tags=req.tags,
         max_results=max_results,
@@ -50,7 +50,7 @@ async def search_experiences_api(
     return {
         "results": results,
         "total": len(results),
-        "project": resolved_project,
+        "limit": max_results,
     }
 
 
@@ -60,25 +60,21 @@ async def search_experiences_debug(
     user: User = Depends(get_current_user),
 ):
     """Debug search pipeline internals for tuning and troubleshooting."""
-    _service = app_module._service
     _settings = app_module._settings
-    if _service is None or _service._search_pipeline is None:
-        raise HTTPException(
-            status_code=400, detail="Search pipeline is not enabled"
-        )
+    search_orchestrator = _get_search_orchestrator()
+    if search_orchestrator is None or search_orchestrator._search_pipeline is None:
+        raise HTTPException(status_code=400, detail="Search pipeline is not enabled")
 
     db_url = _get_db_url()
     retrieval_cfg = _settings.retrieval if _settings else None
     resolved_project = _resolve_project(req.project)
     max_results = req.max_results or (retrieval_cfg.max_count if retrieval_cfg else 10)
-    top_k_children = req.top_k_children or (
-        retrieval_cfg.top_k_children if retrieval_cfg else 3
-    )
+    top_k_children = req.top_k_children or (retrieval_cfg.top_k_children if retrieval_cfg else 3)
 
     from team_memory.services.search_pipeline import SearchRequest as PipelineSearchRequest
 
     async with get_session(db_url) as session:
-        result = await _service._search_pipeline.search(  # noqa: SLF001
+        result = await search_orchestrator._search_pipeline.search(  # noqa: SLF001
             session,
             PipelineSearchRequest(
                 query=req.query,

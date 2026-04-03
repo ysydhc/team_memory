@@ -6,7 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
-from team_memory.storage.repository import (
+from team_memory.storage.personal_memory_repository import (
     PERSONAL_MEMORY_OVERWRITE_THRESHOLD,
     PersonalMemoryRepository,
 )
@@ -44,9 +44,7 @@ class PersonalMemoryService:
         """List memories for user, optionally filtered by scope and/or profile_kind."""
         async with self._session() as session:
             repo = PersonalMemoryRepository(session)
-            rows = await repo.list_by_user(
-                user_id, scope=scope, profile_kind=profile_kind
-            )
+            rows = await repo.list_by_user(user_id, scope=scope, profile_kind=profile_kind)
             return [r.to_dict() for r in rows]
 
     @staticmethod
@@ -75,9 +73,7 @@ class PersonalMemoryService:
             return {"static": [], "dynamic": []}
         context_embedding = None
         if current_context and current_context.strip():
-            context_embedding = await self._embedding.encode_single(
-                current_context.strip()
-            )
+            context_embedding = await self._embedding.encode_single(current_context.strip())
         async with self._session() as session:
             repo = PersonalMemoryRepository(session)
             rows = await repo.list_for_pull(
@@ -116,9 +112,7 @@ class PersonalMemoryService:
             return []
         context_embedding = None
         if current_context and current_context.strip():
-            context_embedding = await self._embedding.encode_single(
-                current_context.strip()
-            )
+            context_embedding = await self._embedding.encode_single(current_context.strip())
         async with self._session() as session:
             repo = PersonalMemoryRepository(session)
             rows = await repo.list_for_pull(

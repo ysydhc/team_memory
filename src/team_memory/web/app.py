@@ -9,35 +9,24 @@ Authentication is via API Key (same keys used for MCP access).
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
 import logging
 import os
 import time
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncGenerator
-from urllib.parse import quote
 
 import httpx
 import uvicorn
 from fastapi import (
-    APIRouter,
     FastAPI,
-    HTTPException,
     Request,
 )
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
 
-from team_memory.auth.provider import (
-    AuthProvider,
-    DbApiKeyAuth,
-    User,
-)
 from team_memory.bootstrap import (
     AppContext,
     bootstrap,
@@ -47,18 +36,40 @@ from team_memory.bootstrap import (
 )
 from team_memory.config import Settings, load_settings
 from team_memory.services.experience import ExperienceService
-from team_memory.storage.database import get_session
-from team_memory.storage.models import ApiKey
+from team_memory.storage.database import get_session  # noqa: F401 -- used by route modules
+from team_memory.web.auth_session import (  # noqa: F401 -- re-exported for backward compat
+    _decode_session_token,
+    _encode_api_key_cookie,
+    _encode_session_token,
+    _get_session_secret,
+    _get_user_role_from_db,
+    get_current_user,
+    get_optional_user,
+)
+from team_memory.web.schemas import (  # noqa: F401 — re-exported for backward compat
+    AdminResetPasswordRequest,
+    ApiKeyCreateRequest,
+    ApiKeyUpdateRequest,
+    ChangePasswordRequest,
+    ExperienceCreate,
+    ExperienceUpdate,
+    FeedbackCreate,
+    ForgotPasswordResetRequest,
+    LoginRequest,
+    LoginResponse,
+    RegisterRequest,
+    SearchRequest,
+)
 
 logger = logging.getLogger("team_memory.web")
 request_logger = logging.getLogger("team_memory.web.request")
 
 # ============================================================
-# Global state — backed by bootstrap.AppContext singleton
+# Global state -- backed by bootstrap.AppContext singleton
 # ============================================================
 _settings: Settings | None = None
 _service: ExperienceService | None = None
-_auth: AuthProvider | None = None
+_auth = None  # AuthProvider | None
 
 
 def _init_from_context(ctx: AppContext) -> None:
@@ -77,7 +88,11 @@ def _get_db_url() -> str:
 
 
 def _resolve_project(project: str | None) -> str:
-    """Resolve project from request > env > config default."""
+    """Resolve project from request > env > config default.
+
+    Delegates to utils.project.resolve_project but falls back to the
+    module-level _settings when AppContext is not yet bootstrapped.
+    """
     if project and project.strip():
         return project.strip()
     env_project = (os.environ.get("TEAM_MEMORY_PROJECT") or "").strip()
@@ -118,6 +133,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await ensure_default_admin(db_url, password)
 
     # Defer route registration to avoid circular import
+    from fastapi import APIRouter
+
     from team_memory.web.routes import mount_all
 
     v1_router = APIRouter(prefix="/api/v1")
@@ -127,6 +144,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("TeamMemory web server started")
     yield
     await stop_background_tasks(ctx)
+    # Ensure DB connections are released even if stop_background_tasks changes
+    from team_memory.storage.database import close_db
+
+    await close_db()
     logger.info("TeamMemory web server stopped")
 
 
@@ -192,19 +213,58 @@ async def _check_embedding_provider() -> dict:
         return {"status": "down", "error": str(e)[:100]}
 
 
+async def _check_llm_provider() -> dict:
+    """Check LLM provider connectivity."""
+    try:
+        ctx = get_context()
+        settings = ctx.settings
+        if settings.llm.provider == "ollama":
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.get(f"{settings.llm.base_url}/api/tags")
+                resp.raise_for_status()
+                return {
+                    "status": "up",
+                    "provider": settings.llm.provider,
+                    "model": settings.llm.model,
+                }
+        return {"status": "up", "provider": settings.llm.provider}
+    except Exception as e:
+        return {"status": "down", "error": str(e)[:100]}
+
+
+async def _check_cache() -> dict:
+    """Check cache backend availability."""
+    try:
+        ctx = get_context()
+        pipeline = (
+            ctx.search_orchestrator._search_pipeline
+            if hasattr(ctx, "search_orchestrator")
+            else None
+        )
+        if pipeline and pipeline._cache:
+            return {"status": "up", "backend": ctx.settings.cache.backend}
+        return {"status": "up", "backend": "none"}
+    except Exception as e:
+        return {"status": "down", "error": str(e)[:100]}
+
+
 @app.get("/health")
 async def health_check():
-    """Health check endpoint — no authentication required."""
-    db_check, ollama_check, embed_check = await asyncio.gather(
+    """Health check endpoint -- no authentication required."""
+    db_check, ollama_check, embed_check, llm_check, cache_check = await asyncio.gather(
         _check_database(),
         _check_ollama(),
         _check_embedding_provider(),
+        _check_llm_provider(),
+        _check_cache(),
     )
 
     checks = {
         "database": db_check,
         "ollama": ollama_check,
         "embedding_provider": embed_check,
+        "llm_provider": llm_check,
+        "cache": cache_check,
     }
 
     if db_check["status"] == "down":
@@ -228,7 +288,7 @@ async def health_check():
 
 @app.get("/ready")
 async def readiness_check():
-    """Readiness probe — returns 200 only when database is healthy."""
+    """Readiness probe -- returns 200 only when database is healthy."""
     db_check = await _check_database()
     if db_check["status"] == "down":
         return JSONResponse(
@@ -244,6 +304,49 @@ async def readiness_check():
 from team_memory.web.middleware import api_version_compat  # noqa: E402
 
 app.middleware("http")(api_version_compat)
+
+# ---- Rate limiting (in-memory, per IP) ----
+_rate_limit_store: dict[str, list[float]] = defaultdict(list)
+
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    """Reject requests that exceed the per-IP rate limit."""
+    if request.url.path in ("/health", "/ready"):
+        return await call_next(request)
+
+    client_ip = request.client.host if request.client else "unknown"
+    limit = getattr(getattr(_settings, "web", None), "rate_limit_per_minute", None) or 200
+    now = time.monotonic()
+    window = 60.0
+
+    timestamps = _rate_limit_store[client_ip]
+    _rate_limit_store[client_ip] = [t for t in timestamps if now - t < window]
+
+    if len(_rate_limit_store[client_ip]) >= limit:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit exceeded"},
+        )
+
+    _rate_limit_store[client_ip].append(now)
+    return await call_next(request)
+
+
+# ---- Request body size limit ----
+@app.middleware("http")
+async def limit_request_body(request: Request, call_next):
+    """Return 413 when Content-Length exceeds the configured maximum."""
+    content_length = request.headers.get("content-length")
+    max_bytes = (
+        getattr(getattr(_settings, "web", None), "max_request_body_bytes", None) or 20_971_520
+    )
+    if content_length and int(content_length) > int(max_bytes):
+        return JSONResponse(
+            status_code=413,
+            content={"detail": f"Request body too large. Max {max_bytes} bytes."},
+        )
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -294,253 +397,6 @@ async def _global_exception_handler(request: Request, exc: Exception):
             },
         )
     raise exc
-
-
-# ============================================================
-# Auth Dependencies
-# ============================================================
-def _encode_api_key_cookie(api_key: str) -> str:
-    return quote(api_key, safe="")
-
-
-def _encode_session_token(user: str, secret: str, expiry_days: int = 7) -> str:
-    expiry_ts = int(time.time()) + expiry_days * 86400
-    msg = f"{user}:{expiry_ts}".encode()
-    sig = hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()
-    return f"sess:{user}:{expiry_ts}:{sig}"
-
-
-def _decode_session_token(token: str, secret: str) -> str | None:
-    if not token or not token.startswith("sess:"):
-        return None
-    parts = token.split(":", 3)
-    if len(parts) != 4:
-        return None
-    _, user, expiry_str, sig = parts
-    try:
-        expiry_ts = int(expiry_str)
-    except ValueError:
-        return None
-    if time.time() > expiry_ts:
-        return None
-    msg = f"{user}:{expiry_ts}".encode()
-    expected = hmac.new(secret.encode(), msg, hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(sig, expected):
-        return None
-    return user
-
-
-def _get_session_secret() -> str:
-    secret = os.environ.get("TEAM_MEMORY_SESSION_SECRET")
-    if secret:
-        return secret
-    settings = _settings or get_context().settings
-    if settings.auth.session_secret:
-        return settings.auth.session_secret
-    return hashlib.sha256(settings.database.url.encode()).hexdigest()
-
-
-async def _get_user_role_from_db(user_name: str) -> str:
-    if not isinstance(_auth, DbApiKeyAuth):
-        return "viewer"
-    db_url = _get_db_url()
-    try:
-        async with get_session(db_url) as session:
-            result = await session.execute(
-                select(ApiKey).where(ApiKey.user_name == user_name)
-            )
-            row = result.scalar_one_or_none()
-            if row:
-                return row.role
-    except Exception:
-        pass
-    return "viewer"
-
-
-async def get_current_user(request: Request) -> User:
-    """Extract and validate credentials from header or cookie."""
-    cached = getattr(request.state, "user", None)
-    if cached is not None:
-        return cached
-
-    if not _auth:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    auth_header = request.headers.get("Authorization", "")
-    api_key = ""
-    if auth_header.startswith("Bearer "):
-        api_key = auth_header[7:]
-
-    if not api_key:
-        from team_memory.web.middleware import _decode_api_key_cookie
-
-        api_key = _decode_api_key_cookie(request.cookies.get("api_key", ""))
-
-    if not api_key:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    if api_key.startswith("sess:"):
-        secret = _get_session_secret()
-        user_str = _decode_session_token(api_key, secret)
-        if user_str:
-            role = await _get_user_role_from_db(user_str)
-            user = User(name=user_str, role=role)
-            request.state.user = user
-            return user
-        raise HTTPException(status_code=401, detail="Invalid or expired session")
-
-    if api_key.startswith("pwd:"):
-        parts = api_key.split(":", 2)
-        if len(parts) == 3:
-            user = await _auth.authenticate({"username": parts[1], "password": parts[2]})
-        else:
-            user = None
-    else:
-        user = await _auth.authenticate({"api_key": api_key})
-
-    if user is None:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    request.state.user = user
-    return user
-
-
-async def get_optional_user(request: Request) -> User | None:
-    """Try to authenticate, return None instead of raising 401."""
-    auth_header = request.headers.get("Authorization", "")
-    api_key = ""
-    if auth_header.startswith("Bearer "):
-        api_key = auth_header[7:]
-
-    if not api_key:
-        from team_memory.web.middleware import _decode_api_key_cookie
-
-        api_key = _decode_api_key_cookie(request.cookies.get("api_key", ""))
-
-    if not api_key or not _auth:
-        if _settings and _settings.auth.allow_anonymous_search:
-            return User(name="anonymous", role="viewer")
-        return None
-
-    if api_key.startswith("sess:"):
-        secret = _get_session_secret()
-        user_str = _decode_session_token(api_key, secret)
-        if user_str:
-            role = await _get_user_role_from_db(user_str)
-            return User(name=user_str, role=role)
-        return None
-
-    if api_key.startswith("pwd:"):
-        parts = api_key.split(":", 2)
-        if len(parts) == 3:
-            return await _auth.authenticate({"username": parts[1], "password": parts[2]})
-        return None
-
-    return await _auth.authenticate({"api_key": api_key})
-
-
-# ============================================================
-# Request/Response Models
-# ============================================================
-class LoginRequest(BaseModel):
-    api_key: str | None = None
-    username: str | None = None
-    password: str | None = None
-
-
-class RegisterRequest(BaseModel):
-    username: str
-    password: str
-
-
-class LoginResponse(BaseModel):
-    success: bool
-    user: str = ""
-    role: str = ""
-    message: str = ""
-
-
-class ChangePasswordRequest(BaseModel):
-    old_password: str
-    new_password: str
-
-
-class ForgotPasswordResetRequest(BaseModel):
-    username: str
-    api_key: str
-    new_password: str
-
-
-class AdminResetPasswordRequest(BaseModel):
-    username: str
-    new_password: str
-
-
-class ExperienceCreate(BaseModel):
-    title: str
-    problem: str
-    solution: str | None = None
-    tags: list[str] = Field(default_factory=list)
-    status: str = "published"
-    visibility: str = "project"
-    skip_dedup_check: bool = False
-    experience_type: str = "general"
-    project: str | None = None
-    group_key: str | None = None
-
-
-class ExperienceUpdate(BaseModel):
-    title: str | None = None
-    problem: str | None = None
-    solution: str | None = None
-    tags: list[str] | None = None
-    experience_type: str | None = None
-    exp_status: str | None = None
-    visibility: str | None = None
-    solution_addendum: str | None = None
-
-
-class FeedbackCreate(BaseModel):
-    rating: int
-    comment: str | None = None
-
-    @field_validator("rating")
-    @classmethod
-    def rating_range(cls, v: int) -> int:
-        if not (1 <= v <= 5):
-            raise ValueError("rating must be between 1 and 5")
-        return v
-
-
-class SearchRequest(BaseModel):
-    query: str
-    tags: list[str] | None = None
-    max_results: int | None = None
-    min_similarity: float = 0.5
-    grouped: bool = True
-    top_k_children: int | None = None
-    project: str | None = None
-    include_archives: bool = False
-
-
-class ApiKeyCreateRequest(BaseModel):
-    user_name: str
-    role: str = "editor"
-    password: str | None = None
-    generate_api_key: bool = False
-
-    @field_validator("role")
-    @classmethod
-    def validate_role(cls, v: str) -> str:
-        if v not in ("admin", "editor", "viewer"):
-            raise ValueError("role must be admin, editor, or viewer")
-        return v
-
-
-class ApiKeyUpdateRequest(BaseModel):
-    role: str | None = None
-    is_active: bool | None = None
-    generate_api_key: bool | None = None
 
 
 # ============================================================

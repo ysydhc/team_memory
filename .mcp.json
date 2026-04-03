@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "team-memory": {
+      "command": "python",
+      "args": ["-m", "team_memory.server"],
+      "cwd": "/Users/yeshouyou/Work/agent/team_doc",
+      "env": {
+        "PYTHONPATH": "/Users/yeshouyou/Work/agent/team_doc/src"
+      }
+    }
+  }
+}

@@ -4,7 +4,7 @@
 
 import { state, defaultTypeIcons } from './store.js';
 import { resolveProjectInput } from './schema.js';
-import { esc, formatDate, timeAgo } from './utils.js';
+import { esc, formatDate, timeAgo, renderMarkdown } from './utils.js';
 
 function api(...args) {
     return window.__api(...args);
@@ -293,7 +293,7 @@ export async function loadList(page = 1) {
         const statusFilter = document.getElementById('list-status-filter')?.value || '';
         const typeFilter = document.getElementById('list-type-filter')?.value || '';
         const visibilityFilter = document.getElementById('list-visibility-filter')?.value || '';
-        let url = `/api/v1/experiences?page=${page}&page_size=15`;
+        let url = `/api/v1/experiences?limit=15&offset=${(page - 1) * 15}`;
         if (projectFilter) url += `&project=${encodeURIComponent(projectFilter)}`;
         if (visibilityFilter) url += `&visibility=${encodeURIComponent(visibilityFilter)}`;
         if (statusFilter) url += `&status=${statusFilter}`;
@@ -301,10 +301,10 @@ export async function loadList(page = 1) {
         if (typeFilter) url += `&experience_type=${encodeURIComponent(typeFilter)}`;
 
         const data = await api('GET', url);
-        renderExpList('list-content', data.experiences);
+        renderExpList('list-content', data.items);
         renderPagination(data);
     } catch (e) {
-        container.innerHTML = `<div class="empty-state"><h3>加载失败</h3><p>${e.message}</p></div>`;
+        container.innerHTML = `<div class="empty-state"><h3>加载失败</h3><p>${esc(e.message)}</p></div>`;
     }
 }
 
@@ -316,14 +316,16 @@ export function filterByTag(tag) {
 
 function renderPagination(data) {
     const el = document.getElementById('list-pagination');
-    if (data.total_pages <= 1) {
+    const totalPages = Math.ceil(data.total / data.limit) || 1;
+    const currentPage = Math.floor(data.offset / data.limit) + 1;
+    if (totalPages <= 1) {
         el.innerHTML = '';
         return;
     }
     el.innerHTML = `
-    <button class="btn btn-secondary btn-sm" onclick="loadList(${data.page - 1})" ${data.page <= 1 ? 'disabled' : ''}>上一页</button>
-    <span class="page-info">${data.page} / ${data.total_pages}</span>
-    <button class="btn btn-secondary btn-sm" onclick="loadList(${data.page + 1})" ${data.page >= data.total_pages ? 'disabled' : ''}>下一页</button>
+    <button class="btn btn-secondary btn-sm" onclick="loadList(${currentPage - 1})" ${currentPage <= 1 ? 'disabled' : ''}>上一页</button>
+    <span class="page-info">${currentPage} / ${totalPages}</span>
+    <button class="btn btn-secondary btn-sm" onclick="loadList(${currentPage + 1})" ${currentPage >= totalPages ? 'disabled' : ''}>下一页</button>
   `;
 }
 
@@ -462,7 +464,7 @@ export async function showDetail(id, opts = {}) {
     `;
         bindCopyDropdowns(page);
     } catch (e) {
-        page.innerHTML = `<div class="empty-state"><h3>加载失败</h3><p>${e.message}</p></div>`;
+        page.innerHTML = `<div class="empty-state"><h3>加载失败</h3><p>${esc(e.message)}</p></div>`;
     }
 }
 
@@ -472,12 +474,12 @@ export async function loadDrafts() {
     container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
     try {
         const project = state.activeProject || state.defaultProject || 'default';
-        const data = await api('GET', `/api/v1/experiences?status=draft&page=1&page_size=50&project=${encodeURIComponent(project)}`);
-        if (!data.experiences || data.experiences.length === 0) {
+        const data = await api('GET', `/api/v1/experiences?status=draft&limit=50&offset=0&project=${encodeURIComponent(project)}`);
+        if (!data.items || data.items.length === 0) {
             container.innerHTML = '<div class="empty-state"><div class="icon">📝</div><h3>暂无草稿</h3><p>创建经验时勾选"保存为草稿"即可</p></div>';
             return;
         }
-        container.innerHTML = data.experiences
+        container.innerHTML = data.items
             .map(
                 (exp) => {
                     const tagsStr = (exp.tags || []).join(', ');
@@ -514,7 +516,7 @@ export async function changeExpStatus(id, newStatus, newVisibility = null) {
     try {
         const body = { status: newStatus };
         if (newVisibility) body.visibility = newVisibility;
-        const res = await api('POST', `/api/v1/experiences/${id}/status`, body);
+        const res = await api('PATCH', `/api/v1/experiences/${id}/status`, body);
         toast(res.message || '操作成功', 'success');
         showDetail(id);
     } catch (e) {
@@ -1128,7 +1130,7 @@ export async function loadKeyManagement() {
     if (!state.currentUser || state.currentUser.role !== 'admin') return;
 
     try {
-        const data = await api('GET', '/api/v1/keys');
+        const data = await api('GET', '/api/v1/auth/keys');
         const keys = data.keys || [];
         const pending = keys.filter(k => !k.is_active && !k.has_api_key);
         const active = keys.filter(k => k.is_active || k.has_api_key);
@@ -1202,7 +1204,7 @@ export async function loadKeyManagement() {
 
 export async function approveUser(id) {
     try {
-        await api('PUT', `/api/v1/keys/${id}`, { is_active: true });
+        await api('PUT', `/api/v1/auth/keys/${id}`, { is_active: true });
         toast('审批成功', 'success');
         loadKeyManagement();
     } catch (e) {
@@ -1213,7 +1215,7 @@ export async function approveUser(id) {
 export async function rejectUser(id) {
     if (!confirm('确定要拒绝此注册申请？将删除该记录。')) return;
     try {
-        await api('DELETE', `/api/v1/keys/${id}`);
+        await api('DELETE', `/api/v1/auth/keys/${id}`);
         toast('已拒绝', 'success');
         loadKeyManagement();
     } catch (e) {
@@ -1230,7 +1232,7 @@ export async function createUserAdmin() {
     try {
         const body = { user_name: username, role };
         if (password) body.password = password;
-        await api('POST', '/api/v1/keys', body);
+        await api('POST', '/api/v1/auth/keys', body);
         toast('用户创建成功', 'success');
         document.getElementById('admin-create-user-form').style.display = 'none';
         document.getElementById('admin-new-username').value = '';
@@ -1243,7 +1245,7 @@ export async function createUserAdmin() {
 
 export async function updateUserRole(id, newRole) {
     try {
-        await api('PUT', `/api/v1/keys/${id}`, { role: newRole });
+        await api('PUT', `/api/v1/auth/keys/${id}`, { role: newRole });
         toast('角色已更新', 'success');
     } catch (e) {
         toast('更新失败: ' + e.message, 'error');
@@ -1255,7 +1257,7 @@ export async function toggleUserActive(id, active) {
     const action = active ? '激活' : '停用';
     if (!confirm(`确定要${action}此用户？`)) return;
     try {
-        await api('PUT', `/api/v1/keys/${id}`, { is_active: active });
+        await api('PUT', `/api/v1/auth/keys/${id}`, { is_active: active });
         toast(`用户已${action}`, 'success');
         loadKeyManagement();
     } catch (e) {
@@ -1463,10 +1465,21 @@ export async function loadArchivesList(page = 1) {
                     st ? `状态 ${st}` : '',
                     typeof a.attachment_count === 'number' ? `${a.attachment_count} 个附件` : '',
                 ].filter(Boolean).join(' · ');
+                const ctBadge = a.content_type
+                    ? `<span class="arch-content-type-badge">${esc(a.content_type)}</span>`
+                    : '';
+                const valSum = a.value_summary
+                    ? `<div class="arch-value-summary">${esc(a.value_summary)}</div>`
+                    : '';
+                const tagsRow = (a.tags && a.tags.length)
+                    ? `<div class="arch-tags">${a.tags.map((t) => `<span class="arch-tag">${esc(t)}</span>`).join('')}</div>`
+                    : '';
                 return `<a class="arch-card" href="${hashHref}" data-archive-id="${esc(idRaw)}"
                   aria-label="查看档案详情：${esc(a.title || '未命名')}">
-                  <div class="arch-card-title">${esc(a.title || '')}</div>
+                  <div class="arch-card-title">${ctBadge}${esc(a.title || '')}</div>
+                  ${valSum}
                   <div class="arch-card-meta">${meta}</div>
+                  ${tagsRow}
                   <div class="arch-card-preview">${prev}</div>
                   <div class="arch-card-cta"><span>查看详情</span></div>
                 </a>`;
@@ -1523,6 +1536,7 @@ function _archiveAttachmentsRich(atts) {
     const projQs = _archivesProjectParam();
     const items = atts.map((t) => {
         const head = `<strong><code>${esc(t.kind || '')}</code></strong>${t.path ? ` <span style="color:var(--text-muted)">${esc(t.path)}</span>` : ''}${t.git_commit ? ` <code style="font-size:11px">${esc(t.git_commit)}</code>` : ''}`;
+        const srcInfo = t.source_path ? `<p style="margin:4px 0 0;font-size:12px;color:var(--text-muted)">本地路径: ${esc(t.source_path)}</p>` : '';
         const dl =
             t.download_api_path
                 ? `<p style="margin:8px 0 0;font-size:13px"><a href="${esc(t.download_api_path)}?${projQs}" download target="_blank" rel="noopener">下载附件文件</a>${t.storage === 'local' ? ' <span style="color:var(--text-muted);font-size:12px">(local)</span>' : ''}</p>`
@@ -1539,7 +1553,7 @@ function _archiveAttachmentsRich(atts) {
         if (!body) {
             body = `<p style="font-size:12px;color:var(--text-muted);margin:8px 0 0">（无内联快照，仅路径引用）</p>`;
         }
-        return `<li style="margin-bottom:16px">${head}${dl}${body}</li>`;
+        return `<li style="margin-bottom:16px">${head}${srcInfo}${dl}${body}</li>`;
     }).join('');
     return `<section style="margin-top:20px"><h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);margin:0 0 8px">附件与快照</h3><ul style="margin:0;padding-left:0;list-style:none">${items}</ul></section>`;
 }
@@ -1665,30 +1679,78 @@ export async function openArchiveDetail(id) {
         const failures = (failRes && failRes.items) || [];
         const { html: failHtml, curlStrings } = _archiveFailuresHtml(id, failures);
 
+        // --- L0: Header ---
         const meta = [
-            a.created_at ? `保存于 ${formatDate(a.created_at)}` : '',
             a.created_by ? esc(a.created_by) : '',
+            a.created_at ? `保存于 ${formatDate(a.created_at)}` : '',
             a.project ? esc(a.project) : '',
             a.status ? `状态 ${esc(a.status)}` : '',
         ].filter(Boolean).join(' · ');
+        const ctBadge = a.content_type
+            ? `<span class="arch-content-type-badge">${esc(a.content_type)}</span>`
+            : '';
+        const valSum = a.value_summary
+            ? `<div class="arch-value-summary">${esc(a.value_summary)}</div>`
+            : '';
+        const tagsRow = (a.tags && a.tags.length)
+            ? `<div class="arch-tags">${a.tags.map((t) => `<span class="arch-tag">${esc(t)}</span>`).join('')}</div>`
+            : '';
         const links = (a.linked_experience_ids || []).length
             ? `<p style="font-size:13px;color:var(--text-muted);margin:12px 0">关联经验 ID：${(a.linked_experience_ids || []).map((x) => `<code>${esc(x)}</code>`).join(', ')}</p>`
             : '';
 
-        body.innerHTML = `
+        const l0Header = `
           <header style="margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:12px">
-            <h2 style="font-size:20px;font-weight:600;margin:0 0 8px;color:var(--text-primary)">${esc(a.title || '')}</h2>
-            <p style="margin:0;font-size:12px;color:var(--text-muted)">${meta}</p>
+            <h2 style="font-size:20px;font-weight:600;margin:0 0 8px;color:var(--text-primary)">${ctBadge}${esc(a.title || '')}</h2>
+            ${valSum}
+            ${tagsRow}
+            <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted)">${meta}</p>
             ${_archiveScopeLine(a)}
-          </header>
+          </header>`;
+
+        // --- L1: Overview (expanded by default) ---
+        const overviewContent = a.overview
+            ? renderMarkdown(a.overview)
+            : '<p style="color:var(--text-muted);font-style:italic">无概览内容</p>';
+        const l1Section = `
+          <div class="archive-section">
+            <div class="archive-section-header" onclick="this.nextElementSibling.classList.toggle('collapsed');this.querySelector('.archive-toggle-icon').textContent=this.nextElementSibling.classList.contains('collapsed')?'&#9654;':'&#9660;'">
+              <span>概览 / Overview</span>
+              <span class="archive-toggle-icon">&#9660;</span>
+            </div>
+            <div class="archive-section-body">
+              ${overviewContent}
+            </div>
+          </div>`;
+
+        // --- L2: Full Content (collapsed by default) ---
+        const solutionHtml = a.solution_doc
+            ? `<section style="margin-bottom:16px"><h4 style="font-size:13px;font-weight:600;color:var(--text-secondary);margin:0 0 8px">方案与计划全文</h4><div>${renderMarkdown(a.solution_doc)}</div></section>`
+            : '';
+        const convHtml = a.conversation_summary
+            ? `<section style="margin-bottom:16px"><h4 style="font-size:13px;font-weight:600;color:var(--text-secondary);margin:0 0 8px">对话摘要</h4><div>${renderMarkdown(a.conversation_summary)}</div></section>`
+            : '';
+        const treeHtml = _archiveTreeNodesSection(a.document_tree_nodes);
+        const attHtml = _archiveAttachmentsRich(a.attachments || []);
+        const l2Inner = solutionHtml + convHtml + treeHtml + links + attHtml;
+        const l2Section = l2Inner.trim()
+            ? `<div class="archive-section">
+            <div class="archive-section-header" onclick="this.nextElementSibling.classList.toggle('collapsed');this.querySelector('.archive-toggle-icon').textContent=this.nextElementSibling.classList.contains('collapsed')?'&#9654;':'&#9660;'">
+              <span>完整内容 / Full Content</span>
+              <span class="archive-toggle-icon">&#9654;</span>
+            </div>
+            <div class="archive-section-body collapsed">
+              ${l2Inner}
+            </div>
+          </div>`
+            : '';
+
+        body.innerHTML = `
+          ${l0Header}
           ${failHtml}
           ${_archiveUploadFormHtml()}
-          ${_archiveTextBlock('方案与计划全文', a.solution_doc)}
-          ${_archiveTextBlock('对话摘要', a.conversation_summary)}
-          ${_archiveTextBlock('概览', a.overview)}
-          ${_archiveTreeNodesSection(a.document_tree_nodes)}
-          ${links}
-          ${_archiveAttachmentsRich(a.attachments || [])}`;
+          ${l1Section}
+          ${l2Section}`;
         await _bindArchiveDetailInteractions(id, body, curlStrings);
     } catch (e) {
         body.innerHTML = `<div class="empty-state"><h3>无法打开</h3><p>${esc(e.message)}</p><p style="font-size:13px">若没有权限或档案为草稿且非您创建，服务器会返回未找到。</p></div>`;

@@ -34,6 +34,8 @@ def setup_app():
     web_module._settings.retrieval = MagicMock()
     web_module._settings.retrieval.max_count = 20
     web_module._settings.retrieval.top_k_children = 3
+    web_module._settings.web.max_request_body_bytes = 20_971_520
+    web_module._settings.web.rate_limit_per_minute = 200
 
     mock_service = MagicMock()
     exp_id = str(uuid.uuid4())
@@ -46,20 +48,25 @@ def setup_app():
             "created_at": "2026-01-01T00:00:00+00:00",
         }
     )
-    mock_service.search = AsyncMock(return_value=[])
     mock_service.feedback = AsyncMock(return_value=True)
-    mock_service.invalidate_search_cache = AsyncMock()
-    mock_service._search_pipeline = None
     mock_service._event_bus = MagicMock()
     web_module._service = mock_service
+
+    mock_search_orchestrator = MagicMock()
+    mock_search_orchestrator.search = AsyncMock(return_value=[])
+    mock_search_orchestrator.invalidate_cache = AsyncMock()
 
     # Patch bootstrap so lifespan runs and /api/v1 routes are registered
     mock_ctx = MagicMock()
     mock_ctx.settings = web_module._settings
     mock_ctx.service = mock_service
     mock_ctx.auth = web_module._auth
+    mock_ctx.search_orchestrator = mock_search_orchestrator
     with (
         patch("team_memory.web.app.bootstrap", return_value=mock_ctx),
+        patch("team_memory.bootstrap.get_context", return_value=mock_ctx),
+        patch("team_memory.web.routes.search.get_context", return_value=mock_ctx),
+        patch("team_memory.web.routes.config.get_context", return_value=mock_ctx),
         patch("team_memory.web.app.start_background_tasks", new_callable=AsyncMock),
         patch("team_memory.web.app.stop_background_tasks", new_callable=AsyncMock),
     ):
@@ -112,7 +119,7 @@ class TestDraftMode:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data.get("exp_status") == "draft"
+        assert data["item"].get("exp_status") == "draft"
         setup_app.save.assert_called_once()
         call_kwargs = setup_app.save.call_args
         assert call_kwargs.kwargs.get("exp_status") == "draft"
@@ -188,7 +195,7 @@ class TestDedupOnSave:
         )
         assert resp.status_code == 409
         data = resp.json()
-        assert data["status"] == "duplicate_detected"
+        assert data["error"]["code"] == "duplicate_detected"
         assert len(data["candidates"]) == 1
 
     def test_skip_dedup_creates_normally(self, client, auth_headers, setup_app):

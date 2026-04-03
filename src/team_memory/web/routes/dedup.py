@@ -9,7 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from team_memory.auth.provider import User
 from team_memory.web import app as app_module
-from team_memory.web.app import _resolve_project, get_current_user
+from team_memory.web.app import _resolve_project
+from team_memory.web.auth_session import get_current_user
 from team_memory.web.dependencies import require_role
 
 router = APIRouter(tags=["dedup"])
@@ -34,9 +35,7 @@ async def list_duplicate_pairs(
     """Scan published root experiences for high vector similarity."""
     svc = _svc()
     resolved = _resolve_project(project)
-    return await svc.find_duplicate_pairs(
-        threshold=threshold, limit=limit, project=resolved
-    )
+    return await svc.find_duplicate_pairs(threshold=threshold, limit=limit, project=resolved)
 
 
 @router.post("/dedup/reembed-group-vectors")

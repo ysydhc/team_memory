@@ -1,5 +1,6 @@
 """Tests for search result and embedding caching (D1 refactored)."""
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -172,3 +173,96 @@ class TestSearchCache:
         assert stats["enabled"] is True
         assert stats["result_cache_size"] == 1
         assert stats["backend"] == "memory"
+
+
+# ======================== Cache Stampede Protection ========================
+
+
+class TestCacheStampedeProtection:
+    @pytest.mark.asyncio
+    async def test_concurrent_same_key_computes_once(self):
+        """Multiple concurrent get_or_compute_embedding calls for the same key
+        should only invoke the embedding provider once (stampede prevention)."""
+        cache = SearchCache(enabled=True, ttl_seconds=300, embedding_cache_size=10)
+
+        call_count = 0
+        compute_started = asyncio.Event()
+        proceed = asyncio.Event()
+
+        async def slow_encode(text: str) -> list[float]:
+            nonlocal call_count
+            call_count += 1
+            compute_started.set()
+            await proceed.wait()
+            return [0.1, 0.2, 0.3]
+
+        mock_provider = AsyncMock()
+        mock_provider.encode_single = slow_encode
+
+        async def requester() -> list[float]:
+            return await cache.get_or_compute_embedding("same text", mock_provider)
+
+        # Launch multiple concurrent requests
+        tasks = [asyncio.create_task(requester()) for _ in range(5)]
+
+        # Wait until at least one computation starts
+        await asyncio.wait_for(compute_started.wait(), timeout=2.0)
+
+        # Let the computation complete
+        proceed.set()
+
+        results = await asyncio.gather(*tasks)
+
+        # All results should be identical
+        for r in results:
+            assert r == [0.1, 0.2, 0.3]
+
+        # The provider should only have been called once
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_different_keys_compute_independently(self):
+        """Different cache keys should not block each other."""
+        cache = SearchCache(enabled=True, ttl_seconds=300, embedding_cache_size=10)
+
+        mock_provider = AsyncMock()
+        mock_provider.encode_single = AsyncMock(side_effect=lambda t: [hash(t) % 100])
+
+        r1 = await cache.get_or_compute_embedding("text a", mock_provider)
+        r2 = await cache.get_or_compute_embedding("text b", mock_provider)
+
+        assert mock_provider.encode_single.call_count == 2
+        assert r1 != r2  # Different inputs, different outputs
+
+    @pytest.mark.asyncio
+    async def test_lock_cleaned_up_after_compute(self):
+        """Per-key locks should be removed after computation to prevent memory leaks."""
+        cache = SearchCache(enabled=True, ttl_seconds=300, embedding_cache_size=10)
+
+        mock_provider = AsyncMock()
+        mock_provider.encode_single = AsyncMock(return_value=[0.5])
+
+        await cache.get_or_compute_embedding("cleanup test", mock_provider)
+
+        # The lock for this key should have been cleaned up
+        import hashlib
+
+        key = hashlib.md5("cleanup test".encode()).hexdigest()
+        assert key not in cache._locks
+
+    @pytest.mark.asyncio
+    async def test_lock_cleaned_up_on_cache_hit_after_lock(self):
+        """Lock should be cleaned up even on cache hit after acquiring lock."""
+        cache = SearchCache(enabled=True, ttl_seconds=300, embedding_cache_size=10)
+
+        mock_provider = AsyncMock()
+        mock_provider.encode_single = AsyncMock(return_value=[0.5])
+
+        # Warm the cache
+        await cache.get_or_compute_embedding("warm key", mock_provider)
+        assert mock_provider.encode_single.call_count == 1
+
+        # Second call hits cache on fast path, no lock needed
+        result = await cache.get_or_compute_embedding("warm key", mock_provider)
+        assert result == [0.5]
+        assert mock_provider.encode_single.call_count == 1

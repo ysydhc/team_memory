@@ -31,13 +31,15 @@ def require_role(*actions: str):
         async def edit(user=Depends(require_role("update", "delete"))):
             ...
     """
+
     async def _check_role(request: Request) -> User:
         # Retrieve user from request state (set by get_current_user)
         user: User | None = getattr(request.state, "user", None)
 
         if user is None:
-            # Authenticate via get_current_user logic (lazy import to avoid circular)
-            from team_memory.web.app import get_current_user
+            # Authenticate via get_current_user logic
+            from team_memory.web.auth_session import get_current_user
+
             user = await get_current_user(request)
             request.state.user = user
 
@@ -46,7 +48,9 @@ def require_role(*actions: str):
             if not has_permission(user.role, action):
                 logger.warning(
                     "Permission denied: user=%s role=%s action=%s",
-                    user.name, user.role, action,
+                    user.name,
+                    user.role,
+                    action,
                 )
                 raise HTTPException(
                     status_code=403,
@@ -60,4 +64,18 @@ def require_role(*actions: str):
 
 def require_admin():
     """Convenience dependency: require admin role."""
-    return require_role("admin")
+
+    async def _check(request: Request) -> User:
+        user: User | None = getattr(request.state, "user", None)
+
+        if user is None:
+            from team_memory.web.auth_session import get_current_user
+
+            user = await get_current_user(request)
+            request.state.user = user
+
+        if user.role != "admin":
+            raise HTTPException(status_code=403, detail="Admin role required")
+        return user
+
+    return _check

@@ -7,7 +7,9 @@ Includes token usage tracking and monthly budget control.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
@@ -82,19 +84,33 @@ class OllamaLLMProvider(LLMProvider):
         if max_tokens:
             payload["options"]["num_predict"] = max_tokens
 
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.post(f"{self._base_url}/api/chat", json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-                content = data.get("message", {}).get("content", "")
-                _track_usage(0, len(content) // 4, 0)
-                return content
-        except httpx.ConnectError:
-            raise ConnectionError(
-                f"Cannot connect to Ollama at {self._base_url}. "
-                "Make sure Ollama is running."
-            )
+        for attempt in range(2):
+            try:
+                call_start = time.monotonic()
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    resp = await client.post(f"{self._base_url}/api/chat", json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    content = data.get("message", {}).get("content", "")
+                    duration_ms = int((time.monotonic() - call_start) * 1000)
+                    logger.info(
+                        "LLM call completed",
+                        extra={"provider": "ollama", "model": model, "duration_ms": duration_ms},
+                    )
+                    _track_usage(0, len(content) // 4, 0)
+                    return content
+            except httpx.ConnectError:
+                raise ConnectionError(
+                    f"Cannot connect to Ollama at {self._base_url}. Make sure Ollama is running."
+                )
+            except Exception as e:
+                if attempt == 0:
+                    logger.info("Ollama LLM call failed, retrying in 1s: %s", e)
+                    await asyncio.sleep(1)
+                else:
+                    raise
+        # Unreachable, but satisfies type checker
+        raise RuntimeError("Unexpected retry loop exit")
 
     def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
         return 0.0
@@ -142,22 +158,37 @@ class OpenAILLMProvider(LLMProvider):
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{self._base_url}/chat/completions",
-                json=payload,
-                headers=headers,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        for attempt in range(2):
+            try:
+                call_start = time.monotonic()
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    resp = await client.post(
+                        f"{self._base_url}/chat/completions",
+                        json=payload,
+                        headers=headers,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
 
-        content = data["choices"][0]["message"]["content"]
-        usage = data.get("usage", {})
-        in_tok = usage.get("prompt_tokens", 0)
-        out_tok = usage.get("completion_tokens", 0)
-        cost_cents = int(self.estimate_cost(in_tok, out_tok) * 100)
-        _track_usage(in_tok, out_tok, cost_cents)
-        return content
+                content = data["choices"][0]["message"]["content"]
+                usage = data.get("usage", {})
+                in_tok = usage.get("prompt_tokens", 0)
+                out_tok = usage.get("completion_tokens", 0)
+                cost_cents = int(self.estimate_cost(in_tok, out_tok) * 100)
+                duration_ms = int((time.monotonic() - call_start) * 1000)
+                logger.info(
+                    "LLM call completed",
+                    extra={"provider": "openai", "model": model, "duration_ms": duration_ms},
+                )
+                _track_usage(in_tok, out_tok, cost_cents)
+                return content
+            except Exception as e:
+                if attempt == 0:
+                    logger.info("OpenAI LLM call failed, retrying in 1s: %s", e)
+                    await asyncio.sleep(1)
+                else:
+                    raise
+        raise RuntimeError("Unexpected retry loop exit")
 
     def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
         return (
@@ -211,28 +242,40 @@ class GenericLLMProvider(LLMProvider):
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{self._base_url}/chat/completions",
-                json=payload,
-                headers=headers,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        for attempt in range(2):
+            try:
+                call_start = time.monotonic()
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    resp = await client.post(
+                        f"{self._base_url}/chat/completions",
+                        json=payload,
+                        headers=headers,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
 
-        content = data["choices"][0]["message"]["content"]
-        usage = data.get("usage", {})
-        in_tok = usage.get("prompt_tokens", 0)
-        out_tok = usage.get("completion_tokens", 0)
-        cost_cents = int(self.estimate_cost(in_tok, out_tok) * 100)
-        _track_usage(in_tok, out_tok, cost_cents)
-        return content
+                content = data["choices"][0]["message"]["content"]
+                usage = data.get("usage", {})
+                in_tok = usage.get("prompt_tokens", 0)
+                out_tok = usage.get("completion_tokens", 0)
+                cost_cents = int(self.estimate_cost(in_tok, out_tok) * 100)
+                duration_ms = int((time.monotonic() - call_start) * 1000)
+                logger.info(
+                    "LLM call completed",
+                    extra={"provider": "generic", "model": model, "duration_ms": duration_ms},
+                )
+                _track_usage(in_tok, out_tok, cost_cents)
+                return content
+            except Exception as e:
+                if attempt == 0:
+                    logger.info("Generic LLM call failed, retrying in 1s: %s", e)
+                    await asyncio.sleep(1)
+                else:
+                    raise
+        raise RuntimeError("Unexpected retry loop exit")
 
     def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
-        return (
-            input_tokens / 1000 * self._cost_input
-            + output_tokens / 1000 * self._cost_output
-        )
+        return input_tokens / 1000 * self._cost_input + output_tokens / 1000 * self._cost_output
 
 
 def _track_usage(input_tokens: int, output_tokens: int, cost_cents: int) -> None:

@@ -97,3 +97,53 @@ export function addSearchHistory(query) {
 export function clearSearchHistory() {
     localStorage.removeItem('searchHistory');
 }
+
+/**
+ * Lightweight Markdown-to-HTML renderer.
+ * Handles headers, bold/italic, inline code, bullet lists, and tables.
+ */
+export function renderMarkdown(text) {
+    if (!text) return '';
+    let html = text
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        // Headers
+        .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+        .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^# (.+)$/gm, '<h2>$1</h2>')
+        // Bold / italic
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        // Inline code
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        // Bullet lists
+        .replace(/^- (.+)$/gm, '<li>$1</li>');
+
+    // Wrap consecutive <li> in <ul>
+    html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+
+    // Simple markdown table detection and rendering.
+    html = html.replace(
+        /(?:^|\n)(\|.+\|)\n(\|[\s:|-]+\|)\n((?:\|.+\|\n?)+)/gm,
+        (_match, headerLine, _sepLine, bodyBlock) => {
+            const parseRow = (line) =>
+                line.split('|').map((c) => c.trim()).filter(Boolean);
+            const headers = parseRow(headerLine);
+            const bodyRows = bodyBlock.trim().split('\n').map(parseRow);
+            let tbl = '<table class="md-table"><thead><tr>' +
+                headers.map((h) => `<th>${h}</th>`).join('') +
+                '</tr></thead><tbody>';
+            for (const cells of bodyRows) {
+                tbl += '<tr>' + cells.map((c) => `<td>${c}</td>`).join('') + '</tr>';
+            }
+            tbl += '</tbody></table>';
+            return tbl;
+        },
+    );
+
+    // Paragraphs (double newline)
+    html = html.replace(/\n\n/g, '</p><p>');
+    // Line breaks
+    html = html.replace(/\n/g, '<br>');
+
+    return '<p>' + html + '</p>';
+}

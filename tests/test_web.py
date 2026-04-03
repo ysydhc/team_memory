@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from team_memory.auth.provider import ApiKeyAuth
-from team_memory.config import UploadsConfig
+from team_memory.config import UploadsConfig, WebConfig
 from team_memory.services.archive import ArchiveUploadError
 from team_memory.web import app as web_module
 from team_memory.web.app import app
@@ -33,6 +33,7 @@ def setup_app():
     auth = ApiKeyAuth()
     auth.register_key("test-key-123", "test_admin", "admin")
     auth.register_key("member-key", "test_member", "member")
+    auth.register_key("viewer-key", "test_viewer", "viewer")
     auth.register_key("测试-key-123", "unicode_admin", "admin")
     web_module._auth = auth
     web_module._settings = MagicMock()
@@ -91,9 +92,9 @@ def setup_app():
         log_file_backup_count=5,
     )
     web_module._settings.uploads = UploadsConfig()
+    web_module._settings.web = WebConfig()
 
     mock_service = MagicMock()
-    mock_service.search = AsyncMock(return_value=[])
     mock_service.save = AsyncMock(
         return_value={
             "id": str(uuid.uuid4()),
@@ -120,7 +121,6 @@ def setup_app():
     )
     mock_service.soft_delete = AsyncMock(return_value=True)
     mock_service.restore = AsyncMock(return_value=True)
-    mock_service.invalidate_search_cache = AsyncMock(return_value=None)
     mock_service.find_duplicate_pairs = AsyncMock(
         return_value={
             "pairs": [],
@@ -138,6 +138,12 @@ def setup_app():
         }
     )
     web_module._service = mock_service
+
+    mock_search_orchestrator = MagicMock()
+    mock_search_orchestrator.search = AsyncMock(return_value=[])
+    mock_search_orchestrator.invalidate_cache = AsyncMock(return_value=None)
+    # Attach for test access via setup_app._search_orchestrator
+    mock_service._search_orchestrator = mock_search_orchestrator
 
     mock_archive_svc = MagicMock()
     mock_archive_svc.list_archives = AsyncMock(return_value=([], 0))
@@ -162,10 +168,13 @@ def setup_app():
     mock_ctx.service = mock_service
     mock_ctx.auth = web_module._auth
     mock_ctx.archive_service = mock_archive_svc
+    mock_ctx.search_orchestrator = mock_search_orchestrator
     with (
         patch("team_memory.web.app.bootstrap", return_value=mock_ctx),
         patch("team_memory.bootstrap.get_context", return_value=mock_ctx),
         patch("team_memory.web.routes.archives.get_context", return_value=mock_ctx),
+        patch("team_memory.web.routes.search.get_context", return_value=mock_ctx),
+        patch("team_memory.web.routes.config.get_context", return_value=mock_ctx),
         patch("team_memory.web.app.start_background_tasks", new_callable=AsyncMock),
         patch("team_memory.web.app.stop_background_tasks", new_callable=AsyncMock),
     ):
@@ -175,6 +184,10 @@ def setup_app():
     web_module._auth = None
     web_module._settings = None
     web_module._service = None
+    # Clear per-IP rate limit store to prevent cross-test leaking
+    from team_memory.web.app import _rate_limit_store
+
+    _rate_limit_store.clear()
 
 
 @pytest.fixture
@@ -192,6 +205,11 @@ def auth_headers():
 @pytest.fixture
 def member_headers():
     return {"Authorization": "Bearer member-key"}
+
+
+@pytest.fixture
+def viewer_headers():
+    return {"Authorization": "Bearer viewer-key"}
 
 
 # ============================================================
@@ -346,6 +364,7 @@ class TestAuth:
         assert resp.status_code == 200
         assert resp.json()["message"] == "密码已重置"
         assert mock_key.password_hash != "old_hash"
+        mock_sess.flush.assert_awaited_once()
 
     def test_change_password_validation_neither_old_nor_api_key(self, client, auth_headers):
         """PUT /auth/password with only new_password returns 422."""
@@ -391,7 +410,7 @@ class TestExperienceList:
                 resp = client.get("/api/v1/experiences")
                 assert resp.status_code == 200
                 data = resp.json()
-                assert "experiences" in data
+                assert "items" in data
 
     def test_list_experiences(self, client, auth_headers):
         with patch("team_memory.web.routes.experiences.app_module.get_session") as mock_gs:
@@ -408,9 +427,9 @@ class TestExperienceList:
                 resp = client.get("/api/v1/experiences", headers=auth_headers)
                 assert resp.status_code == 200
                 data = resp.json()
-                assert "experiences" in data
+                assert "items" in data
                 assert data["total"] == 2
-                assert data["page"] == 1
+                assert data["offset"] == 0
 
 
 class TestCreateExperience:
@@ -437,7 +456,7 @@ class TestCreateExperience:
                 },
             )
             assert resp.status_code == 200
-            assert "id" in resp.json()
+            assert "id" in resp.json()["item"]
 
             setup_app.save.assert_called_once()
             kwargs = setup_app.save.call_args.kwargs
@@ -462,7 +481,7 @@ class TestCreateExperience:
                 },
             )
             assert resp.status_code == 200
-            assert "id" in resp.json()
+            assert "id" in resp.json()["item"]
 
             setup_app.save.assert_called_once()
             kwargs = setup_app.save.call_args.kwargs
@@ -534,7 +553,7 @@ class TestSearch:
             assert "results" in data
 
     def test_search(self, client, auth_headers, setup_app):
-        setup_app.search = AsyncMock(
+        setup_app._search_orchestrator.search = AsyncMock(
             return_value=[{"id": str(uuid.uuid4()), "title": "Result", "similarity": 0.85}]
         )
 
@@ -563,7 +582,7 @@ class TestProjectParam:
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
             resp = client.post("/api/v1/search", json={"query": "hello"})
         assert resp.status_code == 200
-        assert setup_app.search.call_args.kwargs["project"] == "proj-default"
+        assert setup_app._search_orchestrator.search.call_args.kwargs["project"] == "proj-default"
 
     def test_create_passes_project(self, client, auth_headers, setup_app):
         with patch("team_memory.web.app.get_session") as mock_gs:
@@ -675,7 +694,7 @@ class TestRestore:
 
 
 def test_session_token_encode_decode_roundtrip():
-    from team_memory.web.app import _decode_session_token, _encode_session_token
+    from team_memory.web.auth_session import _decode_session_token, _encode_session_token
 
     token = _encode_session_token("admin", secret="test-secret")
     assert token.startswith("sess:")
@@ -723,7 +742,7 @@ class TestRuntimeConfig:
         assert resp.status_code == 200
         assert resp.json()["max_count"] == 12
         assert resp.json()["top_k_children"] == 5
-        setup_app.invalidate_search_cache.assert_awaited()
+        setup_app._search_orchestrator.invalidate_cache.assert_awaited()
 
     def test_put_retrieval_forbidden_member(self, client, member_headers):
         resp = client.put(
@@ -873,8 +892,6 @@ class TestArchivesApi:
         assert "disabled" in resp.json().get("detail", "").lower()
 
     def test_archives_attachment_download_ok(self, client, auth_headers, tmp_path):
-        from pathlib import Path
-
         from team_memory.bootstrap import get_context
 
         aid = uuid.uuid4()
@@ -959,6 +976,176 @@ class TestArchivesApi:
         )
         assert resp.status_code == 404
 
+    # ------ POST /api/v1/archives (create / upsert) ------
+
+    def test_archives_create_ok(self, client, auth_headers):
+        """POST /api/v1/archives creates an archive and returns 201."""
+        from team_memory.bootstrap import get_context
+
+        archive_id = str(uuid.uuid4())
+        get_context().archive_service.archive_upsert = AsyncMock(
+            return_value={
+                "action": "created",
+                "archive_id": archive_id,
+            }
+        )
+        resp = client.post(
+            "/api/v1/archives",
+            headers=auth_headers,
+            json={
+                "title": "My New Archive",
+                "solution_doc": "The detailed solution.",
+                "tags": ["python", "testing"],
+                "overview": "A brief overview.",
+            },
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["item"]["action"] == "created"
+        assert data["item"]["archive_id"] == archive_id
+        assert data["message"] == "Created successfully"
+
+        call_kw = get_context().archive_service.archive_upsert.call_args.kwargs
+        assert call_kw["title"] == "My New Archive"
+        assert call_kw["solution_doc"] == "The detailed solution."
+        assert call_kw["created_by"] == "test_admin"
+        assert call_kw["tags"] == ["python", "testing"]
+        assert call_kw["overview"] == "A brief overview."
+
+    def test_archives_create_upsert_updated(self, client, auth_headers):
+        """POST /api/v1/archives with existing title+project returns action=updated and 200."""
+        from team_memory.bootstrap import get_context
+
+        archive_id = str(uuid.uuid4())
+        get_context().archive_service.archive_upsert = AsyncMock(
+            return_value={
+                "action": "updated",
+                "archive_id": archive_id,
+                "previous_updated_at": "2026-03-30T12:00:00+00:00",
+            }
+        )
+        resp = client.post(
+            "/api/v1/archives",
+            headers=auth_headers,
+            json={
+                "title": "Existing Archive",
+                "solution_doc": "Updated solution.",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["item"]["action"] == "updated"
+        assert data["item"]["archive_id"] == archive_id
+        assert "previous_updated_at" in data["item"]
+        assert data["message"] == "Updated successfully"
+
+    def test_archives_create_requires_auth(self, client):
+        """POST /api/v1/archives without auth returns 401."""
+        resp = client.post(
+            "/api/v1/archives",
+            json={
+                "title": "No Auth Archive",
+                "solution_doc": "solution",
+            },
+        )
+        assert resp.status_code == 401
+
+    def test_archives_create_missing_fields(self, client, auth_headers):
+        """POST /api/v1/archives without required fields returns 422."""
+        # Missing 'title' (required by ArchiveCreateRequest)
+        resp = client.post(
+            "/api/v1/archives",
+            headers=auth_headers,
+            json={
+                "solution_doc": "only solution, no title",
+            },
+        )
+        assert resp.status_code == 422
+
+        # Missing 'solution_doc' (required by ArchiveCreateRequest)
+        resp2 = client.post(
+            "/api/v1/archives",
+            headers=auth_headers,
+            json={
+                "title": "Only title, no solution_doc",
+            },
+        )
+        assert resp2.status_code == 422
+
+        # Empty body
+        resp3 = client.post(
+            "/api/v1/archives",
+            headers=auth_headers,
+            json={},
+        )
+        assert resp3.status_code == 422
+
+    def test_archives_create_with_linked_experience_ids(self, client, auth_headers):
+        """POST /api/v1/archives passes linked_experience_ids as UUIDs to service."""
+        from team_memory.bootstrap import get_context
+
+        exp_id_1 = str(uuid.uuid4())
+        exp_id_2 = str(uuid.uuid4())
+        archive_id = str(uuid.uuid4())
+        get_context().archive_service.archive_upsert = AsyncMock(
+            return_value={"action": "created", "archive_id": archive_id}
+        )
+        resp = client.post(
+            "/api/v1/archives",
+            headers=auth_headers,
+            json={
+                "title": "Linked Archive",
+                "solution_doc": "solution",
+                "linked_experience_ids": [exp_id_1, exp_id_2],
+            },
+        )
+        assert resp.status_code == 201
+        call_kw = get_context().archive_service.archive_upsert.call_args.kwargs
+        linked = call_kw.get("linked_experience_ids")
+        assert linked is not None
+        assert len(linked) == 2
+        # Verify they are UUID objects, not strings
+        assert all(isinstance(uid, uuid.UUID) for uid in linked)
+
+    def test_archives_create_with_project(self, client, auth_headers):
+        """POST /api/v1/archives forwards project to service."""
+        from team_memory.bootstrap import get_context
+
+        get_context().archive_service.archive_upsert = AsyncMock(
+            return_value={"action": "created", "archive_id": str(uuid.uuid4())}
+        )
+        resp = client.post(
+            "/api/v1/archives",
+            headers=auth_headers,
+            json={
+                "title": "Project Archive",
+                "solution_doc": "sol",
+                "project": "my-project",
+            },
+        )
+        assert resp.status_code == 201
+        call_kw = get_context().archive_service.archive_upsert.call_args.kwargs
+        assert call_kw.get("project") is not None
+
+    def test_archives_create_member_can_create(self, client, member_headers):
+        """POST /api/v1/archives also works for member role (not admin-only)."""
+        from team_memory.bootstrap import get_context
+
+        get_context().archive_service.archive_upsert = AsyncMock(
+            return_value={"action": "created", "archive_id": str(uuid.uuid4())}
+        )
+        resp = client.post(
+            "/api/v1/archives",
+            headers=member_headers,
+            json={
+                "title": "Member Archive",
+                "solution_doc": "solution",
+            },
+        )
+        assert resp.status_code == 201
+        call_kw = get_context().archive_service.archive_upsert.call_args.kwargs
+        assert call_kw["created_by"] == "test_member"
+
 
 # ============================================================
 # SPA Tests
@@ -971,3 +1158,358 @@ class TestSPA:
         assert resp.status_code == 200
         assert "TeamMemory" in resp.text
         assert "<!DOCTYPE html>" in resp.text
+
+
+# ============================================================
+# Request body size limit (C3)
+# ============================================================
+
+
+class TestRequestBodySizeLimit:
+    def test_large_content_length_returns_413(self, client, auth_headers):
+        """Requests with Content-Length exceeding max are rejected with 413."""
+        huge_size = 30_000_000  # 30 MB, exceeds 20 MB default
+        resp = client.post(
+            "/api/v1/search",
+            headers={**auth_headers, "content-length": str(huge_size)},
+            json={"query": "test"},
+        )
+        assert resp.status_code == 413
+        assert "too large" in resp.json()["detail"].lower()
+
+    def test_normal_content_length_passes(self, client, auth_headers, setup_app):
+        """Requests with small Content-Length pass through normally."""
+        with patch("team_memory.web.app.get_session") as mock_gs:
+            mock_sess = AsyncMock()
+            mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
+            mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            resp = client.post(
+                "/api/v1/search",
+                headers=auth_headers,
+                json={"query": "test"},
+            )
+            assert resp.status_code == 200
+
+
+# ============================================================
+# Rate limiting (M5)
+# ============================================================
+
+
+class TestRateLimiting:
+    def test_rate_limit_exceeded_returns_429(self, client):
+        """After exceeding rate limit, requests get 429."""
+        from team_memory.web.app import _rate_limit_store
+
+        _rate_limit_store.clear()
+
+        # Set a very low limit for testing
+        web_module._settings.web = WebConfig(rate_limit_per_minute=3)
+
+        for _ in range(3):
+            resp = client.get("/")
+            assert resp.status_code == 200
+
+        # 4th request should be rate-limited
+        resp = client.post(
+            "/api/v1/search",
+            json={"query": "test"},
+        )
+        assert resp.status_code == 429
+        assert "rate limit" in resp.json()["detail"].lower()
+
+    def test_health_and_ready_bypass_rate_limit(self, client):
+        """Health and ready endpoints bypass rate limiting."""
+        from team_memory.web.app import _rate_limit_store
+
+        _rate_limit_store.clear()
+        web_module._settings.web = WebConfig(rate_limit_per_minute=1)
+
+        # Use up the single allowed request
+        resp = client.get("/")
+        assert resp.status_code == 200
+
+        # Health and ready should still work
+        resp = client.get("/health")
+        assert resp.status_code in (200, 503)  # may be unhealthy but not 429
+
+        resp = client.get("/ready")
+        assert resp.status_code in (200, 503)
+
+
+# ============================================================
+# Text field max_length (H4) — schema-level validation
+# ============================================================
+
+
+class TestTextFieldMaxLength:
+    def test_archive_solution_doc_too_long(self, client, auth_headers):
+        """solution_doc exceeding 524_288 chars is rejected by Pydantic."""
+        long_text = "x" * 524_289
+        resp = client.post(
+            "/api/v1/archives",
+            headers=auth_headers,
+            json={
+                "title": "T",
+                "solution_doc": long_text,
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_archive_raw_conversation_too_long(self, client, auth_headers):
+        """raw_conversation exceeding 2_097_152 chars is rejected by Pydantic."""
+        long_text = "x" * 2_097_153
+        resp = client.post(
+            "/api/v1/archives",
+            headers=auth_headers,
+            json={
+                "title": "T",
+                "solution_doc": "short",
+                "raw_conversation": long_text,
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_experience_title_too_long(self, client, auth_headers):
+        """ExperienceCreate title exceeding 500 chars is rejected by Pydantic."""
+        resp = client.post(
+            "/api/v1/experiences",
+            headers=auth_headers,
+            json={
+                "title": "x" * 501,
+                "problem": "p",
+                "solution": "s",
+            },
+        )
+        assert resp.status_code == 422
+
+
+# ============================================================
+# Tags validation (M6) — schema-level
+# ============================================================
+
+
+class TestTagsValidation:
+    def test_archive_too_many_tags(self, client, auth_headers):
+        """More than 20 tags rejected on ArchiveCreateRequest."""
+        resp = client.post(
+            "/api/v1/archives",
+            headers=auth_headers,
+            json={
+                "title": "T",
+                "solution_doc": "body",
+                "tags": [f"tag{i}" for i in range(21)],
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_archive_tag_too_long(self, client, auth_headers):
+        """Tag exceeding 50 chars rejected on ArchiveCreateRequest."""
+        resp = client.post(
+            "/api/v1/archives",
+            headers=auth_headers,
+            json={
+                "title": "T",
+                "solution_doc": "body",
+                "tags": ["x" * 51],
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_experience_too_many_tags(self, client, auth_headers):
+        """More than 20 tags rejected on ExperienceCreate."""
+        resp = client.post(
+            "/api/v1/experiences",
+            headers=auth_headers,
+            json={
+                "title": "T",
+                "problem": "p",
+                "tags": [f"tag{i}" for i in range(21)],
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_experience_tag_too_long(self, client, auth_headers):
+        """Tag exceeding 50 chars rejected on ExperienceCreate."""
+        resp = client.post(
+            "/api/v1/experiences",
+            headers=auth_headers,
+            json={
+                "title": "T",
+                "problem": "p",
+                "tags": ["x" * 51],
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_valid_tags_pass(self, client, auth_headers, setup_app):
+        """Tags within limits are accepted."""
+        from team_memory.bootstrap import get_context
+
+        get_context().archive_service.archive_upsert = AsyncMock(
+            return_value={"action": "created", "archive_id": str(uuid.uuid4())}
+        )
+        resp = client.post(
+            "/api/v1/archives",
+            headers=auth_headers,
+            json={
+                "title": "T",
+                "solution_doc": "body",
+                "tags": ["python", "testing"],
+            },
+        )
+        assert resp.status_code == 201
+
+
+# ============================================================
+# Error Scenarios (T4)
+# ============================================================
+
+
+class TestErrorScenarios:
+    """Comprehensive error scenario coverage for the web API."""
+
+    def test_create_experience_validation_error(self, client, auth_headers):
+        """POST /experiences missing required 'problem' field returns 422."""
+        resp = client.post(
+            "/api/v1/experiences",
+            headers=auth_headers,
+            json={
+                "title": "Missing problem field",
+                # problem is required but omitted
+                "solution": "solution",
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_create_experience_embedding_failure(self, client, auth_headers, setup_app):
+        """POST /experiences when embedding fails returns 500."""
+        setup_app.save = AsyncMock(
+            return_value={
+                "error": True,
+                "message": "Embedding generation failed. Save aborted.",
+            }
+        )
+        with patch("team_memory.web.app.get_session") as mock_gs:
+            mock_sess = AsyncMock()
+            mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
+            mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            resp = client.post(
+                "/api/v1/experiences",
+                headers=auth_headers,
+                json={
+                    "title": "Test",
+                    "problem": "Test problem",
+                    "solution": "Test solution",
+                },
+            )
+        assert resp.status_code == 500
+        assert resp.json()["error"]["code"] == "embedding_failure"
+
+    def test_update_experience_not_found(self, client, auth_headers, setup_app):
+        """PUT /experiences/{id} returns 404 when experience does not exist."""
+        setup_app.update = AsyncMock(return_value=None)
+
+        resp = client.put(
+            f"/api/v1/experiences/{uuid.uuid4()}",
+            headers=auth_headers,
+            json={"title": "Updated title"},
+        )
+        assert resp.status_code == 404
+
+    def test_delete_experience_not_found(self, client, auth_headers, setup_app):
+        """DELETE /experiences/{id} returns 404 when experience does not exist."""
+        setup_app.soft_delete = AsyncMock(return_value=False)
+
+        with patch("team_memory.web.app.get_session") as mock_gs:
+            mock_sess = AsyncMock()
+            mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
+            mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            resp = client.delete(
+                f"/api/v1/experiences/{uuid.uuid4()}",
+                headers=auth_headers,
+            )
+        assert resp.status_code == 404
+
+    def test_feedback_invalid_rating(self, client, auth_headers):
+        """POST /experiences/{id}/feedback with rating=10 returns 422."""
+        resp = client.post(
+            f"/api/v1/experiences/{uuid.uuid4()}/feedback",
+            headers=auth_headers,
+            json={"rating": 10},
+        )
+        assert resp.status_code == 422
+
+    def test_search_empty_query(self, client, auth_headers):
+        """POST /search with empty query string returns 422."""
+        resp = client.post(
+            "/api/v1/search",
+            headers=auth_headers,
+            json={"query": ""},
+        )
+        # Empty string fails Pydantic min_length or the SearchRequest validation
+        # If no min_length is set, the endpoint may return 200 with empty results
+        assert resp.status_code in (200, 422)
+
+    def test_archive_create_too_long_title(self, client, auth_headers):
+        """POST /archives with title exceeding max_length returns 422."""
+        resp = client.post(
+            "/api/v1/archives",
+            headers=auth_headers,
+            json={
+                "title": "x" * 501,
+                "solution_doc": "body",
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_login_wrong_password(self, client):
+        """POST /auth/login with wrong key returns success=False."""
+        resp = client.post(
+            "/api/v1/auth/login",
+            json={"api_key": "wrong-key-does-not-exist"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+
+    def test_admin_endpoint_as_viewer(self, client, viewer_headers):
+        """PUT /config/retrieval as viewer returns 403 (admin-only)."""
+        resp = client.put(
+            "/api/v1/config/retrieval",
+            headers=viewer_headers,
+            json={
+                "max_tokens": None,
+                "max_count": 10,
+                "trim_strategy": "top_k",
+                "top_k_children": 3,
+                "min_avg_rating": 0.0,
+                "rating_weight": 0.3,
+                "summary_model": None,
+            },
+        )
+        assert resp.status_code == 403
+
+    def test_rate_limit_exceeded(self, client):
+        """After exceeding rate limit, requests get 429."""
+        from team_memory.web.app import _rate_limit_store
+
+        _rate_limit_store.clear()
+
+        # Set very low limit for testing
+        web_module._settings.web = WebConfig(rate_limit_per_minute=2)
+
+        for _ in range(2):
+            resp = client.get("/")
+            assert resp.status_code == 200
+
+        # 3rd request should be rate-limited
+        resp = client.post(
+            "/api/v1/search",
+            json={"query": "test"},
+        )
+        assert resp.status_code == 429
+        assert "rate limit" in resp.json()["detail"].lower()

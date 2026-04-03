@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "team_memory": {
+      "command": "/Users/yeshouyou/Work/agent/team_doc/.venv/bin/python",
+      "args": ["-m", "team_memory.server"],
+      "cwd": "/Users/yeshouyou/Work/agent/team_doc",
+      "env": {
+        "TEAM_MEMORY_API_KEY": "0D5007FEF6A98F5A99ED521327C9A698",
+        "TEAM_MEMORY_USER": "admin"
+      }
+    },
+    "gitnexus": {
+      "command": "npx",
+      "args": ["-y", "gitnexus", "mcp"],
+      "cwd": "/Users/yeshouyou/Work/agent/team_doc"
+    }
+  }
+}

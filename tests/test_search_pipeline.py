@@ -1,6 +1,9 @@
 """Tests for the search pipeline (hybrid search, RRF fusion, adaptive filter)."""
 
-from unittest.mock import AsyncMock
+import time
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from team_memory.config import (
     CacheConfig,
@@ -10,8 +13,12 @@ from team_memory.config import (
 )
 from team_memory.services.cache import SearchCache
 from team_memory.services.search_pipeline import (
+    _EXPANSION_CACHE_TTL,
     SearchPipeline,
     SearchResultItem,
+    _expansion_cache,
+    _expansion_cache_clear,
+    _llm_expand_query,
 )
 
 
@@ -186,3 +193,109 @@ class TestCacheKeyIsolation:
         assert key1 != key2
 
 
+# ======================== LLM Expansion Cache ========================
+
+
+class TestLLMExpansionCache:
+    """Tests for caching of LLM query expansion results."""
+
+    def setup_method(self):
+        """Clear the module-level expansion cache before each test."""
+        _expansion_cache_clear()
+
+    def teardown_method(self):
+        """Clean up after each test."""
+        _expansion_cache_clear()
+
+    @pytest.mark.asyncio
+    async def test_empty_query_returns_none(self):
+        result = await _llm_expand_query("", object(), 3.0)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_none_llm_config_returns_none(self):
+        result = await _llm_expand_query("some query", None, 3.0)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_caches_expansion_result(self):
+        """Same query should return cached result on second call."""
+        mock_client = AsyncMock()
+        mock_client.chat = AsyncMock(return_value="expanded keywords here")
+
+        with patch("team_memory.services.llm_client.LLMClient") as mock_llm_cls:
+            mock_llm_cls.from_config.return_value = mock_client
+
+            llm_config = LLMConfig()
+
+            result1 = await _llm_expand_query("database timeout", llm_config, 3.0)
+            assert result1 == "expanded keywords here"
+            assert mock_client.chat.call_count == 1
+
+            # Second call should use cache
+            result2 = await _llm_expand_query("database timeout", llm_config, 3.0)
+            assert result2 == "expanded keywords here"
+            # LLM should NOT have been called again
+            assert mock_client.chat.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_cache_key_normalized(self):
+        """Queries differing only in case/whitespace should share cache."""
+        mock_client = AsyncMock()
+        mock_client.chat = AsyncMock(return_value="expanded")
+
+        with patch("team_memory.services.llm_client.LLMClient") as mock_llm_cls:
+            mock_llm_cls.from_config.return_value = mock_client
+
+            llm_config = LLMConfig()
+
+            await _llm_expand_query("  Database Timeout  ", llm_config, 3.0)
+            result = await _llm_expand_query("database timeout", llm_config, 3.0)
+            assert result == "expanded"
+            assert mock_client.chat.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_cache_expires_after_ttl(self):
+        """Cached result should be evicted after TTL expires."""
+        mock_client = AsyncMock()
+        mock_client.chat = AsyncMock(return_value="result")
+
+        with patch("team_memory.services.llm_client.LLMClient") as mock_llm_cls:
+            mock_llm_cls.from_config.return_value = mock_client
+
+            llm_config = LLMConfig()
+
+            await _llm_expand_query("query", llm_config, 3.0)
+            assert mock_client.chat.call_count == 1
+
+            # Manually expire the cache entry by backdating the timestamp
+            cache_key = "query"
+            expanded, _ts = _expansion_cache[cache_key]
+            _expansion_cache[cache_key] = (expanded, time.monotonic() - _EXPANSION_CACHE_TTL - 1)
+
+            # Should call LLM again
+            await _llm_expand_query("query", llm_config, 3.0)
+            assert mock_client.chat.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_does_not_cache(self):
+        """Failed LLM calls should not populate the cache."""
+        mock_client = AsyncMock()
+        mock_client.chat = AsyncMock(side_effect=RuntimeError("LLM down"))
+
+        with patch("team_memory.services.llm_client.LLMClient") as mock_llm_cls:
+            mock_llm_cls.from_config.return_value = mock_client
+
+            llm_config = LLMConfig()
+
+            result = await _llm_expand_query("failing query", llm_config, 3.0)
+            assert result is None
+            assert "failing query" not in _expansion_cache
+
+    @pytest.mark.asyncio
+    async def test_clear_function_empties_cache(self):
+        """_expansion_cache_clear should remove all entries."""
+        _expansion_cache["test"] = ("expanded", time.monotonic())
+        assert len(_expansion_cache) == 1
+        _expansion_cache_clear()
+        assert len(_expansion_cache) == 0

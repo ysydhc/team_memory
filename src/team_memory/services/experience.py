@@ -1,7 +1,8 @@
-"""Experience business logic service.
+"""Experience business logic service — write path.
 
-Orchestrates Repository, Embedding, Auth, and SearchPipeline to provide
-high-level operations for the MCP tools and Web API.
+Orchestrates Repository, Embedding, Auth, and EventBus to provide
+high-level write operations (save, update, delete, feedback) for
+the MCP tools and Web API.  Search lives in SearchOrchestrator.
 """
 
 from __future__ import annotations
@@ -22,18 +23,17 @@ logger = logging.getLogger("team_memory.service")
 
 
 class ExperienceService:
-    """High-level service for experience operations.
+    """High-level service for experience write operations.
 
     Combines Repository (data access), Embedding (vector encoding),
-    Auth (user verification), SearchPipeline, and EventBus into cohesive
-    business operations.
+    Auth (user verification), and EventBus into cohesive business
+    operations.  Search is handled by SearchOrchestrator.
     """
 
     def __init__(
         self,
         embedding_provider: EmbeddingProvider,
         auth_provider: AuthProvider,
-        search_pipeline=None,
         event_bus: EventBus | None = None,
         lifecycle_config=None,
         llm_config=None,
@@ -43,7 +43,6 @@ class ExperienceService:
         self._db_url = db_url
         self._embedding = embedding_provider
         self._auth = auth_provider
-        self._search_pipeline = search_pipeline
         self._event_bus = event_bus or EventBus()
         self._archive_service = archive_service
         self._lifecycle_config = lifecycle_config
@@ -91,9 +90,9 @@ class ExperienceService:
                 c_sol = (c.solution or "")[: self._CHILD_EMBED_TRUNCATE]
             else:
                 c_title = c.get("title", "")
-                c_desc = (
-                    c.get("description") or c.get("problem") or ""
-                )[: self._CHILD_EMBED_TRUNCATE]
+                c_desc = (c.get("description") or c.get("problem") or "")[
+                    : self._CHILD_EMBED_TRUNCATE
+                ]
                 c_sol = (c.get("solution") or "")[: self._CHILD_EMBED_TRUNCATE]
             text += f"\n{c_title}\n{c_desc}\n{c_sol}"
         return text
@@ -101,147 +100,6 @@ class ExperienceService:
     async def authenticate(self, credentials: dict) -> User | None:
         """Authenticate a user."""
         return await self._auth.authenticate(credentials)
-
-    async def search(
-        self,
-        query: str,
-        tags: list[str] | None = None,
-        max_results: int = 5,
-        min_similarity: float = 0.6,
-        user_name: str = "anonymous",
-        source: str = "mcp",
-        grouped: bool = False,
-        top_k_children: int = 3,
-        project: str | None = None,
-        include_archives: bool = False,
-    ) -> list[dict]:
-        """Search experiences using the enhanced search pipeline.
-
-        If a SearchPipeline is configured, uses the full pipeline
-        (hybrid search + RRF fusion + adaptive filter + compression).
-        Otherwise, falls back to legacy vector/FTS search.
-        """
-        async with self._session() as session:
-            search_start = time.monotonic()
-            repo = ExperienceRepository(session)
-
-            if self._search_pipeline is not None:
-                from team_memory.services.search_pipeline import SearchRequest
-
-                request = SearchRequest(
-                    query=query,
-                    max_results=max_results,
-                    min_similarity=min_similarity,
-                    tags=tags,
-                    user_name=user_name,
-                    current_user=user_name,
-                    source=source,
-                    grouped=grouped,
-                    top_k_children=top_k_children,
-                    project=project,
-                    include_archives=include_archives,
-                )
-                pipeline_result = await self._search_pipeline.search(
-                    session, request
-                )
-                duration_ms = int((time.monotonic() - search_start) * 1000)
-                io_logger.log_internal(
-                    "search",
-                    {
-                        "query": (query or "")[:50],
-                        "result_count": len(pipeline_result.results),
-                        "search_type": pipeline_result.search_type,
-                    },
-                    duration_ms=duration_ms,
-                )
-
-                # Implicit feedback: increment use_count for top results
-                result_ids = []
-                for r in pipeline_result.results:
-                    eid = r.get("group_id") or r.get("id")
-                    if eid:
-                        try:
-                            result_ids.append(uuid.UUID(str(eid)))
-                        except (ValueError, TypeError):
-                            pass
-                if result_ids:
-                    for rid in result_ids:
-                        try:
-                            await repo.increment_use_count(rid)
-                        except Exception:
-                            pass
-
-                return pipeline_result.results
-
-            # Legacy fallback: direct vector/FTS search
-            results = await self._legacy_search(
-                session,
-                query=query,
-                tags=tags,
-                max_results=max_results,
-                min_similarity=min_similarity,
-                user_name=user_name,
-                source=source,
-                grouped=grouped,
-                top_k_children=top_k_children,
-                project=project,
-            )
-            duration_ms = int((time.monotonic() - search_start) * 1000)
-            io_logger.log_internal(
-                "search",
-                {
-                    "query": (query or "")[:50],
-                    "result_count": len(results),
-                    "search_type": "legacy",
-                },
-                duration_ms=duration_ms,
-            )
-            return results
-
-    async def _legacy_search(
-        self,
-        session,  # noqa: ANN001
-        query: str,
-        tags: list[str] | None = None,
-        max_results: int = 5,
-        min_similarity: float = 0.6,
-        user_name: str = "anonymous",
-        source: str = "mcp",
-        grouped: bool = False,
-        top_k_children: int = 3,
-        project: str | None = None,
-    ) -> list[dict]:
-        """Legacy search (vector with FTS fallback, no pipeline)."""
-        repo = ExperienceRepository(session)
-
-        try:
-            query_embedding = await self._embedding.encode_single(query)
-            results = await repo.search_by_vector(
-                query_embedding=query_embedding,
-                max_results=max_results,
-                min_similarity=min_similarity,
-                tags=tags,
-                project=project,
-                current_user=user_name,
-            )
-        except Exception as e:
-            logger.warning(
-                "Vector search failed, falling back to FTS: %s", str(e)
-            )
-            results = await repo.search_by_fts(
-                query_text=query,
-                max_results=max_results,
-                tags=tags,
-                project=project,
-                current_user=user_name,
-            )
-
-        return results
-
-    async def invalidate_search_cache(self):
-        """Invalidate search cache after data mutations."""
-        if self._search_pipeline is not None:
-            await self._search_pipeline.invalidate_cache()
 
     async def save(
         self,
@@ -282,8 +140,14 @@ class ExperienceService:
             embedding = None
             try:
                 embedding = await self._embedding.encode_single(embed_text)
-            except Exception:
-                logger.warning("Failed to generate embedding, saving without it")
+            except Exception as e:
+                logger.warning("Failed to generate embedding: %s", e)
+
+            if embedding is None:
+                return {
+                    "error": True,
+                    "message": "Embedding generation failed. Save aborted.",
+                }
 
             # Dedup-on-save check
             if (
@@ -344,13 +208,16 @@ class ExperienceService:
                 parent_id=parent_id,
             )
 
-            await self._event_bus.emit(Events.EXPERIENCE_CREATED, {
-                "experience_id": str(experience.id),
-                "title": title,
-                "created_by": created_by,
-                "status": exp_status,
-                "visibility": visibility,
-            })
+            await self._event_bus.emit(
+                Events.EXPERIENCE_CREATED,
+                {
+                    "experience_id": str(experience.id),
+                    "title": title,
+                    "created_by": created_by,
+                    "status": exp_status,
+                    "visibility": visibility,
+                },
+            )
             persist_duration_ms = int((time.monotonic() - persist_start) * 1000)
             io_logger.log_internal(
                 "save_persist",
@@ -373,9 +240,7 @@ class ExperienceService:
                             tags=parent_exp.tags,
                             children=parent_exp.children,
                         )
-                        parent_embedding = await self._embedding.encode_single(
-                            parent_embed_text
-                        )
+                        parent_embedding = await self._embedding.encode_single(parent_embed_text)
                         await repo.update(parent_id, embedding=parent_embedding)
                 except Exception:
                     logger.warning("Failed to re-embed group parent %s", parent_id)
@@ -461,20 +326,19 @@ class ExperienceService:
 
             if updated and updates:
                 fields_updated = list(updates.keys())
-                await self._event_bus.emit(Events.EXPERIENCE_UPDATED, {
-                    "experience_id": experience_id,
-                    "fields_updated": fields_updated,
-                    "user": user,
-                })
+                await self._event_bus.emit(
+                    Events.EXPERIENCE_UPDATED,
+                    {
+                        "experience_id": experience_id,
+                        "fields_updated": fields_updated,
+                        "user": user,
+                    },
+                )
 
                 # Update archive status if exp_status or visibility changed
-                if self._archive_service and (
-                    "exp_status" in updates or "visibility" in updates
-                ):
+                if self._archive_service and ("exp_status" in updates or "visibility" in updates):
                     try:
-                        await self._archive_service.update_archive_status_for_experience(
-                            exp_uuid
-                        )
+                        await self._archive_service.update_archive_status_for_experience(exp_uuid)
                     except Exception:
                         logger.warning("Failed to update archive status", exc_info=True)
 
@@ -501,8 +365,14 @@ class ExperienceService:
             "project": proj_norm,
         }
 
+    _REEMBED_BATCH_SIZE = 50
+
     async def reembed_group_parent_vectors(self, project: str | None) -> dict:
-        """Recompute embeddings for parents that have children (group aggregate text)."""
+        """Recompute embeddings for parents that have children (group aggregate text).
+
+        Collects all parent texts first, then batch-encodes in chunks of
+        _REEMBED_BATCH_SIZE to reduce round-trips to the embedding provider.
+        """
         proj_norm = ExperienceRepository._project_value(project)
         updated = 0
         errors = 0
@@ -511,6 +381,9 @@ class ExperienceService:
             repo = ExperienceRepository(session)
             root_ids = await repo.list_root_ids_with_children(project)
             total_groups = len(root_ids)
+
+            # First pass: collect parent texts keyed by root id
+            parent_texts: list[tuple[uuid.UUID, str]] = []
             for rid in root_ids:
                 parent = await repo.get_with_children(rid)
                 if not parent:
@@ -525,18 +398,45 @@ class ExperienceService:
                     tags=parent.tags,
                     children=children,
                 )
+                parent_texts.append((rid, embed_text))
+
+            # Batch encode in chunks of _REEMBED_BATCH_SIZE
+            batch_size = self._REEMBED_BATCH_SIZE
+            for i in range(0, len(parent_texts), batch_size):
+                batch = parent_texts[i : i + batch_size]
+                texts = [text for _, text in batch]
                 try:
-                    embedding = await self._embedding.encode_single(embed_text)
-                    await repo.update(rid, embedding=embedding)
-                    updated += 1
+                    embeddings = await self._embedding.encode(texts)
                 except Exception:
                     logger.warning(
-                        "reembed_group_parent failed for %s",
-                        rid,
+                        "reembed_group_parent batch encode failed for batch starting at %d",
+                        i,
                         exc_info=True,
                     )
-                    errors += 1
-        await self.invalidate_search_cache()
+                    errors += len(batch)
+                    continue
+
+                # Second pass: update embeddings in DB
+                for (rid, _), embedding in zip(batch, embeddings):
+                    try:
+                        await repo.update(rid, embedding=embedding)
+                        updated += 1
+                    except Exception:
+                        logger.warning(
+                            "reembed_group_parent DB update failed for %s",
+                            rid,
+                            exc_info=True,
+                        )
+                        errors += 1
+
+        await self._event_bus.emit(
+            Events.EXPERIENCE_UPDATED,
+            {
+                "experience_id": "batch_reembed",
+                "fields_updated": ["embedding"],
+                "user": "system",
+            },
+        )
         return {
             "updated": updated,
             "errors": errors,
@@ -550,10 +450,13 @@ class ExperienceService:
             repo = ExperienceRepository(session)
             result = await repo.soft_delete(uuid.UUID(experience_id))
             if result:
-                await self._event_bus.emit(Events.EXPERIENCE_DELETED, {
-                    "experience_id": experience_id,
-                    "hard": False,
-                })
+                await self._event_bus.emit(
+                    Events.EXPERIENCE_DELETED,
+                    {
+                        "experience_id": experience_id,
+                        "hard": False,
+                    },
+                )
             return result
 
     async def restore(self, experience_id: str) -> bool:
@@ -562,9 +465,12 @@ class ExperienceService:
             repo = ExperienceRepository(session)
             result = await repo.restore(uuid.UUID(experience_id))
             if result:
-                await self._event_bus.emit(Events.EXPERIENCE_RESTORED, {
-                    "experience_id": experience_id,
-                })
+                await self._event_bus.emit(
+                    Events.EXPERIENCE_RESTORED,
+                    {
+                        "experience_id": experience_id,
+                    },
+                )
             return result
 
     async def hard_delete_and_rebuild(
@@ -624,11 +530,14 @@ class ExperienceService:
                 comment=comment,
                 fitness_score=fitness_score,
             )
-            await self._event_bus.emit(Events.FEEDBACK_ADDED, {
-                "experience_id": experience_id,
-                "rating": rating,
-                "feedback_by": feedback_by,
-            })
+            await self._event_bus.emit(
+                Events.FEEDBACK_ADDED,
+                {
+                    "experience_id": experience_id,
+                    "rating": rating,
+                    "feedback_by": feedback_by,
+                },
+            )
             return True
 
     async def get_recent(
@@ -673,9 +582,7 @@ class ExperienceService:
                 tag=tag,
                 project=project,
             )
-            total = await repo.count_experiences(
-                status=status, tag=tag, project=project
-            )
+            total = await repo.count_experiences(status=status, tag=tag, project=project)
             return {
                 "experiences": exps,
                 "total": total,

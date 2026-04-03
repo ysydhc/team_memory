@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
+from urllib.parse import urlparse
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -13,6 +15,8 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from team_memory.storage.models import Base
+
+logger = logging.getLogger("team_memory.database")
 
 # Module-level engine and session factory (initialized lazily)
 _engine: AsyncEngine | None = None
@@ -27,7 +31,12 @@ def get_engine(database_url: str) -> AsyncEngine:
         if "sqlite" not in database_url:
             kwargs["pool_size"] = 5
             kwargs["max_overflow"] = 10
+            kwargs["pool_recycle"] = 1800
+            kwargs["pool_pre_ping"] = True
         _engine = create_async_engine(database_url, **kwargs)
+        parsed = urlparse(database_url)
+        masked = f"{parsed.scheme}://{parsed.hostname}:{parsed.port}/{parsed.path.lstrip('/')}"
+        logger.info("Database engine created: %s", masked)
     return _engine
 
 
@@ -79,3 +88,4 @@ async def close_db() -> None:
         await _engine.dispose()
         _engine = None
         _session_factory = None
+        logger.info("Database engine closed")

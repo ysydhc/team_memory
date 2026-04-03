@@ -33,15 +33,11 @@ class TestSettings:
         assert settings.embedding.dimension == 768
 
     def test_embedding_dimension_openai(self):
-        settings = Settings(
-            embedding={"provider": "openai", "openai": {"dimension": 1536}}
-        )
+        settings = Settings(embedding={"provider": "openai", "openai": {"dimension": 1536}})
         assert settings.embedding.dimension == 1536
 
     def test_embedding_dimension_local(self):
-        settings = Settings(
-            embedding={"provider": "local", "local": {"dimension": 1024}}
-        )
+        settings = Settings(embedding={"provider": "local", "local": {"dimension": 1024}})
         assert settings.embedding.dimension == 1024
 
     def test_ollama_config_defaults(self):
@@ -159,3 +155,22 @@ def test_logging_config_defaults():
     assert lg.log_file_max_bytes == 10 * 1024 * 1024
 
 
+def test_web_config_security_defaults():
+    """WebConfig has request body size limit, rate limit, and text field limits."""
+    from team_memory.config import WebConfig
+
+    wc = WebConfig()
+    assert wc.max_request_body_bytes == 20_971_520  # 20 MB
+    assert wc.max_text_field_bytes == 64_000  # 64 KB
+    assert wc.max_raw_conversation_bytes == 640_000  # 640 KB
+    assert wc.rate_limit_per_minute == 200
+
+
+def test_mcp_config_security_defaults():
+    """MCPConfig has content length and tags limits."""
+    from team_memory.config import MCPConfig
+
+    mc = MCPConfig()
+    assert mc.max_content_chars == 200_000
+    assert mc.max_tags == 20
+    assert mc.max_tag_length == 50

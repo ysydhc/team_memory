@@ -2,10 +2,56 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from team_memory.auth.provider import ApiKeyAuth, NoAuth
 from team_memory.embedding.base import EmbeddingProvider
+
+# ============================================================
+# Shared MCP Server Mock Helpers
+# ============================================================
+
+LITE_PATCH_BASE = "team_memory.server"
+_P = LITE_PATCH_BASE  # short alias
+
+
+def _patch_user(username: str = "admin"):
+    """Patch _get_current_user to return a fixed username."""
+    return patch(f"{_P}._get_current_user", new_callable=AsyncMock, return_value=username)
+
+
+def _patch_expansion():
+    """No-op: UserExpansion removed in MVP simplification."""
+    return nullcontext()
+
+
+def _patch_personal():
+    """Patch _try_extract_and_save_personal_memory to no-op."""
+    return patch(
+        f"{_P}._try_extract_and_save_personal_memory",
+        new_callable=AsyncMock,
+    )
+
+
+def _setup_session_cm(mock_get_session):
+    """Configure async context manager for get_session mock.
+
+    Args:
+        mock_get_session: The patched get_session mock object.
+
+    Returns:
+        A mock AsyncSession ready for use in tests.
+    """
+    mock_session = AsyncMock()
+    mock_get_session.return_value.__aenter__ = AsyncMock(
+        return_value=mock_session,
+    )
+    mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+    return mock_session
+
 
 # ============================================================
 # Mock Embedding Provider

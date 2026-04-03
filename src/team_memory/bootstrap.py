@@ -34,27 +34,54 @@ from team_memory.embedding.base import EmbeddingProvider
 from team_memory.services.archive import ArchiveService
 from team_memory.services.event_bus import EventBus, Events
 from team_memory.services.experience import ExperienceService
+from team_memory.services.search_orchestrator import SearchOrchestrator
 
 if TYPE_CHECKING:
     from team_memory.services.search_pipeline import SearchPipeline
-    from team_memory.services.webhook import WebhookService
 
 logger = logging.getLogger("team_memory.bootstrap")
 
 
-_LOG_RECORD_STD_ATTRS = frozenset({
-    "name", "msg", "args", "created", "filename", "funcName",
-    "levelname", "levelno", "lineno", "module", "msecs",
-    "pathname", "process", "processName", "relativeCreated",
-    "stack_info", "exc_info", "exc_text", "thread", "threadName",
-    "message", "taskName",
-})
+_LOG_RECORD_STD_ATTRS = frozenset(
+    {
+        "name",
+        "msg",
+        "args",
+        "created",
+        "filename",
+        "funcName",
+        "levelname",
+        "levelno",
+        "lineno",
+        "module",
+        "msecs",
+        "pathname",
+        "process",
+        "processName",
+        "relativeCreated",
+        "stack_info",
+        "exc_info",
+        "exc_text",
+        "thread",
+        "threadName",
+        "message",
+        "taskName",
+    }
+)
 
 # Sensitive keys to redact in extra (per docs/design-docs/logging-format.md)
-_SENSITIVE_KEYS = frozenset({
-    "api_key", "apikey", "api-key", "password", "secret", "token",
-    "authorization", "auth_header",
-})
+_SENSITIVE_KEYS = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "api-key",
+        "password",
+        "secret",
+        "token",
+        "authorization",
+        "auth_header",
+    }
+)
 
 
 def _redact_sensitive(extra: dict) -> dict:
@@ -62,9 +89,8 @@ def _redact_sensitive(extra: dict) -> dict:
     result = {}
     for k, v in extra.items():
         key_lower = k.lower().replace("-", "_")
-        is_sensitive = (
-            key_lower in _SENSITIVE_KEYS
-            or any(s in key_lower for s in ("secret", "token", "password"))
+        is_sensitive = key_lower in _SENSITIVE_KEYS or any(
+            s in key_lower for s in ("secret", "token", "password")
         )
         result[k] = "***" if is_sensitive else v
     return result
@@ -74,9 +100,12 @@ class _JsonFormatter(logging.Formatter):
     """JSON Lines formatter per docs/design-docs/logging-format.md."""
 
     def format(self, record: logging.LogRecord) -> str:
-        ts = datetime.fromtimestamp(record.created, tz=timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%S.%f"
-        )[:-3] + "Z"
+        ts = (
+            datetime.fromtimestamp(record.created, tz=timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%S.%f"
+            )[:-3]
+            + "Z"
+        )
         log_record: dict = {
             "timestamp": ts,
             "level": record.levelname,
@@ -125,15 +154,11 @@ def _configure_logging(settings: Settings) -> QueueListener | None:
     if use_json:
         handler.setFormatter(_JsonFormatter())
     else:
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
-        )
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
     root.addHandler(handler)
 
     log_listener: QueueListener | None = None
-    if getattr(settings, "logging", None) and getattr(
-        settings.logging, "log_file_enabled", False
-    ):
+    if getattr(settings, "logging", None) and getattr(settings.logging, "log_file_enabled", False):
         log_cfg = settings.logging
         log_path = getattr(log_cfg, "log_file_path", "logs/team_memory.log")
         backup_count = getattr(log_cfg, "log_file_backup_count", 5)
@@ -180,7 +205,7 @@ class AppContext:
     search_pipeline: SearchPipeline
     service: ExperienceService
     archive_service: ArchiveService
-    webhook_service: WebhookService | None = None
+    search_orchestrator: SearchOrchestrator
     _log_listener: QueueListener | None = None
 
 
@@ -218,7 +243,9 @@ def _create_embedding_provider(settings: Settings) -> EmbeddingProvider:
             from team_memory.embedding.openai_provider import OpenAIEmbedding
 
             return OpenAIEmbedding(
-                api_key=api_key, model=cfg.openai.model, dim=cfg.openai.dimension,
+                api_key=api_key,
+                model=cfg.openai.model,
+                dim=cfg.openai.dimension,
             )
         return None
 
@@ -275,6 +302,29 @@ def _create_embedding_provider(settings: Settings) -> EmbeddingProvider:
     )
 
 
+def _validate_embedding_dimension(settings: Settings) -> None:
+    """Warn if configured embedding dimension doesn't match the DB schema.
+
+    The database vector columns are defined as Vector(DB_VECTOR_DIM).
+    If the embedding provider produces vectors of a different size,
+    inserts will fail or search quality will degrade.
+    """
+    from team_memory.storage.models import DB_VECTOR_DIM
+
+    configured_dim = settings.embedding.dimension
+    if configured_dim != DB_VECTOR_DIM:
+        logger.warning(
+            "Embedding dimension mismatch: provider configured for %d dims "
+            "but database schema uses %d. Search quality may be degraded. "
+            "To fix: create a migration to change vector(%d) to vector(%d) "
+            "and re-embed all records.",
+            configured_dim,
+            DB_VECTOR_DIM,
+            DB_VECTOR_DIM,
+            configured_dim,
+        )
+
+
 def _configure_auth(settings: Settings) -> AuthProvider:
     from team_memory.auth.provider import ApiKeyAuth
 
@@ -302,8 +352,8 @@ def bootstrap(
     """Module-level singleton factory.
 
     First call creates and caches, subsequent calls return the same instance.
-    ``enable_background=True`` creates WebhookService;
-    ``False`` skips it (for lightweight MCP stdio usage).
+    ``enable_background=True`` registers cache invalidation handlers;
+    ``False`` skips them (for lightweight MCP stdio usage).
     """
     global _instance
     if _instance is not None:
@@ -313,6 +363,7 @@ def bootstrap(
     log_listener = _configure_logging(settings)
     db_url = _resolve_db_url(settings)
     embedding = _create_embedding_provider(settings)
+    _validate_embedding_dimension(settings)
     auth = _configure_auth(settings)
 
     from team_memory.services.search_pipeline import SearchPipeline
@@ -332,12 +383,18 @@ def bootstrap(
     archive_service = ArchiveService(
         embedding_provider=embedding,
         db_url=db_url,
+        event_bus=event_bus,
+    )
+
+    search_orchestrator = SearchOrchestrator(
+        search_pipeline=search_pipeline,
+        embedding_provider=embedding,
+        db_url=db_url,
     )
 
     service = ExperienceService(
         embedding_provider=embedding,
         auth_provider=auth,
-        search_pipeline=search_pipeline,
         event_bus=event_bus,
         lifecycle_config=settings.lifecycle,
         llm_config=settings.llm,
@@ -345,27 +402,9 @@ def bootstrap(
         archive_service=archive_service,
     )
 
-    webhook_service: WebhookService | None = None
-    if enable_background and settings.webhooks:
-        from team_memory.services.webhook import WebhookService as WSClass
-
-        webhook_configs = [w.model_dump() for w in settings.webhooks]
-        webhook_service = WSClass(event_bus, webhook_configs)
-        logger.info(
-            "WebhookService activated with %d target(s)", len(settings.webhooks)
-        )
-
     if enable_background:
-        _register_cache_invalidation(event_bus, service)
-
-    # Register hook registry
-    from team_memory.services.hooks import init_hook_registry
-    from team_memory.storage.database import get_session_factory
-
-    init_hook_registry(
-        session_factory=get_session_factory(db_url),
-        project=getattr(settings, "default_project", None) or "default",
-    )
+        _register_cache_invalidation(event_bus, search_orchestrator)
+        _register_pattern_extraction(event_bus, embedding, settings.llm, db_url)
 
     _instance = AppContext(
         settings=settings,
@@ -376,7 +415,7 @@ def bootstrap(
         search_pipeline=search_pipeline,
         service=service,
         archive_service=archive_service,
-        webhook_service=webhook_service,
+        search_orchestrator=search_orchestrator,
         _log_listener=log_listener,
     )
 
@@ -405,9 +444,9 @@ def reset_context() -> None:
     _instance = None
 
 
-def _register_cache_invalidation(event_bus: EventBus, service: ExperienceService):
+def _register_cache_invalidation(event_bus: EventBus, search_orchestrator: SearchOrchestrator):
     async def _on_data_change(payload: dict) -> None:
-        await service.invalidate_search_cache()
+        await search_orchestrator.invalidate_cache()
         logger.debug("Cache invalidated by event: %s", payload)
 
     for evt in (
@@ -419,6 +458,55 @@ def _register_cache_invalidation(event_bus: EventBus, service: ExperienceService
         event_bus.on(evt, _on_data_change)
 
 
+def _register_pattern_extraction(
+    event_bus: EventBus,
+    embedding: EmbeddingProvider,
+    llm_config: object,
+    db_url: str,
+) -> None:
+    """Subscribe to ARCHIVE_CREATED to enqueue pattern extraction as a background task."""
+    from team_memory.services import task_runner
+
+    async def _handle_pattern_extraction(payload: dict) -> None:
+        raw = payload.get("raw_conversation", "")
+        user_id = payload.get("user_id", "")
+        if not raw or not user_id:
+            return
+        try:
+            from team_memory.services.pattern_extractor import PatternExtractor
+            from team_memory.services.personal_memory import PersonalMemoryService
+
+            pm_svc = PersonalMemoryService(embedding_provider=embedding, db_url=db_url)
+            extractor = PatternExtractor()
+            count = await extractor.extract_and_save(
+                conversation=raw,
+                user_id=user_id,
+                llm_config=llm_config,
+                pm_service=pm_svc,
+            )
+            if count:
+                logger.info("Extracted %d patterns for user=%s", count, user_id)
+        except Exception:
+            logger.warning("Pattern extraction failed", exc_info=True)
+            raise  # let task_runner handle retry
+
+    task_runner.register_handler("pattern_extraction", _handle_pattern_extraction)
+
+    async def _on_archive_created(payload: dict) -> None:
+        raw = payload.get("raw_conversation", "")
+        user_id = payload.get("user_id", "")
+        if not raw or not user_id:
+            return
+        await task_runner.enqueue("pattern_extraction", payload, db_url=db_url)
+        # Attempt immediate execution (best-effort, like the old create_task)
+        try:
+            await task_runner.poll_and_execute(db_url, batch_size=1)
+        except Exception:
+            logger.debug("Immediate task execution failed; will retry later", exc_info=True)
+
+    event_bus.on(Events.ARCHIVE_CREATED, _on_archive_created)
+
+
 async def start_background_tasks(ctx: AppContext) -> None:
     """Start background tasks (placeholder for future use)."""
     logger.info("Background tasks started")
@@ -428,9 +516,10 @@ async def stop_background_tasks(ctx: AppContext) -> None:
     """Gracefully stop background tasks."""
     if ctx._log_listener is not None:
         try:
-            await asyncio.wait_for(
-                asyncio.to_thread(ctx._log_listener.stop), timeout=5
-            )
+            await asyncio.wait_for(asyncio.to_thread(ctx._log_listener.stop), timeout=5)
         except asyncio.TimeoutError:
             logger.warning("QueueListener.stop() timed out after 5s")
+    from team_memory.storage.database import close_db
+
+    await close_db()
     logger.info("Background tasks stopped")

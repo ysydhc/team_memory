@@ -3,9 +3,12 @@
  */
 
 import { state } from './store.js';
-import { esc, getSearchHistory, addSearchHistory, clearSearchHistory } from './utils.js';
+import { esc, getSearchHistory, addSearchHistory, clearSearchHistory, renderMarkdown } from './utils.js';
 import { resolveProjectInput } from './schema.js';
 import { populateTagSuggestions } from './pages.js';
+
+// Re-export renderMarkdown so consumers of components.js can use it.
+export { renderMarkdown };
 
 function api(...args) {
     return window.__api(...args);

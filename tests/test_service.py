@@ -3,6 +3,7 @@
 Uses mock embedding provider and real async SQLite database
 to test the service layer without needing PostgreSQL + pgvector.
 For full vector search tests, see test_integration.py (requires PostgreSQL).
+Search logic is tested in test_search_orchestrator.py.
 """
 
 from __future__ import annotations
@@ -81,8 +82,10 @@ class TestExperienceServiceUnit:
         async def mock_get_session(_db_url):
             yield mock_session
 
-        with patch("team_memory.storage.database.get_session", mock_get_session), \
-             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
+        with (
+            patch("team_memory.storage.database.get_session", mock_get_session),
+            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+        ):
             mock_repo.return_value = mock_repo_instance
             await service.save(
                 title="Fix Docker issue",
@@ -102,36 +105,6 @@ class TestExperienceServiceUnit:
         mock_repo_instance.create.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_search_calls_embedding_and_repo(self, service, mock_embedding):
-        """Verify that search generates query embedding and calls repo."""
-        mock_session = AsyncMock()
-        mock_repo_instance = MagicMock()
-        mock_repo_instance.search_by_vector = AsyncMock(return_value=[
-            {
-                "id": "test-id",
-                "title": "Existing solution",
-                "similarity": 0.95,
-            }
-        ])
-
-        @asynccontextmanager
-        async def mock_get_session(_db_url):
-            yield mock_session
-
-        with patch("team_memory.storage.database.get_session", mock_get_session), \
-             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
-            mock_repo.return_value = mock_repo_instance
-            results = await service.search(
-                query="Docker container issue",
-                max_results=3,
-                min_similarity=0.7,
-            )
-
-        assert len(results) == 1
-        assert results[0]["title"] == "Existing solution"
-        mock_repo_instance.search_by_vector.assert_called_once()
-
-    @pytest.mark.asyncio
     async def test_feedback_success(self, service):
         """Test successful feedback submission."""
         mock_session = AsyncMock()
@@ -146,8 +119,10 @@ class TestExperienceServiceUnit:
         async def mock_get_session(_db_url):
             yield mock_session
 
-        with patch("team_memory.storage.database.get_session", mock_get_session), \
-             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
+        with (
+            patch("team_memory.storage.database.get_session", mock_get_session),
+            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+        ):
             mock_repo.return_value = mock_repo_instance
             result = await service.feedback(
                 experience_id=exp_id,
@@ -172,8 +147,10 @@ class TestExperienceServiceUnit:
         async def mock_get_session(_db_url):
             yield mock_session
 
-        with patch("team_memory.storage.database.get_session", mock_get_session), \
-             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
+        with (
+            patch("team_memory.storage.database.get_session", mock_get_session),
+            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+        ):
             mock_repo.return_value = mock_repo_instance
             result = await service.feedback(
                 experience_id=exp_id,
@@ -204,8 +181,10 @@ class TestExperienceServiceUnit:
         async def mock_get_session(_db_url):
             yield mock_session
 
-        with patch("team_memory.storage.database.get_session", mock_get_session), \
-             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
+        with (
+            patch("team_memory.storage.database.get_session", mock_get_session),
+            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+        ):
             mock_repo.return_value = mock_repo_instance
             result = await service.update(
                 experience_id=exp_id,
@@ -228,7 +207,8 @@ class TestExperienceServiceUnit:
         mock_experience.description = "Desc"
         mock_experience.tags = ["python", "docker"]
         mock_experience.to_dict.return_value = {
-            "id": "test", "tags": ["docker", "linux"],
+            "id": "test",
+            "tags": ["docker", "linux"],
         }
         mock_repo_instance.get_by_id = AsyncMock(return_value=mock_experience)
         mock_repo_instance.update = AsyncMock(return_value=mock_experience)
@@ -239,8 +219,10 @@ class TestExperienceServiceUnit:
         async def mock_get_session(_db_url):
             yield mock_session
 
-        with patch("team_memory.storage.database.get_session", mock_get_session), \
-             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
+        with (
+            patch("team_memory.storage.database.get_session", mock_get_session),
+            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+        ):
             mock_repo.return_value = mock_repo_instance
             result = await service.update(
                 experience_id=exp_id,
@@ -292,8 +274,10 @@ class TestPhase2Fixes:
         async def mock_get_session(_db_url):
             yield mock_session
 
-        with patch("team_memory.storage.database.get_session", mock_get_session), \
-             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
+        with (
+            patch("team_memory.storage.database.get_session", mock_get_session),
+            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+        ):
             mock_repo.return_value = mock_repo_instance
             await service_simple.save(
                 title="Personal experience",
@@ -327,8 +311,10 @@ class TestPhase2Fixes:
         async def mock_get_session(_db_url):
             yield mock_session
 
-        with patch("team_memory.storage.database.get_session", mock_get_session), \
-             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
+        with (
+            patch("team_memory.storage.database.get_session", mock_get_session),
+            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+        ):
             mock_repo.return_value = mock_repo_instance
             await service_simple.save(
                 title="Published experience",
@@ -356,8 +342,10 @@ class TestPhase2Fixes:
         async def mock_get_session(_db_url):
             yield mock_session
 
-        with patch("team_memory.storage.database.get_session", mock_get_session), \
-             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
+        with (
+            patch("team_memory.storage.database.get_session", mock_get_session),
+            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+        ):
             mock_repo.return_value = mock_repo_instance
             result = await service_simple.feedback(
                 experience_id=str(uuid.uuid4()),
@@ -378,8 +366,10 @@ class TestPhase2Fixes:
         async def mock_get_session(_db_url):
             yield mock_session
 
-        with patch("team_memory.storage.database.get_session", mock_get_session), \
-             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
+        with (
+            patch("team_memory.storage.database.get_session", mock_get_session),
+            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+        ):
             mock_repo.return_value = mock_repo_instance
             result = await service_simple.feedback(
                 experience_id=str(uuid.uuid4()),
@@ -410,8 +400,10 @@ class TestPhase2Fixes:
         async def mock_get_session(_db_url):
             yield mock_session
 
-        with patch("team_memory.storage.database.get_session", mock_get_session), \
-             patch("team_memory.services.experience.ExperienceRepository") as mock_repo:
+        with (
+            patch("team_memory.storage.database.get_session", mock_get_session),
+            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+        ):
             mock_repo.return_value = mock_repo_instance
             result = await service_simple.update(
                 experience_id=str(uuid.uuid4()),

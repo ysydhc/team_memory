@@ -74,6 +74,7 @@ def build_vector_search(
     tags: list[str] | None = None,
     min_similarity: float = 0.6,
     limit: int = 5,
+    offset: int = 0,
 ) -> Select:
     """Build vector similarity search statement. Returns SQLAlchemy Select."""
     similarity_expr = (1 - Experience.embedding.cosine_distance(query_embedding)).label(
@@ -88,6 +89,9 @@ def build_vector_search(
         .order_by(desc(similarity_expr))
         .limit(limit)
     )
+
+    if offset > 0:
+        stmt = stmt.offset(offset)
 
     for f in active_filter(current_user):
         stmt = stmt.where(f)
@@ -105,6 +109,7 @@ def build_fts_search(
     current_user: str | None = None,
     tags: list[str] | None = None,
     limit: int = 5,
+    offset: int = 0,
 ) -> Select:
     """Build full-text search statement. Returns SQLAlchemy Select.
 
@@ -120,6 +125,9 @@ def build_fts_search(
         .order_by(desc(rank_expr))
         .limit(limit)
     )
+
+    if offset > 0:
+        stmt = stmt.offset(offset)
 
     for f in active_filter(current_user):
         stmt = stmt.where(f)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import distinct, or_, select
 from sqlalchemy import func as sa_func
@@ -13,16 +13,10 @@ from sqlalchemy.orm import selectinload
 from team_memory.auth.provider import User
 from team_memory.storage.models import Experience
 from team_memory.web import app as app_module
-from team_memory.web.app import (
-    ExperienceCreate,
-    ExperienceUpdate,
-    FeedbackCreate,
-    _get_db_url,
-    _resolve_project,
-    get_current_user,
-    get_optional_user,
-)
+from team_memory.web.app import _get_db_url, _resolve_project
+from team_memory.web.auth_session import get_current_user, get_optional_user
 from team_memory.web.dependencies import require_role
+from team_memory.web.schemas import ExperienceCreate, ExperienceUpdate, FeedbackCreate
 
 router = APIRouter(tags=["experiences"])
 
@@ -55,8 +49,8 @@ async def list_projects(
 
 @router.get("/experiences")
 async def list_experiences(
-    page: int = 1,
-    page_size: int = 20,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     tag: str | None = None,
     project: str | None = None,
     status: str | None = None,
@@ -67,9 +61,7 @@ async def list_experiences(
     """List experiences with pagination and filters."""
     db_url = _get_db_url()
     project_list = (
-        [p.strip() for p in project.split(",") if p.strip()]
-        if project and "," in project
-        else None
+        [p.strip() for p in project.split(",") if p.strip()] if project and "," in project else None
     )
     resolved_project = _resolve_project(project.split(",")[0] if project else project)
     current_user = user.name if user else None
@@ -119,7 +111,6 @@ async def list_experiences(
         repo = ExperienceRepository(session)
 
         if tag or experience_type or status:
-            offset = (page - 1) * page_size
             base_q = (
                 select(Experience)
                 .where(Experience.parent_id.is_(None))
@@ -147,11 +138,7 @@ async def list_experiences(
                 base_q = base_q.where(Experience.experience_type == experience_type)
                 count_q = count_q.where(Experience.experience_type == experience_type)
 
-            base_q = (
-                base_q.order_by(Experience.created_at.desc())
-                .limit(page_size)
-                .offset(offset)
-            )
+            base_q = base_q.order_by(Experience.created_at.desc()).limit(limit).offset(offset)
             result = await session.execute(base_q)
             experiences = list(result.scalars().all())
             total_result = await session.execute(count_q)
@@ -163,9 +150,8 @@ async def list_experiences(
                 scope=visibility,
                 current_user=current_user,
             )
-            offset = (page - 1) * page_size
             experiences = await repo.list_recent(
-                limit=page_size,
+                limit=limit,
                 offset=offset,
                 include_all_statuses=include_all,
                 project=resolved_project,
@@ -180,12 +166,10 @@ async def list_experiences(
             exp_list.append(d)
 
         return {
-            "experiences": exp_list,
+            "items": exp_list,
             "total": total,
-            "page": page,
-            "page_size": page_size,
-            "total_pages": (total + page_size - 1) // page_size,
-            "project": resolved_project,
+            "limit": limit,
+            "offset": offset,
         }
 
 
@@ -240,9 +224,28 @@ async def create_experience(
             project=resolved_project,
             group_key=req.group_key,
         )
+        if result.get("error"):
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": {
+                        "code": "embedding_failure",
+                        "message": result.get("message", "Internal error"),
+                    }
+                },
+            )
         if result.get("status") == "duplicate_detected":
-            return JSONResponse(status_code=409, content=result)
-        return result
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": {
+                        "code": "duplicate_detected",
+                        "message": result.get("message", "Duplicate detected"),
+                    },
+                    "candidates": result.get("candidates", []),
+                },
+            )
+        return {"item": result, "message": "Created successfully"}
 
 
 @router.put("/experiences/{experience_id}")
@@ -311,9 +314,7 @@ async def restore_experience(
     """Restore a soft-deleted experience."""
     restored = await _svc().restore(experience_id)
     if not restored:
-        raise HTTPException(
-            status_code=404, detail="Experience not found or not deleted"
-        )
+        raise HTTPException(status_code=404, detail="Experience not found or not deleted")
     return {"message": "Experience restored"}
 
 
@@ -335,7 +336,7 @@ async def add_feedback(
     return {"message": "Feedback recorded"}
 
 
-@router.post("/experiences/{experience_id}/status")
+@router.patch("/experiences/{experience_id}/status")
 async def change_experience_status(
     experience_id: str,
     request: Request,
@@ -400,9 +401,7 @@ async def change_experience_status(
         try:
             from team_memory.bootstrap import get_context
 
-            await get_context().archive_service.update_archive_status_for_experience(
-                exp_uuid
-            )
+            await get_context().archive_service.update_archive_status_for_experience(exp_uuid)
         except Exception:
             pass
     return {"message": msg, "experience": result.to_dict()}

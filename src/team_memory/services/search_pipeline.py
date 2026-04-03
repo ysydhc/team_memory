@@ -17,6 +17,7 @@ import asyncio
 import logging
 import os
 import time
+import uuid
 from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +37,15 @@ from team_memory.storage.repository import ExperienceRepository
 logger = logging.getLogger("team_memory.search_pipeline")
 
 _SEARCH_DEBUG = os.environ.get("TEAM_MEMORY_SEARCH_DEBUG", "").lower() in ("1", "true", "yes")
+
+# LLM query expansion cache: normalized query -> (expanded_text, monotonic_timestamp)
+_expansion_cache: dict[str, tuple[str, float]] = {}
+_EXPANSION_CACHE_TTL = 600  # 10 minutes
+
+
+def _expansion_cache_clear() -> None:
+    """Clear the LLM expansion cache. Useful for testing and cache invalidation."""
+    _expansion_cache.clear()
 
 
 @dataclass
@@ -86,9 +96,26 @@ async def _llm_expand_query(
     llm_config,
     timeout_seconds: float,
 ) -> str | None:
-    """Call LLM to expand search query with extra keywords. Returns None on any failure."""
+    """Call LLM to expand search query with extra keywords. Returns None on any failure.
+
+    Results are cached for ``_EXPANSION_CACHE_TTL`` seconds keyed by the
+    normalised (stripped + lowercased) query text so repeated identical
+    searches skip the LLM round-trip.
+    """
     if not query or not query.strip() or not llm_config:
         return None
+
+    cache_key = query.strip().lower()
+
+    # Check cache
+    if cache_key in _expansion_cache:
+        expanded, ts = _expansion_cache[cache_key]
+        if time.monotonic() - ts < _EXPANSION_CACHE_TTL:
+            logger.debug("LLM expansion cache hit for: %s", cache_key[:50])
+            return expanded
+        # Expired -- remove stale entry
+        _expansion_cache.pop(cache_key, None)
+
     try:
         from team_memory.services.llm_client import LLMClient
 
@@ -106,7 +133,13 @@ async def _llm_expand_query(
         if not text:
             return None
         line = text.strip().split("\n")[0].strip()
-        return line if line else None
+        result = line if line else None
+
+        # Cache successful result
+        if result:
+            _expansion_cache[cache_key] = (result, time.monotonic())
+
+        return result
     except (asyncio.TimeoutError, Exception) as e:
         logger.debug("LLM query expansion failed (fallback to original): %s", e)
         return None
@@ -174,16 +207,10 @@ class SearchPipeline:
 
         # Optional LLM query expansion
         if getattr(self._search_config, "query_expansion_enabled", False) and self._llm_config:
-            timeout_s = getattr(
-                self._search_config, "query_expansion_timeout_seconds", 3.0
-            )
-            expanded = await _llm_expand_query(
-                request.query, self._llm_config, timeout_s
-            )
+            timeout_s = getattr(self._search_config, "query_expansion_timeout_seconds", 3.0)
+            expanded = await _llm_expand_query(request.query, self._llm_config, timeout_s)
             if expanded and expanded.strip():
-                retrieval_query = (
-                    request.query.strip() + " " + expanded.strip()
-                ).strip()[:2000]
+                retrieval_query = (request.query.strip() + " " + expanded.strip()).strip()[:2000]
 
         query_expansion_ms = int((time.monotonic() - stage_begin) * 1000)
         io_logger.log_internal(
@@ -213,7 +240,7 @@ class SearchPipeline:
                 retrieval_query, self._embedding
             )
         except Exception as e:
-            logger.warning("Embedding failed, will use FTS only: %s", e)
+            logger.warning("Embedding failed, will use FTS only: %s", e, exc_info=True)
         stage_metrics["embedding_ms"] = int((time.monotonic() - stage_begin) * 1000)
 
         # Stage 3 & 4: Retrieval + RRF Fusion
@@ -293,6 +320,16 @@ class SearchPipeline:
                 result_dicts.append(d)
             result_dicts.sort(key=lambda x: float(x.get("score", 0)), reverse=True)
             result_dicts = result_dicts[: request.max_results]
+
+        # Stage 7b: Enrich experience results with archive_ids
+        exp_id_strs = [d["id"] for d in result_dicts if d.get("id") and d.get("type") != "archive"]
+        if exp_id_strs:
+            archive_repo_enrich = ArchiveRepository(session)
+            exp_uuids = [uuid.UUID(eid) for eid in exp_id_strs]
+            archive_mapping = await archive_repo_enrich.get_archive_ids_for_experiences(exp_uuids)
+            for d in result_dicts:
+                if d.get("type") != "archive":
+                    d["archive_ids"] = archive_mapping.get(str(d.get("id", "")), [])
 
         duration_ms = int((time.monotonic() - start) * 1000)
 
@@ -384,10 +421,10 @@ class SearchPipeline:
         )
 
         if isinstance(vector_results, Exception):
-            logger.warning("Vector search failed in hybrid mode: %s", vector_results)
+            logger.warning("Vector search failed in hybrid mode: %s", vector_results, exc_info=True)
             vector_results = []
         if isinstance(fts_results, Exception):
-            logger.warning("FTS failed in hybrid mode: %s", fts_results)
+            logger.warning("FTS failed in hybrid mode: %s", fts_results, exc_info=True)
             fts_results = []
 
         return self._rrf_fuse(vector_results, fts_results, over_fetch)
@@ -559,9 +596,7 @@ class SearchPipeline:
         candidates.sort(key=lambda x: x.score, reverse=True)
         return candidates
 
-    def _apply_adaptive_filter(
-        self, candidates: list[SearchResultItem]
-    ) -> list[SearchResultItem]:
+    def _apply_adaptive_filter(self, candidates: list[SearchResultItem]) -> list[SearchResultItem]:
         """Apply adaptive score filtering using similarity scores.
 
         Two strategies:

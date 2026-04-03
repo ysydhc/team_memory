@@ -1,31 +1,27 @@
-"""FastMCP Server entry point for TeamMemory.
+"""MCP Server — 5 tools for persistent team memory across coding sessions.
 
-Registers all MCP tools (tm_* namespace), resources, and prompts.
-Uses the shared AppContext singleton from bootstrap.py for all services.
+Registers memory_save, memory_recall, memory_get_archive, memory_context, memory_feedback.
+Delegates to the shared service layer via AppContext singleton.
 
-Tool namespace: All tools use the `tm_` prefix to help LLM clients
-identify TeamMemory capabilities (e.g. tm_search, tm_save, tm_solve).
+Usage:
+    python -m team_memory.server             # stdio mode
+    team-memory                              # via entry point
 """
 
 from __future__ import annotations
-
-import warnings
-
-warnings.filterwarnings("ignore", category=DeprecationWarning, append=False)
 
 import functools
 import json
 import logging
 import os
-import time
-from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 
-import yaml
 from fastmcp import FastMCP
 
 from team_memory import io_logger
 from team_memory.bootstrap import bootstrap, get_context
+from team_memory.storage.database import get_session
+from team_memory.utils.project import resolve_project as _resolve_project
 
 try:
     from team_memory.services.context_trimmer import estimate_tokens
@@ -35,67 +31,29 @@ except ImportError:
         return len(text) // 4
 
 
-from team_memory.storage.database import get_session
-
 logger = logging.getLogger("team_memory")
 
 
+# ============================================================
+# Shared helpers (formerly in server.py)
+# ============================================================
+
+
 def track_usage(func):
-    """Decorator to auto-track MCP tool usage."""
+    """Decorator to log MCP tool usage via io_logger."""
 
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
-        from team_memory.services.hooks import (
-            HookContext,
-            HookEvent,
-            get_hook_registry,
-        )
-
-        registry = get_hook_registry()
         tool_name = func.__name__
-        user = "anonymous"
-        try:
-            user = await _get_current_user()
-        except Exception:
-            pass
-        api_key_name = os.environ.get("TEAM_MEMORY_API_KEY_NAME") or None
 
-        # MCP debug: log input (env TEAM_MEMORY_DEBUG=1 or TEAM_MEMORY_MCP_DEBUG=1)
-        try:
-            from team_memory import mcp_debug_log
-
-            if mcp_debug_log.is_mcp_debug_enabled():
-                await mcp_debug_log.log_mcp_io_async(tool_name, "in", kwargs)
-        except Exception:
-            pass
-
-        # io_logger: log input when enabled (independent of mcp_debug_log)
         try:
             if io_logger.is_io_enabled():
                 io_logger.log_mcp_io(tool_name, "in", kwargs)
         except Exception:
             pass
 
-        pre_ctx = HookContext(
-            event=HookEvent.PRE_TOOL_CALL,
-            tool_name=tool_name,
-            user=user,
-            timestamp=datetime.now(timezone.utc),
-            api_key_name=api_key_name,
-        )
-        await registry.fire(pre_ctx)
-
-        success = True
-        error_msg = None
         try:
             result = await func(*args, **kwargs)
-            try:
-                from team_memory import mcp_debug_log
-
-                if mcp_debug_log.is_mcp_debug_enabled():
-                    await mcp_debug_log.log_mcp_io_async(tool_name, "out", result)
-            except Exception:
-                pass
             try:
                 if io_logger.is_io_enabled():
                     io_logger.log_mcp_io(tool_name, "out", result)
@@ -103,34 +61,12 @@ def track_usage(func):
                 pass
             return result
         except Exception as e:
-            success = False
-            error_msg = str(e)
-            try:
-                from team_memory import mcp_debug_log
-
-                if mcp_debug_log.is_mcp_debug_enabled():
-                    await mcp_debug_log.log_mcp_io_async(tool_name, "out", {"error": error_msg})
-            except Exception:
-                pass
             try:
                 if io_logger.is_io_enabled():
-                    io_logger.log_mcp_io(tool_name, "out", {"error": error_msg})
+                    io_logger.log_mcp_io(tool_name, "out", {"error": str(e)})
             except Exception:
                 pass
             raise
-        finally:
-            post_ctx = HookContext(
-                event=HookEvent.POST_TOOL_CALL,
-                tool_name=tool_name,
-                user=user,
-                timestamp=datetime.now(timezone.utc),
-                metadata={"success": success, "error_message": error_msg},
-                api_key_name=api_key_name,
-            )
-            try:
-                await registry.fire(post_ctx)
-            except Exception:
-                pass
 
     return wrapper
 
@@ -149,6 +85,14 @@ def _get_archive_service():
         return get_context().archive_service
     except RuntimeError:
         return bootstrap(enable_background=False).archive_service
+
+
+def _get_search_orchestrator():
+    """Get SearchOrchestrator from the shared AppContext (lazy-init on first call)."""
+    try:
+        return get_context().search_orchestrator
+    except RuntimeError:
+        return bootstrap(enable_background=False).search_orchestrator
 
 
 def _get_settings():
@@ -172,63 +116,27 @@ async def _get_current_user() -> str:
         except RuntimeError:
             logger.warning("MCP get_context failed, using fallback user")
         except Exception as e:
-            logger.warning("MCP auth error: %s", type(e).__name__, exc_info=False)
-    # Fallback: 项目级 mcp.json 的 env 中配置 TEAM_MEMORY_USER，写入的经验归到该用户
+            logger.warning("MCP auth error: %s", type(e).__name__)
+            logger.debug("MCP auth error details", exc_info=True)
     return (os.environ.get("TEAM_MEMORY_USER", "") or "anonymous").strip() or "anonymous"
-
-
-def _normalize_project_name(project: str | None) -> str:
-    """Normalize legacy project aliases to a canonical project name."""
-    if not project:
-        return ""
-    value = project.strip()
-    alias_map = {
-        "team-memory": "team_memory",
-        "team_doc": "team_memory",
-    }
-    return alias_map.get(value, value)
-
-
-def _resolve_project(project: str | None = None) -> str:
-    """Resolve project from explicit param > env > settings default."""
-    normalized = _normalize_project_name(project)
-    if normalized:
-        return normalized
-    env_project = _normalize_project_name(os.environ.get("TEAM_MEMORY_PROJECT", ""))
-    if env_project:
-        return env_project
-    ctx = get_context()
-    default_project = _normalize_project_name(ctx.settings.default_project)
-    return default_project or "default"
 
 
 def _get_db_url() -> str:
     return get_context().db_url
 
 
-async def _try_update_user_expansion_from_search(
-    query: str, results: list[dict], user: str | None
-) -> None:
-    """No-op: UserExpansion removed in MVP simplification."""
-    return
-
-
 async def _try_extract_and_save_personal_memory(
-    conversation: str, user: str | None, settings
+    conversation: str, user: str | None, settings: object
 ) -> None:
     """Extract personal preferences from conversation and write to personal memory.
 
-    Only runs for logged-in non-anonymous user. Timeout/failure are logged and
-    do not block the caller (tm_learn experience save already done).
+    Only runs for logged-in non-anonymous user. Failure is logged and
+    does not block the caller.
     """
     if not user or str(user).strip().lower() == "anonymous":
-        logger.info(
-            "personal_memory: skipped — user is anonymous or empty "
-            "(set MCP env TEAM_MEMORY_API_KEY valid for auth, or TEAM_MEMORY_USER for fallback)"
-        )
+        logger.info("personal_memory: skipped — user is anonymous or empty")
         return
     try:
-        from team_memory.bootstrap import get_context
         from team_memory.services.llm_parser import parse_personal_memory
         from team_memory.services.personal_memory import PersonalMemoryService
 
@@ -239,11 +147,7 @@ async def _try_extract_and_save_personal_memory(
         )
         items = await parse_personal_memory(conversation, llm_config=settings.llm, timeout=25.0)
         if not items:
-            logger.info(
-                "personal_memory: no rows to save — LLM returned no preference items "
-                "(content may have no extractable habits, or llm_parser warnings above; "
-                "try TEAM_MEMORY_DEBUG=1)"
-            )
+            logger.info("personal_memory: no rows to save — LLM returned no preference items")
             return
         ctx = get_context()
         pm_svc = PersonalMemoryService(embedding_provider=ctx.embedding, db_url=ctx.db_url)
@@ -273,37 +177,21 @@ async def _try_extract_and_save_personal_memory(
         )
     except Exception as e:
         logger.warning(
-            "personal_memory: extract/save failed (experience save already succeeded): %s",
+            "personal_memory: extract/save failed: %s",
             e,
             exc_info=os.environ.get("TEAM_MEMORY_DEBUG", "0") == "1",
         )
 
 
-# ============================================================
-# Token Budget Guard (C3)
-# ============================================================
-
-
 def _guard_output(result_json: str, max_tokens: int | None = None) -> str:
     """Enforce token budget on MCP tool output.
 
-    If the JSON output exceeds max_tokens, progressively trims:
-    1. Remove low-confidence results
-    2. Truncate solution / code_snippets fields
-    3. Add a "truncated" flag to the response
-
-    Args:
-        result_json: JSON string to check/trim.
-        max_tokens: Token budget. None = use config default.
-
-    Returns:
-        Possibly trimmed JSON string.
+    Progressively trims: low-confidence results → long fields → trailing results.
     """
     settings = _get_settings()
     if max_tokens is None:
         max_tokens = settings.mcp.max_output_tokens
 
-    # Parse JSON for field-level processing
     try:
         data = json.loads(result_json)
     except json.JSONDecodeError:
@@ -316,23 +204,21 @@ def _guard_output(result_json: str, max_tokens: int | None = None) -> str:
     truncated = False
     max_solution_chars = settings.mcp.truncate_solution_at
 
-    # Step 1: Remove low-confidence results (if present)
+    # Step 1: Remove low-confidence results
     if len(results) > 1:
         high_medium = [r for r in results if r.get("confidence", "high") in ("high", "medium")]
         if high_medium and len(high_medium) < len(results):
             results = high_medium
             truncated = True
 
-    # Step 2: Truncate long fields in each result
+    # Step 2: Truncate long fields
     for result in results:
-        # Truncate in top-level fields
         for field in ("solution", "code_snippets", "description"):
             val = result.get(field)
             if isinstance(val, str) and len(val) > max_solution_chars:
                 result[field] = val[:max_solution_chars] + "... [truncated]"
                 truncated = True
 
-        # Truncate in nested parent/children (grouped results)
         parent = result.get("parent")
         if isinstance(parent, dict):
             for field in ("solution", "code_snippets", "description"):
@@ -351,19 +237,16 @@ def _guard_output(result_json: str, max_tokens: int | None = None) -> str:
                             child[field] = val[:max_solution_chars] + "... [truncated]"
                             truncated = True
 
-    # Apply truncation flag if any changes were made
     if truncated:
         data["truncated"] = True
 
-    # Re-serialize after field-level trimming
     data["results"] = results
     output = json.dumps(data, ensure_ascii=False)
 
-    # Check overall token budget
     if estimate_tokens(output) <= max_tokens:
         return output
 
-    # Step 3: If still over budget, progressively remove trailing results
+    # Step 3: Progressively remove trailing results
     data["truncated"] = True
     while estimate_tokens(output) > max_tokens and len(results) > 1:
         results.pop()
@@ -374,116 +257,522 @@ def _guard_output(result_json: str, max_tokens: int | None = None) -> str:
 
 
 # ============================================================
-# MCP Server
+# MCP Server (Lite)
 # ============================================================
 
 mcp = FastMCP(
     "team_memory",
     instructions=(
-        "team_memory is a team experience database. All tools use the tm_ prefix.\n\n"
-        "**Mandatory**: At task start, call tm_preflight(task_description=..., current_files=...). "
-        "Use search_depth (skip/light/full) to decide if tm_search/tm_solve is needed.\n\n"
-        "**When to use which tool:**\n"
-        "- tm_solve(problem=...): First for concrete technical problems. "
-        "Returns best solution and marks used; add file_path/language for recall.\n"
-        "- tm_search(query=..., tags=..., max_results=5): Exploratory or more results. "
-        "Short queries get lower min_similarity automatically.\n"
-        "- tm_learn(conversation=..., as_group=...): User pastes long doc or chat. "
-        "LLM extracts experience; as_group=True for multi-step.\n"
-        "- tm_save(title=..., problem=..., solution=...): Quick-save. "
-        "Use tm_save_typed for experience_type.\n"
-        "- tm_feedback(experience_id=..., rating=1..5): After a result helped; improves ranking.\n"
-        "- tm_task(action=...): create/list/get/update; completed+summary → experience.\n\n"
-        "Types: general, feature, bugfix, tech_design, incident, best_practice, learning. "
-        "Prefer specific over 'general'. Use project= in multi-project setups."
+        "team_memory gives you persistent memory across coding sessions.\n\n"
+        "**3 habits:**\n"
+        "1. Starting a task -> `memory_context` "
+        "(file_paths / task_description) and use `profile.static` + `profile.dynamic` "
+        "(string lists) plus `relevant_experiences`.\n"
+        "2. Hit a problem -> `memory_recall`(problem=...) before attempting a fix.\n"
+        "3. `memory_save` when ANY of these happen:\n"
+        "   - You fixed an unexpected error (save problem + solution)\n"
+        "   - You chose between 2+ alternatives (save decision + rationale)\n"
+        "   - User corrected your approach (save the correction as feedback)\n"
+        "   - User provided credentials, config, or access info (save as reference)\n\n"
+        "**Optional:** `memory_recall(..., include_user_profile=True)` attaches the same "
+        "`profile` object when you only use recall.\n\n"
+        "**Tools:**\n"
+        "- `memory_context`: User profile `{static, dynamic}` + relevant team knowledge\n"
+        "- `memory_recall`: Search team knowledge; optional user profile; "
+        "use include_archives=True to mix in archives (L0/L1 previews).\n"
+        "- `memory_get_archive`: After recall returns type=archive, fetch full L2 by id.\n"
+        "- `memory_save`: Save team knowledge (or parse long `content`). "
+        "scope='archive' is removed — use the /archive skill or POST /api/v1/archives.\n"
+        "- `memory_feedback`: Rate a helpful result"
     ),
 )
 
 
 # ============================================================
-# Tools — C1: Workflow-oriented tools
+# Tool 1: memory_save (unified write)
 # ============================================================
 
 
 @mcp.tool(
-    name="tm_solve",
+    name="memory_save",
     description=(
-        "Smart problem solving: search the team experience database, "
-        "auto-format the best solution, and mark it as used. "
-        "Call this FIRST when encountering a technical problem. "
-        "Optional current_file_locations (path, start_line, end_line, etc.) for location boost. "
-        "Returns ~500-2000 tokens (focused on top matches)."
+        "Save valuable knowledge: solutions, decisions, patterns, pitfalls. "
+        "Call this when you: "
+        "fix an unexpected error "
+        "(title=error summary, problem=what failed, solution=what fixed it); "
+        "choose between alternatives "
+        "(title=decision, problem=context, solution=chosen option + why); "
+        "receive user correction on your approach "
+        "(title=feedback, problem=what you did wrong, solution=correct approach); "
+        "learn access info like credentials or config "
+        "(title=reference, problem=what you needed, solution=how to access it). "
+        "Use scope='personal' for preferences, 'project' for team knowledge. "
+        "For session archiving, use the /archive skill (not this tool)."
     ),
 )
 @track_usage
-async def tm_solve(
-    problem: str,
-    file_path: str | None = None,
-    file_paths: list[str] | None = None,
-    language: str | None = None,
-    framework: str | None = None,
+async def memory_save(
+    # Direct save mode
+    title: str | None = None,
+    problem: str | None = None,
+    solution: str | None = None,
+    # Long content parse mode
+    content: str | None = None,
+    # Common
     tags: list[str] | None = None,
-    max_results: int = 3,
-    use_pageindex_lite: bool | None = None,
+    scope: str = "project",
+    experience_type: str | None = None,
     project: str | None = None,
-    current_file_locations: list[dict] | None = None,
-    include_archives: bool = False,
+    group_key: str | None = None,
 ) -> str:
-    """Solve a problem by searching team experiences with enhanced context.
-
-    Builds an enriched query from the problem description plus optional
-    context (file path, language, framework). Automatically increments
-    use_count on the best match.
+    """Unified write: route to direct save or LLM parse based on input.
 
     Args:
-        problem: Description of the problem to solve (required).
-        file_path: Current file path for context enrichment.
-        file_paths: File paths for node boost (if file_path given and file_paths
-            is None, treated as file_paths=[file_path]).
-        language: Programming language for filtering.
-        framework: Framework for filtering.
-        tags: Optional tags to filter by.
-        max_results: Max solutions to return (default 3, focused).
-        current_file_locations: Optional list of dicts with path, start_line, end_line;
-            optional file_content, file_mtime, file_content_hash for location_score boost.
+        title: Experience title (required for direct save mode).
+        problem: Problem description (required for direct save mode).
+        solution: Solution description.
+        content: Long text / conversation to parse via LLM (learn mode).
+        tags: Tags for categorization.
+        scope: "personal" | "project" (default).
+        experience_type: general/feature/bugfix/tech_design/incident/best_practice/learning.
+        project: Project scope.
+        group_key: Auto-group key (e.g. sprint name, feature name).
     """
-    if file_path is not None and file_paths is None:
-        file_paths = [file_path]
-
     service = _get_service()
+    settings = _get_settings()
     db_url = _get_db_url()
     user = await _get_current_user()
     resolved_project = _resolve_project(project)
 
-    # Build enhanced query from context
+    # ---- Validate content length ----
+    if content and len(content) > settings.mcp.max_content_chars:
+        return json.dumps(
+            {
+                "error": True,
+                "message": f"Content too long. Max {settings.mcp.max_content_chars} characters.",
+                "code": "content_too_long",
+            },
+            ensure_ascii=False,
+        )
+
+    # ---- Validate tags ----
+    if tags:
+        if len(tags) > settings.mcp.max_tags:
+            return json.dumps(
+                {
+                    "error": True,
+                    "message": f"Too many tags. Maximum {settings.mcp.max_tags} allowed.",
+                    "code": "validation_error",
+                },
+                ensure_ascii=False,
+            )
+        for tag in tags:
+            if len(tag) > settings.mcp.max_tag_length:
+                return json.dumps(
+                    {
+                        "error": True,
+                        "message": (
+                            f"Tag too long (max {settings.mcp.max_tag_length} chars): {tag[:20]}..."
+                        ),
+                        "code": "validation_error",
+                    },
+                    ensure_ascii=False,
+                )
+
+    # ---- scope=archive removed — use /archive skill or POST /api/v1/archives ----
+    if scope == "archive":
+        return json.dumps(
+            {
+                "error": True,
+                "message": (
+                    "scope='archive' is no longer supported. "
+                    "Use the /archive skill or POST /api/v1/archives instead."
+                ),
+                "code": "scope_removed",
+            },
+            ensure_ascii=False,
+        )
+
+    # ---- Route: content parse (tm_learn mode) ----
+    if content:
+        return await _save_from_content(
+            content=content,
+            tags=tags,
+            user=user,
+            project=resolved_project,
+            settings=settings,
+            service=service,
+            db_url=db_url,
+        )
+
+    # ---- Route: direct save (tm_save mode) ----
+    if not title or not problem:
+        return json.dumps(
+            {
+                "error": True,
+                "message": (
+                    "Provide either: (1) title + problem for direct save, or "
+                    "(2) content for LLM extraction."
+                ),
+                "code": "validation_error",
+            },
+            ensure_ascii=False,
+        )
+
+    async with get_session(db_url) as session:
+        result = await service.save(
+            session=session,
+            title=title,
+            problem=problem,
+            solution=solution,
+            created_by=user,
+            tags=tags,
+            source="auto_extract",
+            exp_status="published",
+            visibility="project" if scope == "project" else "private",
+            experience_type=experience_type or "general",
+            project=resolved_project,
+            group_key=group_key,
+        )
+
+    if result.get("error"):
+        return json.dumps(
+            {
+                "error": True,
+                "message": result.get("message", "Save failed."),
+                "code": "internal_error",
+            },
+            ensure_ascii=False,
+        )
+
+    if result.get("status") == "duplicate_detected":
+        return json.dumps(
+            {
+                "message": (
+                    f"Found {len(result['candidates'])} similar experiences. "
+                    "The knowledge may already exist."
+                ),
+                "duplicate_detected": True,
+                "data": {"candidates": result["candidates"]},
+            },
+            ensure_ascii=False,
+        )
+
+    return json.dumps(
+        {
+            "message": "Knowledge saved successfully.",
+            "data": {
+                "id": result.get("id"),
+                "title": result.get("title"),
+                "status": result.get("exp_status"),
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
+async def _save_from_content(
+    *,
+    content: str,
+    tags: list[str] | None,
+    user: str,
+    project: str,
+    settings: object,
+    service: object,
+    db_url: str,
+) -> str:
+    """LLM parse + save helper (tm_learn logic)."""
+    from team_memory.services.llm_parser import (
+        LLMParseError,
+        parse_content,
+    )
+
+    ext = getattr(settings, "extraction", None)
+    quality_min = ext.quality_gate if ext is not None else 2
+    retry_once = (ext.max_retries > 0) if ext is not None else True
+
+    try:
+        parsed = await parse_content(
+            content=content,
+            llm_config=settings.llm,
+            as_group=False,
+            quality_min_score=quality_min,
+            quality_retry_once=retry_once,
+        )
+    except LLMParseError as e:
+        return json.dumps(
+            {
+                "error": True,
+                "message": f"Failed to parse content: {e}",
+                "code": "embedding_failed",
+            },
+            ensure_ascii=False,
+        )
+
+    extracted_tags = parsed.get("tags", [])
+    if tags:
+        extracted_tags = list(set(extracted_tags + [t.lower() for t in tags]))
+
+    async with get_session(db_url) as session:
+        result = await service.save(
+            session=session,
+            title=parsed.get("title", "Untitled"),
+            problem=parsed.get("problem", ""),
+            solution=parsed.get("solution"),
+            created_by=user,
+            tags=extracted_tags,
+            source="auto_extract",
+            exp_status="draft",
+            visibility="project",
+            experience_type=parsed.get("experience_type") or "general",
+            project=project,
+        )
+
+    if result.get("error"):
+        return json.dumps(
+            {
+                "error": True,
+                "message": result.get("message", "Save failed."),
+                "code": "internal_error",
+            },
+            ensure_ascii=False,
+        )
+
+    if result.get("status") == "duplicate_detected":
+        return json.dumps(
+            {
+                "message": (
+                    f"Found {len(result['candidates'])} similar experiences. "
+                    "The knowledge may already exist."
+                ),
+                "duplicate_detected": True,
+                "data": {"candidates": result["candidates"]},
+            },
+            ensure_ascii=False,
+        )
+
+    await _try_extract_and_save_personal_memory(content, user, settings)
+    return json.dumps(
+        {
+            "message": f"Knowledge extracted and saved: {parsed.get('title', 'Untitled')}",
+            "data": {
+                "id": result.get("id"),
+                "title": result.get("title"),
+                "tags": result.get("tags", []),
+                "status": result.get("exp_status"),
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
+async def _append_user_profile_to_recall_json(
+    payload: str,
+    *,
+    user: str,
+    context_text: str | None,
+    include_user_profile: bool,
+) -> str:
+    if not include_user_profile:
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            return payload
+        data["profile"] = None
+        return json.dumps(data, ensure_ascii=False)
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        return payload
+    ctx = get_context()
+    settings = _get_settings()
+    max_side = getattr(settings.mcp, "profile_max_strings_per_side", None) or 20
+    try:
+        from team_memory.services.personal_memory import PersonalMemoryService
+
+        pm_svc = PersonalMemoryService(embedding_provider=ctx.embedding, db_url=ctx.db_url)
+        data["profile"] = await pm_svc.build_profile_for_user(
+            user_id=user,
+            current_context=context_text,
+            max_per_side=max_side,
+        )
+    except Exception:
+        logger.debug("recall: attach profile failed", exc_info=True)
+        data["profile"] = {"static": [], "dynamic": []}
+    return json.dumps(data, ensure_ascii=False)
+
+
+# ============================================================
+# Tool 2: memory_recall (unified read)
+# ============================================================
+
+
+@mcp.tool(
+    name="memory_recall",
+    description=(
+        "Search team knowledge base before solving problems. "
+        "Call this BEFORE you: "
+        "debug an error or exception; "
+        "implement a feature in an unfamiliar area; "
+        "make a design or architecture decision; "
+        "work with code you haven't seen before. "
+        "Provide 'problem' for focused solutions, 'query' for exploratory search, "
+        "or just 'file_path' for context-based suggestions. "
+        "With include_archives=True, results may include type=archive (previews only); "
+        "call memory_get_archive(archive_id) for full L2 text."
+    ),
+)
+@track_usage
+async def memory_recall(
+    query: str | None = None,
+    problem: str | None = None,
+    file_path: str | None = None,
+    language: str | None = None,
+    framework: str | None = None,
+    tags: list[str] | None = None,
+    max_results: int = 5,
+    project: str | None = None,
+    include_archives: bool | None = None,
+    include_user_profile: bool = False,
+) -> str:
+    """Unified read: route to solve/search/suggest mode based on input.
+
+    Args:
+        query: Explicit search query (search mode).
+        problem: Problem description (solve mode — enhanced query + use_count).
+        file_path: Current file path (suggest mode — context-based).
+        language: Programming language for context.
+        framework: Framework for context.
+        tags: Filter by tags.
+        max_results: Max results to return.
+        project: Project scope.
+        include_archives: Include archived experiences. Defaults to True in dev, False in prod.
+        include_user_profile: If True, add profile {static, dynamic} to the JSON response.
+    """
+    if include_archives is None:
+        from team_memory.config import _default_include_archives
+
+        include_archives = _default_include_archives()
+
+    search_orchestrator = _get_search_orchestrator()
+    user = await _get_current_user()
+    resolved_project = _resolve_project(project)
+
+    ctx_hint: str | None = None
+    if problem:
+        ctx_hint = problem
+    elif query:
+        ctx_hint = query
+    elif file_path:
+        ctx_hint = PurePosixPath(file_path).name
+
+    # ---- Route: solve mode ----
+    if problem:
+        raw = await _recall_solve(
+            problem=problem,
+            file_path=file_path,
+            language=language,
+            framework=framework,
+            tags=tags,
+            max_results=max_results,
+            search_orchestrator=search_orchestrator,
+            user=user,
+            project=resolved_project,
+            include_archives=include_archives,
+        )
+        return await _append_user_profile_to_recall_json(
+            raw,
+            user=user,
+            context_text=ctx_hint,
+            include_user_profile=include_user_profile,
+        )
+
+    # ---- Route: search mode ----
+    if query:
+        raw = await _recall_search(
+            query=query,
+            tags=tags,
+            max_results=max_results,
+            search_orchestrator=search_orchestrator,
+            user=user,
+            project=resolved_project,
+            include_archives=include_archives,
+        )
+        return await _append_user_profile_to_recall_json(
+            raw,
+            user=user,
+            context_text=ctx_hint,
+            include_user_profile=include_user_profile,
+        )
+
+    # ---- Route: suggest mode ----
+    if file_path or language or framework:
+        raw = await _recall_suggest(
+            file_path=file_path,
+            language=language,
+            framework=framework,
+            max_results=max_results,
+            search_orchestrator=search_orchestrator,
+            user=user,
+            project=resolved_project,
+        )
+        return await _append_user_profile_to_recall_json(
+            raw,
+            user=user,
+            context_text=ctx_hint,
+            include_user_profile=include_user_profile,
+        )
+
+    raw = json.dumps(
+        {
+            "error": True,
+            "message": (
+                "Provide at least one of: problem, query, file_path, language, or framework."
+            ),
+            "code": "validation_error",
+        },
+        ensure_ascii=False,
+    )
+    return await _append_user_profile_to_recall_json(
+        raw,
+        user=user,
+        context_text=ctx_hint,
+        include_user_profile=include_user_profile,
+    )
+
+
+async def _recall_solve(
+    *,
+    problem: str,
+    file_path: str | None,
+    language: str | None,
+    framework: str | None,
+    tags: list[str] | None,
+    max_results: int,
+    search_orchestrator: object,
+    user: str,
+    project: str,
+    include_archives: bool,
+) -> str:
+    """Solve mode: enhanced query + implicit feedback via search."""
     query_parts = [problem]
     if language:
         query_parts.append(f"language: {language}")
     if framework:
         query_parts.append(f"framework: {framework}")
-    effective_path = file_path or (file_paths[0] if file_paths else None)
-    if effective_path:
-        # Extract meaningful parts from file path
-        p = PurePosixPath(effective_path)
+    if file_path:
+        p = PurePosixPath(file_path)
         query_parts.append(f"file: {p.name}")
     enhanced_query = " | ".join(query_parts)
 
-    # Build combined tags from explicit tags + language/framework
     combined_tags = list(tags) if tags else []
     if language and language.lower() not in combined_tags:
         combined_tags.append(language.lower())
     if framework and framework.lower() not in combined_tags:
         combined_tags.append(framework.lower())
 
-    io_logger.log_internal(
-        "solve_query_build",
-        {
-            "enhanced_query": (enhanced_query or "")[:80],
-            "combined_tags": combined_tags[:10],
-        },
-    )
-
-    results = await service.search(
+    # search_orchestrator.search() increments use_count for top results (implicit feedback)
+    results = await search_orchestrator.search(
         query=enhanced_query,
         tags=combined_tags or None,
         max_results=max_results,
@@ -492,336 +781,96 @@ async def tm_solve(
         source="mcp",
         grouped=True,
         top_k_children=2,
-        use_pageindex_lite=use_pageindex_lite,
-        project=resolved_project,
-        current_file_locations=current_file_locations,
+        project=project,
         include_archives=include_archives,
     )
-
-    # Auto-increment use_count + quality score boost on best match (skip when top result is archive)
-    if results:
-        reflection_start = time.monotonic()
-        best = results[0]
-        best_id = best.get("group_id") or best.get("id")
-        if best_id and best.get("type") != "archive":
-            async with get_session(db_url) as session:
-                from team_memory.storage.repository import ExperienceRepository
-
-                repo = ExperienceRepository(session)
-                try:
-                    import uuid as _uuid
-
-                    await repo.increment_use_count(_uuid.UUID(best_id))
-                except Exception:
-                    logger.debug("Failed to increment use_count", exc_info=True)
-        reflection_duration_ms = int((time.monotonic() - reflection_start) * 1000)
-        io_logger.log_internal(
-            "solve_reflection",
-            {
-                "best_id": str(best_id) if best_id else None,
-                "result_count": len(results),
-            },
-            duration_ms=reflection_duration_ms,
-        )
 
     if not results:
         return json.dumps(
             {
                 "message": (
-                    "No matching experiences found for this problem. "
-                    "After solving it, consider calling tm_learn or tm_save "
-                    "to share the solution with the team."
+                    "No matching experiences found. "
+                    "After solving this problem, call memory_save to share the solution."
                 ),
                 "results": [],
-                "suggestion": "tm_save",
             },
             ensure_ascii=False,
         )
 
-    # P0-4: Prefer summary over full content when available
-    for result in results:
-        parent = result.get("parent", result)
-        if parent.get("summary"):
-            result["_has_summary"] = True
-
     best_id = results[0].get("group_id") or results[0].get("id", "")
-    feedback_hint = (
-        f"如果此方案有帮助，请调用 tm_feedback(experience_id='{best_id}', rating=5) 进行评分"
-    )
-
     output = json.dumps(
         {
-            "message": (
-                f"Found {len(results)} relevant solution(s). "
-                f"Best match score: {results[0].get('score', 'N/A')}. "
-                "If helpful, call tm_feedback with the experience ID."
-            ),
+            "message": f"Found {len(results)} solution(s).",
             "results": results,
-            "feedback_hint": feedback_hint,
+            "feedback_hint": (
+                f"If helpful, call memory_feedback(experience_id='{best_id}', rating=5)"
+            ),
         },
         ensure_ascii=False,
     )
     return _guard_output(output)
 
 
-def _get_template_by_id(template_id: str) -> dict | None:
-    """Load workflow template by id from config/templates/templates.yaml."""
-    try:
-        base = Path(__file__).resolve().parent.parent.parent
-        path = base / "config" / "templates" / "templates.yaml"
-        if not path.exists():
-            return None
-        with open(path) as f:
-            data = yaml.safe_load(f) or {}
-        for t in data.get("templates", []):
-            if (t.get("id") or t.get("experience_type")) == template_id:
-                return t
-    except Exception:
-        pass
-    return None
-
-
-@mcp.tool(
-    name="tm_learn",
-    description=(
-        "Extract and save experience from long conversation or document text. "
-        "Use when the user pastes a doc, chat log, or incident report. "
-        "Parameters: conversation (required), as_group=True for multi-step content, "
-        "tags to add, template=bugfix|feature|tech_design|... to apply workflow template, "
-        "save_as_draft=True to save as draft. Returns ~200-500 tokens."
-    ),
-)
-@track_usage
-async def tm_learn(
-    conversation: str,
-    tags: list[str] | None = None,
-    as_group: bool = False,
-    save_as_draft: bool = True,
-    project: str | None = None,
-    template: str | None = None,
+async def _recall_search(
+    *,
+    query: str,
+    tags: list[str] | None,
+    max_results: int,
+    search_orchestrator: object,
+    user: str,
+    project: str,
+    include_archives: bool,
 ) -> str:
-    """Extract and save an experience from conversation/document text.
-
-    Uses an LLM to parse free-form text into structured fields
-    (title, problem, solution, tags, etc.) then saves automatically.
-    AI-extracted content defaults to draft mode for review.
-    When template is provided (e.g. bugfix, feature, tech_design), applies
-    that template's experience_type and suggested_tags.
-
-    Args:
-        conversation: The conversation or document text to learn from (required).
-        tags: Additional tags to merge with LLM-extracted tags.
-        as_group: If True, extract as parent + children experience group.
-        save_as_draft: If True (default), save as draft requiring review.
-        template: Optional template id to apply (experience_type + suggested_tags).
-    """
-    from team_memory.services.llm_parser import (
-        LLMParseError,
-        parse_content,
+    """Search mode: direct query."""
+    results = await search_orchestrator.search(
+        query=query,
+        tags=tags,
+        max_results=max_results,
+        min_similarity=0.6,
+        user_name=user,
+        source="mcp",
+        grouped=True,
+        top_k_children=3,
+        project=project,
+        include_archives=include_archives,
     )
 
-    service = _get_service()
-    settings = _get_settings()
-    db_url = _get_db_url()
-    user = await _get_current_user()
-    resolved_project = _resolve_project(project)
-
-    status = "draft" if save_as_draft else "published"
-
-    # Parse content with LLM (quality gate and retry from extraction config)
-    ext = getattr(settings, "extraction", None)
-    quality_min = ext.quality_gate if ext is not None else 2
-    retry_once = (ext.max_retries > 0) if ext is not None else True
-    try:
-        parsed = await parse_content(
-            content=conversation,
-            llm_config=settings.llm,
-            as_group=as_group,
-            quality_min_score=quality_min,
-            quality_retry_once=retry_once,
-        )
-    except LLMParseError as e:
+    if not results:
         return json.dumps(
-            {"message": f"Failed to parse content: {e}", "error": True},
+            {"message": "No matching experiences found.", "results": []},
             ensure_ascii=False,
         )
 
-    # Apply template: experience_type + suggested_tags
-    tpl_type: str | None = None
-    tpl_tags: list[str] = []
-    if template:
-        tpl = _get_template_by_id(template.strip())
-        if tpl:
-            tpl_type = tpl.get("experience_type") or tpl.get("id")
-            tpl_tags = list(tpl.get("suggested_tags") or [])
-
-    # Merge user-provided tags (and template suggested_tags)
-    if as_group:
-        parent_tags = parsed["parent"].get("tags", [])
-        if tpl_tags:
-            parent_tags = list(set(parent_tags + [t.lower() for t in tpl_tags]))
-        if tags:
-            parent_tags = list(set(parent_tags + [t.lower() for t in tags]))
-        parsed["parent"]["tags"] = parent_tags
-        if tpl_type and not parsed["parent"].get("experience_type"):
-            parsed["parent"]["experience_type"] = tpl_type
-
-        async with get_session(db_url) as session:
-            from team_memory.storage.repository import ExperienceRepository
-
-            repo = ExperienceRepository(session)
-            parent_data = {
-                "title": parsed["parent"].get("title", "Untitled"),
-                "description": parsed["parent"].get("problem", ""),
-                "solution": parsed["parent"].get("solution"),
-                "tags": parent_tags,
-                "embedding": None,
-                "created_by": user,
-                "exp_status": status,
-            }
-            children_data = [
-                {
-                    "title": c.get("title", "Untitled"),
-                    "description": c.get("problem", ""),
-                    "solution": c.get("solution"),
-                    "tags": c.get("tags", []),
-                    "embedding": None,
-                }
-                for c in parsed.get("children", [])
-            ]
-            result = await repo.create_group(
-                parent_data=parent_data,
-                children_data=children_data,
-                created_by=user,
-                project=resolved_project,
-            )
-            await session.commit()
-
-        child_count = len(parsed["children"])
-        draft_note = " (已保存为草稿)" if status == "draft" else ""
-        await _try_extract_and_save_personal_memory(conversation, user, settings)
-        return json.dumps(
-            {
-                "message": (
-                    f"Experience group saved: 1 parent + {child_count} children. "
-                    f"Title: {parsed['parent'].get('title', 'N/A')}{draft_note}"
-                ),
-                "group": result,
-                "status": status,
-            },
-            ensure_ascii=False,
-        )
-    else:
-        extracted_tags = parsed.get("tags", [])
-        if tpl_tags:
-            extracted_tags = list(set(extracted_tags + [t.lower() for t in tpl_tags]))
-        if tags:
-            extracted_tags = list(set(extracted_tags + [t.lower() for t in tags]))
-        experience_type = parsed.get("experience_type") or tpl_type or "general"
-
-        async with get_session(db_url) as session:
-            result = await service.save(
-                session=session,
-                title=parsed.get("title", "Untitled"),
-                problem=parsed.get("problem", ""),
-                solution=parsed.get("solution"),
-                created_by=user,
-                tags=extracted_tags,
-                source="auto_extract",
-                exp_status=status,
-                visibility="project",
-                experience_type=experience_type,
-                project=resolved_project,
-            )
-
-        # Handle dedup detection
-        if result.get("status") == "duplicate_detected":
-            return json.dumps(
-                {
-                    "message": (
-                        f"发现 {len(result['candidates'])} 条相似经验。"
-                        "如需强制保存，请使用 tm_save 并设置 skip_dedup=true。"
-                    ),
-                    "duplicate_detected": True,
-                    "candidates": result["candidates"],
-                },
-                ensure_ascii=False,
-            )
-
-        draft_note = " (已保存为草稿)" if result.get("exp_status") == "draft" else ""
-        await _try_extract_and_save_personal_memory(conversation, user, settings)
-        return json.dumps(
-            {
-                "message": (
-                    f"Experience saved: {parsed.get('title', 'Untitled')}. "
-                    f"ID: {result.get('id', 'N/A')}{draft_note}"
-                ),
-                "experience": {
-                    "id": result.get("id"),
-                    "title": result.get("title"),
-                    "tags": result.get("tags", []),
-                    "status": result.get("exp_status"),
-                    "visibility": result.get("visibility"),
-                    "created_at": result.get("created_at"),
-                },
-            },
-            ensure_ascii=False,
-        )
+    best_id = results[0].get("group_id") or results[0].get("id", "")
+    output = json.dumps(
+        {
+            "message": f"Found {len(results)} result(s).",
+            "results": results,
+            "feedback_hint": (
+                f"If helpful, call memory_feedback(experience_id='{best_id}', rating=5)"
+            ),
+        },
+        ensure_ascii=False,
+    )
+    return _guard_output(output)
 
 
-# ============================================================
-# Tools — C2: Context-based suggestions
-# ============================================================
-
-
-@mcp.tool(
-    name="tm_suggest",
-    description=(
-        "Get experience recommendations based on current work context. "
-        "Unlike tm_search which needs an explicit query, tm_suggest "
-        "builds a query from file path, language, framework, or error message. "
-        "Returns ~500-2000 tokens (lightweight format)."
-    ),
-)
-@track_usage
-async def tm_suggest(
-    file_path: str | None = None,
-    file_paths: list[str] | None = None,
-    language: str | None = None,
-    framework: str | None = None,
-    error_message: str | None = None,
-    max_results: int = 5,
-    use_pageindex_lite: bool | None = None,
-    project: str | None = None,
+async def _recall_suggest(
+    *,
+    file_path: str | None,
+    language: str | None,
+    framework: str | None,
+    max_results: int,
+    search_orchestrator: object,
+    user: str,
+    project: str,
 ) -> str:
-    """Suggest relevant experiences based on current working context.
+    """Suggest mode: build query from file context."""
+    query_parts: list[str] = []
 
-    At least one context parameter should be provided.
-
-    Args:
-        file_path: Current file path (extracts directory/filename hints).
-        file_paths: File paths for node boost (if file_path given and file_paths
-            is None, treated as file_paths=[file_path]).
-        language: Programming language being used.
-        framework: Framework being used.
-        error_message: Error message encountered (if any).
-        max_results: Maximum suggestions to return.
-    """
-    if file_path is not None and file_paths is None:
-        file_paths = [file_path]
-
-    # Build context-based query
-    query_parts = []
-
-    if error_message:
-        query_parts.append(error_message)
-
-    effective_path = file_path or (file_paths[0] if file_paths else None)
-    if effective_path:
-        p = PurePosixPath(effective_path)
-        # Extract meaningful directory hints
+    if file_path:
+        p = PurePosixPath(file_path)
         parts_lower = [part.lower() for part in p.parts]
-        context_hints = []
         for hint in (
             "test",
             "tests",
@@ -836,10 +885,7 @@ async def tm_suggest(
             "scripts",
         ):
             if hint in parts_lower:
-                context_hints.append(hint)
-        if context_hints:
-            query_parts.append(" ".join(context_hints))
-        # Add file extension / name
+                query_parts.append(hint)
         if p.suffix:
             query_parts.append(f"file type: {p.suffix}")
         query_parts.append(p.name)
@@ -851,28 +897,18 @@ async def tm_suggest(
 
     if not query_parts:
         return json.dumps(
-            {
-                "message": "No context provided. Please specify at least one of: "
-                "file_path, language, framework, or error_message.",
-                "results": [],
-            },
+            {"message": "No context to build suggestions from.", "results": []},
             ensure_ascii=False,
         )
 
     query = " ".join(query_parts)
-
-    # Build tags from language/framework
-    filter_tags = []
+    filter_tags: list[str] = []
     if language:
         filter_tags.append(language.lower())
     if framework:
         filter_tags.append(framework.lower())
 
-    service = _get_service()
-    user = await _get_current_user()
-    resolved_project = _resolve_project(project)
-
-    results = await service.search(
+    results = await search_orchestrator.search(
         query=query,
         tags=filter_tags or None,
         max_results=max_results,
@@ -881,17 +917,15 @@ async def tm_suggest(
         source="mcp",
         grouped=True,
         top_k_children=1,
-        use_pageindex_lite=use_pageindex_lite,
-        project=resolved_project,
+        project=project,
     )
 
     if not results:
         return json.dumps(
-            {"message": "No relevant experiences found for this context.", "results": []},
+            {"message": "No relevant experiences for this context.", "results": []},
             ensure_ascii=False,
         )
 
-    # Lightweight format: title + tags + score + id only
     suggestions = []
     for r in results:
         parent = r.get("parent", r)
@@ -902,14 +936,12 @@ async def tm_suggest(
                 "tags": parent.get("tags", []),
                 "score": r.get("score", r.get("similarity", 0)),
                 "confidence": r.get("confidence", "medium"),
-                "children_count": r.get("total_children", 0),
             }
         )
 
     output = json.dumps(
         {
-            "message": f"Found {len(suggestions)} suggestion(s) based on your context.",
-            "context_query": query,
+            "message": f"Found {len(suggestions)} suggestion(s) for your context.",
             "results": suggestions,
         },
         ensure_ascii=False,
@@ -918,298 +950,141 @@ async def tm_suggest(
 
 
 # ============================================================
-# Tools — Renamed existing tools (C4 namespace)
+# Tool 3: memory_context (profile + relevant knowledge)
 # ============================================================
 
 
 @mcp.tool(
-    name="tm_search",
+    name="memory_context",
     description=(
-        "Search the team experience database for relevant solutions. "
-        "Call this BEFORE starting to solve a technical problem to check "
-        "if the team already has a solution. "
-        "Optional current_file_locations (path, start_line, end_line, etc.) for location boost. "
-        "Returns ~1000-4000 tokens depending on result count."
+        "Get your profile and relevant team knowledge for current work. "
+        "Call this when: "
+        "starting a new task or conversation; "
+        "switching to a different part of the codebase; "
+        "wanting to understand team conventions for a file or module."
     ),
 )
 @track_usage
-async def tm_search(
-    query: str,
-    tags: list[str] | None = None,
-    file_path: str | None = None,
+async def memory_context(
     file_paths: list[str] | None = None,
-    max_results: int = 5,
-    min_similarity: float = 0.6,
-    grouped: bool = True,
-    top_k_children: int = 3,
-    use_pageindex_lite: bool | None = None,
+    task_description: str | None = None,
     project: str | None = None,
-    current_file_locations: list[dict] | None = None,
-    include_archives: bool = False,
 ) -> str:
-    """Search team experiences by semantic similarity.
-
-    Results are sorted by relevance. Each result includes:
-    - confidence: "high"/"medium"/"low" — how relevant this result is
-    - reranked: bool — whether server-side reranking was applied
-    - score: float — the relevance score
-
-    If reranked=false, the client LLM should use confidence and score
-    to judge result quality. Low-confidence results may be less relevant.
+    """Return user profile + relevant experiences for current context.
 
     Args:
-        query: The search query.
-        tags: Optional tags to filter by.
-        file_path: Current file path for node boost (if file_paths is None).
-        file_paths: File paths for node boost.
-        max_results: Maximum number of results (or groups when grouped=True).
-        min_similarity: Minimum similarity threshold.
-        grouped: Return results grouped by parent-child. Default True.
-        top_k_children: Max children per group. Default 3.
-        current_file_locations: Optional list of dicts with path, start_line, end_line;
-            optional file_content, file_mtime, file_content_hash for location_score boost.
-    """
-    if file_path is not None and file_paths is None:
-        file_paths = [file_path]
-
-    service = _get_service()
-    user = await _get_current_user()
-    resolved_project = _resolve_project(project)
-
-    results = await service.search(
-        query=query,
-        tags=tags,
-        max_results=max_results,
-        min_similarity=min_similarity,
-        user_name=user,
-        source="mcp",
-        grouped=grouped,
-        top_k_children=top_k_children,
-        use_pageindex_lite=use_pageindex_lite,
-        project=resolved_project,
-        current_file_locations=current_file_locations,
-        include_archives=include_archives,
-    )
-
-    if not results:
-        return json.dumps(
-            {"message": "No matching experiences found.", "results": []},
-            ensure_ascii=False,
-        )
-
-    # Task 5: auto-update per-user tag_synonyms from query + result tags
-    await _try_update_user_expansion_from_search(query, results, user)
-
-    # Auto-increment use_count on top-1 result (mirrors tm_solve behavior); skip for archives
-    best = results[0]
-    best_id = best.get("group_id") or best.get("id")
-    if best_id and best.get("type") != "archive":
-        try:
-            import uuid as _uuid
-
-            from team_memory.storage.repository import ExperienceRepository
-
-            db_url = _get_db_url()
-            async with get_session(db_url) as session:
-                repo = ExperienceRepository(session)
-                await repo.increment_use_count(_uuid.UUID(best_id))
-        except Exception:
-            logger.debug("tm_search: failed to increment use_count", exc_info=True)
-
-    feedback_hint = (
-        f"如果搜索结果有帮助，请调用 tm_feedback(experience_id='{best_id}', rating=5) 进行评分"
-        if best_id
-        else ""
-    )
-
-    output = json.dumps(
-        {
-            "message": f"Found {len(results)} matching experience(s).",
-            "results": results,
-            "feedback_hint": feedback_hint,
-        },
-        ensure_ascii=False,
-    )
-    return _guard_output(output)
-
-
-@mcp.tool(
-    name="tm_save",
-    description=(
-        "Quick-save a simple experience (title + problem required, solution optional). "
-        "Use this for fast knowledge capture — solution can be added later. "
-        "Returns ~100-200 tokens."
-    ),
-)
-@track_usage
-async def tm_save(
-    title: str,
-    problem: str,
-    solution: str | None = None,
-    tags: list[str] | None = None,
-    status: str = "published",
-    visibility: str = "project",
-    skip_dedup: bool = False,
-    project: str | None = None,
-    group_key: str | None = None,
-) -> str:
-    """Quick-save a new experience to the team knowledge base.
-
-    Args:
-        title: Experience title (required).
-        problem: Problem description (required).
-        solution: Solution description (optional).
-        tags: Tags for the experience.
-        status: "published" (default) or "draft".
-        visibility: "project" (default), "private", or "global".
-        skip_dedup: If True, skip duplicate detection check.
+        file_paths: Current file paths for context-based search.
+        task_description: Optional task description for search.
         project: Project scope.
-        group_key: Auto-group key (experiences with same key share a parent).
     """
-    service = _get_service()
-    db_url = _get_db_url()
     user = await _get_current_user()
     resolved_project = _resolve_project(project)
+    ctx = get_context()
 
-    async with get_session(db_url) as session:
-        result = await service.save(
-            session=session,
-            title=title,
-            problem=problem,
-            solution=solution,
-            created_by=user,
-            tags=tags,
-            source="auto_extract",
-            exp_status=status,
-            visibility=visibility,
-            skip_dedup=skip_dedup,
-            project=resolved_project,
-            group_key=group_key,
+    settings = _get_settings()
+    max_side = getattr(settings.mcp, "profile_max_strings_per_side", None) or 20
+    result: dict = {
+        "user": user,
+        "project": resolved_project,
+        "profile": {"static": [], "dynamic": []},
+        "relevant_experiences": [],
+    }
+
+    # 1. User profile (Supermemory-shaped)
+    try:
+        from team_memory.services.personal_memory import PersonalMemoryService
+
+        pm_svc = PersonalMemoryService(embedding_provider=ctx.embedding, db_url=ctx.db_url)
+        context_text = task_description
+        if not context_text and file_paths:
+            context_text = " ".join(PurePosixPath(fp).name for fp in file_paths[:5])
+        result["profile"] = await pm_svc.build_profile_for_user(
+            user_id=user,
+            current_context=context_text,
+            max_per_side=max_side,
         )
+    except Exception:
+        logger.debug("Failed to build user profile", exc_info=True)
 
-    # Handle dedup detection
-    if result.get("status") == "duplicate_detected":
-        return json.dumps(
-            {
-                "message": (
-                    f"发现 {len(result['candidates'])} 条相似经验。"
-                    "如需强制保存，请设置 skip_dedup=true 重新调用。"
-                ),
-                "duplicate_detected": True,
-                "candidates": result["candidates"],
-            },
-            ensure_ascii=False,
-        )
+    # 2. Search relevant experiences based on file/task context
+    query_parts: list[str] = []
+    if task_description:
+        query_parts.append(task_description)
+    if file_paths:
+        for fp in file_paths[:3]:
+            p = PurePosixPath(fp)
+            query_parts.append(p.name)
 
-    return json.dumps(
-        {
-            "message": "Experience saved successfully.",
-            "experience": {
-                "id": result.get("id"),
-                "title": result.get("title"),
-                "status": result.get("exp_status"),
-                "visibility": result.get("visibility"),
-                "completeness_score": result.get("completeness_score"),
-                "created_at": result.get("created_at"),
-            },
-        },
-        ensure_ascii=False,
-    )
+    if query_parts:
+        try:
+            search_orch = _get_search_orchestrator()
+            query = " ".join(query_parts)
+            results = await search_orch.search(
+                query=query,
+                max_results=3,
+                min_similarity=0.4,
+                user_name=user,
+                source="mcp",
+                grouped=True,
+                top_k_children=1,
+                project=resolved_project,
+            )
+            for r in results:
+                parent = r.get("parent", r)
+                result["relevant_experiences"].append(
+                    {
+                        "id": r.get("group_id") or parent.get("id", ""),
+                        "title": parent.get("title", "Untitled"),
+                        "tags": parent.get("tags", []),
+                        "confidence": r.get("confidence", "medium"),
+                    }
+                )
+        except Exception:
+            logger.debug("Failed to search relevant experiences", exc_info=True)
+
+    return json.dumps(result, ensure_ascii=False)
+
+
+# ============================================================
+# Tool 4: memory_get_archive (L2 read, dual-phase with memory_recall)
+# ============================================================
 
 
 @mcp.tool(
-    name="tm_archive_save",
+    name="memory_get_archive",
     description=(
-        "Save an archive entry (session/plan-level summary doc). "
-        "Required: title, solution_doc, created_by (or omit to use current user). "
-        "Optional: overview, conversation_summary, scope, scope_ref, project, "
-        "linked_experience_ids (list of experience UUIDs), "
-        "attachments (list of dicts with kind, path?, snippet?, "
-        "content_snapshot?, git_commit?, git_refs?). "
-        "Returns archive_id."
+        "Load full archive body (L2) by id: solution_doc, overview, "
+        "conversation_summary, attachments (with content_snapshot), "
+        "document_tree_nodes. Use when memory_recall returned type=archive."
     ),
 )
 @track_usage
-async def tm_archive_save(
-    title: str,
-    solution_doc: str,
-    created_by: str | None = None,
-    project: str | None = None,
-    scope: str = "session",
-    scope_ref: str | None = None,
-    overview: str | None = None,
-    conversation_summary: str | None = None,
-    linked_experience_ids: list[str] | None = None,
-    attachments: list[dict] | None = None,
-) -> str:
-    """Save an archive to the team knowledge base."""
-    archive_svc = _get_archive_service()
-    user = (created_by or (await _get_current_user())).strip() or "anonymous"
-    resolved_project = _resolve_project(project)
-
+async def memory_get_archive(archive_id: str, project: str | None = None) -> str:
+    """Return L2 JSON or 404-style error."""
     import uuid as _uuid
 
-    linked_uuids = []
-    if linked_experience_ids:
-        for s in linked_experience_ids:
-            try:
-                linked_uuids.append(_uuid.UUID(s))
-            except (ValueError, TypeError):
-                pass
-
     try:
-        archive_id = await archive_svc.archive_save(
-            title=title,
-            solution_doc=solution_doc,
-            created_by=user,
-            project=resolved_project or None,
-            scope=scope,
-            scope_ref=scope_ref,
-            overview=overview,
-            conversation_summary=conversation_summary,
-            linked_experience_ids=linked_uuids if linked_uuids else None,
-            attachments=attachments,
+        aid = _uuid.UUID(archive_id.strip())
+    except (ValueError, TypeError, AttributeError):
+        return json.dumps(
+            {"error": True, "message": "Archive not found", "code": "not_found"},
+            ensure_ascii=False,
         )
+
+    user = await _get_current_user()
+    resolved = _resolve_project(project)
+    archive_svc = _get_archive_service()
+    try:
+        out = await archive_svc.get_archive(aid, viewer=user, project=resolved)
     except Exception as e:
-        logger.exception("tm_archive_save failed: %s", e)
+        logger.exception("memory_get_archive failed: %s", e)
         return json.dumps(
-            {"error": str(e), "code": 400},
+            {"error": True, "message": str(e), "code": "internal_error"},
             ensure_ascii=False,
         )
-
-    return json.dumps(
-        {"message": "Archive saved successfully.", "archive_id": str(archive_id)},
-        ensure_ascii=False,
-    )
-
-
-@mcp.tool(
-    name="tm_get_archive",
-    description=(
-        "Get full archive by id (L2: solution_doc, overview, attachments). "
-        "Returns 404 when archive does not exist or id is invalid."
-    ),
-)
-@track_usage
-async def tm_get_archive(archive_id: str) -> str:
-    """Return L2 archive by id; 404 when not found."""
-    import uuid as _uuid
-
-    try:
-        aid = _uuid.UUID(archive_id)
-    except (ValueError, TypeError):
-        return json.dumps(
-            {"error": "archive not found", "code": 404},
-            ensure_ascii=False,
-        )
-
-    archive_svc = _get_archive_service()
-    user = await _get_current_user()
-    resolved_project = _resolve_project(None)
-    out = await archive_svc.get_archive(aid, viewer=user, project=resolved_project)
     if out is None:
         return json.dumps(
-            {"error": "archive not found", "code": 404},
+            {"error": True, "message": "Archive not found", "code": "not_found"},
             ensure_ascii=False,
         )
     if "attachments" not in out or out["attachments"] is None:
@@ -1219,292 +1094,41 @@ async def tm_get_archive(archive_id: str) -> str:
     return json.dumps(out, ensure_ascii=False)
 
 
-@mcp.tool(
-    name="tm_save_typed",
-    description=(
-        "Save an experience with explicit experience_type. "
-        "Types: general, feature, bugfix, tech_design, incident, best_practice, learning. "
-        "Returns ~200-400 tokens."
-    ),
-)
-@track_usage
-async def tm_save_typed(
-    title: str,
-    problem: str,
-    experience_type: str = "general",
-    solution: str | None = None,
-    tags: list[str] | None = None,
-    status: str = "published",
-    visibility: str = "project",
-    skip_dedup: bool = False,
-    project: str | None = None,
-    group_key: str | None = None,
-) -> str:
-    """Save a typed experience.
-
-    Args:
-        title: Experience title (required).
-        problem: Problem description (required).
-        experience_type: Type — general/feature/bugfix/tech_design/incident/best_practice/learning.
-        solution: Solution (optional).
-        tags: Tags for the experience.
-        status: "published" (default) or "draft".
-        visibility: "project" (default), "private", or "global".
-        skip_dedup: If True, skip duplicate detection check.
-        project: Project scope.
-        group_key: Auto-group key.
-    """
-    service = _get_service()
-    db_url = _get_db_url()
-    user = await _get_current_user()
-    resolved_project = _resolve_project(project)
-
-    async with get_session(db_url) as session:
-        result = await service.save(
-            session=session,
-            title=title,
-            problem=problem,
-            solution=solution,
-            created_by=user,
-            tags=tags,
-            source="auto_extract",
-            exp_status=status,
-            visibility=visibility,
-            skip_dedup=skip_dedup,
-            experience_type=experience_type,
-            project=resolved_project,
-            group_key=group_key,
-        )
-
-    if result.get("status") == "duplicate_detected":
-        return json.dumps(
-            {
-                "message": f"发现 {len(result['candidates'])} 条相似经验。",
-                "duplicate_detected": True,
-                "candidates": result["candidates"],
-            },
-            ensure_ascii=False,
-        )
-
-    return json.dumps(
-        {
-            "message": f"Typed experience ({experience_type}) saved successfully.",
-            "experience": {
-                "id": result.get("id"),
-                "title": result.get("title"),
-                "experience_type": result.get("experience_type"),
-                "status": result.get("exp_status"),
-                "visibility": result.get("visibility"),
-                "created_at": result.get("created_at"),
-            },
-        },
-        ensure_ascii=False,
-    )
-
-
-@mcp.tool(
-    name="tm_save_group",
-    description=(
-        "Save a group of related experiences (parent + children). "
-        "Use this when a solution involves multiple steps or stages. "
-        "Returns ~200-500 tokens."
-    ),
-)
-async def tm_save_group(
-    parent_title: str,
-    parent_problem: str,
-    children: list[dict],
-    parent_solution: str | None = None,
-    parent_tags: list[str] | None = None,
-    experience_type: str = "general",
-    project: str | None = None,
-) -> str:
-    """Save a group of experiences (parent with children).
-
-    Args:
-        parent_title: Title for the parent experience.
-        parent_problem: Problem description for the parent.
-        children: List of dicts, each with keys: title, problem, solution, tags.
-        parent_solution: Overall solution summary (optional).
-        parent_tags: Tags for the parent.
-        experience_type: Type for the group (default "general").
-        project: Project scope.
-    """
-    db_url = _get_db_url()
-    user = await _get_current_user()
-    resolved_project = _resolve_project(project)
-
-    parent_data = {
-        "title": parent_title,
-        "description": parent_problem,
-        "solution": parent_solution or "",
-        "tags": parent_tags or [],
-        "embedding": None,
-        "exp_status": "published",
-        "project": resolved_project,
-        "experience_type": experience_type,
-    }
-
-    children_data = [
-        {
-            "title": c.get("title", ""),
-            "description": c.get("problem", ""),
-            "solution": c.get("solution", ""),
-            "tags": c.get("tags", []),
-            "embedding": None,
-            "project": resolved_project,
-            "experience_type": experience_type,
-        }
-        for c in children
-    ]
-
-    async with get_session(db_url) as session:
-        from team_memory.storage.repository import ExperienceRepository
-
-        repo = ExperienceRepository(session)
-        result = await repo.create_group(
-            parent_data=parent_data,
-            children_data=children_data,
-            created_by=user,
-        )
-        await session.commit()
-
-    msg = f"Experience group ({experience_type}) saved: 1 parent + {len(children_data)} children."
-    return json.dumps(
-        {
-            "message": msg,
-            "group": result,
-        },
-        ensure_ascii=False,
-    )
-
-
 # ============================================================
-# Tools — P3-2: Agent Collaboration
+# Tool 5: memory_feedback (feedback loop)
 # ============================================================
 
 
 @mcp.tool(
-    name="tm_claim",
+    name="memory_feedback",
     description=(
-        "Claim an experience/problem so other agents know you're working on it. "
-        "Stored as a tag agent_claim|user|ISO8601|message (prior claim tag replaced)."
-    ),
-)
-async def tm_claim(
-    experience_id: str,
-    message: str | None = None,
-) -> str:
-    """Mark that you're working on a specific experience or problem.
-
-    Args:
-        experience_id: The experience ID to claim.
-        message: Optional message describing what you're doing.
-    """
-    import uuid as _uuid
-    from datetime import datetime, timezone
-
-    _ = _get_service()  # ensure service initialized
-    db_url = _get_db_url()
-    user = await _get_current_user()
-
-    async with get_session(db_url) as session:
-        from team_memory.storage.models import Experience
-
-        exp = await session.get(Experience, _uuid.UUID(experience_id))
-        if exp is None or exp.is_deleted:
-            return json.dumps({"message": "Experience not found.", "error": True})
-        now_iso = datetime.now(timezone.utc).isoformat()
-        msg = (message or "").replace("\n", " ").strip()[:200]
-        claim_tag = f"agent_claim|{user}|{now_iso}|{msg}"
-        prev = list(exp.tags or [])
-        kept = [t for t in prev if not str(t).startswith("agent_claim|")]
-        exp.tags = kept + [claim_tag]
-        await session.commit()
-
-    return json.dumps(
-        {
-            "message": f"Claimed by {user}. Other agents will see this.",
-            "claimed_by": user,
-        }
-    )
-
-
-@mcp.tool(
-    name="tm_notify",
-    description=(
-        "Notify the team that a new experience has been saved. "
-        "Use after tm_save or tm_learn to signal other agents."
-    ),
-)
-async def tm_notify(
-    experience_id: str,
-    message: str = "New experience available",
-) -> str:
-    """Notify the team about a new or updated experience.
-
-    Args:
-        experience_id: The experience ID to notify about.
-        message: Human-readable notification message.
-    """
-    user = await _get_current_user()
-
-    # Emit via event bus (will trigger webhook if configured)
-    service = _get_service()
-    if service._event_bus:
-        from team_memory.services.event_bus import Events
-
-        await service._event_bus.emit(
-            Events.EXPERIENCE_UPDATED,
-            {
-                "experience_id": experience_id,
-                "notified_by": user,
-                "message": message,
-            },
-        )
-
-    return json.dumps(
-        {
-            "message": f"Notification sent: {message}",
-            "notified_by": user,
-            "experience_id": experience_id,
-        }
-    )
-
-
-@mcp.tool(
-    name="tm_feedback",
-    description=(
-        "Rate an experience after using it (e.g. from tm_search/tm_solve). "
-        "Required: experience_id (from search result), rating 1-5 (5=very helpful). "
-        "Optional: comment, fitness_score 1-5. Call this when a result helped — "
-        "it improves future ranking and completes the feedback loop. Returns ~50 tokens."
+        "Rate a knowledge result after using it (1=not helpful, 5=very helpful). "
+        "Call this when a memory_recall result helped you solve a problem."
     ),
 )
 @track_usage
-async def tm_feedback(
+async def memory_feedback(
     experience_id: str,
     rating: int,
-    fitness_score: int | None = None,
     comment: str | None = None,
-    session: object = None,  # MCP context may inject; ignored, not passed to service
 ) -> str:
     """Submit feedback for an experience.
 
     Args:
         experience_id: The ID of the experience to rate.
         rating: Rating from 1 to 5 (5 = most helpful).
-        fitness_score: Post-use fitness score 1-5 (how well it matched your need).
         comment: Optional feedback comment.
-        session: Ignored (MCP context); not passed to service.
-
-    Returns:
-        JSON string with the result.
     """
     if not (1 <= rating <= 5):
-        return json.dumps({"message": "Rating must be between 1 and 5.", "error": True})
-    if fitness_score is not None and not (1 <= fitness_score <= 5):
-        return json.dumps({"message": "fitness_score must be between 1 and 5.", "error": True})
+        return json.dumps(
+            {
+                "error": True,
+                "message": "Rating must be between 1 and 5.",
+                "code": "validation_error",
+            },
+            ensure_ascii=False,
+        )
+
     service = _get_service()
     user = await _get_current_user()
 
@@ -1513,561 +1137,19 @@ async def tm_feedback(
         rating=rating,
         feedback_by=user,
         comment=comment,
-        fitness_score=fitness_score,
     )
 
     if success:
-        return json.dumps({"message": "Feedback recorded. Thank you!"})
+        return json.dumps({"message": "Feedback recorded. Thank you!"}, ensure_ascii=False)
     else:
-        return json.dumps({"message": "Experience not found.", "error": True})
-
-
-@mcp.tool(
-    name="tm_update",
-    description=(
-        "Update an existing experience with additional solution details "
-        "or new tags. "
-        "Returns ~100-300 tokens."
-    ),
-)
-async def tm_update(
-    experience_id: str,
-    solution_addendum: str | None = None,
-    tags: list[str] | None = None,
-) -> str:
-    """Update an existing experience record."""
-    service = _get_service()
-
-    result = await service.update(
-        experience_id=experience_id,
-        solution_addendum=solution_addendum,
-        tags=tags,
-    )
-
-    if result is None:
-        return json.dumps({"message": "Experience not found.", "error": True})
-
-    return json.dumps(
-        {
-            "message": "Experience updated successfully.",
-            "experience": result,
-        },
-        ensure_ascii=False,
-    )
-
-
-@mcp.tool(
-    name="tm_config",
-    description=(
-        "Read runtime retrieval configuration snapshot (retrieval/search/cache/pageindex-lite)."
-    ),
-)
-async def tm_config() -> str:
-    """Return current runtime configuration snapshot for diagnostics."""
-    settings = _get_settings()
-    return json.dumps(
-        {
-            "default_project": settings.default_project,
-            "retrieval": {
-                "max_tokens": settings.retrieval.max_tokens,
-                "max_count": settings.retrieval.max_count,
-                "trim_strategy": settings.retrieval.trim_strategy,
-                "top_k_children": settings.retrieval.top_k_children,
-                "min_avg_rating": settings.retrieval.min_avg_rating,
-                "rating_weight": settings.retrieval.rating_weight,
-                "summary_model": settings.retrieval.summary_model,
+        return json.dumps(
+            {
+                "error": True,
+                "message": "Experience not found.",
+                "code": "not_found",
             },
-            "search": {
-                "mode": settings.search.mode,
-                "rrf_k": settings.search.rrf_k,
-                "vector_weight": settings.search.vector_weight,
-                "fts_weight": settings.search.fts_weight,
-                "location_weight": settings.search.location_weight,
-                "adaptive_filter": settings.search.adaptive_filter,
-                "score_gap_threshold": settings.search.score_gap_threshold,
-                "min_confidence_ratio": settings.search.min_confidence_ratio,
-            },
-            "cache": {
-                "enabled": settings.cache.enabled,
-                "backend": settings.cache.backend,
-                "ttl_seconds": settings.cache.ttl_seconds,
-                "max_size": settings.cache.max_size,
-                "embedding_cache_size": settings.cache.embedding_cache_size,
-            },
-            "pageindex_lite": {
-                "enabled": settings.pageindex_lite.enabled,
-                "only_long_docs": settings.pageindex_lite.only_long_docs,
-                "min_doc_chars": settings.pageindex_lite.min_doc_chars,
-                "max_tree_depth": settings.pageindex_lite.max_tree_depth,
-                "max_nodes_per_doc": settings.pageindex_lite.max_nodes_per_doc,
-                "max_node_chars": settings.pageindex_lite.max_node_chars,
-                "tree_weight": settings.pageindex_lite.tree_weight,
-                "min_node_score": settings.pageindex_lite.min_node_score,
-                "include_matched_nodes": settings.pageindex_lite.include_matched_nodes,
-            },
-            "installable_catalog": {
-                "sources": list(settings.installable_catalog.sources or []),
-                "local_base_dir": settings.installable_catalog.local_base_dir,
-                "registry_manifest_url": settings.installable_catalog.registry_manifest_url,
-                "target_rules_dir": settings.installable_catalog.target_rules_dir,
-                "target_prompts_dir": settings.installable_catalog.target_prompts_dir,
-                "request_timeout_seconds": settings.installable_catalog.request_timeout_seconds,
-            },
-        },
-        ensure_ascii=False,
-    )
-
-
-@mcp.tool(
-    name="tm_status",
-    description=(
-        "Read runtime status summary for diagnostics "
-        "(service/search-pipeline/cache/pageindex-lite)."
-    ),
-)
-async def tm_status() -> str:
-    """Return runtime status for troubleshooting."""
-    service = _get_service()
-    settings = _get_settings()
-    pipeline = service._search_pipeline
-    cache = pipeline._cache if pipeline is not None else None
-    cache_stats = await cache.stats if cache is not None else {}
-
-    return json.dumps(
-        {
-            "service_initialized": service is not None,
-            "search_pipeline_enabled": pipeline is not None,
-            "embedding_provider": settings.embedding.provider,
-            "cache_enabled": cache_stats.get("enabled", False),
-            "cache_size": cache_stats.get("result_cache_size", 0),
-            "embedding_cache_size": cache_stats.get("embedding_cache_size", 0),
-            "pageindex_lite_enabled": settings.pageindex_lite.enabled,
-            "pageindex_lite_only_long_docs": settings.pageindex_lite.only_long_docs,
-            "active_project": _resolve_project(None),
-        },
-        ensure_ascii=False,
-    )
-
-
-@mcp.tool(
-    name="tm_invalidate_search_cache",
-    description=(
-        "Clear the search result and embedding cache. "
-        "Call this when config changed (e.g. query_expansion_enabled) to force fresh retrieval."
-    ),
-)
-async def tm_invalidate_search_cache() -> str:
-    """Invalidate search cache so next tm_search runs the full pipeline
-    (e.g. with query expansion).
-    """
-    service = _get_service()
-    await service.invalidate_search_cache()
-    return json.dumps({"message": "Search cache cleared"}, ensure_ascii=False)
-
-
-@mcp.tool(
-    name="tm_skill_manage",
-    description=(
-        "Manage skills: list, disable, enable. "
-        "action: 'list' | 'disable' | 'enable', "
-        "skill_path: path to SKILL.md file (required for disable/enable)."
-    ),
-)
-async def tm_skill_manage(
-    action: str = "list",
-    skill_path: str | None = None,
-) -> str:
-    """Manage skills: list, disable, enable."""
-    from pathlib import Path
-
-    if action == "list":
-        cache_dir = Path.home() / ".team_memory" / "disabled_skills"
-        cached_names = set()
-        if cache_dir.exists():
-            for f in cache_dir.iterdir():
-                if f.name.endswith("__SKILL.md"):
-                    cached_names.add(f.name.replace("__SKILL.md", ""))
-                elif f.is_dir() and f.name.count("__") >= 2:
-                    parts = f.name.split("__", 2)
-                    if len(parts) == 3:
-                        cached_names.add(parts[2])
-
-        skill_dirs = [
-            Path.cwd() / ".cursor" / "skills",
-            Path.cwd() / ".claude" / "skills",
-        ]
-        skills = []
-        for d in skill_dirs:
-            if d.exists():
-                for skill_dir in sorted(d.iterdir()):
-                    if skill_dir.is_dir():
-                        active = (skill_dir / "SKILL.md").exists()
-                        disabled = (
-                            skill_dir.name in cached_names
-                            or (skill_dir / "SKILL.md.disabled").exists()
-                        )
-                        if active or disabled:
-                            skills.append(
-                                {
-                                    "name": skill_dir.name,
-                                    "path": str(skill_dir),
-                                    "active": active,
-                                }
-                            )
-        lines = [f"{'✅' if s['active'] else '⏸️'} {s['name']}" for s in skills]
-        return f"Skills ({len(skills)}):\n" + "\n".join(lines) if lines else "No skills found."
-
-    if not skill_path:
-        return "❌ skill_path required for disable/enable"
-
-    import hashlib
-    import shutil
-
-    cache_dir = Path.home() / ".team_memory" / "disabled_skills"
-
-    def _skill_cache_key(base_path: Path, skill_dir_name: str) -> tuple[str, str]:
-        """Infer category from base_path and return (category, cache_key). Matches Web format."""
-        base_resolved = str(base_path.resolve())
-        home = str(Path.home())
-        if ".claude" in base_resolved and "skills" in base_resolved:
-            category = "user_claude_skills" if base_resolved.startswith(home) else "claude_skills"
-        elif ".cursor" in base_resolved and "skills-cursor" in base_resolved:
-            category = "user_cursor_skills" if base_resolved.startswith(home) else "cursor_skills"
-        else:
-            category = "claude_skills"
-        safe = hashlib.sha256(base_resolved.encode()).hexdigest()[:12]
-        return category, f"{category}__{safe}__{skill_dir_name}"
-
-    p = Path(skill_path).resolve()
-    skill_dir = p if p.is_dir() else p.parent
-    if not skill_dir.is_dir():
-        return f"❌ Not a directory: {skill_dir}"
-    skill_dir_name = skill_dir.name
-    base_path = skill_dir.parent
-
-    if action == "disable":
-        skill_md = skill_dir / "SKILL.md"
-        if not skill_md.exists() or not skill_md.is_file():
-            return f"❌ SKILL.md not found in {skill_dir}"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        _, cache_key = _skill_cache_key(base_path, skill_dir_name)
-        cache_path = cache_dir / cache_key
-        if cache_path.exists():
-            shutil.rmtree(str(cache_path))
-        shutil.copytree(str(skill_dir), str(cache_path))
-        shutil.rmtree(str(skill_dir))
-        return f"⏸️ Disabled: {skill_dir_name} (whole folder cached to {cache_dir})"
-
-    if action == "enable":
-        _, cache_key = _skill_cache_key(base_path, skill_dir_name)
-        cache_path = cache_dir / cache_key
-        if cache_path.exists() and cache_path.is_dir():
-            # copytree(src, dst) requires dst to NOT exist; do not mkdir(skill_dir) first
-            shutil.copytree(str(cache_path), str(skill_dir))
-            shutil.rmtree(str(cache_path))
-            return f"✅ Enabled: {skill_dir_name} (folder restored from cache)"
-        legacy_file = cache_dir / (skill_dir_name + "__SKILL.md")
-        if legacy_file.exists() and legacy_file.is_file():
-            skill_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(legacy_file), str(skill_dir / "SKILL.md"))
-            os.remove(str(legacy_file))
-            return f"✅ Enabled: {skill_dir_name} (SKILL.md restored from legacy cache)"
-        old_disabled = skill_dir / "SKILL.md.disabled"
-        if old_disabled.exists():
-            skill_dir.mkdir(parents=True, exist_ok=True)
-            os.rename(str(old_disabled), str(skill_dir / "SKILL.md"))
-            return f"✅ Enabled: {skill_dir_name} (legacy rename)"
-        return f"❌ Not found in cache or disabled: {skill_dir_name}"
-
-    return f"❌ Unknown action: {action}"
-
-
-@mcp.tool(
-    name="tm_analyze_patterns",
-    description=(
-        "Analyze user conversation patterns and extract recurring instruction styles. "
-        "Identifies frequently used phrases, preferences, and instruction patterns. "
-        "Optionally saves them as user_pattern experiences. Returns ~200-500 tokens."
-    ),
-)
-@track_usage
-async def tm_analyze_patterns(
-    conversation_text: str | None = None,
-    auto_save: bool = True,
-) -> str:
-    """Analyze user conversation patterns and extract recurring instruction styles.
-
-    Identifies frequently used phrases, preferences, and instruction patterns
-    from conversation text. Optionally saves them as user_pattern experiences.
-    Returns extracted patterns (~200-500 tokens).
-    """
-    if not conversation_text:
-        return "❌ conversation_text is required"
-
-    user = await _get_current_user()
-    project = _resolve_project(None)
-    settings = _get_settings()
-
-    # Use LLM to extract patterns
-    from team_memory.services.llm_provider import create_llm_provider
-
-    llm = create_llm_provider(settings.llm)
-
-    prompt = f"""分析以下用户对话文本，提取用户反复使用的指令模式和偏好习惯。
-
-对话文本：
-{conversation_text[:8000]}
-
-请提取：
-1. 用户常用的指令短语（如"请一步步思考"、"你有什么问题可以和我进行讨论"）
-2. 用户偏好的工作方式（如"先搜索再执行"、"需要多角色审视"）
-3. 用户对输出格式的要求（如"给出对比方案"、"在一个回答内说清楚"）
-
-以 JSON 格式返回：
-{{
-  "patterns": [
-    {{
-      "pattern": "用户常说的话或行为模式",
-      "category": "instruction_style|workflow_preference|output_format",
-      "frequency_hint": "high|medium|low",
-      "suggested_rule": "建议生成的规则描述"
-    }}
-  ]
-}}"""
-
-    try:
-        response = await llm.chat([{"role": "user", "content": prompt}])
-
-        # Parse JSON from response
-        import re
-
-        json_match = re.search(r"\{[\s\S]*\}", response)
-        if not json_match:
-            return f"提取完成但无法解析结果:\n{response[:500]}"
-
-        data = json.loads(json_match.group())
-        patterns = data.get("patterns", [])
-
-        if not patterns:
-            return "未发现明显的重复模式"
-
-        saved_count = 0
-        if auto_save:
-            service = _get_service()
-            for p in patterns:
-                try:
-                    await service.save(
-                        title=f"用户模式: {p['pattern'][:50]}",
-                        problem=p.get("suggested_rule", p["pattern"]),
-                        created_by=user,
-                        tags=["user-pattern", p.get("category", "general")],
-                        source="auto_extract",
-                        exp_status="published",
-                        visibility="private",
-                        experience_type="learning",
-                        project=project,
-                        skip_dedup=False,
-                    )
-                    saved_count += 1
-                except Exception:
-                    pass
-
-        lines = []
-        for p in patterns:
-            freq = {
-                "high": "🔴",
-                "medium": "🟡",
-                "low": "🟢",
-            }.get(p.get("frequency_hint"), "⚪")
-            lines.append(f"{freq} [{p.get('category', '?')}] {p['pattern']}")
-
-        result = f"发现 {len(patterns)} 个模式"
-        if saved_count:
-            result += f"，已保存 {saved_count} 条"
-        result += ":\n" + "\n".join(lines)
-        return result
-
-    except Exception as e:
-        return f"❌ 模式分析失败: {e}"
-
-
-# ============================================================
-# Resources
-# ============================================================
-
-
-@mcp.resource("experiences://recent")
-async def recent_experiences() -> str:
-    """Get the 10 most recently added experiences."""
-    service = _get_service()
-    db_url = _get_db_url()
-    project = _resolve_project(None)
-
-    async with get_session(db_url) as session:
-        results = await service.get_recent(session=session, limit=10, project=project)
-
-    if not results:
-        return "No experiences in the database yet."
-
-    lines = ["# Recent Experiences\n"]
-    for exp in results:
-        tags_str = ", ".join(exp.get("tags", []))
-        lines.append(f"- **{exp['title']}** [{tags_str}] ({exp['created_at']})")
-
-    return "\n".join(lines)
-
-
-# ============================================================
-# Prompts
-# ============================================================
-
-
-@mcp.prompt(
-    description=(
-        "Summarize the current conversation into a structured experience document. "
-        "Use this after solving a problem to create a reusable knowledge entry."
-    )
-)
-def summarize_experience() -> str:
-    """Guide the Agent to summarize the current conversation as a structured experience."""
-    return (
-        "Please summarize the key problem-solving experience from our "
-        "conversation into a structured format. Extract and organize the "
-        "following fields:\n\n"
-        "1. **title**: A concise title describing what was solved\n"
-        "2. **problem**: A clear description of the problem encountered\n"
-        "3. **root_cause**: The underlying cause of the problem\n"
-        "4. **solution**: Step-by-step description of how the problem was solved\n"
-        "5. **tags**: Relevant classification tags\n"
-        "6. **language**: The primary programming language involved (if any)\n"
-        "7. **framework**: The framework involved (if any)\n"
-        "8. **code_snippets**: Key code examples that were part of the "
-        "solution (if any)\n\n"
-        "If the source material is long (design docs / markdown / imported URL), "
-        "search first with `tm_search(..., use_pageindex_lite=true)` and preserve "
-        "the matched section path information in the final solution summary.\n\n"
-        "After organizing this information, call the `tm_save` tool with "
-        "these fields to store it in the team knowledge base."
-    )
-
-
-@mcp.prompt(
-    description=(
-        "Submit a document (text/markdown) as a team experience. "
-        "Parse it into structured fields and save to the knowledge base."
-    )
-)
-def submit_doc_experience(document: str) -> str:
-    """Guide the Agent to parse a document into a structured experience and save it."""
-    return (
-        "Please analyze the following document and extract a structured "
-        "experience entry from it.\n\n"
-        "---\n"
-        f"{document}\n"
-        "---\n\n"
-        "Extract and organize into these fields:\n"
-        "1. **title**: A concise descriptive title\n"
-        "2. **problem**: The problem or challenge described\n"
-        "3. **root_cause**: The root cause (if identifiable)\n"
-        "4. **solution**: The solution or approach described\n"
-        "5. **tags**: Relevant classification tags\n"
-        "6. **language**: Programming language (if applicable)\n"
-        "7. **framework**: Framework (if applicable)\n"
-        "8. **code_snippets**: Key code examples (if any)\n\n"
-        "For long documents, first run `tm_search` with "
-        "`use_pageindex_lite=true` to verify whether similar section-level "
-        "experience already exists. Reuse section paths when useful.\n\n"
-        "After extracting, call the `tm_save` tool to store this in the "
-        "team knowledge base."
-    )
-
-
-@mcp.prompt(
-    description=(
-        "Review an experience for quality, accuracy, and completeness. "
-        "Use this to systematically check if an experience is ready for publishing."
-    )
-)
-def review_experience(experience_id: str) -> str:
-    """Guide the Agent to review an experience entry for quality."""
-    return f"""Please review the experience with ID: {experience_id}
-
-Check the following aspects:
-1. **Completeness**: Does it have a clear title, problem description, and solution?
-2. **Accuracy**: Is the technical information correct and up-to-date?
-3. **Clarity**: Is the writing clear enough for other team members to understand?
-4. **Actionability**: Can someone follow the solution to resolve the same problem?
-5. **Tags**: Are the tags appropriate and sufficient for discovery?
-6. **Root Cause**: Is the root cause identified (if applicable)?
-
-After reviewing, provide:
-- A quality score (1-5, where 5 is excellent)
-- Specific suggestions for improvement (if any)
-- Whether to approve or request changes
-
-If the experience is good, call `tm_feedback` with a rating.
-If changes are needed, call `tm_update` with improvements."""
-
-
-@mcp.prompt(
-    description=(
-        "Systematic troubleshooting guide. "
-        "Use this when encountering an error to search existing solutions "
-        "and follow a structured debugging process."
-    )
-)
-def troubleshoot(error_message: str, context: str = "") -> str:
-    """Guide the Agent through systematic problem troubleshooting."""
-    ctx = f"\nAdditional context: {context}" if context else ""
-    return f"""I'm encountering the following error:
-
-```
-{error_message}
-```
-{ctx}
-
-Please help me troubleshoot this systematically:
-
-1. **Search existing solutions**: First, call `tm_solve` with the error
-   message to check if the team has already solved this.
-   If logs/docs are long, set `use_pageindex_lite=true`.
-
-2. **Analyze the error**: If no existing solution is found:
-   - Identify the error type and category
-   - List possible root causes (most likely first)
-   - Suggest diagnostic steps to narrow down the cause
-
-3. **Apply solution**: Once identified:
-   - Provide step-by-step fix instructions
-   - Explain WHY the fix works (root cause)
-   - Note any potential side effects
-
-4. **Save the experience**: After resolving, call `tm_save` or `tm_learn` to capture:
-   - The error message and context
-   - The root cause
-   - The solution steps
-   - Relevant tags for future discovery
-   - For long documents, include matched section paths from PageIndex-Lite"""
-
-
-@mcp.prompt(
-    description=(
-        "Analyze a long document with section-level retrieval hints. "
-        "Use PageIndex-Lite search strategy to avoid context overflow."
-    )
-)
-def analyze_long_document(document_goal: str) -> str:
-    """Guide the Agent to process long documents with PageIndex-Lite workflow."""
-    return f"""Please analyze this long-document task: {document_goal}
-
-Use this workflow:
-1. Call `tm_config` to inspect current retrieval and PageIndex-Lite settings.
-2. Call `tm_search` with `use_pageindex_lite=true` and collect matched nodes.
-3. Build a concise answer using section paths + node summaries first.
-4. If no relevant node is found, fallback to normal semantic results.
-5. If the output is useful for future reuse, save it with `tm_save` or `tm_learn`.
-
-Keep the response compact and reference section paths whenever available."""
+            ensure_ascii=False,
+        )
 
 
 # ============================================================
@@ -2075,10 +1157,14 @@ Keep the response compact and reference section paths whenever available."""
 # ============================================================
 
 
-def main():
-    """Run the MCP server (stdio mode)."""
+def main() -> None:
+    """Run the Lite MCP server (stdio mode)."""
     logging.basicConfig(level=logging.INFO)
     bootstrap(enable_background=False)
+    logger.info(
+        "TeamMemory Lite server started with %d tools",
+        len([t for t in dir(mcp) if not t.startswith("_")]),
+    )
     mcp.run()
 
 

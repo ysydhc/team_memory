@@ -9,9 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ValidationError
 
 from team_memory.auth.provider import User
+from team_memory.bootstrap import get_context
 from team_memory.config import RetrievalConfig, SearchConfig
 from team_memory.web import app as app_module
-from team_memory.web.app import get_current_user
+from team_memory.web.auth_session import get_current_user
 from team_memory.web.dependencies import require_role
 
 logger = logging.getLogger("team_memory.web")
@@ -19,10 +20,8 @@ logger = logging.getLogger("team_memory.web")
 router = APIRouter(tags=["config"])
 
 
-def _service():
-    if app_module._service is None:
-        raise HTTPException(status_code=503, detail="Service not initialized")
-    return app_module._service
+def _search_orchestrator():
+    return get_context().search_orchestrator
 
 
 def _settings():
@@ -68,7 +67,7 @@ async def put_retrieval_config(
     r = _settings().retrieval
     for k in RetrievalConfig.model_fields:
         setattr(r, k, getattr(new_cfg, k))
-    await _service().invalidate_search_cache()
+    await _search_orchestrator().invalidate_cache()
     logger.info("Retrieval config updated by %s", user.name)
     return _model_dump_compat(RetrievalConfig, r)
 
@@ -90,6 +89,6 @@ async def put_search_config(
     s = _settings().search
     for k in SearchConfig.model_fields:
         setattr(s, k, getattr(new_cfg, k))
-    await _service().invalidate_search_cache()
+    await _search_orchestrator().invalidate_cache()
     logger.info("Search config updated by %s", user.name)
     return _model_dump_compat(SearchConfig, s)

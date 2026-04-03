@@ -1,7 +1,7 @@
 """I/O logger for MCP, service, and pipeline layers.
 
 L0 layer: depends only on config and logging.
-See docs/plans/2025-03-10-logging-system-design.md for design details.
+See docs/exec-plans/completed/logging-system/1-plan/plan.md for design details.
 """
 
 from __future__ import annotations
@@ -50,6 +50,9 @@ _DETAIL_LEVELS: dict[str, str] = {
     "save_persist": "service",
     "search": "service",
     "solve_query_build": "service",
+    # Service layer (ArchiveService)
+    "archive_save": "service",
+    "archive_upsert": "service",
     # Internal steps, only at full
     "cache_check": "full",
     "cache_store": "full",
@@ -58,9 +61,7 @@ _DETAIL_LEVELS: dict[str, str] = {
 
 _DETAIL_RANK = {"mcp": 0, "service": 1, "pipeline": 2, "full": 3}
 
-_SENSITIVE_KEYS = frozenset(
-    {"api_key", "password", "secret", "token", "authorization"}
-)
+_SENSITIVE_KEYS = frozenset({"api_key", "password", "secret", "token", "authorization"})
 
 _settings_provider: Callable[[], Any] | None = None
 
@@ -70,11 +71,7 @@ def _mask_sensitive(obj: dict) -> dict:
     out = {}
     for k, v in obj.items():
         key_lower = k.lower() if isinstance(k, str) else ""
-        if (
-            key_lower in _SENSITIVE_KEYS
-            or "password" in key_lower
-            or "secret" in key_lower
-        ):
+        if key_lower in _SENSITIVE_KEYS or "password" in key_lower or "secret" in key_lower:
             out[k] = "***"
         else:
             out[k] = v
@@ -158,9 +155,7 @@ def log_mcp_io(tool_name: str, kind: str, payload: str | dict) -> None:
     logger.info("[io] %s %s: %s", tool_name, kind, text)
 
 
-def log_internal(
-    node_id: str, payload: dict | str, duration_ms: float | None = None
-) -> None:
+def log_internal(node_id: str, payload: dict | str, duration_ms: float | None = None) -> None:
     """Log internal node I/O. Logs only if _should_log_node and is_io_enabled."""
     if not is_io_enabled():
         return

@@ -179,6 +179,6 @@ class TestLogFormatConfig:
 
         os.environ.pop("LOG_FORMAT", None)
         os.environ.pop("TEAM_MEMORY_LOG_FORMAT", None)
-        with patch("team_memory.config._load_dotenv_if_available"):
+        with patch("team_memory.config.settings._load_dotenv_if_available"):
             settings = load_settings()
         assert settings.log_format == "human"

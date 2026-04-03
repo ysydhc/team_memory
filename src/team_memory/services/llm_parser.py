@@ -271,7 +271,6 @@ def _substitute_variables(prompt_text: str) -> str:
     return prompt_text
 
 
-
 # ============================================================
 # Parser
 # ============================================================
@@ -338,9 +337,10 @@ async def parse_content(
                 data = resp.json()
         except httpx.ConnectError:
             raise LLMParseError(
-                f"Cannot connect to Ollama at {llm_base_url}. "
-                "Make sure Ollama is running."
+                f"Cannot connect to Ollama at {llm_base_url}. Make sure Ollama is running."
             )
+        except httpx.TimeoutException:
+            raise LLMParseError("LLM call timed out") from None
         except httpx.HTTPStatusError as e:
             raise LLMParseError(f"Ollama API error: {e.response.text[:200]}")
 
@@ -401,14 +401,10 @@ async def parse_personal_memory(
             resp.raise_for_status()
             data = resp.json()
     except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as e:
-        logger.warning(
-            "Personal memory extraction failed (no block): %s", e, exc_info=False
-        )
+        logger.warning("Personal memory extraction failed (no block): %s", e, exc_info=True)
         return []
     except Exception as e:
-        logger.warning(
-            "Personal memory extraction error (no block): %s", e, exc_info=True
-        )
+        logger.warning("Personal memory extraction error (no block): %s", e, exc_info=True)
         return []
 
     llm_text = data.get("message", {}).get("content", "")
@@ -429,10 +425,10 @@ async def parse_personal_memory(
             try:
                 raw = json.loads(clean_text[start:end])
             except json.JSONDecodeError:
-                logger.warning("Personal memory JSON parse failed (array expected)")
+                logger.error("Personal memory JSON parse failed (array expected)")
                 return []
         else:
-            logger.warning("Personal memory JSON parse failed (array expected)")
+            logger.error("Personal memory JSON parse failed (array expected)")
             return []
 
     if not isinstance(raw, list):
@@ -462,12 +458,14 @@ async def parse_personal_memory(
         context_hint = item.get("context_hint")
         if context_hint is not None:
             context_hint = str(context_hint).strip() or None
-        result.append({
-            "content": content_str[:500],
-            "scope": scope,
-            "profile_kind": profile_kind,
-            "context_hint": context_hint,
-        })
+        result.append(
+            {
+                "content": content_str[:500],
+                "scope": scope,
+                "profile_kind": profile_kind,
+                "context_hint": context_hint,
+            }
+        )
 
     return result
 
@@ -493,9 +491,7 @@ def _extract_json(llm_text: str) -> dict:
                 return json.loads(clean_text[start:end])
             except json.JSONDecodeError:
                 pass
-        raise LLMParseError(
-            f"Failed to parse LLM response as JSON. Raw: {llm_text[:300]}"
-        )
+        raise LLMParseError(f"Failed to parse LLM response as JSON. Raw: {llm_text[:300]}")
 
 
 def _normalize_single(parsed: dict) -> dict:
@@ -577,9 +573,7 @@ async def suggest_experience_type(
                     "messages": [
                         {
                             "role": "system",
-                            "content": load_prompt(
-                                "suggest_type", llm_config=llm_config
-                            ),
+                            "content": load_prompt("suggest_type", llm_config=llm_config),
                         },
                         {"role": "user", "content": user_content[:2000]},
                     ],
@@ -589,7 +583,7 @@ async def suggest_experience_type(
             )
             resp.raise_for_status()
             data = resp.json()
-    except (httpx.ConnectError, httpx.HTTPStatusError) as e:
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as e:
         logger.warning("Type suggestion LLM call failed: %s", e)
         return {
             "suggested_type": "general",
@@ -631,9 +625,7 @@ async def suggest_experience_type(
     fallbacks = parsed.get("fallback_types", [])
     if not isinstance(fallbacks, list):
         fallbacks = []
-    fallbacks = [
-        str(f).strip() for f in fallbacks if str(f).strip() in EXPERIENCE_TYPES
-    ][:2]
+    fallbacks = [str(f).strip() for f in fallbacks if str(f).strip() in EXPERIENCE_TYPES][:2]
 
     return {
         "suggested_type": suggested,
@@ -700,6 +692,8 @@ async def generate_summary(
         raise LLMParseError(
             f"Cannot connect to Ollama at {llm_base_url}. Make sure Ollama is running."
         )
+    except httpx.TimeoutException:
+        raise LLMParseError("LLM call timed out") from None
     except httpx.HTTPStatusError as e:
         raise LLMParseError(f"Ollama API error: {e.response.text[:200]}")
 

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import os
 import time
 from collections import defaultdict
 
@@ -13,11 +11,18 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select, update
 
 from team_memory.auth.provider import DbApiKeyAuth, User, _hash_password
-from team_memory.config import get_settings
 from team_memory.storage.database import get_session
 from team_memory.storage.models import ApiKey
 from team_memory.web import app as app_module
-from team_memory.web.app import (
+from team_memory.web.app import _get_db_url
+from team_memory.web.auth_session import (
+    _encode_api_key_cookie,
+    _encode_session_token,
+    _get_session_secret,
+    get_current_user,
+)
+from team_memory.web.dependencies import require_role
+from team_memory.web.schemas import (
     AdminResetPasswordRequest,
     ApiKeyCreateRequest,
     ApiKeyUpdateRequest,
@@ -26,12 +31,7 @@ from team_memory.web.app import (
     LoginRequest,
     LoginResponse,
     RegisterRequest,
-    _encode_api_key_cookie,
-    _encode_session_token,
-    _get_db_url,
-    get_current_user,
 )
-from team_memory.web.dependencies import require_role
 
 _forgot_password_attempts: dict[str, list[float]] = defaultdict(list)
 _FORGOT_PASSWORD_WINDOW = 60.0
@@ -46,16 +46,6 @@ def _check_forgot_password_rate_limit(client_ip: str) -> bool:
         return False
     attempts.append(now)
     return True
-
-
-def _get_session_secret() -> str:
-    secret = os.environ.get("TEAM_MEMORY_SESSION_SECRET")
-    if secret:
-        return secret
-    settings = app_module._settings or get_settings()
-    if settings.auth.session_secret:
-        return settings.auth.session_secret
-    return hashlib.sha256(settings.database.url.encode()).hexdigest()
 
 
 logger = logging.getLogger("team_memory.web")
@@ -77,13 +67,13 @@ async def register(req: RegisterRequest):
 
     try:
         result = await _auth.register_user_db(req.username.strip(), req.password)
-        return {"success": True, "message": "注册成功，请等待管理员审批", **result}
+        return {"item": result, "message": "Created successfully"}
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.post("/auth/login", response_model=LoginResponse)
-async def login(req: LoginRequest):
+async def login(req: LoginRequest, request: Request):
     """Validate credentials and return user info."""
     _auth = app_module._auth
     if not _auth:
@@ -129,11 +119,13 @@ async def login(req: LoginRequest):
     resp_data["permissions"] = sorted(perms) if "*" not in perms else ["*"]
 
     response = JSONResponse(content=resp_data)
+    is_secure = request.url.scheme == "https"
     response.set_cookie(
         key="api_key",
         value=_encode_api_key_cookie(cookie_value),
         httponly=True,
         samesite="strict",
+        secure=is_secure,
         max_age=86400 * 7,
     )
     return response
@@ -214,6 +206,20 @@ async def change_password(
     return {"message": "密码修改成功"}
 
 
+@router.post("/auth/keys/rotate")
+async def rotate_own_key(user: User = Depends(get_current_user)):
+    """Regenerate the current user's API key. Returns the new key (shown only once)."""
+    _auth = app_module._auth
+    if not isinstance(_auth, DbApiKeyAuth):
+        raise HTTPException(status_code=400, detail="Key rotation requires db_api_key auth mode")
+
+    try:
+        result = await _auth.rotate_key_for_user_db(user.name)
+        return {"success": True, "api_key": result["api_key"]}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/auth/admin/reset-password")
 async def admin_reset_password(
     req: AdminResetPasswordRequest,
@@ -233,14 +239,13 @@ async def admin_reset_password(
 
     db_url = _get_db_url()
     async with get_session(db_url) as session:
-        result = await session.execute(
-            select(ApiKey).where(ApiKey.user_name == username)
-        )
+        result = await session.execute(select(ApiKey).where(ApiKey.user_name == username))
         db_key = result.scalar_one_or_none()
         if not db_key:
             raise HTTPException(status_code=404, detail="用户不存在")
 
         db_key.password_hash = _hash_password(req.new_password)
+        await session.flush()
 
     return {"message": "密码已重置"}
 
@@ -248,7 +253,7 @@ async def admin_reset_password(
 # ------------------------------------------------------------------
 # API Key management (admin only)
 # ------------------------------------------------------------------
-@router.get("/keys")
+@router.get("/auth/keys")
 async def list_api_keys(user: User = Depends(require_role("admin"))):
     """List all API keys (admin only)."""
     _auth = app_module._auth
@@ -261,7 +266,7 @@ async def list_api_keys(user: User = Depends(require_role("admin"))):
         return {"keys": keys}
 
 
-@router.post("/keys")
+@router.post("/auth/keys")
 async def create_api_key(
     req: ApiKeyCreateRequest,
     user: User = Depends(require_role("admin")),
@@ -281,12 +286,12 @@ async def create_api_key(
                 password=req.password,
                 generate_api_key=req.generate_api_key,
             )
-            return result
+            return {"item": result, "message": "Created successfully"}
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
 
-@router.delete("/keys/{key_id}")
+@router.delete("/auth/keys/{key_id}")
 async def delete_or_deactivate_key(
     key_id: int,
     user: User = Depends(require_role("admin")),
@@ -311,7 +316,7 @@ async def delete_or_deactivate_key(
             return {"message": "用户已停用" if ok else "停用失败"}
 
 
-@router.post("/keys/{key_id}/generate")
+@router.post("/auth/keys/{key_id}/generate")
 async def generate_api_key_for_user(
     key_id: int,
     user: User = Depends(require_role("admin")),
@@ -329,7 +334,7 @@ async def generate_api_key_for_user(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.put("/keys/{key_id}")
+@router.put("/auth/keys/{key_id}")
 async def update_api_key(
     key_id: int,
     req: ApiKeyUpdateRequest,
@@ -347,11 +352,7 @@ async def update_api_key(
         if not db_key:
             raise HTTPException(status_code=404, detail="用户不存在")
 
-        is_approval = (
-            req.is_active is True
-            and not db_key.is_active
-            and db_key.key_hash is None
-        )
+        is_approval = req.is_active is True and not db_key.is_active and db_key.key_hash is None
 
         if is_approval:
             result = await _auth.approve_user_db(
@@ -369,18 +370,14 @@ async def update_api_key(
         values = {}
         if req.role is not None:
             if req.role not in ("admin", "editor", "viewer"):
-                raise HTTPException(
-                    status_code=422, detail="role must be admin, editor, or viewer"
-                )
+                raise HTTPException(status_code=422, detail="role must be admin, editor, or viewer")
             values["role"] = req.role
         if req.is_active is not None:
             values["is_active"] = req.is_active
         if not values:
             raise HTTPException(status_code=400, detail="No fields to update")
 
-        await session.execute(
-            update(ApiKey).where(ApiKey.id == key_id).values(**values)
-        )
+        await session.execute(update(ApiKey).where(ApiKey.id == key_id).values(**values))
 
         if req.is_active is False and db_key.key_hash:
             self_keys = getattr(_auth, "_keys", {})

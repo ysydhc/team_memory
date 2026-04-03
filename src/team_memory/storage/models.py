@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     ForeignKey,
@@ -21,6 +22,11 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# Embedding vector dimension — matches the database schema.
+# To change: create a migration, update this constant, re-embed all records.
+DB_VECTOR_DIM: int = 768
 
 
 class Base(DeclarativeBase):
@@ -60,8 +66,8 @@ class Experience(Base):
         String(30), default="general", nullable=False, server_default="general"
     )
 
-    # Vector embedding (768-dim, matches Ollama nomic-embed-text)
-    embedding = mapped_column(Vector(768), nullable=True)
+    # Vector embedding (DB_VECTOR_DIM dims, matches Ollama nomic-embed-text default)
+    embedding = mapped_column(Vector(DB_VECTOR_DIM), nullable=True)
 
     # Full-text search (populated via trigger in DB migration)
     fts = mapped_column(TSVECTOR, nullable=True)
@@ -194,17 +200,23 @@ class Archive(Base):
     solution_doc: Mapped[str] = mapped_column(Text, nullable=False)
     overview: Mapped[str | None] = mapped_column(Text, nullable=True)
     conversation_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_conversation: Mapped[str | None] = mapped_column(Text, nullable=True)
     project: Mapped[str] = mapped_column(String(100), nullable=False, server_default="default")
     created_by: Mapped[str] = mapped_column(String(100), nullable=False)
     visibility: Mapped[str] = mapped_column(String(20), nullable=False, server_default="project")
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="draft")
+    content_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="session_archive"
+    )
+    value_summary: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    tags: Mapped[list[str] | None] = mapped_column(ARRAY(String), default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
     )
-    embedding = mapped_column(Vector(768), nullable=True)
+    embedding = mapped_column(Vector(DB_VECTOR_DIM), nullable=True)
 
     experience_links: Mapped[list[ArchiveExperienceLink]] = relationship(
         "ArchiveExperienceLink",
@@ -277,6 +289,7 @@ class ArchiveAttachment(Base):
     git_commit: Mapped[str | None] = mapped_column(String(64), nullable=True)
     git_refs: Mapped[dict | list | None] = mapped_column(JSONB, nullable=True)
     snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     archive: Mapped[Archive] = relationship(back_populates="attachments")
@@ -374,7 +387,7 @@ class PersonalMemory(Base):
         String(16), default="static", nullable=False, server_default="static"
     )  # static | dynamic
     context_hint: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    embedding = mapped_column(Vector(768), nullable=True)
+    embedding = mapped_column(Vector(DB_VECTOR_DIM), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
@@ -412,3 +425,29 @@ class ApiKey(Base):
     key_prefix: Mapped[str | None] = mapped_column(String(4), nullable=True)
     key_suffix: Mapped[str | None] = mapped_column(String(4), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+# ============================================================
+# BackgroundTask (persistent task queue)
+# ============================================================
+
+
+class BackgroundTask(Base):
+    """Persistent background task queue."""
+
+    __tablename__ = "background_tasks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="pending", index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    max_retries: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3")

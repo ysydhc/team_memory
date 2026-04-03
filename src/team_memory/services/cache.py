@@ -13,12 +13,13 @@ Cache is invalidated when experiences are created/updated/deleted
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
 import time
 from abc import ABC, abstractmethod
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -27,6 +28,19 @@ if TYPE_CHECKING:
 from team_memory import io_logger
 
 logger = logging.getLogger("team_memory.cache")
+
+# Rate-limited Redis warning to avoid log storms
+_last_redis_warning: float = 0.0
+_REDIS_WARNING_INTERVAL = 300  # seconds
+
+
+def _warn_redis_once(msg: str, *args: object) -> None:
+    """Log a Redis warning at most once per _REDIS_WARNING_INTERVAL seconds."""
+    global _last_redis_warning
+    now = time.monotonic()
+    if now - _last_redis_warning >= _REDIS_WARNING_INTERVAL:
+        logger.warning(msg, *args)
+        _last_redis_warning = now
 
 
 # ============================================================
@@ -160,7 +174,7 @@ class RedisCacheBackend(CacheBackend):
                 return None
             return json.loads(raw)
         except Exception:
-            logger.debug("Redis GET error for key %s", key, exc_info=True)
+            _warn_redis_once("Redis GET error for key %s", key)
             return None
 
     async def put(self, key: str, value: Any, ttl: int | None = None) -> None:
@@ -171,7 +185,7 @@ class RedisCacheBackend(CacheBackend):
             serialized = json.dumps(value)
             await client.setex(self._key(key), ttl or self._ttl, serialized)
         except Exception:
-            logger.debug("Redis SET error for key %s", key, exc_info=True)
+            _warn_redis_once("Redis SET error for key %s", key)
 
     async def clear(self) -> None:
         client = await self._get_client()
@@ -181,9 +195,7 @@ class RedisCacheBackend(CacheBackend):
             # Delete all keys with our prefix
             cursor = 0
             while True:
-                cursor, keys = await client.scan(
-                    cursor=cursor, match=f"{self._prefix}*", count=100
-                )
+                cursor, keys = await client.scan(cursor=cursor, match=f"{self._prefix}*", count=100)
                 if keys:
                     await client.delete(*keys)
                 if cursor == 0:
@@ -200,9 +212,7 @@ class RedisCacheBackend(CacheBackend):
             cursor = 0
             count = 0
             while True:
-                cursor, keys = await client.scan(
-                    cursor=cursor, match=f"{self._prefix}*", count=100
-                )
+                cursor, keys = await client.scan(cursor=cursor, match=f"{self._prefix}*", count=100)
                 count += len(keys)
                 if cursor == 0:
                     break
@@ -267,6 +277,7 @@ class SearchCache:
     ):
         self.enabled = enabled
         self._backend = backend
+        self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._result_cache = create_cache_backend(
             backend=backend,
             redis_url=redis_url,
@@ -321,9 +332,10 @@ class SearchCache:
         query_preview = (query or "")[:50]
         if result is not None:
             io_logger.log_internal("cache_check", {"hit": True, "query_preview": query_preview})
-            logger.debug("Cache hit for query: %s", query_preview)
+            logger.debug("Search cache hit for: %s", query_preview)
         else:
             io_logger.log_internal("cache_check", {"hit": False, "query_preview": query_preview})
+            logger.debug("Search cache miss for: %s", query_preview)
         return result
 
     async def put(
@@ -348,6 +360,10 @@ class SearchCache:
     ) -> list[float]:
         """Get embedding from cache or compute it.
 
+        Uses per-key locking to prevent cache stampede: when multiple
+        concurrent callers request the same embedding, only the first
+        caller computes it; the rest wait and reuse the cached result.
+
         Args:
             text: Text to encode.
             embedding_provider: Provider to use if cache misses.
@@ -358,27 +374,44 @@ class SearchCache:
         key = hashlib.md5(text.strip().lower().encode()).hexdigest()
         text_preview = (text or "")[:50]
 
+        # Fast path: cache hit (no lock needed)
         if self.enabled:
             cached = await self._embedding_cache.get(key)
             if cached is not None:
                 io_logger.log_internal("embedding", {"hit": True, "text_preview": text_preview})
                 logger.debug("Embedding cache hit for: %s", text_preview)
                 return cached
+            logger.debug("Embedding cache miss for: %s", text_preview)
 
-        # Compute embedding
-        t0 = time.monotonic()
-        embedding = await embedding_provider.encode_single(text)
-        duration_ms = int((time.monotonic() - t0) * 1000)
+        # Slow path: acquire per-key lock to prevent stampede
+        async with self._locks[key]:
+            # Double-check after acquiring lock
+            if self.enabled:
+                cached = await self._embedding_cache.get(key)
+                if cached is not None:
+                    io_logger.log_internal("embedding", {"hit": True, "text_preview": text_preview})
+                    logger.debug("Embedding cache hit (after lock) for: %s", text_preview)
+                    # Clean up lock to prevent memory leak
+                    self._locks.pop(key, None)
+                    return cached
 
-        if self.enabled:
-            await self._embedding_cache.put(key, embedding)
+            # Compute embedding
+            t0 = time.monotonic()
+            embedding = await embedding_provider.encode_single(text)
+            duration_ms = int((time.monotonic() - t0) * 1000)
 
-        io_logger.log_internal(
-            "embedding",
-            {"hit": False, "text_preview": text_preview, "duration_ms": duration_ms},
-            duration_ms=float(duration_ms),
-        )
-        return embedding
+            if self.enabled:
+                await self._embedding_cache.put(key, embedding)
+
+            io_logger.log_internal(
+                "embedding",
+                {"hit": False, "text_preview": text_preview, "duration_ms": duration_ms},
+                duration_ms=float(duration_ms),
+            )
+
+            # Clean up lock to prevent memory leak
+            self._locks.pop(key, None)
+            return embedding
 
     async def clear(self) -> None:
         """Clear all caches. Call after data mutations."""

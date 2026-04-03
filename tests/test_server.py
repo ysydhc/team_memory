@@ -1,10 +1,6 @@
-"""Tests for MCP Server tool registration, namespace, and functionality.
+"""Tests for MCP Server (server.py).
 
-Tests that all tools use the tm_ namespace, are properly registered,
-and that new workflow tools (tm_solve, tm_learn, tm_suggest) and
-token budget guard work correctly.
-
-Full integration tests (with real DB) are in test_integration.py.
+Validates tool registration, routing logic, and delegation to services.
 """
 
 from __future__ import annotations
@@ -15,269 +11,117 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from team_memory.server import _guard_output, mcp
+from team_memory.server import mcp
+from tests.conftest import (
+    _P,
+    _patch_expansion,
+    _patch_personal,
+    _patch_user,
+)
 
 # ============================================================
-# C4: Namespace tests — all tools must use tm_ prefix
+# Tool registration
 # ============================================================
 
 
-class TestToolNamespace:
-    """Verify that all tools follow the tm_ naming convention."""
+class TestLiteToolRegistration:
+    """Verify lite server registers exactly 5 memory_* tools."""
 
     @pytest.mark.asyncio
-    async def test_all_tools_have_tm_prefix(self):
-        """Every registered tool name must start with 'tm_'."""
+    async def test_exactly_five_tools(self):
         tools = {t.name: t for t in await mcp.list_tools()}
-        for name in tools:
-            assert name.startswith("tm_"), f"Tool '{name}' does not use tm_ prefix"
+        assert len(tools) == 5, f"Expected 5 tools, got {len(tools)}: {list(tools.keys())}"
 
     @pytest.mark.asyncio
-    async def test_expected_tools_registered(self):
-        """All expected tools should be present."""
+    async def test_tool_names(self):
         tools = {t.name: t for t in await mcp.list_tools()}
         expected = {
-            "tm_search",
-            "tm_save",
-            "tm_save_group",
-            "tm_archive_save",
-            "tm_get_archive",
-            "tm_feedback",
-            "tm_update",
-            "tm_solve",
-            "tm_learn",
-            "tm_suggest",
+            "memory_save",
+            "memory_recall",
+            "memory_get_archive",
+            "memory_context",
+            "memory_feedback",
         }
-        for name in expected:
-            assert name in tools, f"Tool '{name}' not registered"
+        assert set(tools.keys()) == expected
 
     @pytest.mark.asyncio
     async def test_all_tools_have_descriptions(self):
         tools = {t.name: t for t in await mcp.list_tools()}
         for name, tool in tools.items():
-            assert tool.description, f"Tool {name} has no description"
+            assert tool.description, f"Tool '{name}' has no description"
 
     @pytest.mark.asyncio
-    async def test_tool_descriptions_have_token_hints(self):
-        """Workflow tools should mention approximate token output size."""
+    async def test_no_tm_prefix_tools(self):
+        """Lite server should NOT register any tm_* tools."""
         tools = {t.name: t for t in await mcp.list_tools()}
-        for name in (
-            "tm_search",
-            "tm_solve",
-            "tm_suggest",
-            "tm_save",
-            "tm_save_group",
-            "tm_feedback",
-            "tm_update",
-        ):
-            desc = tools[name].description or ""
-            assert "token" in desc.lower(), (
-                f"Tool '{name}' description should mention token output size"
-            )
+        for name in tools:
+            assert not name.startswith("tm_"), f"Unexpected tm_ tool: {name}"
 
 
 # ============================================================
-# Resource registration
+# memory_get_archive
 # ============================================================
 
 
-class TestMCPResourceRegistration:
-    """Verify that all expected resources are registered."""
-
+class TestMemoryGetArchive:
     @pytest.mark.asyncio
-    async def test_recent_resource_registered(self):
-        resources = await mcp.list_resources()
-        uris = {str(r.uri) for r in resources}
-        assert "experiences://recent" in uris
-
-
-# ============================================================
-# C3: Token budget guard tests
-# ============================================================
-
-
-class TestGuardOutput:
-    """Test the _guard_output token budget enforcement."""
-
-    def test_small_output_unchanged(self):
-        """Output within budget should pass through unchanged."""
-        data = {"message": "ok", "results": [{"title": "A"}]}
-        raw = json.dumps(data)
-        result = _guard_output(raw, max_tokens=5000)
-        assert json.loads(result) == data
-
-    def test_large_output_truncates_results(self):
-        """Output exceeding budget should remove trailing results."""
-        results = [{"title": f"Experience {i}", "solution": "x" * 3000} for i in range(10)]
-        data = {"message": "Found 10", "results": results}
-        raw = json.dumps(data, ensure_ascii=False)
-
-        result = _guard_output(raw, max_tokens=500)
-        parsed = json.loads(result)
-        assert len(parsed["results"]) < 10
-        assert parsed.get("truncated") is True
-
-    def test_truncates_long_solution_field(self):
-        """Long solution fields should be truncated."""
-        results = [{"title": "A", "solution": "x" * 5000}]
-        data = {"message": "ok", "results": results}
-        raw = json.dumps(data)
-
-        with patch("team_memory.server._get_settings") as mock_settings:
-            mock_cfg = MagicMock()
-            mock_cfg.mcp.max_output_tokens = 4000
-            mock_cfg.mcp.truncate_solution_at = 100
-            mock_cfg.mcp.include_code_snippets = True
-            mock_settings.return_value = mock_cfg
-
-            result = _guard_output(raw, max_tokens=4000)
-            parsed = json.loads(result)
-            assert "[truncated]" in parsed["results"][0]["solution"]
-            assert parsed["truncated"] is True
-
-    def test_removes_low_confidence_first(self):
-        """Low-confidence results should be removed before truncating fields."""
-        results = [
-            {"title": "A", "confidence": "high", "solution": "good answer"},
-            {"title": "B", "confidence": "medium", "solution": "ok answer"},
-            {"title": "C", "confidence": "low", "solution": "x" * 5000},
-        ]
-        data = {"message": "Found 3", "results": results}
-        raw = json.dumps(data)
-
-        result = _guard_output(raw, max_tokens=200)
-        parsed = json.loads(result)
-        # Low confidence result should be removed
-        titles = [r["title"] for r in parsed["results"]]
-        assert "C" not in titles
-
-    def test_no_results_passthrough(self):
-        """Output with no results should pass through."""
-        data = {"message": "No matches", "results": []}
-        raw = json.dumps(data)
-        result = _guard_output(raw, max_tokens=100)
-        assert json.loads(result) == data
-
-
-# ============================================================
-# tm_search (renamed from search_experiences)
-# ============================================================
-
-
-class TestTdSearch:
-    """Test tm_search tool function."""
-
-    @pytest.mark.asyncio
-    async def test_search_returns_json(self):
-        mock_results = [
-            {
-                "id": str(uuid.uuid4()),
-                "title": "Test experience",
-                "description": "Test problem",
-                "solution": "Test solution",
-                "tags": ["python"],
-                "similarity": 0.85,
-            }
-        ]
-
+    async def test_returns_l2_json(self):
+        aid = str(uuid.uuid4())
+        l2 = {
+            "id": aid,
+            "title": "T",
+            "solution_doc": "body",
+            "overview": "o",
+            "attachments": [],
+        }
         with (
-            patch("team_memory.server._get_service") as mock_get_service,
-            patch("team_memory.server.get_session") as mock_get_session,
+            patch(f"{_P}._get_archive_service") as mock_get,
+            patch(f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"),
+            patch(f"{_P}._resolve_project", return_value="default"),
         ):
-            mock_service = MagicMock()
-            mock_service.search = AsyncMock(return_value=mock_results)
-            mock_get_service.return_value = mock_service
-
-            mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
+            mock_svc = MagicMock()
+            mock_svc.get_archive = AsyncMock(return_value=l2)
+            mock_get.return_value = mock_svc
             tools = {t.name: t for t in await mcp.list_tools()}
-            search_fn = tools["tm_search"].fn
-            result = await search_fn(query="test problem")
-
-        data = json.loads(result)
-        assert "results" in data
-        assert len(data["results"]) == 1
-        assert data["results"][0]["title"] == "Test experience"
+            fn = tools["memory_get_archive"].fn
+            out = await fn(archive_id=aid)
+        data = json.loads(out)
+        assert data["id"] == aid
+        assert data["solution_doc"] == "body"
+        mock_svc.get_archive.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_search_empty_results(self):
-        with (
-            patch("team_memory.server._get_service") as mock_get_service,
-            patch("team_memory.server.get_session") as mock_get_session,
-        ):
-            mock_service = MagicMock()
-            mock_service.search = AsyncMock(return_value=[])
-            mock_get_service.return_value = mock_service
-
-            mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            tools = {t.name: t for t in await mcp.list_tools()}
-            search_fn = tools["tm_search"].fn
-            result = await search_fn(query="nonexistent")
-
-        data = json.loads(result)
-        assert data["results"] == []
-        assert "No matching" in data["message"]
-
-    @pytest.mark.asyncio
-    async def test_search_passes_current_file_locations(self):
-        """tm_search with current_file_locations should pass them to search for location boost."""
-        locs = [
-            {"path": "src/team_memory/server.py", "start_line": 1, "end_line": 10},
-            {"path": "tests/conftest.py"},
-        ]
-        with (
-            patch("team_memory.server._get_service") as mock_get_service,
-            patch("team_memory.server.get_session") as mock_get_session,
-            patch("team_memory.server._get_current_user", return_value="alice"),
-            patch("team_memory.server._resolve_project", return_value="default"),
-        ):
-            mock_service = MagicMock()
-            mock_service.search = AsyncMock(return_value=[])
-            mock_get_service.return_value = mock_service
-
-            mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            tools = {t.name: t for t in await mcp.list_tools()}
-            search_fn = tools["tm_search"].fn
-            await search_fn(
-                query="test",
-                current_file_locations=locs,
-            )
-
-        call_kwargs = mock_service.search.call_args.kwargs
-        assert call_kwargs.get("current_file_locations") == locs
+    async def test_invalid_uuid(self):
+        tools = {t.name: t for t in await mcp.list_tools()}
+        fn = tools["memory_get_archive"].fn
+        out = await fn(archive_id="bad")
+        data = json.loads(out)
+        assert data.get("code") == "not_found"
 
 
 # ============================================================
-# tm_save (renamed from save_experience)
+# memory_save
 # ============================================================
 
 
-class TestTdSave:
-    """Test tm_save tool function."""
+class TestMemorySave:
+    """Test memory_save routing logic."""
 
     @pytest.mark.asyncio
-    async def test_save_returns_json(self):
-        exp_id = str(uuid.uuid4())
+    async def test_direct_save(self):
+        """title + problem → service.save()."""
         mock_result = {
-            "id": exp_id,
-            "title": "Fix Docker issue",
-            "created_at": "2026-01-01T00:00:00+00:00",
+            "id": str(uuid.uuid4()),
+            "title": "Fix DB timeout",
+            "exp_status": "published",
         }
 
         with (
-            patch("team_memory.server._get_service") as mock_get_service,
-            patch("team_memory.server.get_session") as mock_get_session,
-            patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"),
-            patch("team_memory.server._resolve_project", return_value="default"),
-            patch("team_memory.server._get_current_user", return_value="alice"),
+            patch(f"{_P}._get_service") as mock_get_service,
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_P}.get_session") as mock_get_session,
         ):
             mock_service = MagicMock()
             mock_service.save = AsyncMock(return_value=mock_result)
@@ -288,823 +132,787 @@ class TestTdSave:
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
             tools = {t.name: t for t in await mcp.list_tools()}
-            save_fn = tools["tm_save"].fn
-            result = await save_fn(
-                title="Fix Docker issue",
-                problem="Container won't start",
-                solution="Check port conflicts",
-                tags=["docker"],
+            fn = tools["memory_save"].fn
+            result = await fn(
+                title="Fix DB timeout",
+                problem="Connection pool exhausted under load",
+                solution="Increase pool size to 20",
             )
 
         data = json.loads(result)
-        assert "experience" in data
-        assert data["experience"]["id"] == exp_id
-        assert "saved successfully" in data["message"].lower()
-
-
-# ============================================================
-# tm_archive_save
-# ============================================================
-
-
-class TestTmArchiveSave:
-    """Test tm_archive_save tool function."""
+        assert "data" in data
+        assert data["data"]["title"] == "Fix DB timeout"
+        mock_service.save.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_tm_archive_save_returns_archive_id(self):
-        """tm_archive_save returns JSON with archive_id."""
-        archive_id = str(uuid.uuid4())
-        with (
-            patch("team_memory.server._get_archive_service") as mock_get_archive_svc,
-            patch("team_memory.server._get_current_user", return_value="alice"),
-            patch("team_memory.server._resolve_project", return_value="default"),
-        ):
-            mock_svc = MagicMock()
-            mock_svc.archive_save = AsyncMock(return_value=uuid.UUID(archive_id))
-            mock_get_archive_svc.return_value = mock_svc
-
-            tools = {t.name: t for t in await mcp.list_tools()}
-            assert "tm_archive_save" in tools
-            save_fn = tools["tm_archive_save"].fn
-            result = await save_fn(
-                title="T",
-                solution_doc="D",
-                created_by="u",
-            )
-
-        data = json.loads(result)
-        assert "archive_id" in data
-        assert data["archive_id"] == archive_id
-        assert "saved successfully" in data.get("message", "").lower()
-
-
-class TestTmGetArchive:
-    """Test tm_get_archive tool function."""
-
-    @pytest.mark.asyncio
-    async def test_tm_get_archive_returns_l2_with_attachments(self):
-        """tm_get_archive returns L2 dict with attachments array."""
-        archive_id = str(uuid.uuid4())
-        l2 = {
-            "id": archive_id,
-            "title": "T",
-            "solution_doc": "D",
-            "overview": "O",
-            "attachments": [{"id": "a1", "kind": "file", "path": "p"}],
+    async def test_content_parse_mode(self):
+        """content → LLM parse → service.save()."""
+        mock_parsed = {
+            "title": "Parsed Title",
+            "problem": "Parsed problem",
+            "solution": "Parsed solution",
+            "tags": ["python"],
         }
+        mock_result = {
+            "id": str(uuid.uuid4()),
+            "title": "Parsed Title",
+            "tags": ["python"],
+            "exp_status": "draft",
+        }
+
         with (
-            patch("team_memory.server._get_archive_service") as mock_get_svc,
+            patch(f"{_P}._get_service") as mock_get_service,
+            patch(f"{_P}._get_settings") as mock_get_settings,
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_P}.get_session") as mock_get_session,
             patch(
-                "team_memory.server._get_current_user", new_callable=AsyncMock, return_value="alice"
+                "team_memory.services.llm_parser.parse_content",
+                new_callable=AsyncMock,
+                return_value=mock_parsed,
             ),
-            patch("team_memory.server._resolve_project", return_value="default"),
+            _patch_personal(),
         ):
-            mock_svc = MagicMock()
-            mock_svc.get_archive = AsyncMock(return_value=l2)
-            mock_get_svc.return_value = mock_svc
+            mock_service = MagicMock()
+            mock_service.save = AsyncMock(return_value=mock_result)
+            mock_get_service.return_value = mock_service
+
+            mock_settings = MagicMock()
+            mock_settings.extraction = None
+            mock_settings.llm = MagicMock()
+            mock_settings.mcp.max_content_chars = 200_000
+            mock_settings.mcp.max_tags = 20
+            mock_settings.mcp.max_tag_length = 50
+            mock_get_settings.return_value = mock_settings
+
+            mock_session = AsyncMock()
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
             tools = {t.name: t for t in await mcp.list_tools()}
-            get_fn = tools["tm_get_archive"].fn
-            result = await get_fn(archive_id=archive_id)
+            fn = tools["memory_save"].fn
+            result = await fn(content="Long conversation about fixing a bug...")
 
         data = json.loads(result)
-        assert data["id"] == archive_id
-        assert data["title"] == "T"
-        assert data["attachments"] == [{"id": "a1", "kind": "file", "path": "p"}]
+        assert "data" in data
+        assert data["data"]["title"] == "Parsed Title"
 
     @pytest.mark.asyncio
-    async def test_tm_get_archive_404_invalid_id(self):
-        """tm_get_archive returns 404 for invalid UUID."""
-        tools = {t.name: t for t in await mcp.list_tools()}
-        get_fn = tools["tm_get_archive"].fn
-        result = await get_fn(archive_id="not-a-uuid")
-        data = json.loads(result)
-        assert data.get("code") == 404
-        assert "not found" in data.get("error", "").lower()
-
-    @pytest.mark.asyncio
-    async def test_tm_get_archive_404_not_found(self):
-        """tm_get_archive returns 404 when archive does not exist."""
-        archive_id = str(uuid.uuid4())
+    async def test_archive_scope_rejected(self):
+        """scope='archive' → hard error, no longer supported."""
         with (
-            patch("team_memory.server._get_archive_service") as mock_get_svc,
-            patch(
-                "team_memory.server._get_current_user", new_callable=AsyncMock, return_value="alice"
-            ),
-            patch("team_memory.server._resolve_project", return_value="default"),
+            patch(f"{_P}._get_settings"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_P}._get_service"),
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
         ):
-            mock_svc = MagicMock()
-            mock_svc.get_archive = AsyncMock(return_value=None)
-            mock_get_svc.return_value = mock_svc
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_save"].fn
+            result = await fn(
+                title="Sprint 42 Summary",
+                solution="Completed auth migration...",
+                scope="archive",
+            )
+
+        data = json.loads(result)
+        assert data["error"] is True
+        assert "no longer supported" in data["message"]
+
+    @pytest.mark.asyncio
+    async def test_missing_params_error(self):
+        """No title/problem/content → error."""
+        mock_settings = MagicMock()
+        mock_settings.mcp.max_content_chars = 200_000
+        mock_settings.mcp.max_tags = 20
+        mock_settings.mcp.max_tag_length = 50
+
+        with (
+            patch(f"{_P}._get_service"),
+            patch(f"{_P}._get_settings", return_value=mock_settings),
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+        ):
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_save"].fn
+            result = await fn(tags=["python"])
+
+        data = json.loads(result)
+        assert data.get("error") is True
+
+
+# ============================================================
+# memory_recall
+# ============================================================
+
+
+class TestMemoryRecall:
+    """Test memory_recall routing logic."""
+
+    @pytest.mark.asyncio
+    async def test_solve_mode(self):
+        """problem → solve mode with enhanced query."""
+        mock_results = [
+            {
+                "id": str(uuid.uuid4()),
+                "group_id": str(uuid.uuid4()),
+                "title": "DB Timeout Fix",
+                "solution": "Increase pool size",
+                "score": 0.9,
+                "confidence": "high",
+                "type": "experience",
+            }
+        ]
+
+        with (
+            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_P}.get_session") as mock_get_session,
+            _patch_expansion(),
+        ):
+            mock_orchestrator = MagicMock()
+            mock_orchestrator.search = AsyncMock(return_value=mock_results)
+            mock_get_orch.return_value = mock_orchestrator
+
+            mock_session = AsyncMock()
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
             tools = {t.name: t for t in await mcp.list_tools()}
-            get_fn = tools["tm_get_archive"].fn
-            result = await get_fn(archive_id=archive_id)
+            fn = tools["memory_recall"].fn
+            result = await fn(problem="Database connection timeout", language="python")
 
         data = json.loads(result)
-        assert data.get("code") == 404
+        assert "results" in data
+        assert len(data["results"]) == 1
+        # Verify enhanced query was built
+        call_args = mock_orchestrator.search.call_args
+        assert "python" in call_args.kwargs.get("query", "").lower()
+        assert call_args.kwargs["min_similarity"] == 0.5  # solve mode threshold
 
     @pytest.mark.asyncio
-    async def test_tm_get_archive_attachments_default_empty(self):
-        """tm_get_archive ensures attachments is [] when missing."""
-        archive_id = str(uuid.uuid4())
-        l2 = {"id": archive_id, "title": "T", "solution_doc": "D"}
+    async def test_search_mode(self):
+        """query → search mode."""
+        mock_results = [
+            {
+                "id": str(uuid.uuid4()),
+                "group_id": str(uuid.uuid4()),
+                "title": "Caching patterns",
+                "score": 0.8,
+            }
+        ]
+
         with (
-            patch("team_memory.server._get_archive_service") as mock_get_svc,
-            patch(
-                "team_memory.server._get_current_user", new_callable=AsyncMock, return_value="alice"
-            ),
-            patch("team_memory.server._resolve_project", return_value="default"),
+            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+            _patch_expansion(),
         ):
-            mock_svc = MagicMock()
-            mock_svc.get_archive = AsyncMock(return_value=l2)
-            mock_get_svc.return_value = mock_svc
+            mock_orchestrator = MagicMock()
+            mock_orchestrator.search = AsyncMock(return_value=mock_results)
+            mock_get_orch.return_value = mock_orchestrator
 
             tools = {t.name: t for t in await mcp.list_tools()}
-            get_fn = tools["tm_get_archive"].fn
-            result = await get_fn(archive_id=archive_id)
+            fn = tools["memory_recall"].fn
+            result = await fn(query="redis caching best practices")
 
         data = json.loads(result)
-        assert data.get("attachments") == []
-
-
-# ============================================================
-# tm_save_typed
-# ============================================================
-
-
-class TestTdSaveTyped:
-    """Test tm_save_typed tool function."""
-
-
-# ============================================================
-# tm_feedback (renamed from feedback_experience)
-# ============================================================
-
-
-class TestTdFeedback:
-    """Test tm_feedback tool function."""
+        assert "results" in data
+        call_args = mock_orchestrator.search.call_args
+        assert call_args.kwargs["min_similarity"] == 0.6  # search mode threshold
 
     @pytest.mark.asyncio
-    async def test_feedback_success(self):
+    async def test_search_mode_include_user_profile(self):
+        """include_user_profile=True adds profile.static / profile.dynamic."""
+        mock_results = [
+            {
+                "id": str(uuid.uuid4()),
+                "group_id": str(uuid.uuid4()),
+                "title": "Caching patterns",
+                "score": 0.8,
+            }
+        ]
+
+        mock_settings = MagicMock()
+        mock_settings.mcp.profile_max_strings_per_side = 20
+        mock_settings.mcp.max_output_tokens = 4000
+        mock_settings.mcp.truncate_solution_at = 2000
+
         with (
-            patch("team_memory.server._get_service") as mock_get_service,
-            patch("team_memory.server.get_session") as mock_get_session,
-            patch("team_memory.server._get_current_user", return_value="alice"),
+            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_P}.get_context") as mock_get_ctx,
+            patch(f"{_P}._get_settings", return_value=mock_settings),
+            patch(
+                "team_memory.services.personal_memory.PersonalMemoryService",
+            ) as mock_pm_cls,
+            _patch_expansion(),
+        ):
+            mock_ctx = MagicMock()
+            mock_ctx.embedding = MagicMock()
+            mock_ctx.db_url = "sqlite://"
+            mock_get_ctx.return_value = mock_ctx
+            mock_pm = MagicMock()
+            mock_pm.build_profile_for_user = AsyncMock(
+                return_value={"static": ["prefers tests"], "dynamic": []}
+            )
+            mock_pm_cls.return_value = mock_pm
+
+            mock_orchestrator = MagicMock()
+            mock_orchestrator.search = AsyncMock(return_value=mock_results)
+            mock_get_orch.return_value = mock_orchestrator
+
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_recall"].fn
+            result = await fn(query="redis", include_user_profile=True)
+
+        data = json.loads(result)
+        assert data["profile"]["static"] == ["prefers tests"]
+        assert data["profile"]["dynamic"] == []
+        mock_pm.build_profile_for_user.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_suggest_mode(self):
+        """file_path only → suggest mode."""
+        mock_results = [
+            {
+                "id": str(uuid.uuid4()),
+                "parent": {"id": str(uuid.uuid4()), "title": "Auth middleware", "tags": ["auth"]},
+                "score": 0.7,
+                "confidence": "medium",
+                "total_children": 0,
+            }
+        ]
+
+        with (
+            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+        ):
+            mock_orchestrator = MagicMock()
+            mock_orchestrator.search = AsyncMock(return_value=mock_results)
+            mock_get_orch.return_value = mock_orchestrator
+
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_recall"].fn
+            result = await fn(file_path="src/auth/middleware.py")
+
+        data = json.loads(result)
+        assert "results" in data
+        call_args = mock_orchestrator.search.call_args
+        assert call_args.kwargs["min_similarity"] == 0.4  # suggest mode threshold
+        assert "middleware.py" in call_args.kwargs["query"]
+
+    @pytest.mark.asyncio
+    async def test_empty_params_error(self):
+        """No params → error."""
+        with (
+            patch(f"{_P}._get_search_orchestrator"),
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+        ):
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_recall"].fn
+            result = await fn()
+
+        data = json.loads(result)
+        assert data.get("error") is True
+
+    @pytest.mark.asyncio
+    async def test_no_results_suggests_save(self):
+        """No results in solve mode → suggest memory_save."""
+        with (
+            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+        ):
+            mock_orchestrator = MagicMock()
+            mock_orchestrator.search = AsyncMock(return_value=[])
+            mock_get_orch.return_value = mock_orchestrator
+
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_recall"].fn
+            result = await fn(problem="Some unique problem")
+
+        data = json.loads(result)
+        assert "memory_save" in data["message"]
+
+    @pytest.mark.asyncio
+    async def test_recall_include_archives_true(self):
+        """memory_recall with include_archives=True passes it to search_orchestrator.search."""
+        mock_results = [
+            {
+                "id": str(uuid.uuid4()),
+                "group_id": str(uuid.uuid4()),
+                "title": "Archived solution",
+                "score": 0.85,
+                "type": "archive",
+            }
+        ]
+
+        with (
+            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+            _patch_expansion(),
+        ):
+            mock_orchestrator = MagicMock()
+            mock_orchestrator.search = AsyncMock(return_value=mock_results)
+            mock_get_orch.return_value = mock_orchestrator
+
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_recall"].fn
+            result = await fn(query="redis patterns", include_archives=True)
+
+        data = json.loads(result)
+        assert "results" in data
+        assert len(data["results"]) == 1
+        call_kwargs = mock_orchestrator.search.call_args.kwargs
+        assert call_kwargs["include_archives"] is True
+
+    @pytest.mark.asyncio
+    async def test_recall_solve_mode_include_archives_true(self):
+        """memory_recall solve mode with include_archives=True passes it to search."""
+        mock_results = [
+            {
+                "id": str(uuid.uuid4()),
+                "group_id": str(uuid.uuid4()),
+                "title": "Archived fix",
+                "score": 0.9,
+                "confidence": "high",
+                "type": "archive",
+            }
+        ]
+
+        with (
+            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+            _patch_expansion(),
+        ):
+            mock_orchestrator = MagicMock()
+            mock_orchestrator.search = AsyncMock(return_value=mock_results)
+            mock_get_orch.return_value = mock_orchestrator
+
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_recall"].fn
+            result = await fn(
+                problem="Connection pool exhaustion",
+                include_archives=True,
+            )
+
+        data = json.loads(result)
+        assert "results" in data
+        call_kwargs = mock_orchestrator.search.call_args.kwargs
+        assert call_kwargs["include_archives"] is True
+
+    @pytest.mark.asyncio
+    async def test_recall_default_include_archives_dev(self, monkeypatch):
+        """In development env, include_archives defaults to True."""
+        monkeypatch.setenv("TEAM_MEMORY_ENV", "development")
+
+        with (
+            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+            _patch_expansion(),
+        ):
+            mock_orchestrator = MagicMock()
+            mock_orchestrator.search = AsyncMock(return_value=[])
+            mock_get_orch.return_value = mock_orchestrator
+
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_recall"].fn
+            await fn(query="test query")
+
+        call_kwargs = mock_orchestrator.search.call_args.kwargs
+        assert call_kwargs["include_archives"] is True
+
+    @pytest.mark.asyncio
+    async def test_recall_default_include_archives_prod(self, monkeypatch):
+        """In production env, include_archives defaults to False."""
+        monkeypatch.setenv("TEAM_MEMORY_ENV", "production")
+
+        with (
+            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+            _patch_expansion(),
+        ):
+            mock_orchestrator = MagicMock()
+            mock_orchestrator.search = AsyncMock(return_value=[])
+            mock_get_orch.return_value = mock_orchestrator
+
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_recall"].fn
+            await fn(query="test query")
+
+        call_kwargs = mock_orchestrator.search.call_args.kwargs
+        assert call_kwargs["include_archives"] is False
+
+
+# ============================================================
+# memory_context
+# ============================================================
+
+
+class TestMemoryContext:
+    """Test memory_context profile + context retrieval."""
+
+    @pytest.mark.asyncio
+    async def test_returns_profile_and_experiences(self):
+        mock_results = [
+            {
+                "group_id": str(uuid.uuid4()),
+                "parent": {"id": str(uuid.uuid4()), "title": "Auth patterns", "tags": ["auth"]},
+                "confidence": "high",
+            }
+        ]
+
+        with (
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_P}.get_context") as mock_get_ctx,
+            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
+            patch(
+                "team_memory.services.personal_memory.PersonalMemoryService",
+            ) as mock_pm_cls,
+        ):
+            mock_ctx = MagicMock()
+            mock_ctx.embedding = MagicMock()
+            mock_ctx.db_url = "sqlite://"
+            mock_get_ctx.return_value = mock_ctx
+
+            mock_pm = MagicMock()
+            mock_pm.build_profile_for_user = AsyncMock(
+                return_value={
+                    "static": ["Prefers dark mode"],
+                    "dynamic": [],
+                }
+            )
+            mock_pm_cls.return_value = mock_pm
+
+            mock_orchestrator = MagicMock()
+            mock_orchestrator.search = AsyncMock(return_value=mock_results)
+            mock_get_orch.return_value = mock_orchestrator
+
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_context"].fn
+            result = await fn(
+                file_paths=["src/auth/middleware.py"],
+                task_description="Add rate limiting",
+            )
+
+        data = json.loads(result)
+        assert data["user"] == "admin"
+        assert data["profile"]["static"] == ["Prefers dark mode"]
+        assert data["profile"]["dynamic"] == []
+        assert len(data["relevant_experiences"]) == 1
+
+
+# ============================================================
+# memory_feedback
+# ============================================================
+
+
+class TestMemoryFeedback:
+    """Test memory_feedback rating flow."""
+
+    @pytest.mark.asyncio
+    async def test_valid_rating(self):
+        with (
+            patch(f"{_P}._get_service") as mock_get_service,
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}.get_session") as mock_get_session,
         ):
             mock_service = MagicMock()
             mock_service.feedback = AsyncMock(return_value=True)
             mock_get_service.return_value = mock_service
 
             mock_session = AsyncMock()
+            mock_execute = AsyncMock()
+            mock_execute.scalar_one_or_none.return_value = None
+            mock_session.execute = AsyncMock(return_value=mock_execute)
             mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
             tools = {t.name: t for t in await mcp.list_tools()}
-            feedback_fn = tools["tm_feedback"].fn
-            result = await feedback_fn(
-                experience_id=str(uuid.uuid4()),
-                rating=5,
-                comment="Worked great!",
-            )
+            fn = tools["memory_feedback"].fn
+            result = await fn(experience_id=str(uuid.uuid4()), rating=5)
 
         data = json.loads(result)
-        assert "recorded" in data["message"].lower()
+        assert "Feedback recorded" in data["message"]
 
     @pytest.mark.asyncio
-    async def test_feedback_invalid_rating(self):
-        """Rating outside 1-5 should return error."""
-        tools = {t.name: t for t in await mcp.list_tools()}
-        feedback_fn = tools["tm_feedback"].fn
-        result = await feedback_fn(
-            experience_id=str(uuid.uuid4()),
-            rating=0,
-        )
-        data = json.loads(result)
-        assert "error" in data
-
-
-# ============================================================
-# C1-a: tm_solve tests
-# ============================================================
-
-
-class TestTdSolve:
-    """Test tm_solve workflow tool."""
-
-    @pytest.mark.asyncio
-    async def test_solve_returns_results_and_marks_used(self):
-        """tm_solve should search, format, and increment use_count."""
-        exp_id = str(uuid.uuid4())
-        mock_results = [
-            {
-                "group_id": exp_id,
-                "score": 0.88,
-                "parent": {"id": exp_id, "title": "Docker fix", "solution": "..."},
-                "children": [],
-                "total_children": 0,
-            }
-        ]
-
-        mock_repo = MagicMock()
-        mock_repo.increment_use_count = AsyncMock()
-
+    async def test_invalid_rating(self):
         with (
-            patch("team_memory.server._get_service") as mock_get_service,
-            patch("team_memory.server.get_session") as mock_get_session,
-            patch("team_memory.storage.repository.ExperienceRepository", return_value=mock_repo),
+            patch(f"{_P}._get_service"),
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
         ):
-            mock_service = MagicMock()
-            mock_service.search = AsyncMock(return_value=mock_results)
-            mock_get_service.return_value = mock_service
-
-            mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
             tools = {t.name: t for t in await mcp.list_tools()}
-            solve_fn = tools["tm_solve"].fn
-            result = await solve_fn(
-                problem="Docker container won't start",
-                language="python",
-            )
-
-        data = json.loads(result)
-        assert len(data["results"]) == 1
-        assert "tm_feedback" in data["message"]
-        # use_count should have been incremented
-        mock_repo.increment_use_count.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_solve_no_results_suggests_save(self):
-        """tm_solve with no results should suggest tm_save."""
-        with (
-            patch("team_memory.server._get_service") as mock_get_service,
-            patch("team_memory.server.get_session") as mock_get_session,
-        ):
-            mock_service = MagicMock()
-            mock_service.search = AsyncMock(return_value=[])
-            mock_get_service.return_value = mock_service
-
-            mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            tools = {t.name: t for t in await mcp.list_tools()}
-            solve_fn = tools["tm_solve"].fn
-            result = await solve_fn(problem="Unique unseen problem")
-
-        data = json.loads(result)
-        assert data["results"] == []
-        assert data["suggestion"] == "tm_save"
-
-    @pytest.mark.asyncio
-    async def test_solve_passes_current_file_locations_from_file_path(self):
-        """tm_solve with current_file_locations should pass them to search for location boost."""
-        locs = [{"path": "src/team_memory/server.py", "start_line": 1, "end_line": 5}]
-        with (
-            patch("team_memory.server._get_service") as mock_get_service,
-            patch("team_memory.server.get_session") as mock_get_session,
-            patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"),
-            patch("team_memory.server._get_current_user", return_value="alice"),
-            patch("team_memory.server._resolve_project", return_value="default"),
-        ):
-            mock_service = MagicMock()
-            mock_service.search = AsyncMock(return_value=[])
-            mock_get_service.return_value = mock_service
-
-            mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            tools = {t.name: t for t in await mcp.list_tools()}
-            solve_fn = tools["tm_solve"].fn
-            await solve_fn(
-                problem="test",
-                current_file_locations=locs,
-            )
-
-        call_kwargs = mock_service.search.call_args.kwargs
-        assert call_kwargs.get("current_file_locations") == locs
-
-    @pytest.mark.asyncio
-    async def test_solve_passes_current_file_locations_from_file_paths(self):
-        """tm_solve with current_file_locations should pass them to search for location boost."""
-        locs = [{"path": "src/foo.py"}, {"path": "tests/bar.py"}]
-        with (
-            patch("team_memory.server._get_service") as mock_get_service,
-            patch("team_memory.server.get_session") as mock_get_session,
-            patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"),
-            patch("team_memory.server._get_current_user", return_value="alice"),
-            patch("team_memory.server._resolve_project", return_value="default"),
-        ):
-            mock_service = MagicMock()
-            mock_service.search = AsyncMock(return_value=[])
-            mock_get_service.return_value = mock_service
-
-            mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            tools = {t.name: t for t in await mcp.list_tools()}
-            solve_fn = tools["tm_solve"].fn
-            await solve_fn(
-                problem="test",
-                current_file_locations=locs,
-            )
-
-        call_kwargs = mock_service.search.call_args.kwargs
-        assert call_kwargs.get("current_file_locations") == locs
-
-    @pytest.mark.asyncio
-    async def test_solve_builds_enhanced_query(self):
-        """tm_solve should combine problem + language + framework into query."""
-        with (
-            patch("team_memory.server._get_service") as mock_get_service,
-            patch("team_memory.server.get_session") as mock_get_session,
-        ):
-            mock_service = MagicMock()
-            mock_service.search = AsyncMock(return_value=[])
-            mock_get_service.return_value = mock_service
-
-            mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            tools = {t.name: t for t in await mcp.list_tools()}
-            solve_fn = tools["tm_solve"].fn
-            await solve_fn(
-                problem="API error",
-                language="python",
-                framework="fastapi",
-                file_path="src/api/routes.py",
-            )
-
-        # Check that search was called with enriched query
-        call_args = mock_service.search.call_args
-        query = call_args.kwargs.get("query", "")
-        assert "API error" in query
-        assert "python" in query
-        assert "fastapi" in query
-        assert "routes.py" in query
-
-
-# ============================================================
-# C1-b: tm_learn tests
-# ============================================================
-
-
-class TestTdLearn:
-    """Test tm_learn workflow tool."""
-
-    @pytest.mark.asyncio
-    async def test_learn_single_experience(self):
-        """tm_learn should parse and save a single experience."""
-        parsed = {
-            "title": "Fix database timeout",
-            "problem": "Queries were timing out",
-            "solution": "Added connection pooling",
-            "tags": ["database", "performance"],
-            "root_cause": "Too many connections",
-            "language": "python",
-            "framework": None,
-            "code_snippets": None,
-        }
-        saved = {
-            "id": str(uuid.uuid4()),
-            "title": "Fix database timeout",
-            "tags": ["database", "performance"],
-            "created_at": "2026-01-01T00:00:00",
-        }
-
-        with (
-            patch("team_memory.server._get_service") as mock_get_service,
-            patch("team_memory.server._get_settings") as mock_get_settings,
-            patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"),
-            patch("team_memory.server._resolve_project", return_value="default"),
-            patch("team_memory.server.get_session") as mock_get_session,
-            patch(
-                "team_memory.services.llm_parser.parse_content",
-                new_callable=AsyncMock,
-                return_value=parsed,
-            ),
-        ):
-            mock_service = MagicMock()
-            mock_service.save = AsyncMock(return_value=saved)
-            mock_get_service.return_value = mock_service
-
-            mock_settings_obj = MagicMock()
-            mock_settings_obj.llm = MagicMock()
-            mock_settings_obj.extraction = MagicMock(quality_gate=2, max_retries=1)
-            mock_get_settings.return_value = mock_settings_obj
-
-            mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            tools = {t.name: t for t in await mcp.list_tools()}
-            learn_fn = tools["tm_learn"].fn
-            result = await learn_fn(
-                conversation="We fixed the database timeout issue by adding pooling...",
-            )
-
-        data = json.loads(result)
-        assert "experience" in data
-        assert data["experience"]["title"] == "Fix database timeout"
-        mock_service.save.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_learn_parse_error(self):
-        """tm_learn should handle LLM parse failures gracefully."""
-        from team_memory.services.llm_parser import LLMParseError
-
-        with (
-            patch("team_memory.server._get_service") as mock_get_service,
-            patch("team_memory.server._get_settings") as mock_get_settings,
-            patch("team_memory.server._get_db_url", return_value="sqlite+aiosqlite:///:memory:"),
-            patch("team_memory.server._resolve_project", return_value="default"),
-            patch(
-                "team_memory.services.llm_parser.parse_content",
-                new_callable=AsyncMock,
-                side_effect=LLMParseError("Connection refused"),
-            ),
-        ):
-            mock_service = MagicMock()
-            mock_get_service.return_value = mock_service
-
-            mock_settings_obj = MagicMock()
-            mock_settings_obj.llm = MagicMock()
-            mock_settings_obj.extraction = MagicMock(quality_gate=2, max_retries=1)
-            mock_get_settings.return_value = mock_settings_obj
-
-            tools = {t.name: t for t in await mcp.list_tools()}
-            learn_fn = tools["tm_learn"].fn
-            result = await learn_fn(conversation="some text")
+            fn = tools["memory_feedback"].fn
+            result = await fn(experience_id=str(uuid.uuid4()), rating=10)
 
         data = json.loads(result)
         assert data.get("error") is True
-        assert "Connection refused" in data["message"]
 
 
 # ============================================================
-# C2: tm_suggest tests
+# Token budget guard tests
 # ============================================================
 
 
-class TestTdSuggest:
-    """Test tm_suggest context-based recommendation tool."""
+class TestGuardOutput:
+    """Test the _guard_output token budget enforcement."""
+
+    def test_small_output_unchanged(self):
+        from team_memory.server import _guard_output
+
+        data = {"message": "ok", "results": [{"title": "A"}]}
+        raw = json.dumps(data)
+        result = _guard_output(raw, max_tokens=5000)
+        assert json.loads(result) == data
+
+    def test_large_output_truncates_results(self):
+        from team_memory.server import _guard_output
+
+        results = [{"title": f"Experience {i}", "solution": "x" * 3000} for i in range(10)]
+        data = {"message": "Found 10", "results": results}
+        raw = json.dumps(data, ensure_ascii=False)
+
+        result = _guard_output(raw, max_tokens=500)
+        parsed = json.loads(result)
+        assert len(parsed["results"]) < 10
+        assert parsed.get("truncated") is True
+
+    def test_removes_low_confidence_first(self):
+        from team_memory.server import _guard_output
+
+        results = [
+            {"title": "A", "confidence": "high", "solution": "good answer"},
+            {"title": "B", "confidence": "medium", "solution": "ok answer"},
+            {"title": "C", "confidence": "low", "solution": "x" * 5000},
+        ]
+        data = {"message": "Found 3", "results": results}
+        raw = json.dumps(data)
+
+        result = _guard_output(raw, max_tokens=200)
+        parsed = json.loads(result)
+        titles = [r["title"] for r in parsed["results"]]
+        assert "C" not in titles
+
+    def test_no_results_passthrough(self):
+        from team_memory.server import _guard_output
+
+        data = {"message": "No matches", "results": []}
+        raw = json.dumps(data)
+        result = _guard_output(raw, max_tokens=100)
+        assert json.loads(result) == data
+
+
+# ============================================================
+# Input validation: content length (H5)
+# ============================================================
+
+
+class TestMemorySaveContentLimit:
+    """Test memory_save rejects content that exceeds max_content_chars."""
 
     @pytest.mark.asyncio
-    async def test_suggest_builds_query_from_context(self):
-        """tm_suggest should build a query from file_path + language + framework."""
+    async def test_content_too_long_rejected(self):
+        """Content exceeding max_content_chars returns error."""
+        mock_settings = MagicMock()
+        mock_settings.mcp.max_content_chars = 100
+        mock_settings.mcp.max_tags = 20
+        mock_settings.mcp.max_tag_length = 50
+
         with (
-            patch("team_memory.server._get_service") as mock_get_service,
-            patch("team_memory.server.get_session") as mock_get_session,
+            patch(f"{_P}._get_service"),
+            patch(f"{_P}._get_settings", return_value=mock_settings),
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
         ):
-            mock_service = MagicMock()
-            mock_service.search = AsyncMock(return_value=[])
-            mock_get_service.return_value = mock_service
-
-            mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
             tools = {t.name: t for t in await mcp.list_tools()}
-            suggest_fn = tools["tm_suggest"].fn
-            await suggest_fn(
-                file_path="tests/test_auth.py",
-                language="python",
-                framework="pytest",
-            )
-
-        call_args = mock_service.search.call_args
-        query = call_args.kwargs.get("query", "")
-        # Should include directory hint + filename + language
-        assert "test" in query.lower()
-        assert "python" in query.lower()
-
-    @pytest.mark.asyncio
-    async def test_suggest_calls_search_with_context_query(self):
-        """tm_suggest with file_path should call search with context-derived query."""
-        with (
-            patch("team_memory.server._get_service") as mock_get_service,
-            patch("team_memory.server.get_session") as mock_get_session,
-            patch("team_memory.server._get_current_user", return_value="alice"),
-            patch("team_memory.server._resolve_project", return_value="default"),
-        ):
-            mock_service = MagicMock()
-            mock_service.search = AsyncMock(return_value=[])
-            mock_get_service.return_value = mock_service
-
-            mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            tools = {t.name: t for t in await mcp.list_tools()}
-            suggest_fn = tools["tm_suggest"].fn
-            await suggest_fn(file_path="src/team_memory/server.py")
-
-        call_kwargs = mock_service.search.call_args.kwargs
-        assert "query" in call_kwargs
-        assert "server.py" in call_kwargs["query"]
-        # tm_suggest does not take current_file_locations (only tm_search/tm_solve do)
-        assert call_kwargs.get("current_file_locations") is None
-
-    @pytest.mark.asyncio
-    async def test_suggest_no_context_error(self):
-        """tm_suggest with no context params should return error."""
-        tools = {t.name: t for t in await mcp.list_tools()}
-        suggest_fn = tools["tm_suggest"].fn
-        result = await suggest_fn()
+            fn = tools["memory_save"].fn
+            result = await fn(content="x" * 101)
 
         data = json.loads(result)
-        assert data["results"] == []
-        assert "No context" in data["message"]
+        assert data["error"] is True
+        assert "too long" in data["message"].lower()
 
     @pytest.mark.asyncio
-    async def test_suggest_returns_lightweight_format(self):
-        """tm_suggest results should be lightweight (no full solution text)."""
-        mock_results = [
-            {
-                "group_id": str(uuid.uuid4()),
-                "score": 0.75,
-                "confidence": "high",
-                "parent": {
-                    "id": str(uuid.uuid4()),
-                    "title": "Auth testing guide",
-                    "tags": ["pytest", "auth"],
-                    "solution": "Very long solution text..." * 100,
-                },
-                "children": [],
-                "total_children": 2,
-            }
-        ]
+    async def test_content_within_limit_passes(self):
+        """Content within max_content_chars proceeds to LLM parse."""
+        mock_parsed = {
+            "title": "Parsed",
+            "problem": "P",
+            "solution": "S",
+            "tags": [],
+        }
+        mock_result = {
+            "id": str(uuid.uuid4()),
+            "title": "Parsed",
+            "tags": [],
+            "exp_status": "draft",
+        }
+
+        mock_settings = MagicMock()
+        mock_settings.mcp.max_content_chars = 200_000
+        mock_settings.mcp.max_tags = 20
+        mock_settings.mcp.max_tag_length = 50
+        mock_settings.extraction = None
+        mock_settings.llm = MagicMock()
 
         with (
-            patch("team_memory.server._get_service") as mock_get_service,
-            patch("team_memory.server.get_session") as mock_get_session,
-        ):
-            mock_service = MagicMock()
-            mock_service.search = AsyncMock(return_value=mock_results)
-            mock_get_service.return_value = mock_service
-
-            mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            tools = {t.name: t for t in await mcp.list_tools()}
-            suggest_fn = tools["tm_suggest"].fn
-            result = await suggest_fn(error_message="AssertionError in test_auth")
-
-        data = json.loads(result)
-        assert len(data["results"]) == 1
-        suggestion = data["results"][0]
-        # Should have lightweight fields
-        assert "title" in suggestion
-        assert "tags" in suggestion
-        assert "score" in suggestion
-        assert "id" in suggestion
-        # Should NOT have full solution text
-        assert "solution" not in suggestion
-
-
-# ============================================================
-# LLM Parser tests
-# ============================================================
-
-
-class TestLLMParser:
-    """Test the shared llm_parser module."""
-
-    def test_extract_json_plain(self):
-        from team_memory.services.llm_parser import _extract_json
-
-        result = _extract_json('{"title": "test", "problem": "p"}')
-        assert result["title"] == "test"
-
-    def test_extract_json_with_markdown_wrapper(self):
-        from team_memory.services.llm_parser import _extract_json
-
-        text = '```json\n{"title": "test"}\n```'
-        result = _extract_json(text)
-        assert result["title"] == "test"
-
-    def test_extract_json_with_prefix(self):
-        from team_memory.services.llm_parser import _extract_json
-
-        text = 'Here is the result: {"title": "test"}'
-        result = _extract_json(text)
-        assert result["title"] == "test"
-
-    def test_extract_json_invalid_raises(self):
-        from team_memory.services.llm_parser import LLMParseError, _extract_json
-
-        with pytest.raises(LLMParseError):
-            _extract_json("not json at all")
-
-    def test_normalize_single(self):
-        from team_memory.services.llm_parser import _normalize_single
-
-        result = _normalize_single(
-            {
-                "title": " Fix bug ",
-                "problem": "crash",
-                "solution": "patch",
-                "tags": ["Python", " Docker "],
-            }
-        )
-        assert result["title"] == "Fix bug"
-        assert result["tags"] == ["python", "docker"]
-
-    def test_normalize_group(self):
-        from team_memory.services.llm_parser import _normalize_group
-
-        result = _normalize_group(
-            {
-                "parent": {"title": "Parent", "problem": "p", "solution": "s", "tags": []},
-                "children": [
-                    {"title": "Child1", "problem": "cp", "solution": "cs", "tags": ["go"]},
-                ],
-            }
-        )
-        assert result["parent"]["title"] == "Parent"
-        assert len(result["children"]) == 1
-        assert result["children"][0]["tags"] == ["go"]
-
-    @pytest.mark.asyncio
-    async def test_parse_personal_memory_returns_list(self):
-        """parse_personal_memory returns normalized list from LLM array response."""
-        from team_memory.services.llm_parser import parse_personal_memory
-
-        fake_response = {
-            "message": {
-                "content": '[{"content": "喜欢简洁回复", "scope": "generic", "context_hint": null}]'
-            }
-        }
-        resp = MagicMock()
-        resp.raise_for_status = MagicMock()
-        resp.json = MagicMock(return_value=fake_response)
-        mock_post = AsyncMock(return_value=resp)
-        client = MagicMock()
-        client.post = mock_post
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
-            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            result = await parse_personal_memory("User said: keep it short.", timeout=5.0)
-        assert len(result) == 1
-        assert result[0]["content"] == "喜欢简洁回复"
-        assert result[0]["scope"] == "generic"
-        assert result[0]["profile_kind"] == "static"
-        assert result[0]["context_hint"] is None
-
-    @pytest.mark.asyncio
-    async def test_parse_personal_memory_invalid_kind_uses_scope(self):
-        """Illegal profile_kind falls back from scope (T-B01)."""
-        from team_memory.services.llm_parser import parse_personal_memory
-
-        async def _run(json_content: str):
-            fake_response = {"message": {"content": json_content}}
-            resp = MagicMock()
-            resp.raise_for_status = MagicMock()
-            resp.json = MagicMock(return_value=fake_response)
-            client = MagicMock()
-            client.post = AsyncMock(return_value=resp)
-            with patch("httpx.AsyncClient") as mock_client_cls:
-                mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
-                mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-                return await parse_personal_memory("x", timeout=5.0)
-
-        r1 = await _run('[{"content": "a", "scope": "generic", "profile_kind": "bogus"}]')
-        assert r1[0]["profile_kind"] == "static"
-        r2 = await _run('[{"content": "b", "scope": "context", "profile_kind": "invalid"}]')
-        assert r2[0]["profile_kind"] == "dynamic"
-        assert r2[0]["scope"] == "context"
-
-    @pytest.mark.asyncio
-    async def test_parse_personal_memory_explicit_dynamic_kind(self):
-        from team_memory.services.llm_parser import parse_personal_memory
-
-        fake_response = {
-            "message": {
-                "content": (
-                    '[{"content": "current task focus", '
-                    '"scope": "generic", "profile_kind": "dynamic", '
-                    '"context_hint": null}]'
-                )
-            }
-        }
-        resp = MagicMock()
-        resp.raise_for_status = MagicMock()
-        resp.json = MagicMock(return_value=fake_response)
-        client = MagicMock()
-        client.post = AsyncMock(return_value=resp)
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
-            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            result = await parse_personal_memory("x", timeout=5.0)
-        assert len(result) == 1
-        assert result[0]["profile_kind"] == "dynamic"
-        assert result[0]["scope"] == "context"
-
-    @pytest.mark.asyncio
-    async def test_parse_personal_memory_on_error_returns_empty(self):
-        """parse_personal_memory returns [] on timeout/connection error (no raise)."""
-        import httpx
-
-        from team_memory.services.llm_parser import parse_personal_memory
-
-        client = MagicMock()
-        client.post = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
-            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            result = await parse_personal_memory("some text", timeout=1.0)
-        assert result == []
-
-
-# ============================================================
-# Personal memory extraction (Task 3) — tm_learn side path
-# ============================================================
-
-
-class TestTryExtractAndSavePersonalMemory:
-    """Test _try_extract_and_save_personal_memory (no block on failure)."""
-
-    @pytest.mark.asyncio
-    async def test_skips_when_anonymous(self):
-        """Anonymous user: no parse call, no write."""
-        from team_memory.server import _try_extract_and_save_personal_memory
-
-        with patch(
-            "team_memory.services.llm_parser.parse_personal_memory",
-            new_callable=AsyncMock,
-        ) as mock_parse:
-            await _try_extract_and_save_personal_memory(
-                "conversation", user=None, settings=MagicMock()
-            )
-            await _try_extract_and_save_personal_memory(
-                "conversation", user="anonymous", settings=MagicMock()
-            )
-            mock_parse.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_writes_when_logged_in_and_items_returned(self):
-        """Logged-in user and parse returns items: PersonalMemoryService.write called."""
-        from team_memory.server import _try_extract_and_save_personal_memory
-
-        items = [
-            {"content": "喜欢简洁回复", "scope": "generic", "context_hint": None},
-        ]
-        mock_write = AsyncMock(return_value={"id": "1", "content": "喜欢简洁回复"})
-        mock_pm_svc = MagicMock()
-        mock_pm_svc.write = mock_write
-        settings = MagicMock()
-        settings.llm = MagicMock()
-        with (
+            patch(f"{_P}._get_service") as mock_get_service,
+            patch(f"{_P}._get_settings", return_value=mock_settings),
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_P}.get_session") as mock_get_session,
             patch(
-                "team_memory.services.llm_parser.parse_personal_memory",
+                "team_memory.services.llm_parser.parse_content",
                 new_callable=AsyncMock,
-                return_value=items,
+                return_value=mock_parsed,
             ),
-            patch("team_memory.bootstrap.get_context") as mock_ctx,
-            patch(
-                "team_memory.services.personal_memory.PersonalMemoryService",
-                return_value=mock_pm_svc,
-            ),
+            _patch_personal(),
         ):
-            mock_ctx.return_value.embedding = MagicMock()
-            mock_ctx.return_value.db_url = "sqlite:///"
-            await _try_extract_and_save_personal_memory(
-                "user said: keep answers short.", user="user-1", settings=settings
+            mock_service = MagicMock()
+            mock_service.save = AsyncMock(return_value=mock_result)
+            mock_get_service.return_value = mock_service
+
+            mock_session = AsyncMock()
+            mock_get_session.return_value.__aenter__ = AsyncMock(
+                return_value=mock_session,
             )
-        mock_write.assert_called_once()
-        call_kw = mock_write.call_args.kwargs
-        assert call_kw["user_id"] == "user-1"
-        assert call_kw["content"] == "喜欢简洁回复"
-        assert call_kw["scope"] == "generic"
-        assert call_kw["profile_kind"] == "static"
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_save"].fn
+            result = await fn(content="Valid content under limit")
+
+        data = json.loads(result)
+        assert "data" in data
 
 
 # ============================================================
-# io_logger integration in track_usage (LOG_IO_ENABLED=1)
+# Input validation: tags in MCP (M6)
 # ============================================================
 
 
-class TestTrackUsageIoLogger:
-    """When LOG_IO_ENABLED=1, track_usage should call io_logger.log_mcp_io."""
+class TestMemorySaveTagsValidation:
+    """Test memory_save rejects invalid tags."""
 
     @pytest.mark.asyncio
-    async def test_io_logger_called_when_enabled(self):
-        """With io_logger enabled, calling a tm_ tool invokes log_mcp_io."""
+    async def test_too_many_tags_rejected(self):
+        """More than max_tags returns error."""
+        mock_settings = MagicMock()
+        mock_settings.mcp.max_content_chars = 200_000
+        mock_settings.mcp.max_tags = 5
+        mock_settings.mcp.max_tag_length = 50
+
         with (
-            patch("team_memory.server.io_logger.is_io_enabled", return_value=True),
-            patch("team_memory.server.io_logger.log_mcp_io") as mock_log,
+            patch(f"{_P}._get_service"),
+            patch(f"{_P}._get_settings", return_value=mock_settings),
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
         ):
             tools = {t.name: t for t in await mcp.list_tools()}
-            feedback_fn = tools["tm_feedback"].fn
-            await feedback_fn(
-                experience_id=str(uuid.uuid4()),
-                rating=0,
+            fn = tools["memory_save"].fn
+            result = await fn(
+                title="T",
+                problem="P",
+                tags=["a", "b", "c", "d", "e", "f"],
             )
 
-            assert mock_log.call_count > 0
+        data = json.loads(result)
+        assert data["error"] is True
+        assert "too many tags" in data["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_tag_too_long_rejected(self):
+        """Tag exceeding max_tag_length returns error."""
+        mock_settings = MagicMock()
+        mock_settings.mcp.max_content_chars = 200_000
+        mock_settings.mcp.max_tags = 20
+        mock_settings.mcp.max_tag_length = 10
+
+        with (
+            patch(f"{_P}._get_service"),
+            patch(f"{_P}._get_settings", return_value=mock_settings),
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+        ):
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_save"].fn
+            result = await fn(
+                title="T",
+                problem="P",
+                tags=["this_tag_is_way_too_long"],
+            )
+
+        data = json.loads(result)
+        assert data["error"] is True
+        assert "tag too long" in data["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_valid_tags_pass(self):
+        """Tags within limits proceed to save."""
+        mock_result = {
+            "id": str(uuid.uuid4()),
+            "title": "T",
+            "exp_status": "published",
+        }
+        mock_settings = MagicMock()
+        mock_settings.mcp.max_content_chars = 200_000
+        mock_settings.mcp.max_tags = 20
+        mock_settings.mcp.max_tag_length = 50
+
+        with (
+            patch(f"{_P}._get_service") as mock_get_service,
+            patch(f"{_P}._get_settings", return_value=mock_settings),
+            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_P}.get_session") as mock_get_session,
+        ):
+            mock_service = MagicMock()
+            mock_service.save = AsyncMock(return_value=mock_result)
+            mock_get_service.return_value = mock_service
+
+            mock_session = AsyncMock()
+            mock_get_session.return_value.__aenter__ = AsyncMock(
+                return_value=mock_session,
+            )
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_save"].fn
+            result = await fn(
+                title="T",
+                problem="P",
+                tags=["python", "testing"],
+            )
+
+        data = json.loads(result)
+        assert "data" in data
+        mock_service.save.assert_called_once()

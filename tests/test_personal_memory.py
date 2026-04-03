@@ -207,7 +207,7 @@ async def test_pull_generic_only_and_generic_plus_context(engine, session, mock_
     )
     await session.commit()
 
-    db_url = str(engine.url)
+    db_url = engine.url.render_as_string(hide_password=False)
     svc = PersonalMemoryService(embedding_provider=mock_embedding, db_url=db_url)
 
     # No current_context: only generic
@@ -231,7 +231,7 @@ async def test_pull_generic_only_and_generic_plus_context(engine, session, mock_
 @pytest.mark.asyncio
 async def test_personal_memory_service_write_and_list(engine, mock_embedding):
     """Service write() computes embedding and upserts; list_by_user returns items."""
-    db_url = str(engine.url)
+    db_url = engine.url.render_as_string(hide_password=False)
     svc = PersonalMemoryService(embedding_provider=mock_embedding, db_url=db_url)
 
     out = await svc.write(

@@ -61,11 +61,9 @@ Repository = "https://github.com/ysydhc/team_memory"
 Issues = "https://github.com/ysydhc/team_memory/issues"
 
 [project.scripts]
-# Default CLI is Lite MCP; legacy full MCP for migration only.
-team-memory = "team_memory.server_lite:main"
-team-memory-full = "team_memory.server:main"
-team-memory-lite = "team_memory.server_lite:main"
+team-memory = "team_memory.server:main"
 team-memory-web = "team_memory.web.app:main"
+tm-cli = "team_memory.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/team_memory"]

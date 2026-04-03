@@ -3217,6 +3217,23 @@
       stroke-linejoin: round;
     }
 
+    /* ===== Archive L0/L1/L2 layout ===== */
+    .arch-content-type-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; background: #e3f2fd; color: #1565c0; margin-right: 8px; vertical-align: middle; }
+    .arch-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+    .arch-tag { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 0.7rem; background: var(--bg-elevated, #f5f5f5); color: var(--text-secondary, #616161); }
+    .arch-value-summary { color: var(--text-muted, #666); font-style: italic; margin: 4px 0 8px; font-size: 13px; }
+    .archive-section { margin: 16px 0; border: 1px solid var(--border, #e0e0e0); border-radius: 8px; overflow: hidden; }
+    .archive-section-header { padding: 8px 16px; background: var(--bg-elevated, #fafafa); cursor: pointer; font-weight: 600; display: flex; justify-content: space-between; align-items: center; font-size: 14px; user-select: none; }
+    .archive-section-header:hover { background: var(--bg-card-hover, #f0f0f0); }
+    .archive-section-body { padding: 16px; }
+    .archive-section-body.collapsed { display: none; }
+    .md-table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+    .md-table th, .md-table td { border: 1px solid var(--border, #ddd); padding: 6px 12px; text-align: left; font-size: 13px; }
+    .md-table th { background: var(--bg-elevated, #f5f5f5); font-weight: 600; }
+    .archive-section-body h2, .archive-section-body h3, .archive-section-body h4 { margin: 12px 0 6px; }
+    .archive-section-body ul { padding-left: 20px; margin: 4px 0; }
+    .archive-section-body p { margin: 6px 0; line-height: 1.6; }
+
     @media (prefers-reduced-motion: reduce) {
 
       *,
@@ -3410,8 +3427,8 @@
               <input type="number" id="search-min-similarity" placeholder="默认" min="0" max="1" step="0.05">
             </div>
             <div class="form-group" style="margin-bottom:0">
-              <label>PageIndex-Lite <span class="hint">(Web 检索未接开关；见 MCP tm_search)</span></label>
-              <select id="search-use-pageindex" disabled title="当前 Web /search 请求未携带此参数；请用 tm_search(use_pageindex_lite=...) 或后续版本接入">
+              <label>PageIndex-Lite <span class="hint">(Web 检索未接开关；档案长文档侧由后端与配置控制)</span></label>
+              <select id="search-use-pageindex" disabled title="当前 Web /search 请求未接此开关；与档案/PageIndex-Lite 相关的检索以后端实现为准">
                 <option value="">默认（配置项）</option>
                 <option value="true">启用</option>
                 <option value="false">禁用</option>

@@ -109,22 +109,6 @@ web:
   port: 9111
 
 # -----------------------------------------------------------------------------
-# installable_catalog — 可安装 Rules / Prompts / Skills 目录与注册表
-# -----------------------------------------------------------------------------
-# sources: local 读本地目录；registry 需配置 registry_manifest_url
-# local_base_dir: 相对仓库根；内置清单与压缩包来源
-# target_*: 安装目标目录（Cursor 规则常用 .cursor 下路径）
-# target_skills_dir: Skills 安装目录（与 MCP tm_skill_manage 等配合）
-installable_catalog:
-  sources: ["local"]
-  local_base_dir: "docs/res"
-  registry_manifest_url: ""
-  target_rules_dir: ".cursor/rules"
-  target_prompts_dir: ".cursor/prompts"
-  target_skills_dir: ".cursor/skills"
-  request_timeout_seconds: 8
-
-# -----------------------------------------------------------------------------
 # retrieval — 检索结果裁剪与上下文预算（偏向「返回给模型多少条、多少子节点」）
 # -----------------------------------------------------------------------------
 # max_tokens: 返回正文总 token 上限；null 表示不按 token 截断（仍可能受 mcp 层限制）
@@ -249,17 +233,6 @@ mcp:
 #   log_io_detail: mcp
 #   log_file_enabled: false
 #   log_file_path: logs/team_memory.log
-
-# -----------------------------------------------------------------------------
-# webhooks — 事件 HTTP 回调（经验变更等，列表为空表示不启用）
-# -----------------------------------------------------------------------------
-# 每项: url, events[], secret, active
-# webhooks:
-#   - url: "https://hooks.example.com/team-memory"
-#     events: ["experience.created"]
-#     secret: "${WEBHOOK_SECRET}"
-#     active: true
-webhooks: []
 
 # -----------------------------------------------------------------------------
 # tag_synonyms — 检索/保存时标签规范化（缩写 → 全称）

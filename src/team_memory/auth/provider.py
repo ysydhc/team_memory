@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import hmac as _hmac
 import logging
+import os
 import secrets
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -15,6 +17,29 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("team_memory.auth")
+
+_KEY_HASH_SECRET_WARNED = False
+
+
+def _get_key_hash_secret() -> str:
+    """Resolve the HMAC secret for API key hashing.
+
+    Priority: env var > config > empty string (fallback to plain SHA256).
+    An empty return value means no HMAC secret is configured; callers should
+    fall back to plain SHA256 for backward compatibility but log a warning.
+    """
+    env_secret = os.environ.get("TEAM_MEMORY_KEY_HASH_SECRET", "")
+    if env_secret:
+        return env_secret
+    try:
+        from team_memory.config.settings import get_settings
+
+        settings = get_settings()
+        if settings.auth.key_hash_secret:
+            return settings.auth.key_hash_secret
+    except Exception:
+        pass
+    return ""
 
 
 @dataclass
@@ -47,7 +72,7 @@ class NoAuth(AuthProvider):
     """No authentication — always returns a default user."""
 
     async def authenticate(self, credentials: dict) -> User | None:
-        return User(name="anonymous", role="admin")
+        return User(name="anonymous", role="viewer")
 
 
 class ApiKeyAuth(AuthProvider):
@@ -58,7 +83,24 @@ class ApiKeyAuth(AuthProvider):
 
     @staticmethod
     def hash_key(api_key: str) -> str:
-        return hashlib.sha256(api_key.encode()).hexdigest()
+        """Hash an API key for storage/lookup.
+
+        Uses HMAC-SHA256 when TEAM_MEMORY_KEY_HASH_SECRET (or config
+        auth.key_hash_secret) is set, preventing rainbow-table attacks.
+        Falls back to plain SHA256 for backward compatibility when no
+        secret is configured (with a one-time warning at startup).
+        """
+        global _KEY_HASH_SECRET_WARNED  # noqa: PLW0603
+        secret = _get_key_hash_secret()
+        if not secret:
+            if not _KEY_HASH_SECRET_WARNED:
+                logger.warning(
+                    "TEAM_MEMORY_KEY_HASH_SECRET is not set; using plain SHA256 "
+                    "for API key hashing. Set the secret to enable HMAC-SHA256."
+                )
+                _KEY_HASH_SECRET_WARNED = True
+            return hashlib.sha256(api_key.encode()).hexdigest()
+        return _hmac.new(secret.encode(), api_key.encode(), hashlib.sha256).hexdigest()
 
     def register_key(self, api_key: str, user_name: str, role: str = "member") -> None:
         key_hash = self.hash_key(api_key)
@@ -76,6 +118,7 @@ class ApiKeyAuth(AuthProvider):
 # Password hashing helpers
 # ---------------------------------------------------------------------------
 
+
 def _hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
@@ -88,7 +131,7 @@ class DbApiKeyAuth(ApiKeyAuth):
     """API Key auth with database persistence and password support.
 
     Supports two authentication paths:
-      1. API Key (SHA256 hash) — in-memory first, then DB fallback
+      1. API Key (HMAC-SHA256 hash, or plain SHA256 fallback) — in-memory first, then DB
       2. Username + password (bcrypt) — DB lookup
     """
 
@@ -137,7 +180,7 @@ class DbApiKeyAuth(ApiKeyAuth):
                     self._keys[key_hash] = user
                     return user
         except Exception:
-            logger.warning("DB API key lookup failed", exc_info=True)
+            logger.error("DB API key lookup failed", exc_info=True)
         return None
 
     async def _db_password_lookup(self, username: str, password: str) -> User | None:
@@ -149,9 +192,7 @@ class DbApiKeyAuth(ApiKeyAuth):
             from team_memory.storage.models import ApiKey
 
             async with get_session(self._db_url) as session:
-                result = await session.execute(
-                    select(ApiKey).where(ApiKey.user_name == username)
-                )
+                result = await session.execute(select(ApiKey).where(ApiKey.user_name == username))
                 db_key = result.scalar_one_or_none()
                 if db_key is None:
                     return None
@@ -177,9 +218,7 @@ class DbApiKeyAuth(ApiKeyAuth):
             from team_memory.storage.models import ApiKey
 
             async with get_session(self._db_url) as session:
-                result = await session.execute(
-                    select(ApiKey).where(ApiKey.user_name == username)
-                )
+                result = await session.execute(select(ApiKey).where(ApiKey.user_name == username))
                 db_key = result.scalar_one_or_none()
                 if db_key is None:
                     return "not_found"
@@ -201,9 +240,7 @@ class DbApiKeyAuth(ApiKeyAuth):
         from team_memory.storage.models import ApiKey
 
         async with get_session(self._db_url) as session:
-            existing = await session.execute(
-                select(ApiKey).where(ApiKey.user_name == username)
-            )
+            existing = await session.execute(select(ApiKey).where(ApiKey.user_name == username))
             if existing.scalar_one_or_none() is not None:
                 raise ValueError(f"用户名 '{username}' 已存在")
 
@@ -251,9 +288,7 @@ class DbApiKeyAuth(ApiKeyAuth):
         await session.flush()
 
         if db_key.key_hash:
-            self._keys[db_key.key_hash] = User(
-                name=db_key.user_name, role=db_key.role
-            )
+            self._keys[db_key.key_hash] = User(name=db_key.user_name, role=db_key.role)
         return {
             "id": db_key.id,
             "user_name": db_key.user_name,
@@ -280,9 +315,7 @@ class DbApiKeyAuth(ApiKeyAuth):
 
         from team_memory.storage.models import ApiKey
 
-        existing = await session.execute(
-            select(ApiKey).where(ApiKey.user_name == user_name)
-        )
+        existing = await session.execute(select(ApiKey).where(ApiKey.user_name == user_name))
         if existing.scalar_one_or_none() is not None:
             raise ValueError(f"用户名 '{user_name}' 已存在")
 
@@ -324,9 +357,7 @@ class DbApiKeyAuth(ApiKeyAuth):
     # ------------------------------------------------------------------
     # Generate API key for user without key (admin action)
     # ------------------------------------------------------------------
-    async def generate_key_for_user_db(
-        self, session: "AsyncSession", key_id: int
-    ) -> dict:
+    async def generate_key_for_user_db(self, session: "AsyncSession", key_id: int) -> dict:
         """Generate API key for a user who has no key_hash. Returns api_key once only."""
         from sqlalchemy import select
 
@@ -346,9 +377,7 @@ class DbApiKeyAuth(ApiKeyAuth):
         db_key.key_suffix = raw_key[-min(4, n) :] if n else None
         await session.flush()
 
-        self._keys[db_key.key_hash] = User(
-            name=db_key.user_name, role=db_key.role
-        )
+        self._keys[db_key.key_hash] = User(name=db_key.user_name, role=db_key.role)
         return {"api_key": raw_key}
 
     # ------------------------------------------------------------------
@@ -359,9 +388,7 @@ class DbApiKeyAuth(ApiKeyAuth):
 
         from team_memory.storage.models import ApiKey
 
-        result = await session.execute(
-            select(ApiKey).order_by(ApiKey.created_at.desc())
-        )
+        result = await session.execute(select(ApiKey).order_by(ApiKey.created_at.desc()))
         keys = result.scalars().all()
         return [
             {
@@ -403,9 +430,7 @@ class DbApiKeyAuth(ApiKeyAuth):
         )
         return result.first() is not None
 
-    async def update_password_db(
-        self, username: str, old_password: str, new_password: str
-    ) -> bool:
+    async def update_password_db(self, username: str, old_password: str, new_password: str) -> bool:
         """Update a user's password after verifying the old one."""
         from sqlalchemy import select
 
@@ -413,9 +438,7 @@ class DbApiKeyAuth(ApiKeyAuth):
         from team_memory.storage.models import ApiKey
 
         async with get_session(self._db_url) as session:
-            result = await session.execute(
-                select(ApiKey).where(ApiKey.user_name == username)
-            )
+            result = await session.execute(select(ApiKey).where(ApiKey.user_name == username))
             db_key = result.scalar_one_or_none()
             if db_key is None:
                 return False
@@ -460,9 +483,7 @@ class DbApiKeyAuth(ApiKeyAuth):
         from team_memory.storage.models import ApiKey
 
         async with get_session(self._db_url) as session:
-            result = await session.execute(
-                select(ApiKey).where(ApiKey.user_name == username)
-            )
+            result = await session.execute(select(ApiKey).where(ApiKey.user_name == username))
             db_key = result.scalar_one_or_none()
             if db_key is None:
                 return False
@@ -470,10 +491,48 @@ class DbApiKeyAuth(ApiKeyAuth):
             await session.flush()
             return True
 
+    # ------------------------------------------------------------------
+    # Key rotation (self-service)
+    # ------------------------------------------------------------------
+    async def rotate_key_for_user_db(self, username: str) -> dict:
+        """Regenerate the API key for *username*.
 
-def create_auth_provider(
-    auth_type: str, db_url: str | None = None
-) -> AuthProvider:
+        Invalidates the old key_hash in-memory cache and DB, generates a
+        new random key, and returns the plaintext key (shown only once).
+        """
+        from sqlalchemy import select
+
+        from team_memory.storage.database import get_session
+        from team_memory.storage.models import ApiKey
+
+        async with get_session(self._db_url) as session:
+            result = await session.execute(
+                select(ApiKey).where(
+                    ApiKey.user_name == username,
+                    ApiKey.is_active == True,  # noqa: E712
+                )
+            )
+            db_key = result.scalar_one_or_none()
+            if db_key is None:
+                raise ValueError("Active user not found")
+
+            # Evict old hash from in-memory cache
+            if db_key.key_hash:
+                self._keys.pop(db_key.key_hash, None)
+
+            raw_key = secrets.token_hex(32)
+            new_hash = self.hash_key(raw_key)
+            db_key.key_hash = new_hash
+            n = len(raw_key)
+            db_key.key_prefix = raw_key[: min(4, n)]
+            db_key.key_suffix = raw_key[-min(4, n) :]
+            await session.flush()
+
+            self._keys[new_hash] = User(name=db_key.user_name, role=db_key.role)
+            return {"api_key": raw_key}
+
+
+def create_auth_provider(auth_type: str, db_url: str | None = None) -> AuthProvider:
     """Factory function to create an auth provider."""
     if auth_type == "none":
         return NoAuth()

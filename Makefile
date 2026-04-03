@@ -22,7 +22,7 @@ ALEMBIC ?= $(shell \
 	else echo alembic; fi)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp mcp-full test lint lint-fix lint-js harness-check harness-doc-check harness-plan-check verify verify-web backup health clean migrate migrate-fts install-knowledge release-9111 hooks-install
+.PHONY: help setup dev web mcp test lint lint-fix lint-js harness-check harness-doc-check doc-harness-config-check verify verify-web backup health clean migrate migrate-fts install-knowledge release-9111 hooks-install
 
 help:           ## 显示所有可用命令
 	@echo ""
@@ -61,8 +61,7 @@ setup:          ## 首次安装：启动 Docker + 安装依赖 + 初始化数据
 	@echo ""
 	@echo "  ✔ Setup complete!"
 	@echo "  Run 'make web' to start the Web UI."
-	@echo "  Run 'make mcp' to start the Lite MCP server (memory_* tools)."
-	@echo "  Run 'make mcp-full' only if you still need legacy tm_* tools (deprecated)."
+	@echo "  Run 'make mcp' to start the MCP server (memory_* tools)."
 	@echo "  If Ollama is unavailable, set embedding.provider to openai in config for embedding."
 	@echo ""
 
@@ -76,10 +75,7 @@ web:            ## 仅启动 Web 管理界面（默认端口 9111）；自动释
 	@$(MAKE) -s release-9111 || true
 	python -m team_memory.web.app
 
-mcp:            ## 启动 Lite MCP（memory_save / recall / context / feedback）
-	python -m team_memory.server_lite
-
-mcp-full:       ## 启动完整 MCP（tm_*，遗留；计划移除，见 ops/mcp-lite-default.md）
+mcp:            ## 启动 MCP（memory_save / recall / context / get_archive / feedback）
 	python -m team_memory.server
 
 test:           ## 运行全部测试（默认 uv / .venv 中的 pytest）
@@ -110,14 +106,15 @@ lint-js:        ## Web 前端 JS 检查：重复声明、语法类问题
 harness-doc-check:  ## Doc gardening：扫描 docs/design-docs、docs/exec-plans 链接与 deprecated 引用
 	python scripts/harness_doc_gardening.py
 
-harness-plan-check:  ## Plan 结构检查：扫描 exec-plans 下 wait/executing/completed 主题目录
-	python scripts/harness_plan_structure_check.py
+doc-harness-config-check:  ## 校验 doc-harness.project.yaml 必填键与引用的文件存在
+	python scripts/check_doc_harness_config.py
 
-harness-check:  ## Harness 门禁：import 方向检查 + ruff + lint-js + harness_ref_verify
+harness-check:  ## Harness 门禁：import 方向检查 + ruff + lint-js + harness_ref_verify + doc-harness 配置
 	python scripts/harness_import_check.py
 	$(MAKE) lint
 	$(MAKE) lint-js
 	./scripts/harness_ref_verify.sh
+	$(MAKE) doc-harness-config-check
 
 verify:         ## 标准验收：lint + 全量测试
 	@$(MAKE) lint

@@ -8,6 +8,7 @@ import {
     applyProjectPlaceholders,
     resolveProjectInput,
 } from './schema.js';
+import { esc } from './utils.js';
 import * as pages from './pages.js';
 import * as components from './components.js';
 
@@ -210,7 +211,7 @@ function populateProjectSwitcher() {
         const pageKey = containerId.replace('page-', '').replace('-projects', '');
         let html = `<div class="proj-opt selected" data-value="__all__" onclick="toggleProjectOpt(this,'${pageKey}')"><span class="proj-check">✓</span><span>全部项目</span></div>`;
         projects.forEach(p => {
-            html += `<div class="proj-opt" data-value="${p}" onclick="toggleProjectOpt(this,'${pageKey}')"><span class="proj-check">✓</span><span>${p}</span></div>`;
+            html += `<div class="proj-opt" data-value="${esc(p)}" onclick="toggleProjectOpt(this,'${pageKey}')"><span class="proj-check">✓</span><span>${esc(p)}</span></div>`;
         });
         dropdown.innerHTML = html;
         updateProjectTrigger(containerId, pageKey);
@@ -276,11 +277,11 @@ function updateProjectTrigger(containerId, pageKey) {
         if (tagsEl) tagsEl.innerHTML = '';
     } else if (selected.length <= 2) {
         if (label) label.textContent = '';
-        if (tagsEl) tagsEl.innerHTML = selected.map(p => `<span class="proj-tag">${p}</span>`).join('');
+        if (tagsEl) tagsEl.innerHTML = selected.map(p => `<span class="proj-tag">${esc(p)}</span>`).join('');
     } else {
         if (label) label.textContent = '';
         if (tagsEl) {
-            tagsEl.innerHTML = selected.slice(0, 2).map(p => `<span class="proj-tag">${p}</span>`).join('')
+            tagsEl.innerHTML = selected.slice(0, 2).map(p => `<span class="proj-tag">${esc(p)}</span>`).join('')
                 + `<span class="proj-tag">+${selected.length - 2}</span>`;
         }
     }

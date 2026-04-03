@@ -5,7 +5,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from team_memory.auth.init_admin import ensure_default_admin, is_api_keys_empty
-from team_memory.auth.provider import ApiKeyAuth, DbApiKeyAuth, NoAuth, create_auth_provider
+from team_memory.auth.provider import (
+    ApiKeyAuth,
+    DbApiKeyAuth,
+    NoAuth,
+    _get_key_hash_secret,
+    create_auth_provider,
+)
 
 
 class TestNoAuth:
@@ -17,7 +23,7 @@ class TestNoAuth:
         user = await auth.authenticate({})
         assert user is not None
         assert user.name == "anonymous"
-        assert user.role == "admin"
+        assert user.role == "viewer"
 
     @pytest.mark.asyncio
     async def test_ignores_credentials(self):
@@ -105,9 +111,7 @@ class TestDbApiKeyAuthKeyHashGuard:
         mock_session.execute = AsyncMock(return_value=mock_result)
         mock_session.flush = AsyncMock()
 
-        result = await auth.approve_user_db(
-            mock_session, key_id=1, generate_key=False
-        )
+        result = await auth.approve_user_db(mock_session, key_id=1, generate_key=False)
         assert result["api_key"] is None
         assert result["is_active"] is True
         assert result["user_name"] == "alice"
@@ -238,3 +242,221 @@ class TestEnsureDefaultAdmin:
         with patch("team_memory.storage.database.get_session", side_effect=mock_get_session):
             empty = await is_api_keys_empty("sqlite+aiosqlite:///:memory:")
         assert empty is False
+
+    @pytest.mark.asyncio
+    async def test_ensure_default_admin_custom_username(self):
+        """When TEAM_MEMORY_DEFAULT_ADMIN is set, uses that username."""
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = 0
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.add = MagicMock()
+        mock_session.flush = AsyncMock()
+
+        def mock_get_session(_db_url):
+            cm = AsyncMock()
+            cm.__aenter__ = AsyncMock(return_value=mock_session)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        with (
+            patch("team_memory.storage.database.get_session", side_effect=mock_get_session),
+            patch.dict("os.environ", {"TEAM_MEMORY_DEFAULT_ADMIN": "superadmin"}),
+        ):
+            created = await ensure_default_admin("sqlite+aiosqlite:///:memory:", "secret123")
+        assert created is True
+        added = mock_session.add.call_args[0][0]
+        assert added.user_name == "superadmin"
+        assert added.role == "admin"
+
+
+class TestHmacKeyHashing:
+    """Test HMAC-SHA256 key hashing with server secret."""
+
+    def test_hash_key_plain_sha256_without_secret(self):
+        """Without TEAM_MEMORY_KEY_HASH_SECRET, falls back to plain SHA256."""
+        import hashlib
+
+        with patch.dict("os.environ", {}, clear=False):
+            # Ensure env var is absent
+            import os
+
+            os.environ.pop("TEAM_MEMORY_KEY_HASH_SECRET", None)
+            with patch("team_memory.auth.provider._get_key_hash_secret", return_value=""):
+                result = ApiKeyAuth.hash_key("test_key")
+                expected = hashlib.sha256(b"test_key").hexdigest()
+                assert result == expected
+
+    def test_hash_key_hmac_sha256_with_secret(self):
+        """With TEAM_MEMORY_KEY_HASH_SECRET set, uses HMAC-SHA256."""
+        import hashlib
+        import hmac
+
+        secret = "my-server-secret"
+        with patch("team_memory.auth.provider._get_key_hash_secret", return_value=secret):
+            result = ApiKeyAuth.hash_key("test_key")
+            expected = hmac.new(secret.encode(), b"test_key", hashlib.sha256).hexdigest()
+            assert result == expected
+
+    def test_hmac_hash_differs_from_plain_sha256(self):
+        """HMAC hash is different from plain SHA256 for the same input."""
+        import hashlib
+
+        secret = "some-secret"
+        with patch("team_memory.auth.provider._get_key_hash_secret", return_value=secret):
+            hmac_result = ApiKeyAuth.hash_key("test_key")
+        plain_sha256 = hashlib.sha256(b"test_key").hexdigest()
+        assert hmac_result != plain_sha256
+
+    def test_hmac_hash_is_deterministic(self):
+        """Same secret + same key = same hash (deterministic for DB lookup)."""
+        secret = "stable-secret"
+        with patch("team_memory.auth.provider._get_key_hash_secret", return_value=secret):
+            h1 = ApiKeyAuth.hash_key("my_api_key")
+            h2 = ApiKeyAuth.hash_key("my_api_key")
+        assert h1 == h2
+
+    def test_hmac_hash_different_secrets_produce_different_hashes(self):
+        """Different secrets produce different hashes for the same key."""
+        with patch("team_memory.auth.provider._get_key_hash_secret", return_value="secret-A"):
+            h_a = ApiKeyAuth.hash_key("same_key")
+        with patch("team_memory.auth.provider._get_key_hash_secret", return_value="secret-B"):
+            h_b = ApiKeyAuth.hash_key("same_key")
+        assert h_a != h_b
+
+    def test_get_key_hash_secret_from_env(self):
+        """_get_key_hash_secret reads TEAM_MEMORY_KEY_HASH_SECRET env var."""
+        with patch.dict("os.environ", {"TEAM_MEMORY_KEY_HASH_SECRET": "env-secret"}):
+            assert _get_key_hash_secret() == "env-secret"
+
+    def test_get_key_hash_secret_empty_when_not_set(self):
+        """Returns empty string when no secret is configured anywhere."""
+        import os
+
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("TEAM_MEMORY_KEY_HASH_SECRET", None)
+            with patch(
+                "team_memory.config.settings.get_settings",
+                side_effect=Exception("no config"),
+            ):
+                assert _get_key_hash_secret() == ""
+
+    @pytest.mark.asyncio
+    async def test_register_and_authenticate_with_hmac(self):
+        """ApiKeyAuth register + authenticate works with HMAC hashing."""
+        secret = "integration-secret"
+        with patch("team_memory.auth.provider._get_key_hash_secret", return_value=secret):
+            auth = ApiKeyAuth()
+            auth.register_key("my-key", "alice", "admin")
+            user = await auth.authenticate({"api_key": "my-key"})
+            assert user is not None
+            assert user.name == "alice"
+
+            # Wrong key should fail
+            no_user = await auth.authenticate({"api_key": "wrong-key"})
+            assert no_user is None
+
+
+class TestRotateKeyForUserDb:
+    """Test DbApiKeyAuth.rotate_key_for_user_db."""
+
+    @pytest.mark.asyncio
+    async def test_rotate_key_success(self):
+        """rotate_key_for_user_db generates new key and evicts old cache."""
+        auth = DbApiKeyAuth(db_url="sqlite+aiosqlite:///:memory:", keys={})
+        old_hash = "old_hash_value"
+        # Pre-populate in-memory cache with old hash
+        auth._keys[old_hash] = MagicMock(name="alice", role="editor")
+
+        mock_db_key = MagicMock()
+        mock_db_key.user_name = "alice"
+        mock_db_key.role = "editor"
+        mock_db_key.key_hash = old_hash
+        mock_db_key.key_prefix = "abcd"
+        mock_db_key.key_suffix = "efgh"
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_db_key
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.flush = AsyncMock()
+
+        def mock_get_session(_db_url):
+            cm = AsyncMock()
+            cm.__aenter__ = AsyncMock(return_value=mock_session)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        with patch("team_memory.storage.database.get_session", side_effect=mock_get_session):
+            result = await auth.rotate_key_for_user_db("alice")
+
+        assert "api_key" in result
+        raw_key = result["api_key"]
+        assert len(raw_key) == 64  # secrets.token_hex(32) = 64 hex chars
+        # Old hash should be evicted from cache
+        assert old_hash not in auth._keys
+        # New hash should be in cache
+        new_hash = auth.hash_key(raw_key)
+        assert new_hash in auth._keys
+        # DB record should be updated
+        assert mock_db_key.key_hash == new_hash
+        assert mock_db_key.key_prefix == raw_key[:4]
+        assert mock_db_key.key_suffix == raw_key[-4:]
+
+    @pytest.mark.asyncio
+    async def test_rotate_key_user_not_found(self):
+        """rotate_key_for_user_db raises ValueError if no active user found."""
+        auth = DbApiKeyAuth(db_url="sqlite+aiosqlite:///:memory:", keys={})
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        def mock_get_session(_db_url):
+            cm = AsyncMock()
+            cm.__aenter__ = AsyncMock(return_value=mock_session)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        with (
+            patch(
+                "team_memory.storage.database.get_session",
+                side_effect=mock_get_session,
+            ),
+            pytest.raises(ValueError, match="Active user not found"),
+        ):
+            await auth.rotate_key_for_user_db("ghost")
+
+    @pytest.mark.asyncio
+    async def test_rotate_key_no_previous_key(self):
+        """rotate_key_for_user_db works when user had no previous key_hash."""
+        auth = DbApiKeyAuth(db_url="sqlite+aiosqlite:///:memory:", keys={})
+
+        mock_db_key = MagicMock()
+        mock_db_key.user_name = "bob"
+        mock_db_key.role = "editor"
+        mock_db_key.key_hash = None
+        mock_db_key.key_prefix = None
+        mock_db_key.key_suffix = None
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_db_key
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.flush = AsyncMock()
+
+        def mock_get_session(_db_url):
+            cm = AsyncMock()
+            cm.__aenter__ = AsyncMock(return_value=mock_session)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        with patch("team_memory.storage.database.get_session", side_effect=mock_get_session):
+            result = await auth.rotate_key_for_user_db("bob")
+
+        assert "api_key" in result
+        raw_key = result["api_key"]
+        new_hash = auth.hash_key(raw_key)
+        assert new_hash in auth._keys

@@ -1,4 +1,4 @@
-"""Archive (档案馆) browse API — list, L2 detail, multipart upload, failures."""
+"""Archive (档案馆) browse API — list, L2 detail, upsert, multipart upload, failures."""
 
 from __future__ import annotations
 
@@ -14,13 +14,15 @@ from fastapi import (
     Query,
     UploadFile,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from team_memory.auth.provider import User
 from team_memory.bootstrap import get_context
+from team_memory.schemas import ArchiveCreateRequest
 from team_memory.services.archive import ArchiveUploadError
-from team_memory.web.app import _resolve_project, get_optional_user
+from team_memory.web.app import _resolve_project
+from team_memory.web.auth_session import get_current_user, get_optional_user
 
 router = APIRouter(tags=["archives"])
 
@@ -36,6 +38,13 @@ def _parse_archive_id(archive_id: str) -> _uuid.UUID:
         raise HTTPException(status_code=404, detail="Archive not found") from e
 
 
+def _viewer_info(user: User | None) -> tuple[str | None, str | None]:
+    """Extract (viewer_name, viewer_role) from optional User."""
+    if user is None:
+        return None, None
+    return user.name, user.role
+
+
 @router.get("/archives")
 async def list_archives(
     project: str | None = Query(None, description="Project scope"),
@@ -46,7 +55,7 @@ async def list_archives(
 ):
     """Paginated archives visible to the current user (same rules as vector search)."""
     ctx = get_context()
-    viewer = user.name if user else None
+    viewer, role = _viewer_info(user)
     resolved = _resolve_project(project)
     items, total = await ctx.archive_service.list_archives(
         viewer=viewer,
@@ -54,14 +63,55 @@ async def list_archives(
         q=q,
         limit=limit,
         offset=offset,
+        viewer_role=role,
     )
     return {
         "items": items,
         "total": total,
         "limit": limit,
         "offset": offset,
-        "project": resolved,
     }
+
+
+@router.post("/archives")
+async def create_or_update_archive(
+    body: ArchiveCreateRequest,
+    user: User = Depends(get_current_user),
+):
+    """Create or upsert an archive (title+project dedup). Requires authentication."""
+    ctx = get_context()
+    linked_uuids: list[_uuid.UUID] = []
+    if body.linked_experience_ids:
+        for s in body.linked_experience_ids:
+            try:
+                linked_uuids.append(_uuid.UUID(s))
+            except (ValueError, TypeError):
+                pass
+    result = await ctx.archive_service.archive_upsert(
+        title=body.title,
+        solution_doc=body.solution_doc,
+        created_by=user.name,
+        project=_resolve_project(body.project),
+        scope=body.scope,
+        scope_ref=body.scope_ref,
+        overview=body.overview,
+        conversation_summary=body.conversation_summary,
+        raw_conversation=body.raw_conversation,
+        content_type=body.content_type,
+        value_summary=body.value_summary,
+        tags=body.tags,
+        linked_experience_ids=linked_uuids if linked_uuids else None,
+    )
+    # Ensure UUID fields are JSON-serializable
+    if "archive_id" in result and not isinstance(result["archive_id"], str):
+        result["archive_id"] = str(result["archive_id"])
+    is_update = result.get("action") == "updated"
+    status_code = 200 if is_update else 201
+    message = "Updated successfully" if is_update else "Created successfully"
+    return JSONResponse(
+        content={"item": result, "message": message},
+        status_code=status_code,
+    )
 
 
 @router.get("/archives/{archive_id}")
@@ -73,9 +123,14 @@ async def get_archive_detail(
     """Full archive (L2) when allowed for viewer."""
     aid = _parse_archive_id(archive_id)
     ctx = get_context()
-    viewer = user.name if user else None
+    viewer, role = _viewer_info(user)
     resolved = _resolve_project(project)
-    out = await ctx.archive_service.get_archive(aid, viewer=viewer, project=resolved)
+    out = await ctx.archive_service.get_archive(
+        aid,
+        viewer=viewer,
+        project=resolved,
+        viewer_role=role,
+    )
     if out is None:
         raise HTTPException(status_code=404, detail="Archive not found")
     return out
@@ -87,6 +142,7 @@ async def upload_archive_attachment(
     file: UploadFile = File(...),
     kind: str = Form("file"),
     note: str | None = Form(None),
+    source_path: str | None = Form(None),
     project: str | None = Query(None),
     user: User | None = Depends(get_optional_user),
     x_upload_source: str | None = Header(None, alias="X-Upload-Source"),
@@ -111,6 +167,7 @@ async def upload_archive_attachment(
             kind=kind,
             snippet=note,
             source=src,
+            source_path=source_path,
         )
     except ArchiveUploadError as e:
         raise HTTPException(status_code=e.http_status, detail=e.message) from e
@@ -157,9 +214,17 @@ async def list_archive_upload_failures(
     """Failed upload attempts for remediation (curl) — same visibility as L2."""
     aid = _parse_archive_id(archive_id)
     ctx = get_context()
-    viewer = user.name if user else None
+    viewer, role = _viewer_info(user)
     resolved = _resolve_project(project)
-    if await ctx.archive_service.get_archive(aid, viewer=viewer, project=resolved) is None:
+    if (
+        await ctx.archive_service.get_archive(
+            aid,
+            viewer=viewer,
+            project=resolved,
+            viewer_role=role,
+        )
+        is None
+    ):
         raise HTTPException(status_code=404, detail="Archive not found")
     items = await ctx.archive_service.list_upload_failures(
         aid,

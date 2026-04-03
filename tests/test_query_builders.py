@@ -110,6 +110,19 @@ class TestBuildVectorSearch:
         compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
         assert "10" in compiled
 
+    def test_offset_not_applied_when_zero(self) -> None:
+        fake_embedding = [0.1] * 768
+        stmt = build_vector_search(fake_embedding, limit=10, offset=0)
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        assert "OFFSET" not in compiled.upper()
+
+    def test_offset_applied_when_positive(self) -> None:
+        fake_embedding = [0.1] * 768
+        stmt = build_vector_search(fake_embedding, limit=10, offset=5)
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        assert "OFFSET" in compiled.upper()
+        assert "5" in compiled
+
 
 class TestBuildFtsSearch:
     """Tests for build_fts_search."""
@@ -133,6 +146,18 @@ class TestBuildFtsSearch:
         compiled = str(stmt.compile())
         # tags.overlap generates an && operator in the SQL
         assert "&&" in compiled or "tags" in compiled
+
+    def test_offset_not_applied_when_zero(self) -> None:
+        stmt = build_fts_search("test query", limit=10, offset=0)
+        assert isinstance(stmt, Select)
+        compiled = str(stmt.compile())
+        assert "OFFSET" not in compiled.upper()
+
+    def test_offset_applied_when_positive(self) -> None:
+        stmt = build_fts_search("test query", limit=10, offset=5)
+        assert isinstance(stmt, Select)
+        compiled = str(stmt.compile())
+        assert "OFFSET" in compiled.upper()
 
 
 class TestBuildDuplicateDetection:

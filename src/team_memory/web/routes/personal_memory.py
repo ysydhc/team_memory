@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import ProgrammingError
 
 from team_memory.auth.provider import User
 from team_memory.bootstrap import get_context
 from team_memory.services.personal_memory import PersonalMemoryService
-from team_memory.web.app import get_current_user, get_optional_user
+from team_memory.web.auth_session import get_current_user, get_optional_user
 
 logger = logging.getLogger("team_memory.web.personal_memory")
 
@@ -51,13 +51,15 @@ async def create_personal_memory(
         context_hint=str(context_hint).strip() if context_hint else None,
         profile_kind=pk,
     )
-    return mem
+    return {"item": mem, "message": "Created successfully"}
 
 
 @router.get("/personal-memory/list")
 async def list_personal_memory(
     scope: str | None = None,
     profile_kind: str | None = None,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user),
 ):
     """List current user's personal memories. Requires auth.
@@ -68,9 +70,7 @@ async def list_personal_memory(
         profile_kind = None
     svc = _personal_memory_service()
     try:
-        items = await svc.list_by_user(
-            user.name, scope=scope, profile_kind=profile_kind
-        )
+        all_items = await svc.list_by_user(user.name, scope=scope, profile_kind=profile_kind)
     except ProgrammingError as e:
         orig = str(getattr(e, "orig", e) or e)
         logger.exception("personal_memory list query failed: %s", orig)
@@ -83,7 +83,9 @@ async def list_personal_memory(
             status_code=503,
             detail="用户画像列表查询失败，请查看服务端日志",
         ) from e
-    return {"items": items}
+    total = len(all_items)
+    items = all_items[offset : offset + limit]
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/personal-memory/{memory_id}")

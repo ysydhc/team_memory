@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import and_, desc, func, or_, select, update
+from sqlalchemy import and_, case, delete, desc, func, literal, or_, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -17,8 +20,11 @@ from team_memory.storage.models import (
     Experience,
 )
 
+logger = logging.getLogger("team_memory.storage.archive_repository")
+
 SOLUTION_PREVIEW_LEN = 500
 OVERVIEW_PREVIEW_MAX = 2000
+UNBOUNDED_QUERY_LIMIT = 1000
 
 
 def _project_value(project: str | None) -> str:
@@ -36,8 +42,12 @@ def _archive_visible_to_viewer(
     archive: Archive,
     viewer_name: str | None,
     proj: str,
+    *,
+    viewer_role: str | None = None,
 ) -> bool:
-    """Same rules as search_archives WHERE clause."""
+    """Same rules as search_archives WHERE clause; admin sees everything."""
+    if viewer_role == "admin":
+        return True
     if viewer_name:
         return archive.created_by == viewer_name or (
             archive.status == "published" and archive.project == proj
@@ -65,6 +75,7 @@ class ArchiveRepository:
         scope_ref: str | None = None,
         overview: str | None = None,
         conversation_summary: str | None = None,
+        raw_conversation: str | None = None,
         visibility: str = "project",
         status: str = "draft",
         embedding: list[float] | None = None,
@@ -82,6 +93,7 @@ class ArchiveRepository:
             scope_ref=scope_ref,
             overview=overview,
             conversation_summary=conversation_summary,
+            raw_conversation=raw_conversation,
             visibility=visibility,
             status=status,
             embedding=embedding,
@@ -123,6 +135,128 @@ class ArchiveRepository:
 
         return archive.id
 
+    async def upsert_archive(
+        self,
+        title: str,
+        solution_doc: str,
+        created_by: str,
+        *,
+        project: str | None = None,
+        scope: str = "session",
+        scope_ref: str | None = None,
+        overview: str | None = None,
+        conversation_summary: str | None = None,
+        content_type: str = "session_archive",
+        value_summary: str | None = None,
+        tags: list[str] | None = None,
+        visibility: str = "project",
+        embedding: list[float] | None = None,
+        linked_experience_ids: list[uuid.UUID] | None = None,
+    ) -> dict[str, Any]:
+        """Atomic upsert using INSERT ... ON CONFLICT (title, project) DO UPDATE.
+
+        On conflict, updates content fields but does NOT delete old attachments
+        (attachments are incremental). Experience links are re-associated: old
+        links for this archive are deleted and new ones inserted.
+
+        Returns ``{"action": "created"|"updated", "archive_id": UUID,
+        "previous_updated_at": str|None}``.
+        """
+        proj = _project_value(project)
+        now = datetime.now(timezone.utc)
+        new_id = uuid.uuid4()
+
+        insert_values: dict[str, Any] = {
+            "id": new_id,
+            "title": title,
+            "solution_doc": solution_doc,
+            "created_by": created_by,
+            "project": proj,
+            "scope": scope,
+            "scope_ref": scope_ref,
+            "overview": overview,
+            "conversation_summary": conversation_summary,
+            "content_type": content_type,
+            "value_summary": value_summary,
+            "tags": tags or [],
+            "visibility": visibility,
+            "status": "draft",
+            "embedding": embedding,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+        update_on_conflict: dict[str, Any] = {
+            "overview": overview,
+            "solution_doc": solution_doc,
+            "conversation_summary": conversation_summary,
+            "tags": tags or [],
+            "content_type": content_type,
+            "value_summary": value_summary,
+            "embedding": embedding,
+            "scope": scope,
+            "scope_ref": scope_ref,
+            "updated_at": now,
+        }
+
+        stmt = (
+            insert(Archive)
+            .values(**insert_values)
+            .on_conflict_do_update(
+                index_elements=["title", "project"],
+                index_where=Archive.title.is_not(None),
+                set_=update_on_conflict,
+            )
+            .returning(Archive.id, Archive.created_at, Archive.updated_at)
+        )
+
+        result = await self._session.execute(stmt)
+        row = result.one()
+        archive_id: uuid.UUID = row.id
+        created_at: datetime = row.created_at
+        updated_at: datetime = row.updated_at
+
+        # Determine if this was a create or update: if created_at is close to
+        # the updated_at we just set (within 1 second), it was a fresh insert.
+        was_created = abs(created_at - updated_at) < timedelta(seconds=1)
+        previous_updated_at: str | None = None
+        if not was_created:
+            # The row already existed; the old updated_at was overwritten.
+            # We cannot recover the exact previous value from RETURNING alone,
+            # but we can infer: if updated_at == now, the old value was anything
+            # before now. We report created_at as a stable reference instead.
+            previous_updated_at = created_at.isoformat()
+
+        # --- Re-associate experience links ---
+        # Delete old links for this archive (incremental attachments are NOT touched).
+        await self._session.execute(
+            delete(ArchiveExperienceLink).where(ArchiveExperienceLink.archive_id == archive_id)
+        )
+
+        if linked_experience_ids:
+            link_rows = [
+                {"archive_id": archive_id, "experience_id": eid} for eid in linked_experience_ids
+            ]
+            await self._session.execute(insert(ArchiveExperienceLink).values(link_rows))
+
+            # Derive status from linked experiences
+            exp_stmt = select(Experience.exp_status).where(Experience.id.in_(linked_experience_ids))
+            exp_result = await self._session.execute(exp_stmt)
+            statuses = [r[0] for r in exp_result.all()]
+            if statuses and all(s == "published" for s in statuses):
+                await self._session.execute(
+                    update(Archive).where(Archive.id == archive_id).values(status="published")
+                )
+
+        await self._session.flush()
+
+        action = "created" if was_created else "updated"
+        return {
+            "action": action,
+            "archive_id": archive_id,
+            "previous_updated_at": previous_updated_at,
+        }
+
     async def search_archives(
         self,
         query_embedding: list[float],
@@ -131,14 +265,42 @@ class ArchiveRepository:
         min_similarity: float = 0.0,
         current_user: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Vector search; filter by creator or published + project."""
+        """Vector search; filter by creator or published + project.
+
+        Uses correlated subqueries for linked_experience_ids and attachment_count
+        to avoid N+1 queries.
+        """
         similarity_expr = (1 - Archive.embedding.cosine_distance(query_embedding)).label(
             "similarity"
         )
 
+        # Correlated subquery: array of linked experience UUIDs (removes NULLs)
+        # When no links exist, array_agg returns NULL → handled in Python as []
+        linked_ids_sub = (
+            select(
+                func.array_remove(
+                    func.array_agg(ArchiveExperienceLink.experience_id),
+                    None,
+                )
+            )
+            .where(ArchiveExperienceLink.archive_id == Archive.id)
+            .correlate(Archive)
+            .scalar_subquery()
+            .label("linked_ids")
+        )
+
+        # Correlated subquery: attachment count
+        att_count_sub = (
+            select(func.count(ArchiveAttachment.id))
+            .where(ArchiveAttachment.archive_id == Archive.id)
+            .correlate(Archive)
+            .scalar_subquery()
+            .label("attachment_count")
+        )
+
         proj = _project_value(project)
         query = (
-            select(Archive, similarity_expr)
+            select(Archive, similarity_expr, linked_ids_sub, att_count_sub)
             .where(Archive.embedding.is_not(None))
             .where(similarity_expr >= min_similarity)
             .order_by(desc(similarity_expr))
@@ -164,22 +326,10 @@ class ArchiveRepository:
 
         result = await self._session.execute(query)
         rows = result.all()
-        out = []
-        for archive, sim in rows:
+        out: list[dict[str, Any]] = []
+        for archive, sim, linked_ids_raw, att_count in rows:
             preview = (archive.overview or archive.solution_doc or "")[:SOLUTION_PREVIEW_LEN]
-            linked_ids = []
-            link_result = await self._session.execute(
-                select(ArchiveExperienceLink.experience_id).where(
-                    ArchiveExperienceLink.archive_id == archive.id
-                )
-            )
-            linked_ids = [r[0] for r in link_result.all()]
-            count_result = await self._session.execute(
-                select(func.count(ArchiveAttachment.id)).where(
-                    ArchiveAttachment.archive_id == archive.id
-                )
-            )
-            att_count = count_result.scalar() or 0
+            linked_ids = linked_ids_raw if linked_ids_raw else []
             ov = (archive.overview or "").strip()
             overview_preview = ov[:OVERVIEW_PREVIEW_MAX] if ov else ""
             out.append(
@@ -190,8 +340,11 @@ class ArchiveRepository:
                     "overview_preview": overview_preview,
                     "score": round(float(sim), 4),
                     "similarity": round(float(sim), 4),
+                    "content_type": archive.content_type,
+                    "value_summary": archive.value_summary,
+                    "tags": archive.tags or [],
                     "linked_experience_ids": [str(x) for x in linked_ids],
-                    "attachment_count": att_count,
+                    "attachment_count": att_count or 0,
                     "type": "archive",
                 }
             )
@@ -204,38 +357,36 @@ class ArchiveRepository:
 
         For each such archive: if all its linked experiences have exp_status='published',
         set archive.status='published'; otherwise set 'draft'.
+
+        Uses a single UPDATE with a CASE expression to avoid N+1 queries.
         """
         # Archives that link this experience
-        link_q = (
+        archive_ids_q = (
             select(ArchiveExperienceLink.archive_id)
             .where(ArchiveExperienceLink.experience_id == experience_id)
             .distinct()
         )
-        result = await self._session.execute(link_q)
-        archive_ids = [row[0] for row in result.all()]
-        if not archive_ids:
-            return
 
-        for archive_id in archive_ids:
-            # Linked experience ids for this archive
-            link_ids_q = select(ArchiveExperienceLink.experience_id).where(
-                ArchiveExperienceLink.archive_id == archive_id
-            )
-            r2 = await self._session.execute(link_ids_q)
-            exp_ids = [row[0] for row in r2.all()]
-            if not exp_ids:
-                await self._session.execute(
-                    update(Archive).where(Archive.id == archive_id).values(status="draft")
+        # Subquery: archive_ids where ALL linked experiences are published
+        all_published_q = (
+            select(ArchiveExperienceLink.archive_id)
+            .join(Experience, Experience.id == ArchiveExperienceLink.experience_id)
+            .where(ArchiveExperienceLink.archive_id.in_(archive_ids_q))
+            .group_by(ArchiveExperienceLink.archive_id)
+            .having(func.bool_and(Experience.exp_status == "published"))
+        )
+
+        # Bulk update: published if all linked are published, else draft
+        await self._session.execute(
+            update(Archive)
+            .where(Archive.id.in_(archive_ids_q))
+            .values(
+                status=case(
+                    (Archive.id.in_(all_published_q), "published"),
+                    else_="draft",
                 )
-                continue
-            stmt = select(Experience.exp_status).where(Experience.id.in_(exp_ids))
-            r3 = await self._session.execute(stmt)
-            statuses = [row[0] for row in r3.all()]
-            all_pub = statuses and all(s == "published" for s in statuses)
-            new_status = "published" if all_pub else "draft"
-            await self._session.execute(
-                update(Archive).where(Archive.id == archive_id).values(status=new_status)
             )
+        )
 
     async def _build_l2_dict(self, archive: Archive) -> dict[str, Any]:
         link_result = await self._session.execute(
@@ -254,6 +405,7 @@ class ArchiveRepository:
                 "snippet": a.snippet,
                 "git_commit": a.git_commit,
                 "git_refs": a.git_refs,
+                "source_path": a.source_path,
                 "storage": "local",
                 "download_api_path": (f"/api/v1/archives/{aid_str}/attachments/{a.id}/file"),
             }
@@ -276,6 +428,9 @@ class ArchiveRepository:
             "project": archive.project,
             "created_by": archive.created_by,
             "status": archive.status,
+            "content_type": archive.content_type,
+            "value_summary": archive.value_summary,
+            "tags": archive.tags or [],
             "linked_experience_ids": linked_ids,
             "attachments": att_list,
             "document_tree_nodes": tree_payload,
@@ -306,6 +461,8 @@ class ArchiveRepository:
         archive_id: uuid.UUID,
         viewer_name: str | None,
         project: str | None,
+        *,
+        viewer_role: str | None = None,
     ) -> dict[str, Any] | None:
         """L2 when visible to viewer; None if missing or denied (treat as 404)."""
         result = await self._session.execute(
@@ -320,7 +477,7 @@ class ArchiveRepository:
         if archive is None:
             return None
         proj = _project_value(project)
-        if not _archive_visible_to_viewer(archive, viewer_name, proj):
+        if not _archive_visible_to_viewer(archive, viewer_name, proj, viewer_role=viewer_role):
             return None
         return await self._build_l2_dict(archive)
 
@@ -332,24 +489,38 @@ class ArchiveRepository:
         q: str | None = None,
         limit: int = 30,
         offset: int = 0,
+        viewer_role: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
-        """Paginated list with same visibility as search_archives; returns items + total."""
+        """Paginated list with same visibility as search_archives; returns items + total.
+
+        Uses a correlated scalar subquery for attachment_count to avoid N+1.
+        """
         proj = _project_value(project)
-        visibility = (
-            or_(
+        if viewer_role == "admin":
+            # Admin sees all archives
+            base_where = literal(True)
+        elif viewer_name:
+            base_where = or_(
                 Archive.created_by == viewer_name,
                 and_(
                     Archive.status == "published",
                     Archive.project == proj,
                 ),
             )
-            if viewer_name
-            else and_(Archive.status == "published", Archive.project == proj)
+        else:
+            base_where = and_(Archive.status == "published", Archive.project == proj)
+
+        # Correlated subquery: attachment count per archive
+        att_count_sub = (
+            select(func.count(ArchiveAttachment.id))
+            .where(ArchiveAttachment.archive_id == Archive.id)
+            .correlate(Archive)
+            .scalar_subquery()
+            .label("attachment_count")
         )
-        base_where = visibility
 
         count_q = select(func.count(Archive.id)).where(base_where)
-        list_q = select(Archive).where(base_where)
+        list_q = select(Archive, att_count_sub).where(base_where)
         if q and q.strip():
             term = f"%{q.strip()}%"
             text_filter = or_(
@@ -362,20 +533,13 @@ class ArchiveRepository:
         list_q = list_q.order_by(desc(Archive.created_at)).offset(offset).limit(limit)
 
         total = (await self._session.execute(count_q)).scalar() or 0
-        rows = (await self._session.execute(list_q)).scalars().all()
+        rows = (await self._session.execute(list_q)).all()
 
         items: list[dict[str, Any]] = []
-        for archive in rows:
+        for archive, att_count in rows:
             preview = (archive.overview or archive.solution_doc or "")[:SOLUTION_PREVIEW_LEN]
             ov = (archive.overview or "").strip()
             overview_preview = ov[:OVERVIEW_PREVIEW_MAX] if ov else ""
-
-            count_result = await self._session.execute(
-                select(func.count(ArchiveAttachment.id)).where(
-                    ArchiveAttachment.archive_id == archive.id
-                )
-            )
-            att_count = count_result.scalar() or 0
 
             items.append(
                 {
@@ -386,9 +550,12 @@ class ArchiveRepository:
                     "project": archive.project,
                     "created_by": archive.created_by,
                     "status": archive.status,
+                    "content_type": archive.content_type,
+                    "value_summary": archive.value_summary,
+                    "tags": archive.tags or [],
                     "solution_preview": preview,
                     "overview_preview": overview_preview,
-                    "attachment_count": att_count,
+                    "attachment_count": att_count or 0,
                     "created_at": archive.created_at.isoformat() if archive.created_at else None,
                     "updated_at": archive.updated_at.isoformat() if archive.updated_at else None,
                 }
@@ -403,6 +570,7 @@ class ArchiveRepository:
         kind: str,
         rel_path: str,
         snippet: str | None = None,
+        source_path: str | None = None,
     ) -> uuid.UUID:
         """Insert a single archive_attachments row (file already on disk)."""
         row = ArchiveAttachment(
@@ -411,6 +579,7 @@ class ArchiveRepository:
             kind=kind,
             path=rel_path,
             snippet=snippet,
+            source_path=source_path,
         )
         self._session.add(row)
         await self._session.flush()
@@ -450,6 +619,7 @@ class ArchiveRepository:
         *,
         limit: int = 20,
         include_resolved: bool = False,
+        viewer_role: str | None = None,
     ) -> list[dict[str, Any]]:
         """List failures for an archive if viewer can see L2."""
         result = await self._session.execute(select(Archive).where(Archive.id == archive_id))
@@ -457,7 +627,7 @@ class ArchiveRepository:
         if archive is None:
             return []
         proj = _project_value(project)
-        if not _archive_visible_to_viewer(archive, viewer_name, proj):
+        if not _archive_visible_to_viewer(archive, viewer_name, proj, viewer_role=viewer_role):
             return []
         q = select(ArchiveUploadFailure).where(ArchiveUploadFailure.archive_id == archive_id)
         if not include_resolved:
@@ -485,16 +655,16 @@ class ArchiveRepository:
         failure_id: uuid.UUID,
         viewer_name: str | None,
         project: str | None,
+        *,
+        viewer_role: str | None = None,
     ) -> bool:
         """Set resolved_at=now if viewer can see archive."""
-        from datetime import datetime, timezone
-
         result = await self._session.execute(select(Archive).where(Archive.id == archive_id))
         archive = result.scalar_one_or_none()
         if archive is None:
             return False
         proj = _project_value(project)
-        if not _archive_visible_to_viewer(archive, viewer_name, proj):
+        if not _archive_visible_to_viewer(archive, viewer_name, proj, viewer_role=viewer_role):
             return False
         fr = await self._session.get(ArchiveUploadFailure, failure_id)
         if fr is None or fr.archive_id != archive_id:
@@ -503,14 +673,63 @@ class ArchiveRepository:
         await self._session.flush()
         return True
 
+    async def get_archive_ids_for_experience(
+        self,
+        experience_id: uuid.UUID,
+    ) -> list[str]:
+        """Return archive IDs that link to this experience."""
+        result = await self._session.execute(
+            select(ArchiveExperienceLink.archive_id)
+            .where(ArchiveExperienceLink.experience_id == experience_id)
+            .limit(UNBOUNDED_QUERY_LIMIT)
+        )
+        rows = [str(row[0]) for row in result.all()]
+        if len(rows) >= UNBOUNDED_QUERY_LIMIT:
+            logger.warning(
+                "get_archive_ids_for_experience hit %d limit for experience %s",
+                UNBOUNDED_QUERY_LIMIT,
+                experience_id,
+            )
+        return rows
+
+    async def get_archive_ids_for_experiences(
+        self,
+        experience_ids: list[uuid.UUID],
+    ) -> dict[str, list[str]]:
+        """Return {experience_id_str: [archive_id_str, ...]} for multiple experiences."""
+        if not experience_ids:
+            return {}
+        result = await self._session.execute(
+            select(
+                ArchiveExperienceLink.experience_id,
+                ArchiveExperienceLink.archive_id,
+            )
+            .where(ArchiveExperienceLink.experience_id.in_(experience_ids))
+            .limit(UNBOUNDED_QUERY_LIMIT)
+        )
+        rows = result.all()
+        if len(rows) >= UNBOUNDED_QUERY_LIMIT:
+            logger.warning(
+                "get_archive_ids_for_experiences hit %d limit for %d experiences",
+                UNBOUNDED_QUERY_LIMIT,
+                len(experience_ids),
+            )
+        mapping: dict[str, list[str]] = {}
+        for exp_id, arch_id in rows:
+            key = str(exp_id)
+            mapping.setdefault(key, []).append(str(arch_id))
+        return mapping
+
     async def get_attachment_relative_path_for_viewer(
         self,
         archive_id: uuid.UUID,
         attachment_id: uuid.UUID,
         viewer_name: str | None,
         project: str | None,
-    ) -> str | None:
-        """Return attachment.path (relative to uploads root) if visible; else None."""
+        *,
+        viewer_role: str | None = None,
+    ) -> tuple[str | None, str | None]:
+        """Return (rel_path, source_path) if visible; (None, None) otherwise."""
         result = await self._session.execute(
             select(Archive)
             .where(Archive.id == archive_id)
@@ -518,11 +737,11 @@ class ArchiveRepository:
         )
         archive = result.scalar_one_or_none()
         if archive is None:
-            return None
+            return None, None
         proj = _project_value(project)
-        if not _archive_visible_to_viewer(archive, viewer_name, proj):
-            return None
+        if not _archive_visible_to_viewer(archive, viewer_name, proj, viewer_role=viewer_role):
+            return None, None
         for a in archive.attachments:
             if a.id == attachment_id:
-                return a.path
-        return None
+                return a.path, a.source_path
+        return None, None

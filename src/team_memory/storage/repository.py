@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -13,6 +14,10 @@ from team_memory.storage.models import (
     Experience,
     ExperienceFeedback,
 )
+
+logger = logging.getLogger("team_memory.storage.repository")
+
+UNBOUNDED_QUERY_LIMIT = 1000
 
 
 def _utcnow() -> datetime:
@@ -254,9 +259,17 @@ class ExperienceRepository:
             .where(Experience.id.in_(subq))
             .where(Experience.is_deleted == False)  # noqa: E712
             .where(Experience.project == self._project_value(project))
+            .limit(UNBOUNDED_QUERY_LIMIT)
         )
         result = await self._session.execute(query)
-        return [row[0] for row in result.all()]
+        rows = [row[0] for row in result.all()]
+        if len(rows) >= UNBOUNDED_QUERY_LIMIT:
+            logger.warning(
+                "list_root_ids_with_children hit %d limit for project=%s",
+                UNBOUNDED_QUERY_LIMIT,
+                project,
+            )
+        return rows
 
     async def list_recent(
         self,
@@ -311,6 +324,7 @@ class ExperienceRepository:
         tags: list[str] | None = None,
         project: str | None = None,
         current_user: str | None = None,
+        offset: int = 0,
     ) -> list[dict]:
         """Search experiences by vector similarity using pgvector."""
         from team_memory.storage.query_builders import build_vector_search
@@ -322,6 +336,7 @@ class ExperienceRepository:
             tags=tags,
             min_similarity=min_similarity,
             limit=max_results,
+            offset=offset,
         )
         result = await self._session.execute(stmt)
         rows = result.all()
@@ -340,6 +355,7 @@ class ExperienceRepository:
         tags: list[str] | None = None,
         project: str | None = None,
         current_user: str | None = None,
+        offset: int = 0,
     ) -> list[dict]:
         """Full-text search using PostgreSQL tsvector/tsquery with jieba."""
         from team_memory.services.tokenizer import tokenize
@@ -352,6 +368,7 @@ class ExperienceRepository:
             current_user=current_user,
             tags=tags,
             limit=max_results,
+            offset=offset,
         )
         result = await self._session.execute(stmt)
         rows = result.all()
@@ -600,9 +617,17 @@ class ExperienceRepository:
                 SELECT DISTINCT project FROM experiences
                 WHERE is_deleted = false
                 ORDER BY project
-            """)
+                LIMIT :lim
+            """),
+            {"lim": UNBOUNDED_QUERY_LIMIT},
         )
-        return [row[0] for row in result.all()]
+        rows = [row[0] for row in result.all()]
+        if len(rows) >= UNBOUNDED_QUERY_LIMIT:
+            logger.warning(
+                "list_projects hit %d limit",
+                UNBOUNDED_QUERY_LIMIT,
+            )
+        return rows
 
 
 # ============================================================
