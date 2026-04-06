@@ -5,7 +5,7 @@
 
 export const state = {
     apiKey: '',
-    currentUser: { name: 'anonymous', role: 'member' },
+    currentUser: null,
     currentPage: 'dashboard',
     listPage: 1,
     allTags: {},

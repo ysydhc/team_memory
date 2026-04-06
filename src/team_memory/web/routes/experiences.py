@@ -14,7 +14,7 @@ from team_memory.auth.provider import User
 from team_memory.storage.models import Experience
 from team_memory.web import app as app_module
 from team_memory.web.app import _get_db_url, _resolve_project
-from team_memory.web.auth_session import get_current_user, get_optional_user
+from team_memory.web.auth_session import get_current_user
 from team_memory.web.dependencies import require_role
 from team_memory.web.schemas import ExperienceCreate, ExperienceUpdate, FeedbackCreate
 
@@ -32,7 +32,7 @@ def _svc():
 
 @router.get("/projects")
 async def list_projects(
-    user: User | None = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
 ):
     """List distinct project names from experiences."""
     db_url = _get_db_url()
@@ -56,7 +56,7 @@ async def list_experiences(
     status: str | None = None,
     visibility: str | None = None,
     experience_type: str | None = None,
-    user: User | None = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
 ):
     """List experiences with pagination and filters."""
     db_url = _get_db_url()
@@ -64,7 +64,7 @@ async def list_experiences(
         [p.strip() for p in project.split(",") if p.strip()] if project and "," in project else None
     )
     resolved_project = _resolve_project(project.split(",")[0] if project else project)
-    current_user = user.name if user else None
+    current_user = user.name
 
     def _project_filter(q):
         if project_list:
@@ -176,7 +176,7 @@ async def list_experiences(
 @router.get("/experiences/{experience_id}")
 async def get_experience(
     experience_id: str,
-    user: User | None = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
 ):
     """Get a single experience by ID."""
     db_url = _get_db_url()

@@ -9,7 +9,7 @@ from team_memory.bootstrap import get_context
 from team_memory.storage.database import get_session
 from team_memory.web import app as app_module
 from team_memory.web.app import _get_db_url, _resolve_project
-from team_memory.web.auth_session import get_current_user, get_optional_user
+from team_memory.web.auth_session import get_current_user
 from team_memory.web.schemas import SearchRequest
 
 router = APIRouter(tags=["search"])
@@ -23,11 +23,11 @@ def _get_search_orchestrator():
 @router.post("/search")
 async def search_experiences_api(
     req: SearchRequest,
-    user: User | None = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
 ):
-    """Semantic search for experiences. Supports anonymous access."""
+    """Semantic search for experiences."""
     _settings = app_module._settings
-    user_name = user.name if user else "anonymous"
+    user_name = user.name
 
     retrieval_cfg = _settings.retrieval if _settings else None
     resolved_project = _resolve_project(req.project)

@@ -10,7 +10,7 @@ from sqlalchemy.exc import ProgrammingError
 from team_memory.auth.provider import User
 from team_memory.bootstrap import get_context
 from team_memory.services.personal_memory import PersonalMemoryService
-from team_memory.web.auth_session import get_current_user, get_optional_user
+from team_memory.web.auth_session import get_current_user
 
 logger = logging.getLogger("team_memory.web.personal_memory")
 
@@ -31,8 +31,6 @@ async def create_personal_memory(
     user: User = Depends(get_current_user),
 ):
     """Create one personal memory. Requires auth."""
-    if str(user.name).strip().lower() == "anonymous":
-        raise HTTPException(status_code=401, detail="Anonymous cannot create")
     content = body.get("content")
     if not content or not str(content).strip():
         raise HTTPException(status_code=400, detail="content is required")
@@ -64,8 +62,6 @@ async def list_personal_memory(
 ):
     """List current user's personal memories. Requires auth.
     Supports scope and profile_kind filter."""
-    if str(user.name).strip().lower() == "anonymous":
-        raise HTTPException(status_code=401, detail="Anonymous cannot list")
     if profile_kind not in (None, "static", "dynamic"):
         profile_kind = None
     svc = _personal_memory_service()
@@ -94,8 +90,6 @@ async def get_personal_memory(
     user: User = Depends(get_current_user),
 ):
     """Get one personal memory by id. Requires auth, must own."""
-    if str(user.name).strip().lower() == "anonymous":
-        raise HTTPException(status_code=401, detail="Anonymous cannot get")
     svc = _personal_memory_service()
     mem = await svc.get_by_id(memory_id, user.name)
     if not mem:
@@ -110,8 +104,6 @@ async def put_personal_memory(
     user: User = Depends(get_current_user),
 ):
     """Update one personal memory. Requires auth, must own."""
-    if str(user.name).strip().lower() == "anonymous":
-        raise HTTPException(status_code=401, detail="Anonymous cannot update")
     content = body.get("content")
     scope = body.get("scope")
     context_hint = body.get("context_hint")
@@ -138,8 +130,6 @@ async def delete_personal_memory(
     user: User = Depends(get_current_user),
 ):
     """Delete one personal memory. Requires auth, must own."""
-    if str(user.name).strip().lower() == "anonymous":
-        raise HTTPException(status_code=401, detail="Anonymous cannot delete")
     svc = _personal_memory_service()
     ok = await svc.delete(memory_id, user.name)
     if not ok:
@@ -150,15 +140,14 @@ async def delete_personal_memory(
 @router.get("/personal-memory")
 async def pull_personal_memory(
     current_context: str | None = None,
-    user: User | None = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
 ):
     """Pull personal memories for Agent: generic + context-matched.
 
-    Anonymous (no auth or user name 'anonymous'): returns [].
-    Else returns scope=generic all; if current_context given,
+    Returns scope=generic all; if current_context given,
     also scope=context items semantically matching current_context.
     """
-    user_id = user.name if user else None
+    user_id = user.name
     svc = _personal_memory_service()
     items = await svc.pull(
         user_id=user_id,

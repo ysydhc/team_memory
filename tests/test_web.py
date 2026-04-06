@@ -393,23 +393,10 @@ class TestAuth:
 
 
 class TestExperienceList:
-    def test_list_anonymous_access(self, client):
-        """List experiences supports anonymous access (no auth required)."""
-        with patch("team_memory.web.routes.experiences.app_module.get_session") as mock_gs:
-            mock_sess = AsyncMock()
-            mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
-            mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            with patch("team_memory.storage.repository.ExperienceRepository") as mock_repo_cls:
-                mock_repo = MagicMock()
-                mock_repo.count = AsyncMock(return_value=0)
-                mock_repo.list_recent = AsyncMock(return_value=[])
-                mock_repo_cls.return_value = mock_repo
-
-                resp = client.get("/api/v1/experiences")
-                assert resp.status_code == 200
-                data = resp.json()
-                assert "items" in data
+    def test_list_requires_auth(self, client):
+        """List experiences requires authentication (returns 401 without auth)."""
+        resp = client.get("/api/v1/experiences")
+        assert resp.status_code == 401
 
     def test_list_experiences(self, client, auth_headers):
         with patch("team_memory.web.routes.experiences.app_module.get_session") as mock_gs:
@@ -539,17 +526,10 @@ class TestDeleteExperience:
 
 
 class TestSearch:
-    def test_search_anonymous_access(self, client, setup_app):
-        """Search supports anonymous access."""
-        with patch("team_memory.web.app.get_session") as mock_gs:
-            mock_sess = AsyncMock()
-            mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
-            mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            resp = client.post("/api/v1/search", json={"query": "test"})
-            assert resp.status_code == 200
-            data = resp.json()
-            assert "results" in data
+    def test_search_requires_auth(self, client, setup_app):
+        """Search requires authentication (returns 401 without auth)."""
+        resp = client.post("/api/v1/search", json={"query": "test"})
+        assert resp.status_code == 401
 
     def test_search(self, client, auth_headers, setup_app):
         setup_app._search_orchestrator.search = AsyncMock(
@@ -573,13 +553,13 @@ class TestSearch:
 
 
 class TestProjectParam:
-    def test_search_uses_default_project(self, client, setup_app):
+    def test_search_uses_default_project(self, client, auth_headers, setup_app):
         web_module._settings.default_project = "proj-default"
         with patch("team_memory.web.app.get_session") as mock_gs:
             mock_sess = AsyncMock()
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
-            resp = client.post("/api/v1/search", json={"query": "hello"})
+            resp = client.post("/api/v1/search", json={"query": "hello"}, headers=auth_headers)
         assert resp.status_code == 200
         assert setup_app._search_orchestrator.search.call_args.kwargs["project"] == "proj-default"
 
@@ -799,16 +779,10 @@ class TestDedupApi:
 
 
 class TestArchivesApi:
-    def test_archives_list_ok_anonymous(self, client):
-        from team_memory.bootstrap import get_context
-
-        get_context().archive_service.list_archives.return_value = ([], 0)
+    def test_archives_list_requires_auth(self, client):
+        """Archives list requires authentication (returns 401 without auth)."""
         resp = client.get("/api/v1/archives")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["items"] == []
-        assert data["total"] == 0
-        get_context().archive_service.list_archives.assert_awaited()
+        assert resp.status_code == 401
 
     def test_archives_list_with_auth_viewer(self, client, auth_headers):
         from team_memory.bootstrap import get_context
@@ -834,12 +808,12 @@ class TestArchivesApi:
         kw = get_context().archive_service.list_archives.call_args.kwargs
         assert kw.get("viewer") == "test_admin"
 
-    def test_archives_detail_not_found(self, client):
+    def test_archives_detail_not_found(self, client, auth_headers):
         from team_memory.bootstrap import get_context
 
         get_context().archive_service.get_archive.return_value = None
         aid = str(uuid.uuid4())
-        resp = client.get(f"/api/v1/archives/{aid}")
+        resp = client.get(f"/api/v1/archives/{aid}", headers=auth_headers)
         assert resp.status_code == 404
 
     def test_archives_attachment_upload_ok(self, client, auth_headers):

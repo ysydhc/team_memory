@@ -56,7 +56,7 @@ class SearchRequest:
     max_results: int = 5
     min_similarity: float = 0.6
     tags: list[str] | None = None
-    user_name: str = "anonymous"
+    user_name: str = ""
     current_user: str | None = None
     source: str = "mcp"
     grouped: bool = False

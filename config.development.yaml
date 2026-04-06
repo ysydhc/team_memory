@@ -91,6 +91,7 @@ extraction:
 auth:
   type: db_api_key
   api_key: "${TEAM_MEMORY_API_KEY}"
+  session_secret: "dev-session-secret-change-in-production"
 
 # -----------------------------------------------------------------------------
 # default_project — 多租户/多项目隔离的默认项目名
@@ -226,7 +227,7 @@ mcp:
 # -----------------------------------------------------------------------------
 # logging — 日志子系统（可选；未写时走 Settings 默认值）
 # -----------------------------------------------------------------------------
-# 可通过本段或环境变量 TEAM_MEMORY_LOGGING__* 配置；详见 docs/design-docs/logging-format.md
+# 可通过本段或环境变量 TEAM_MEMORY_LOGGING__* 配置；详见 docs/design-docs/ops/logging-format.md
 # 示例：
 # logging:
 #   log_io_enabled: false

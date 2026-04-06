@@ -44,7 +44,6 @@ from team_memory.web.auth_session import (  # noqa: F401 -- re-exported for back
     _get_session_secret,
     _get_user_role_from_db,
     get_current_user,
-    get_optional_user,
 )
 from team_memory.web.schemas import (  # noqa: F401 — re-exported for backward compat
     AdminResetPasswordRequest,
@@ -154,9 +153,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 # ============================================================
 # FastAPI App + MCP mount (single-process)
 # ============================================================
-from team_memory.server import mcp  # noqa: E402
+from starlette.middleware import Middleware as StarletteMiddleware  # noqa: E402
 
-mcp_app = mcp.http_app(path="/mcp")
+from team_memory.server import mcp  # noqa: E402
+from team_memory.web.mcp_auth_middleware import MCPAuthMiddleware  # noqa: E402
+
+mcp_app = mcp.http_app(
+    path="/mcp",
+    middleware=[StarletteMiddleware(MCPAuthMiddleware)],
+)
 
 app = FastAPI(
     title="TeamMemory",

@@ -22,7 +22,7 @@ from team_memory.bootstrap import get_context
 from team_memory.schemas import ArchiveCreateRequest
 from team_memory.services.archive import ArchiveUploadError
 from team_memory.web.app import _resolve_project
-from team_memory.web.auth_session import get_current_user, get_optional_user
+from team_memory.web.auth_session import get_current_user
 
 router = APIRouter(tags=["archives"])
 
@@ -38,10 +38,8 @@ def _parse_archive_id(archive_id: str) -> _uuid.UUID:
         raise HTTPException(status_code=404, detail="Archive not found") from e
 
 
-def _viewer_info(user: User | None) -> tuple[str | None, str | None]:
-    """Extract (viewer_name, viewer_role) from optional User."""
-    if user is None:
-        return None, None
+def _viewer_info(user: User) -> tuple[str, str]:
+    """Extract (viewer_name, viewer_role) from authenticated User."""
     return user.name, user.role
 
 
@@ -51,7 +49,7 @@ async def list_archives(
     q: str | None = Query(None, description="Keyword filter on title/overview"),
     limit: int = Query(30, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    user: User | None = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
 ):
     """Paginated archives visible to the current user (same rules as vector search)."""
     ctx = get_context()
@@ -118,7 +116,7 @@ async def create_or_update_archive(
 async def get_archive_detail(
     archive_id: str,
     project: str | None = Query(None),
-    user: User | None = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
 ):
     """Full archive (L2) when allowed for viewer."""
     aid = _parse_archive_id(archive_id)
@@ -144,13 +142,13 @@ async def upload_archive_attachment(
     note: str | None = Form(None),
     source_path: str | None = Form(None),
     project: str | None = Query(None),
-    user: User | None = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
     x_upload_source: str | None = Header(None, alias="X-Upload-Source"),
 ):
     """multipart upload of a single file; requires same visibility as L2."""
     aid = _parse_archive_id(archive_id)
     ctx = get_context()
-    viewer = user.name if user else None
+    viewer = user.name
     resolved = _resolve_project(project)
     body = await file.read()
     src = (x_upload_source or "web").strip().lower()[:20]
@@ -178,7 +176,7 @@ async def download_archive_attachment(
     archive_id: str,
     attachment_id: str,
     project: str | None = Query(None),
-    user: User | None = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
 ):
     """Stream file bytes; GET allowed even when POST uploads disabled (§4.1)."""
     aid = _parse_archive_id(archive_id)
@@ -188,7 +186,7 @@ async def download_archive_attachment(
         raise HTTPException(status_code=404, detail="Archive not found") from e
 
     ctx = get_context()
-    viewer = user.name if user else None
+    viewer = user.name
     resolved = _resolve_project(project)
     pair = await ctx.archive_service.read_archive_attachment_file(
         aid, att_id, viewer, resolved, ctx.settings.uploads
@@ -209,7 +207,7 @@ async def list_archive_upload_failures(
     project: str | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
     include_resolved: bool = Query(False),
-    user: User | None = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
 ):
     """Failed upload attempts for remediation (curl) — same visibility as L2."""
     aid = _parse_archive_id(archive_id)
@@ -242,7 +240,7 @@ async def resolve_archive_upload_failure(
     failure_id: str,
     body: UploadFailureResolveBody,
     project: str | None = Query(None),
-    user: User | None = Depends(get_optional_user),
+    user: User = Depends(get_current_user),
 ):
     if not body.resolved:
         raise HTTPException(status_code=400, detail="Only resolved=true supported")
@@ -252,7 +250,7 @@ async def resolve_archive_upload_failure(
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=404, detail="Archive not found") from e
     ctx = get_context()
-    viewer = user.name if user else None
+    viewer = user.name
     resolved = _resolve_project(project)
     ok = await ctx.archive_service.mark_upload_failure_resolved(aid, fid, viewer, resolved)
     if not ok:

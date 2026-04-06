@@ -104,6 +104,20 @@ def _get_settings():
 
 
 async def _get_current_user() -> str:
+    """Resolve authenticated user: HTTP header (remote) → env API Key (stdio) → error."""
+    # Step 1: HTTP MCP — read user injected by MCPAuthMiddleware
+    try:
+        from fastmcp.server.http import _current_http_request
+
+        request = _current_http_request.get()
+        if request is not None:
+            mcp_user = getattr(request.state, "mcp_user", None)
+            if mcp_user:
+                return mcp_user
+    except Exception:
+        pass
+
+    # Step 2: stdio MCP — authenticate via env TEAM_MEMORY_API_KEY
     api_key = os.environ.get("TEAM_MEMORY_API_KEY", "")
     if api_key:
         try:
@@ -112,13 +126,18 @@ async def _get_current_user() -> str:
                 user = await ctx.auth.authenticate({"api_key": api_key})
                 if user is not None:
                     return user.name
-            logger.warning("MCP auth resolve failed, using fallback user")
+            logger.warning("MCP auth resolve failed for TEAM_MEMORY_API_KEY")
         except RuntimeError:
-            logger.warning("MCP get_context failed, using fallback user")
+            logger.warning("MCP get_context failed, cannot resolve user")
         except Exception as e:
             logger.warning("MCP auth error: %s", type(e).__name__)
             logger.debug("MCP auth error details", exc_info=True)
-    return (os.environ.get("TEAM_MEMORY_USER", "") or "anonymous").strip() or "anonymous"
+
+    # Step 3: no identity — error
+    raise RuntimeError(
+        "No authenticated user. Set TEAM_MEMORY_API_KEY env var "
+        "or provide Authorization header for HTTP MCP."
+    )
 
 
 def _get_db_url() -> str:

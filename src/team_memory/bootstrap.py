@@ -69,7 +69,7 @@ _LOG_RECORD_STD_ATTRS = frozenset(
     }
 )
 
-# Sensitive keys to redact in extra (per docs/design-docs/logging-format.md)
+# Sensitive keys to redact in extra; see docs/design-docs/ops/logging-format.md
 _SENSITIVE_KEYS = frozenset(
     {
         "api_key",
@@ -97,7 +97,10 @@ def _redact_sensitive(extra: dict) -> dict:
 
 
 class _JsonFormatter(logging.Formatter):
-    """JSON Lines formatter per docs/design-docs/logging-format.md."""
+    """JSON Lines formatter.
+
+    Spec: docs/design-docs/ops/logging-format.md
+    """
 
     def format(self, record: logging.LogRecord) -> str:
         ts = (
@@ -335,9 +338,10 @@ def _configure_auth(settings: Settings) -> AuthProvider:
             auth.register_key((settings.auth.api_key or "").strip(), settings.auth.user, "admin")
         env_key = (os.environ.get("TEAM_MEMORY_API_KEY") or "").strip()
         if env_key:
-            user_name = (os.environ.get("TEAM_MEMORY_USER") or "admin").strip()
-            auth.register_key(env_key, user_name, "admin")
-            logger.debug("Registered API key from TEAM_MEMORY_API_KEY for user %s", user_name)
+            auth.register_key(env_key, settings.auth.user, "admin")
+            logger.debug(
+                "Registered API key from TEAM_MEMORY_API_KEY for user %s", settings.auth.user
+            )
     return auth
 
 

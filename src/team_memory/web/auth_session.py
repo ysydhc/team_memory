@@ -155,39 +155,3 @@ async def get_current_user(request: Request) -> User:
 
     request.state.user = user
     return user
-
-
-async def get_optional_user(request: Request) -> User | None:
-    """Try to authenticate, return None instead of raising 401."""
-    auth_header = request.headers.get("Authorization", "")
-    api_key = ""
-    if auth_header.startswith("Bearer "):
-        api_key = auth_header[7:]
-
-    if not api_key:
-        from team_memory.web.middleware import _decode_api_key_cookie
-
-        api_key = _decode_api_key_cookie(request.cookies.get("api_key", ""))
-
-    _auth = _get_auth()
-    _settings = _get_settings_lazy()
-    if not api_key or not _auth:
-        if _settings and _settings.auth.allow_anonymous_search:
-            return User(name="anonymous", role="viewer")
-        return None
-
-    if api_key.startswith("sess:"):
-        secret = _get_session_secret()
-        user_str = _decode_session_token(api_key, secret)
-        if user_str:
-            role = await _get_user_role_from_db(user_str)
-            return User(name=user_str, role=role)
-        return None
-
-    if api_key.startswith("pwd:"):
-        parts = api_key.split(":", 2)
-        if len(parts) == 3:
-            return await _auth.authenticate({"username": parts[1], "password": parts[2]})
-        return None
-
-    return await _auth.authenticate({"api_key": api_key})
