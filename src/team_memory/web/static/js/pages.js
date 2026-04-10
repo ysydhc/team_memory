@@ -1420,7 +1420,18 @@ function _archivesProjectParam() {
     return `project=${encodeURIComponent(p)}`;
 }
 
+/** Escape key handler for archive upload modal; cleared when modal closes or detail unmounts. */
+let _archiveUploadOnEscape = null;
+
+function _teardownArchiveUploadModal() {
+    if (_archiveUploadOnEscape) {
+        document.removeEventListener('keydown', _archiveUploadOnEscape);
+        _archiveUploadOnEscape = null;
+    }
+}
+
 export function showArchivesListView() {
+    _teardownArchiveUploadModal();
     document.getElementById('archives-list-view')?.classList.remove('hidden');
     document.getElementById('archives-detail-view')?.classList.add('hidden');
 }
@@ -1509,7 +1520,7 @@ function _archiveScopeLine(a) {
     if (a.scope) parts.push(`范围 ${esc(a.scope)}`);
     if (a.scope_ref) parts.push(`引用 ${esc(a.scope_ref)}`);
     if (!parts.length) return '';
-    return `<p style="margin:8px 0 0;font-size:12px;color:var(--text-muted)">${parts.join(' · ')}</p>`;
+    return `<p class="arch-scope-line">${parts.join(' · ')}</p>`;
 }
 
 /** PageIndex-Lite / long-doc sections stored on archive. */
@@ -1590,28 +1601,83 @@ function _archiveFailuresHtml(archiveId, failures) {
     return { html, curlStrings };
 }
 
-function _archiveUploadFormHtml() {
-    return `<section style="margin-bottom:20px;padding:14px;border:1px solid var(--border);border-radius:var(--radius)">
-    <h3 style="font-size:13px;margin:0 0 10px">上传附件</h3>
-    <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">与档案 L2 权限一致；白名单后缀见服务端配置 <code>uploads.allowed_extensions</code>。</p>
-    <form id="archives-upload-form">
-      <div style="margin-bottom:8px">
-        <input type="file" name="file" required style="font-size:13px" />
-      </div>
-      <div style="margin-bottom:8px">
-        <label style="font-size:12px;color:var(--text-secondary)">kind</label><br/>
-        <input type="text" name="kind" value="file" style="width:100%;max-width:280px" />
-      </div>
-      <div style="margin-bottom:8px">
-        <label style="font-size:12px;color:var(--text-secondary)">备注（snippet）</label><br/>
-        <input type="text" name="note" placeholder="可选" style="width:100%;max-width:400px" />
-      </div>
-      <button type="submit" class="btn btn-primary btn-sm">上传</button>
-    </form>
-  </section>`;
+function _archiveUploadUiHtml() {
+    return `<div class="archive-upload-entry">
+  <button type="button" class="btn btn-secondary archive-upload-open-btn" id="archive-upload-open-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="archive-upload-dialog">
+    上传附件
+  </button>
+</div>
+<div id="archive-upload-dialog" class="modal-overlay archive-upload-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="archive-upload-modal-title" aria-hidden="true">
+  <div class="modal archive-upload-modal-panel" role="document" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2 id="archive-upload-modal-title">上传附件</h2>
+      <button type="button" class="modal-close" data-archive-upload-close aria-label="关闭">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="archive-upload-hint">与档案 L2 权限一致；白名单后缀见服务端配置 <code>uploads.allowed_extensions</code>。</p>
+      <form id="archives-upload-form">
+        <div class="archive-upload-grid">
+          <div class="form-group archive-upload-file">
+            <label for="archives-upload-file">文件</label>
+            <input type="file" id="archives-upload-file" name="file" required />
+          </div>
+          <div class="form-group">
+            <label for="archives-upload-kind">类型 (kind)</label>
+            <input type="text" id="archives-upload-kind" name="kind" value="file" autocomplete="off" />
+          </div>
+          <div class="form-group archive-upload-note">
+            <label for="archives-upload-note">备注 (snippet)</label>
+            <input type="text" id="archives-upload-note" name="note" placeholder="可选" autocomplete="off" />
+          </div>
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" data-archive-upload-close>取消</button>
+      <button type="submit" form="archives-upload-form" class="btn btn-primary">上传</button>
+    </div>
+  </div>
+</div>`;
 }
 
 async function _bindArchiveDetailInteractions(archiveId, bodyEl, failureCurlStrings) {
+    const overlay = bodyEl.querySelector('#archive-upload-dialog');
+    const openBtn = bodyEl.querySelector('#archive-upload-open-btn');
+
+    const closeUploadModal = () => {
+        if (!overlay || !openBtn) return;
+        overlay.classList.add('hidden');
+        overlay.setAttribute('aria-hidden', 'true');
+        openBtn.setAttribute('aria-expanded', 'false');
+        _teardownArchiveUploadModal();
+    };
+
+    const openUploadModal = () => {
+        if (!overlay || !openBtn) return;
+        overlay.classList.remove('hidden');
+        overlay.setAttribute('aria-hidden', 'false');
+        openBtn.setAttribute('aria-expanded', 'true');
+        _teardownArchiveUploadModal();
+        _archiveUploadOnEscape = (e) => {
+            if (e.key === 'Escape') closeUploadModal();
+        };
+        document.addEventListener('keydown', _archiveUploadOnEscape);
+        requestAnimationFrame(() => {
+            const f = overlay.querySelector('input[type=file]');
+            if (f) f.focus();
+        });
+    };
+
+    if (openBtn && overlay) {
+        openBtn.addEventListener('click', openUploadModal);
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) closeUploadModal();
+        });
+        bodyEl.querySelectorAll('[data-archive-upload-close]').forEach((btn) => {
+            btn.addEventListener('click', closeUploadModal);
+        });
+    }
+
     const form = bodyEl.querySelector('#archives-upload-form');
     if (form) {
         form.addEventListener('submit', async (ev) => {
@@ -1627,6 +1693,7 @@ async function _bindArchiveDetailInteractions(archiveId, bodyEl, failureCurlStri
                 const qs = _archivesProjectParam();
                 await api('POST', `/api/v1/archives/${archiveId}/attachments/upload?${qs}`, fd);
                 toast('上传成功', 'info');
+                closeUploadModal();
                 await openArchiveDetail(archiveId);
             } catch (e) {
                 toast('上传失败: ' + e.message, 'error');
@@ -1664,6 +1731,7 @@ export async function openArchiveDetail(id) {
     const detailV = document.getElementById('archives-detail-view');
     const body = document.getElementById('archives-detail-body');
     if (!listV || !detailV || !body) return;
+    _teardownArchiveUploadModal();
     listV.classList.add('hidden');
     detailV.classList.remove('hidden');
     body.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
@@ -1680,12 +1748,16 @@ export async function openArchiveDetail(id) {
         const { html: failHtml, curlStrings } = _archiveFailuresHtml(id, failures);
 
         // --- L0: Header ---
-        const meta = [
+        const metaText = [
             a.created_by ? esc(a.created_by) : '',
             a.created_at ? `保存于 ${formatDate(a.created_at)}` : '',
             a.project ? esc(a.project) : '',
-            a.status ? `状态 ${esc(a.status)}` : '',
         ].filter(Boolean).join(' · ');
+        const statusRaw = a.status ? String(a.status).trim().toLowerCase() : '';
+        const statusSlug = statusRaw ? statusRaw.replace(/[^a-z0-9_-]/g, '') || 'unknown' : '';
+        const statusPill = statusRaw
+            ? `<span class="arch-status-pill arch-status-pill--${esc(statusSlug)}">${esc(a.status)}</span>`
+            : '';
         const ctBadge = a.content_type
             ? `<span class="arch-content-type-badge">${esc(a.content_type)}</span>`
             : '';
@@ -1700,13 +1772,19 @@ export async function openArchiveDetail(id) {
             : '';
 
         const l0Header = `
-          <header style="margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:12px">
-            <h2 style="font-size:20px;font-weight:600;margin:0 0 8px;color:var(--text-primary)">${ctBadge}${esc(a.title || '')}</h2>
+          <header class="arch-detail-header">
+            <h2>${ctBadge}${esc(a.title || '')}</h2>
             ${valSum}
             ${tagsRow}
-            <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted)">${meta}</p>
+            <div class="arch-meta-row">
+              <p class="arch-meta-text">${metaText}</p>
+              ${statusPill}
+            </div>
             ${_archiveScopeLine(a)}
           </header>`;
+
+        const _archSectionToggle =
+            "onclick=\"(function(btn){var b=btn.nextElementSibling;var i=btn.querySelector('.archive-toggle-icon');var added=b.classList.toggle('collapsed');btn.setAttribute('aria-expanded',added?'false':'true');i.textContent=added?'\\u25B6':'\\u25BC';})(this)\"";
 
         // --- L1: Overview (expanded by default) ---
         const overviewContent = a.overview
@@ -1714,10 +1792,10 @@ export async function openArchiveDetail(id) {
             : '<p style="color:var(--text-muted);font-style:italic">无概览内容</p>';
         const l1Section = `
           <div class="archive-section">
-            <div class="archive-section-header" onclick="this.nextElementSibling.classList.toggle('collapsed');this.querySelector('.archive-toggle-icon').textContent=this.nextElementSibling.classList.contains('collapsed')?'&#9654;':'&#9660;'">
+            <button type="button" class="archive-section-header" aria-expanded="true" ${_archSectionToggle}>
               <span>概览 / Overview</span>
-              <span class="archive-toggle-icon">&#9660;</span>
-            </div>
+              <span class="archive-toggle-icon" aria-hidden="true">\u25BC</span>
+            </button>
             <div class="archive-section-body">
               ${overviewContent}
             </div>
@@ -1735,10 +1813,10 @@ export async function openArchiveDetail(id) {
         const l2Inner = solutionHtml + convHtml + treeHtml + links + attHtml;
         const l2Section = l2Inner.trim()
             ? `<div class="archive-section">
-            <div class="archive-section-header" onclick="this.nextElementSibling.classList.toggle('collapsed');this.querySelector('.archive-toggle-icon').textContent=this.nextElementSibling.classList.contains('collapsed')?'&#9654;':'&#9660;'">
+            <button type="button" class="archive-section-header" aria-expanded="false" ${_archSectionToggle}>
               <span>完整内容 / Full Content</span>
-              <span class="archive-toggle-icon">&#9654;</span>
-            </div>
+              <span class="archive-toggle-icon" aria-hidden="true">\u25B6</span>
+            </button>
             <div class="archive-section-body collapsed">
               ${l2Inner}
             </div>
@@ -1748,7 +1826,7 @@ export async function openArchiveDetail(id) {
         body.innerHTML = `
           ${l0Header}
           ${failHtml}
-          ${_archiveUploadFormHtml()}
+          ${_archiveUploadUiHtml()}
           ${l1Section}
           ${l2Section}`;
         await _bindArchiveDetailInteractions(id, body, curlStrings);

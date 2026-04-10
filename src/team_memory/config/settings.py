@@ -21,6 +21,7 @@ from team_memory.config.lifecycle import LifecycleConfig
 from team_memory.config.llm import ExtractionConfig, LLMConfig
 from team_memory.config.logging_config import LoggingConfig
 from team_memory.config.mcp import MCPConfig
+from team_memory.config.reranker import RerankerConfig
 from team_memory.config.search import (
     CacheConfig,
     PageIndexLiteConfig,
@@ -46,6 +47,7 @@ class Settings(BaseSettings):
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     pageindex_lite: PageIndexLiteConfig = Field(default_factory=PageIndexLiteConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
+    reranker: RerankerConfig = Field(default_factory=RerankerConfig)
     cache: CacheConfig = Field(default_factory=CacheConfig)
     vector: VectorConfig = Field(default_factory=VectorConfig)
     web: WebConfig = Field(default_factory=WebConfig)

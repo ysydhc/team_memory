@@ -11,10 +11,12 @@ from team_memory.config import (
     RetrievalConfig,
     SearchConfig,
 )
+from team_memory.reranker.base import RerankerProvider, RerankResult
 from team_memory.services.cache import SearchCache
 from team_memory.services.search_pipeline import (
     _EXPANSION_CACHE_TTL,
     SearchPipeline,
+    SearchRequest,
     SearchResultItem,
     _expansion_cache,
     _expansion_cache_clear,
@@ -191,6 +193,59 @@ class TestCacheKeyIsolation:
         key1 = SearchCache._make_key("same query", ["python"], project="proj-a")
         key2 = SearchCache._make_key("same query", ["python"], project="proj-b")
         assert key1 != key2
+
+    def test_cache_key_includes_reranker_signature_when_enabled(self):
+        base = SearchCache._make_key("q", None, reranker_signature="none")
+        other = SearchCache._make_key("q", None, reranker_signature="ce:deadbeef")
+        assert base != other
+
+
+# ======================== Reranker stage ========================
+
+
+class _FlipReranker(RerankerProvider):
+    async def rank(self, query, documents, top_k=10, document_metadata=None):
+        return [
+            RerankResult(index=1, score=10.0, text=documents[1]),
+            RerankResult(index=0, score=5.0, text=documents[0]),
+        ]
+
+
+class _BoomReranker(RerankerProvider):
+    async def rank(self, query, documents, top_k=10, document_metadata=None):
+        raise RuntimeError("reranker down")
+
+
+class TestApplyRerank:
+    @pytest.mark.asyncio
+    async def test_rerank_reorders_and_sets_score(self):
+        pipeline = _make_pipeline()
+        pipeline._reranker = _FlipReranker()
+        pipeline._rerank_enabled = True
+        req = SearchRequest(query="find bugs")
+        items = [
+            SearchResultItem(data={"id": "a", "title": "A"}, score=1.0),
+            SearchResultItem(data={"id": "b", "title": "B"}, score=0.5),
+        ]
+        out, ok = await pipeline._apply_rerank(req, items)
+        assert ok is True
+        assert [x.data["id"] for x in out] == ["b", "a"]
+        assert out[0].score == 10.0
+        assert out[0].data.get("rerank_score") == 10.0
+
+    @pytest.mark.asyncio
+    async def test_rerank_failure_keeps_order(self):
+        pipeline = _make_pipeline()
+        pipeline._reranker = _BoomReranker()
+        pipeline._rerank_enabled = True
+        req = SearchRequest(query="q")
+        items = [
+            SearchResultItem(data={"id": "a"}, score=1.0),
+            SearchResultItem(data={"id": "b"}, score=0.5),
+        ]
+        out, ok = await pipeline._apply_rerank(req, items)
+        assert ok is False
+        assert [x.data["id"] for x in out] == ["a", "b"]
 
 
 # ======================== LLM Expansion Cache ========================

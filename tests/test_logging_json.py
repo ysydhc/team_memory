@@ -1,7 +1,7 @@
 """Tests for JSON log format (Phase 4 Task 2).
 
 Validates that LOG_FORMAT=json produces valid JSON lines with required fields
-per docs/design-docs/logging-format.md.
+assert JSON log shape from bootstrap._JsonFormatter.
 """
 
 from __future__ import annotations

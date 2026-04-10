@@ -6,9 +6,11 @@ Pipeline stages:
   3. Retrieval — parallel vector + FTS search (hybrid mode) or single mode
   4. RRF Fusion — merge results from multiple sources using Reciprocal Rank Fusion
   5. Exact match boost — boost score when query matches title
-  6. Adaptive Filtering — dynamic threshold + elbow detection + confidence labeling
-  7. Archive merging — include archive results when requested
-  8. Cache store — save results for future queries
+  6. Adaptive Filtering — dynamic threshold + elbow detection
+  7. Optional reranking — server-side rerank of experience candidates when configured
+  8. Confidence labeling — high/medium/low from scores (after rerank if any)
+  9. Archive merging — include archive results when requested (after top experiences assembled)
+  10. Cache store — save results for future queries
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import os
 import time
 import uuid
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +33,9 @@ from team_memory.config import (
 )
 from team_memory.embedding.base import EmbeddingProvider
 from team_memory.services.cache import SearchCache
+
+if TYPE_CHECKING:
+    from team_memory.reranker.base import RerankerProvider
 from team_memory.storage.archive_repository import ArchiveRepository
 from team_memory.storage.database import get_session
 from team_memory.storage.repository import ExperienceRepository
@@ -161,6 +167,10 @@ class SearchPipeline:
         llm_config=None,
         tag_synonyms: dict[str, str] | None = None,
         db_url: str | None = None,
+        reranker_provider: RerankerProvider | None = None,
+        rerank_enabled: bool = False,
+        reranker_signature: str = "none",
+        rerank_max_document_chars: int = 8000,
     ):
         self._embedding = embedding_provider
         self._db_url = db_url
@@ -168,6 +178,10 @@ class SearchPipeline:
         self._retrieval_config = retrieval_config
         self._llm_config = llm_config
         self._tag_synonyms = tag_synonyms or {}
+        self._reranker = reranker_provider
+        self._rerank_enabled = bool(rerank_enabled and reranker_provider is not None)
+        self._reranker_signature = reranker_signature or "none"
+        self._rerank_max_document_chars = max(256, int(rerank_max_document_chars))
         self._cache = SearchCache(
             max_size=cache_config.max_size,
             ttl_seconds=cache_config.ttl_seconds,
@@ -195,6 +209,7 @@ class SearchPipeline:
                 project=request.project,
                 current_user=request.current_user,
                 include_archives=request.include_archives,
+                reranker_signature=self._reranker_signature,
             )
             if cached is not None:
                 cached.cached = True
@@ -288,7 +303,22 @@ class SearchPipeline:
             duration_ms=stage_metrics["adaptive_filter_ms"],
         )
 
-        # Confidence labels
+        reranked = False
+        if self._rerank_enabled and candidates:
+            stage_begin = time.monotonic()
+            candidates, reranked = await self._apply_rerank(request, candidates)
+            stage_metrics["rerank_ms"] = int((time.monotonic() - stage_begin) * 1000)
+            io_logger.log_internal(
+                "rerank",
+                {
+                    "query": (request.query or "")[:50],
+                    "candidates": len(candidates),
+                    "reranked": reranked,
+                },
+                duration_ms=stage_metrics.get("rerank_ms", 0),
+            )
+
+        # Confidence labels (after fusion / filter / optional rerank scores)
         candidates = self._label_confidence(candidates)
 
         # Limit final results
@@ -337,7 +367,7 @@ class SearchPipeline:
             results=result_dicts,
             total_candidates=total_candidates,
             search_type=mode,
-            reranked=False,
+            reranked=reranked,
             cached=False,
             duration_ms=duration_ms,
             stage_metrics=stage_metrics,
@@ -353,6 +383,7 @@ class SearchPipeline:
                 project=request.project,
                 current_user=request.current_user,
                 include_archives=request.include_archives,
+                reranker_signature=self._reranker_signature,
             )
             io_logger.log_internal(
                 "cache_store",
@@ -639,6 +670,72 @@ class SearchPipeline:
             filtered.append(curr)
 
         return filtered
+
+    def _build_rerank_document_text(self, item: SearchResultItem) -> str:
+        """Concatenate title, problem (description), solution for reranker input."""
+        d = item.data
+        title = str(d.get("title") or "").strip()
+        problem = str(d.get("description") or d.get("problem") or "").strip()
+        solution = str(d.get("solution") or "").strip()
+        parts = [p for p in (title, problem, solution) if p]
+        text = "\n\n".join(parts) if parts else title
+        max_c = self._rerank_max_document_chars
+        if len(text) > max_c:
+            text = text[:max_c] + "…"
+        return text or "(empty)"
+
+    async def _apply_rerank(
+        self,
+        request: SearchRequest,
+        candidates: list[SearchResultItem],
+    ) -> tuple[list[SearchResultItem], bool]:
+        """Server-side rerank on experience candidates only. Returns (items, success)."""
+        if not self._reranker or not candidates:
+            return candidates, False
+
+        query = (request.query or "").strip()
+        documents = [self._build_rerank_document_text(c) for c in candidates]
+        doc_meta: list[dict] = [
+            {"exact_title_match": (c.data.get("exact_title_match") or "")} for c in candidates
+        ]
+        top_k = len(documents)
+
+        try:
+            ranked = await self._reranker.rank(
+                query,
+                documents,
+                top_k=top_k,
+                document_metadata=doc_meta,
+            )
+        except Exception as e:
+            logger.warning("Reranker failed, keeping pre-rerank order: %s", e, exc_info=True)
+            return candidates, False
+
+        if not ranked:
+            return candidates, False
+
+        seen: set[int] = set()
+        new_items: list[SearchResultItem] = []
+        for r in ranked:
+            if r.index < 0 or r.index >= len(candidates) or r.index in seen:
+                continue
+            seen.add(r.index)
+            item = candidates[r.index]
+            item.score = float(r.score)
+            item.data["rerank_score"] = round(float(r.score), 4)
+            new_items.append(item)
+
+        if len(new_items) != len(candidates):
+            logger.warning(
+                "Reranker returned incomplete index set (%d/%d); merging remainder",
+                len(new_items),
+                len(candidates),
+            )
+            for i, c in enumerate(candidates):
+                if i not in seen:
+                    new_items.append(c)
+
+        return new_items, True
 
     @staticmethod
     def _label_confidence(

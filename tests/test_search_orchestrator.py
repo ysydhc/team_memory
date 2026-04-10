@@ -49,14 +49,14 @@ class TestSearchOrchestratorSearch:
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            results = await orchestrator.search(
+            o = await orchestrator.search(
                 query="test query",
                 max_results=5,
                 user_name="tester",
             )
 
-        assert len(results) == 1
-        assert results[0]["title"] == "Result 1"
+        assert len(o.results) == 1
+        assert o.results[0]["title"] == "Result 1"
         mock_pipeline.search.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -89,13 +89,14 @@ class TestSearchOrchestratorSearch:
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            results = await orchestrator.search(
+            o = await orchestrator.search(
                 query="test",
                 max_results=3,
             )
 
-        assert len(results) == 1
-        assert results[0]["title"] == "Legacy result"
+        assert len(o.results) == 1
+        assert o.results[0]["title"] == "Legacy result"
+        assert o.reranked is False
         mock_embedding.encode_single.assert_awaited_once()
         mock_repo.search_by_vector.assert_awaited_once()
 
@@ -127,10 +128,10 @@ class TestSearchOrchestratorSearch:
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            results = await orchestrator.search(query="fallback test")
+            o = await orchestrator.search(query="fallback test")
 
-        assert len(results) == 1
-        assert results[0]["title"] == "FTS result"
+        assert len(o.results) == 1
+        assert o.results[0]["title"] == "FTS result"
         mock_repo.search_by_fts.assert_awaited_once()
 
 

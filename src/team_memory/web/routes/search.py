@@ -35,7 +35,7 @@ async def search_experiences_api(
     top_k_children = req.top_k_children or (retrieval_cfg.top_k_children if retrieval_cfg else 3)
 
     search_orchestrator = _get_search_orchestrator()
-    results = await search_orchestrator.search(
+    osearch = await search_orchestrator.search(
         query=req.query,
         tags=req.tags,
         max_results=max_results,
@@ -48,9 +48,11 @@ async def search_experiences_api(
         include_archives=req.include_archives,
     )
     return {
-        "results": results,
-        "total": len(results),
+        "results": osearch.results,
+        "total": len(osearch.results),
         "limit": max_results,
+        "reranked": osearch.reranked,
+        "cached": osearch.cached,
     }
 
 
@@ -97,7 +99,7 @@ async def search_experiences_debug(
         "reranked": result.reranked,
         "cached": result.cached,
         "duration_ms": result.duration_ms,
-        "tree_hits": result.tree_hits,
+        "tree_hits": getattr(result, "tree_hits", None),
         "stage_metrics": result.stage_metrics,
         "project": resolved_project,
     }

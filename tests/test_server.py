@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from team_memory.server import mcp
+from team_memory.services.search_orchestrator import OrchestratedSearchResult
 from tests.conftest import (
     _P,
     _patch_expansion,
@@ -25,12 +26,12 @@ from tests.conftest import (
 
 
 class TestLiteToolRegistration:
-    """Verify lite server registers exactly 5 memory_* tools."""
+    """Verify lite server registers exactly 6 memory_* tools."""
 
     @pytest.mark.asyncio
-    async def test_exactly_five_tools(self):
+    async def test_exactly_six_tools(self):
         tools = {t.name: t for t in await mcp.list_tools()}
-        assert len(tools) == 5, f"Expected 5 tools, got {len(tools)}: {list(tools.keys())}"
+        assert len(tools) == 6, f"Expected 6 tools, got {len(tools)}: {list(tools.keys())}"
 
     @pytest.mark.asyncio
     async def test_tool_names(self):
@@ -39,6 +40,7 @@ class TestLiteToolRegistration:
             "memory_save",
             "memory_recall",
             "memory_get_archive",
+            "memory_archive_upsert",
             "memory_context",
             "memory_feedback",
         }
@@ -97,6 +99,101 @@ class TestMemoryGetArchive:
         out = await fn(archive_id="bad")
         data = json.loads(out)
         assert data.get("code") == "not_found"
+
+
+# ============================================================
+# memory_archive_upsert
+# ============================================================
+
+
+class TestMemoryArchiveUpsert:
+    @pytest.mark.asyncio
+    async def test_success_created(self):
+        aid = uuid.uuid4()
+        with (
+            patch(f"{_P}._get_archive_service") as mock_get,
+            patch(f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"),
+            patch(f"{_P}._resolve_project", return_value="myproj"),
+            patch(f"{_P}._get_settings") as mock_settings,
+        ):
+            mock_settings.return_value = MagicMock()
+            mock_settings.return_value.mcp.max_archive_solution_doc_chars = 64_000
+            mock_svc = MagicMock()
+            mock_svc.archive_upsert = AsyncMock(
+                return_value={"action": "created", "archive_id": aid, "previous_updated_at": None}
+            )
+            mock_get.return_value = mock_svc
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_archive_upsert"].fn
+            out = await fn(title="Doc", solution_doc="# Body\n", project="p")
+
+        data = json.loads(out)
+        assert data["archive_id"] == str(aid)
+        assert data["action"] == "created"
+        assert data["message"] == "Created successfully"
+        mock_svc.archive_upsert.assert_awaited_once()
+        call_kw = mock_svc.archive_upsert.await_args.kwargs
+        assert call_kw["created_by"] == "alice"
+        assert call_kw["project"] == "myproj"
+
+    @pytest.mark.asyncio
+    async def test_validation_error_from_schema(self):
+        with patch(f"{_P}._get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock()
+            mock_settings.return_value.mcp.max_archive_solution_doc_chars = 64_000
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_archive_upsert"].fn
+            out = await fn(
+                title="T",
+                solution_doc="x",
+                tags=[f"t{i}" for i in range(21)],
+            )
+
+        data = json.loads(out)
+        assert data.get("error") is True
+        assert data.get("code") == "validation_error"
+
+    @pytest.mark.asyncio
+    async def test_solution_doc_exceeds_mcp_limit(self):
+        with patch(f"{_P}._get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock()
+            mock_settings.return_value.mcp.max_archive_solution_doc_chars = 10
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_archive_upsert"].fn
+            out = await fn(title="T", solution_doc="x" * 11)
+
+        data = json.loads(out)
+        assert data.get("code") == "validation_error"
+        assert "exceeds MCP limit" in data.get("message", "")
+
+    @pytest.mark.asyncio
+    async def test_embedding_failed(self):
+        from team_memory.services.archive import ArchiveUploadError
+
+        with (
+            patch(f"{_P}._get_archive_service") as mock_get,
+            patch(f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"),
+            patch(f"{_P}._resolve_project", return_value=None),
+            patch(f"{_P}._get_settings") as mock_settings,
+        ):
+            mock_settings.return_value = MagicMock()
+            mock_settings.return_value.mcp.max_archive_solution_doc_chars = 64_000
+            mock_svc = MagicMock()
+            mock_svc.archive_upsert = AsyncMock(
+                side_effect=ArchiveUploadError(
+                    "embedding_failed",
+                    "Embedding generation failed.",
+                    http_status=500,
+                )
+            )
+            mock_get.return_value = mock_svc
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_archive_upsert"].fn
+            out = await fn(title="T", solution_doc="body")
+
+        data = json.loads(out)
+        assert data.get("error") is True
+        assert data.get("code") == "embedding_failed"
 
 
 # ============================================================
@@ -275,7 +372,9 @@ class TestMemoryRecall:
             _patch_expansion(),
         ):
             mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(return_value=mock_results)
+            mock_orchestrator.search = AsyncMock(
+                return_value=OrchestratedSearchResult(results=mock_results)
+            )
             mock_get_orch.return_value = mock_orchestrator
 
             mock_session = AsyncMock()
@@ -314,7 +413,9 @@ class TestMemoryRecall:
             _patch_expansion(),
         ):
             mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(return_value=mock_results)
+            mock_orchestrator.search = AsyncMock(
+                return_value=OrchestratedSearchResult(results=mock_results)
+            )
             mock_get_orch.return_value = mock_orchestrator
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -366,7 +467,9 @@ class TestMemoryRecall:
             mock_pm_cls.return_value = mock_pm
 
             mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(return_value=mock_results)
+            mock_orchestrator.search = AsyncMock(
+                return_value=OrchestratedSearchResult(results=mock_results)
+            )
             mock_get_orch.return_value = mock_orchestrator
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -398,7 +501,9 @@ class TestMemoryRecall:
             patch(f"{_P}._resolve_project", return_value="default"),
         ):
             mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(return_value=mock_results)
+            mock_orchestrator.search = AsyncMock(
+                return_value=OrchestratedSearchResult(results=mock_results)
+            )
             mock_get_orch.return_value = mock_orchestrator
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -437,7 +542,7 @@ class TestMemoryRecall:
             patch(f"{_P}._resolve_project", return_value="default"),
         ):
             mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(return_value=[])
+            mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=[]))
             mock_get_orch.return_value = mock_orchestrator
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -468,7 +573,9 @@ class TestMemoryRecall:
             _patch_expansion(),
         ):
             mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(return_value=mock_results)
+            mock_orchestrator.search = AsyncMock(
+                return_value=OrchestratedSearchResult(results=mock_results)
+            )
             mock_get_orch.return_value = mock_orchestrator
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -503,7 +610,9 @@ class TestMemoryRecall:
             _patch_expansion(),
         ):
             mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(return_value=mock_results)
+            mock_orchestrator.search = AsyncMock(
+                return_value=OrchestratedSearchResult(results=mock_results)
+            )
             mock_get_orch.return_value = mock_orchestrator
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -531,7 +640,7 @@ class TestMemoryRecall:
             _patch_expansion(),
         ):
             mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(return_value=[])
+            mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=[]))
             mock_get_orch.return_value = mock_orchestrator
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -554,7 +663,7 @@ class TestMemoryRecall:
             _patch_expansion(),
         ):
             mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(return_value=[])
+            mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=[]))
             mock_get_orch.return_value = mock_orchestrator
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -607,7 +716,9 @@ class TestMemoryContext:
             mock_pm_cls.return_value = mock_pm
 
             mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(return_value=mock_results)
+            mock_orchestrator.search = AsyncMock(
+                return_value=OrchestratedSearchResult(results=mock_results, reranked=True)
+            )
             mock_get_orch.return_value = mock_orchestrator
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -622,6 +733,7 @@ class TestMemoryContext:
         assert data["profile"]["static"] == ["Prefers dark mode"]
         assert data["profile"]["dynamic"] == []
         assert len(data["relevant_experiences"]) == 1
+        assert data.get("search_reranked") is True
 
 
 # ============================================================

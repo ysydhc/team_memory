@@ -21,6 +21,12 @@ from team_memory.config.lifecycle import LifecycleConfig
 from team_memory.config.llm import ExtractionConfig, LLMConfig
 from team_memory.config.logging_config import LoggingConfig
 from team_memory.config.mcp import MCPConfig
+from team_memory.config.reranker import (
+    RerankerConfig,
+    RerankerCrossEncoderConfig,
+    RerankerJinaConfig,
+    RerankerOllamaLLMConfig,
+)
 from team_memory.config.search import (
     CacheConfig,
     PageIndexLiteConfig,
@@ -57,6 +63,10 @@ __all__ = [
     "RetrievalConfig",
     "PageIndexLiteConfig",
     "SearchConfig",
+    "RerankerConfig",
+    "RerankerOllamaLLMConfig",
+    "RerankerCrossEncoderConfig",
+    "RerankerJinaConfig",
     "CacheConfig",
     "VectorConfig",
     # auth

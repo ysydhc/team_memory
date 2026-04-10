@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from team_memory.auth.provider import ApiKeyAuth
+from team_memory.services.search_orchestrator import OrchestratedSearchResult
 from team_memory.web import app as web_module
 from team_memory.web.app import app
 
@@ -53,7 +54,7 @@ def setup_app():
     web_module._service = mock_service
 
     mock_search_orchestrator = MagicMock()
-    mock_search_orchestrator.search = AsyncMock(return_value=[])
+    mock_search_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=[]))
     mock_search_orchestrator.invalidate_cache = AsyncMock()
 
     # Patch bootstrap so lifespan runs and /api/v1 routes are registered

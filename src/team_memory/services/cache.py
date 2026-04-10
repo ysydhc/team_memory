@@ -298,11 +298,13 @@ class SearchCache:
         project: str | None = None,
         current_user: str | None = None,
         include_archives: bool = False,
+        reranker_signature: str = "none",
     ) -> str:
         """Create a cache key from query, tags, project, and optionally current_user.
 
         When per-user expansion is used, current_user must be included to avoid
         cross-user cache pollution. include_archives differentiates archive-inclusive results.
+        reranker_signature avoids serving un-reranked JSON when server-side rerank is enabled.
         """
         parts = [query.strip().lower()]
         if tags:
@@ -313,6 +315,9 @@ class SearchCache:
             parts.append(f"user:{current_user.strip().lower()}")
         if include_archives:
             parts.append("archives:1")
+        sig = (reranker_signature or "none").strip()
+        if sig != "none":
+            parts.append(f"rerank:{sig}")
         raw = "|".join(parts)
         return hashlib.md5(raw.encode()).hexdigest()
 
@@ -323,11 +328,14 @@ class SearchCache:
         project: str | None = None,
         current_user: str | None = None,
         include_archives: bool = False,
+        reranker_signature: str = "none",
     ) -> Any | None:
         """Get cached search results."""
         if not self.enabled:
             return None
-        key = self._make_key(query, tags, project, current_user, include_archives)
+        key = self._make_key(
+            query, tags, project, current_user, include_archives, reranker_signature
+        )
         result = await self._result_cache.get(key)
         query_preview = (query or "")[:50]
         if result is not None:
@@ -346,11 +354,14 @@ class SearchCache:
         project: str | None = None,
         current_user: str | None = None,
         include_archives: bool = False,
+        reranker_signature: str = "none",
     ) -> None:
         """Cache search results."""
         if not self.enabled:
             return
-        key = self._make_key(query, tags, project, current_user, include_archives)
+        key = self._make_key(
+            query, tags, project, current_user, include_archives, reranker_signature
+        )
         await self._result_cache.put(key, value)
 
     async def get_or_compute_embedding(

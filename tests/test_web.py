@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from team_memory.auth.provider import ApiKeyAuth
 from team_memory.config import UploadsConfig, WebConfig
 from team_memory.services.archive import ArchiveUploadError
+from team_memory.services.search_orchestrator import OrchestratedSearchResult
 from team_memory.web import app as web_module
 from team_memory.web.app import app
 
@@ -71,7 +72,7 @@ def setup_app():
     )
     web_module._settings.installable_catalog = MagicMock(
         sources=["local"],
-        local_base_dir=".debug/knowledge-pack",
+        local_base_dir=".tm_cursor/installables",
         registry_manifest_url="",
         target_rules_dir=".cursor/rules",
         target_prompts_dir=".cursor/prompts",
@@ -139,7 +140,7 @@ def setup_app():
     web_module._service = mock_service
 
     mock_search_orchestrator = MagicMock()
-    mock_search_orchestrator.search = AsyncMock(return_value=[])
+    mock_search_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=[]))
     mock_search_orchestrator.invalidate_cache = AsyncMock(return_value=None)
     # Attach for test access via setup_app._search_orchestrator
     mock_service._search_orchestrator = mock_search_orchestrator
@@ -533,7 +534,9 @@ class TestSearch:
 
     def test_search(self, client, auth_headers, setup_app):
         setup_app._search_orchestrator.search = AsyncMock(
-            return_value=[{"id": str(uuid.uuid4()), "title": "Result", "similarity": 0.85}]
+            return_value=OrchestratedSearchResult(
+                results=[{"id": str(uuid.uuid4()), "title": "Result", "similarity": 0.85}]
+            )
         )
 
         with patch("team_memory.web.app.get_session") as mock_gs:
@@ -553,7 +556,9 @@ class TestSearch:
 
 
 class TestProjectParam:
-    def test_search_uses_default_project(self, client, auth_headers, setup_app):
+    def test_search_uses_default_project(self, client, auth_headers, setup_app, monkeypatch):
+        """Without TEAM_MEMORY_PROJECT in env, fall back to settings.default_project."""
+        monkeypatch.delenv("TEAM_MEMORY_PROJECT", raising=False)
         web_module._settings.default_project = "proj-default"
         with patch("team_memory.web.app.get_session") as mock_gs:
             mock_sess = AsyncMock()

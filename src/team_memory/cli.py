@@ -71,11 +71,12 @@ def cmd_archive(args: argparse.Namespace) -> None:
         resp = httpx.post(url, json=body, headers=_headers(), timeout=30.0)
         resp.raise_for_status()
         data = resp.json()
-        action = data.get("action", "unknown")
-        archive_id = data.get("archive_id", "?")
+        item = data.get("item") if isinstance(data.get("item"), dict) else data
+        action = item.get("action", "unknown")
+        archive_id = item.get("archive_id", "?")
         print(f"Archive {action}: {archive_id}")
-        if action == "updated" and data.get("previous_updated_at"):
-            print(f"  (previous version from {data['previous_updated_at']})")
+        if action == "updated" and item.get("previous_updated_at"):
+            print(f"  (previous version from {item['previous_updated_at']})")
     except httpx.HTTPStatusError as e:
         print(f"Error {e.response.status_code}: {e.response.text}", file=sys.stderr)
         sys.exit(1)
@@ -92,6 +93,9 @@ def cmd_upload(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     url = f"{_get_base_url()}/api/v1/archives/{args.archive_id}/attachments/upload"
+    params: dict[str, str] = {}
+    if getattr(args, "project", None):
+        params["project"] = args.project
     headers = {"Authorization": f"Bearer {_get_api_key()}"}
     files = {"file": (file_path.name, file_path.open("rb"), "application/octet-stream")}
     data = {"kind": args.kind or "file"}
@@ -99,7 +103,14 @@ def cmd_upload(args: argparse.Namespace) -> None:
         data["note"] = args.snippet
 
     try:
-        resp = httpx.post(url, headers=headers, files=files, data=data, timeout=60.0)
+        resp = httpx.post(
+            url,
+            headers=headers,
+            files=files,
+            data=data,
+            params=params or None,
+            timeout=60.0,
+        )
         resp.raise_for_status()
         result = resp.json()
         print(f"Uploaded: {result.get('id', '?')}")
@@ -143,6 +154,10 @@ def main() -> None:
     p_up.add_argument("--file", required=True, help="File path to upload")
     p_up.add_argument("--kind", default="file", help="Attachment kind")
     p_up.add_argument("--snippet", help="Optional snippet/note")
+    p_up.add_argument(
+        "--project",
+        help="Project scope (query param; align with memory_archive_upsert / MCP env)",
+    )
     p_up.set_defaults(func=cmd_upload)
 
     args = parser.parse_args()

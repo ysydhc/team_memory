@@ -1,7 +1,7 @@
 """I/O logger for MCP, service, and pipeline layers.
 
 L0 layer: depends only on config and logging.
-See docs/exec-plans/completed/logging-system/1-plan/plan.md for design details.
+I/O logging env: TEAM_MEMORY_LOG_IO_ENABLED / TEAM_MEMORY_LOGGING__LOG_IO_* (see io_logger module).
 """
 
 from __future__ import annotations

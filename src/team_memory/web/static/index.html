@@ -19,6 +19,8 @@
       --bg-secondary: #141415;
       --bg-card: #161617;
       --bg-card-hover: #1c1c1d;
+      /* Nested / inset panels (pre blocks, archive sections); must stay dark */
+      --bg-elevated: #1e1e20;
       --bg-input: #121213;
       --border: rgba(255, 255, 255, 0.06);
       --border-strong: rgba(255, 255, 255, 0.1);
@@ -847,8 +849,10 @@
     }
 
     .archives-detail-article.prose-read {
-      max-width: 52rem;
-      padding: 4px 4px 48px;
+      max-width: none;
+      width: 100%;
+      padding: 4px 0 48px;
+      box-sizing: border-box;
       font-size: 15px;
       line-height: 1.65;
       color: var(--text-primary);
@@ -3218,18 +3222,244 @@
     }
 
     /* ===== Archive L0/L1/L2 layout ===== */
-    .arch-content-type-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; background: #e3f2fd; color: #1565c0; margin-right: 8px; vertical-align: middle; }
-    .arch-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
-    .arch-tag { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 0.7rem; background: var(--bg-elevated, #f5f5f5); color: var(--text-secondary, #616161); }
-    .arch-value-summary { color: var(--text-muted, #666); font-style: italic; margin: 4px 0 8px; font-size: 13px; }
-    .archive-section { margin: 16px 0; border: 1px solid var(--border, #e0e0e0); border-radius: 8px; overflow: hidden; }
-    .archive-section-header { padding: 8px 16px; background: var(--bg-elevated, #fafafa); cursor: pointer; font-weight: 600; display: flex; justify-content: space-between; align-items: center; font-size: 14px; user-select: none; }
-    .archive-section-header:hover { background: var(--bg-card-hover, #f0f0f0); }
-    .archive-section-body { padding: 16px; }
-    .archive-section-body.collapsed { display: none; }
+    .arch-detail-header {
+      margin-bottom: 24px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .arch-detail-header h2 {
+      font-size: clamp(1.125rem, 2.2vw, 1.35rem);
+      font-weight: 600;
+      line-height: 1.35;
+      margin: 0 0 10px;
+      color: var(--text-primary);
+    }
+
+    .arch-content-type-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+      vertical-align: middle;
+      margin: 0 10px 6px 0;
+      background: var(--accent2-dim);
+      color: var(--accent-secondary);
+      border: 1px solid rgba(167, 139, 250, 0.22);
+    }
+
+    .arch-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 10px 0 12px;
+    }
+
+    .arch-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.3;
+      background: var(--bg-input);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
+
+    .arch-value-summary {
+      color: var(--text-secondary);
+      font-style: italic;
+      margin: 4px 0 8px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .arch-meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px 16px;
+      margin-top: 4px;
+    }
+
+    .arch-meta-text {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--text-secondary);
+    }
+
+    .arch-status-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 11px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      border: 1px solid var(--border);
+      background: var(--bg-input);
+      color: var(--text-secondary);
+      text-transform: lowercase;
+    }
+
+    .arch-status-pill--published {
+      background: var(--green-bg);
+      color: var(--green);
+      border-color: rgba(74, 222, 128, 0.28);
+    }
+
+    .arch-status-pill--draft {
+      background: var(--yellow-bg);
+      color: var(--yellow);
+      border-color: rgba(251, 191, 36, 0.28);
+    }
+
+    .arch-scope-line {
+      margin: 12px 0 0;
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--text-muted);
+    }
+
+    .archive-section {
+      margin: 20px 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      background: var(--bg-card);
+    }
+
+    button.archive-section-header {
+      width: 100%;
+      margin: 0;
+      padding: 14px 18px;
+      min-height: 48px;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      border: none;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      text-align: left;
+      user-select: none;
+      transition: background var(--transition), color var(--transition);
+    }
+
+    button.archive-section-header:hover {
+      background: var(--bg-card-hover);
+    }
+
+    .archive-toggle-icon {
+      flex-shrink: 0;
+      font-size: 11px;
+      color: var(--text-muted);
+      width: 1.25rem;
+      text-align: center;
+    }
+
+    .archive-section-body {
+      padding: 18px 20px;
+      background: var(--bg-primary);
+      border-top: 1px solid transparent;
+    }
+
+    .archive-section-body.collapsed {
+      display: none;
+    }
+
+    .archive-upload-entry {
+      margin-bottom: 20px;
+    }
+
+    .archive-upload-open-btn {
+      min-height: 44px;
+      padding: 10px 18px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 500;
+    }
+
+    .archive-upload-modal-panel {
+      width: min(92vw, 520px);
+      max-width: 520px;
+      max-height: min(90vh, 720px);
+    }
+
+    .archive-upload-dialog .modal-body .archive-upload-hint {
+      margin: 0 0 18px;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--text-muted);
+    }
+
+    .archive-upload-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px 20px;
+      margin-bottom: 18px;
+    }
+
+    @media (min-width: 640px) {
+      .archive-upload-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .archive-upload-file,
+      .archive-upload-note {
+        grid-column: 1 / -1;
+      }
+    }
+
+    .archive-upload-dialog.modal-overlay {
+      z-index: 1100;
+    }
+
+    .archive-upload-dialog .form-group {
+      margin-bottom: 0;
+    }
+
+    .archive-upload-dialog input[type="file"] {
+      padding: 10px 12px;
+      font-size: 13px;
+    }
+
+    .archive-upload-dialog input[type="file"]::file-selector-button {
+      margin-right: 12px;
+      padding: 8px 16px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background var(--transition), border-color var(--transition);
+    }
+
+    .archive-upload-dialog input[type="file"]::file-selector-button:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-strong);
+    }
+
+    .archive-upload-dialog .modal-footer .btn-primary {
+      min-height: 44px;
+      padding: 10px 22px;
+    }
+
     .md-table { border-collapse: collapse; width: 100%; margin: 8px 0; }
-    .md-table th, .md-table td { border: 1px solid var(--border, #ddd); padding: 6px 12px; text-align: left; font-size: 13px; }
-    .md-table th { background: var(--bg-elevated, #f5f5f5); font-weight: 600; }
+    .md-table th, .md-table td { border: 1px solid var(--border); padding: 6px 12px; text-align: left; font-size: 13px; }
+    .md-table th { background: var(--bg-secondary); font-weight: 600; color: var(--text-secondary); }
     .archive-section-body h2, .archive-section-body h3, .archive-section-body h4 { margin: 12px 0 6px; }
     .archive-section-body ul { padding-left: 20px; margin: 4px 0; }
     .archive-section-body p { margin: 6px 0; line-height: 1.6; }

@@ -1,6 +1,7 @@
-"""MCP Server — 5 tools for persistent team memory across coding sessions.
+"""MCP Server — 6 tools for persistent team memory across coding sessions.
 
-Registers memory_save, memory_recall, memory_get_archive, memory_context, memory_feedback.
+Registers memory_save, memory_recall, memory_get_archive, memory_archive_upsert,
+memory_context, memory_feedback.
 Delegates to the shared service layer via AppContext singleton.
 
 Usage:
@@ -791,7 +792,7 @@ async def _recall_solve(
         combined_tags.append(framework.lower())
 
     # search_orchestrator.search() increments use_count for top results (implicit feedback)
-    results = await search_orchestrator.search(
+    osearch = await search_orchestrator.search(
         query=enhanced_query,
         tags=combined_tags or None,
         max_results=max_results,
@@ -803,6 +804,7 @@ async def _recall_solve(
         project=project,
         include_archives=include_archives,
     )
+    results = osearch.results
 
     if not results:
         return json.dumps(
@@ -812,6 +814,7 @@ async def _recall_solve(
                     "After solving this problem, call memory_save to share the solution."
                 ),
                 "results": [],
+                "reranked": False,
             },
             ensure_ascii=False,
         )
@@ -821,6 +824,7 @@ async def _recall_solve(
         {
             "message": f"Found {len(results)} solution(s).",
             "results": results,
+            "reranked": osearch.reranked,
             "feedback_hint": (
                 f"If helpful, call memory_feedback(experience_id='{best_id}', rating=5)"
             ),
@@ -841,7 +845,7 @@ async def _recall_search(
     include_archives: bool,
 ) -> str:
     """Search mode: direct query."""
-    results = await search_orchestrator.search(
+    osearch = await search_orchestrator.search(
         query=query,
         tags=tags,
         max_results=max_results,
@@ -853,10 +857,11 @@ async def _recall_search(
         project=project,
         include_archives=include_archives,
     )
+    results = osearch.results
 
     if not results:
         return json.dumps(
-            {"message": "No matching experiences found.", "results": []},
+            {"message": "No matching experiences found.", "results": [], "reranked": False},
             ensure_ascii=False,
         )
 
@@ -865,6 +870,7 @@ async def _recall_search(
         {
             "message": f"Found {len(results)} result(s).",
             "results": results,
+            "reranked": osearch.reranked,
             "feedback_hint": (
                 f"If helpful, call memory_feedback(experience_id='{best_id}', rating=5)"
             ),
@@ -927,7 +933,7 @@ async def _recall_suggest(
     if framework:
         filter_tags.append(framework.lower())
 
-    results = await search_orchestrator.search(
+    osearch = await search_orchestrator.search(
         query=query,
         tags=filter_tags or None,
         max_results=max_results,
@@ -938,10 +944,15 @@ async def _recall_suggest(
         top_k_children=1,
         project=project,
     )
+    results = osearch.results
 
     if not results:
         return json.dumps(
-            {"message": "No relevant experiences for this context.", "results": []},
+            {
+                "message": "No relevant experiences for this context.",
+                "results": [],
+                "reranked": False,
+            },
             ensure_ascii=False,
         )
 
@@ -962,6 +973,7 @@ async def _recall_suggest(
         {
             "message": f"Found {len(suggestions)} suggestion(s) for your context.",
             "results": suggestions,
+            "reranked": osearch.reranked,
         },
         ensure_ascii=False,
     )
@@ -1038,7 +1050,7 @@ async def memory_context(
         try:
             search_orch = _get_search_orchestrator()
             query = " ".join(query_parts)
-            results = await search_orch.search(
+            osearch = await search_orch.search(
                 query=query,
                 max_results=3,
                 min_similarity=0.4,
@@ -1048,7 +1060,8 @@ async def memory_context(
                 top_k_children=1,
                 project=resolved_project,
             )
-            for r in results:
+            result["search_reranked"] = osearch.reranked
+            for r in osearch.results:
                 parent = r.get("parent", r)
                 result["relevant_experiences"].append(
                     {
@@ -1114,7 +1127,138 @@ async def memory_get_archive(archive_id: str, project: str | None = None) -> str
 
 
 # ============================================================
-# Tool 5: memory_feedback (feedback loop)
+# Tool 5: memory_archive_upsert (L2 write, same as POST /api/v1/archives)
+# ============================================================
+
+
+@mcp.tool(
+    name="memory_archive_upsert",
+    description=(
+        "Create or update an archive (title + project dedup), same contract as "
+        "POST /api/v1/archives. Use for L0/L1/L2 text fields only; large files via HTTP "
+        "POST /api/v1/archives/{archive_id}/attachments/upload or "
+        "python -m team_memory.cli upload (after you have archive_id). Does not embed file bytes."
+    ),
+)
+@track_usage
+async def memory_archive_upsert(
+    title: str,
+    solution_doc: str,
+    content_type: str = "session_archive",
+    value_summary: str | None = None,
+    tags: list[str] | None = None,
+    overview: str | None = None,
+    conversation_summary: str | None = None,
+    raw_conversation: str | None = None,
+    linked_experience_ids: list[str] | None = None,
+    project: str | None = None,
+    scope: str = "session",
+    scope_ref: str | None = None,
+) -> str:
+    """Upsert archive via ArchiveService (embedding + DB); JSON success or error."""
+    import uuid as _uuid
+
+    from pydantic import ValidationError
+
+    from team_memory.schemas import ArchiveCreateRequest
+    from team_memory.services.archive import ArchiveUploadError
+
+    settings = _get_settings()
+    max_sd = int(getattr(settings.mcp, "max_archive_solution_doc_chars", 64_000))
+    if len(solution_doc or "") > max_sd:
+        return json.dumps(
+            {
+                "error": True,
+                "message": (
+                    f"solution_doc exceeds MCP limit ({max_sd} chars). "
+                    "Shorten/summarize or upload full text as an attachment via HTTP/cli upload."
+                ),
+                "code": "validation_error",
+            },
+            ensure_ascii=False,
+        )
+
+    try:
+        body = ArchiveCreateRequest(
+            title=title,
+            solution_doc=solution_doc,
+            content_type=content_type,
+            value_summary=value_summary,
+            tags=tags,
+            overview=overview,
+            conversation_summary=conversation_summary,
+            raw_conversation=raw_conversation,
+            linked_experience_ids=linked_experience_ids,
+            project=project,
+            scope=scope,
+            scope_ref=scope_ref,
+        )
+    except ValidationError as e:
+        return json.dumps(
+            {"error": True, "message": str(e), "code": "validation_error"},
+            ensure_ascii=False,
+        )
+
+    user = await _get_current_user()
+    resolved = _resolve_project(body.project)
+
+    linked_uuids: list[_uuid.UUID] = []
+    if body.linked_experience_ids:
+        for s in body.linked_experience_ids:
+            try:
+                linked_uuids.append(_uuid.UUID(s))
+            except (ValueError, TypeError):
+                pass
+
+    archive_svc = _get_archive_service()
+    try:
+        result = await archive_svc.archive_upsert(
+            title=body.title,
+            solution_doc=body.solution_doc,
+            created_by=user,
+            project=resolved,
+            scope=body.scope,
+            scope_ref=body.scope_ref,
+            overview=body.overview,
+            conversation_summary=body.conversation_summary,
+            raw_conversation=body.raw_conversation,
+            content_type=body.content_type,
+            value_summary=body.value_summary,
+            tags=body.tags,
+            linked_experience_ids=linked_uuids if linked_uuids else None,
+        )
+    except ArchiveUploadError as e:
+        return json.dumps(
+            {"error": True, "message": e.message, "code": e.error_code},
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        logger.exception("memory_archive_upsert failed: %s", e)
+        return json.dumps(
+            {"error": True, "message": str(e), "code": "internal_error"},
+            ensure_ascii=False,
+        )
+
+    item = dict(result)
+    archive_id = item.get("archive_id")
+    if archive_id is not None and not isinstance(archive_id, str):
+        archive_id = str(archive_id)
+        item = {**item, "archive_id": archive_id}
+    action = item.get("action", "created")
+    msg = "Updated successfully" if action == "updated" else "Created successfully"
+    return json.dumps(
+        {
+            "archive_id": archive_id,
+            "action": action,
+            "message": msg,
+            "item": item,
+        },
+        ensure_ascii=False,
+    )
+
+
+# ============================================================
+# Tool 6: memory_feedback (feedback loop)
 # ============================================================
 
 

@@ -418,6 +418,40 @@ class TestCliUpload:
         call_data = mock_httpx.post.call_args[1].get("data", {})
         assert call_data.get("note") == "my note"
 
+    @patch("team_memory.cli.httpx")
+    def test_upload_with_project(
+        self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("TEAM_MEMORY_API_KEY", "test-key")
+        test_file = tmp_path / "a.md"
+        test_file.write_text("x")
+        mock_httpx.post.return_value = _make_mock_response(json_data={"id": "a1"})
+        mock_httpx.HTTPStatusError = httpx.HTTPStatusError
+        mock_httpx.ConnectError = httpx.ConnectError
+
+        from team_memory.cli import main
+
+        with (
+            patch(
+                "sys.argv",
+                [
+                    "tm-cli",
+                    "upload",
+                    "--archive-id",
+                    "aid",
+                    "--file",
+                    str(test_file),
+                    "--project",
+                    "team_memory",
+                ],
+            ),
+            patch("sys.stdout", StringIO()),
+        ):
+            main()
+
+        call_kw = mock_httpx.post.call_args[1]
+        assert call_kw.get("params") == {"project": "team_memory"}
+
     def test_upload_file_not_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TEAM_MEMORY_API_KEY", "test-key")
         from team_memory.cli import main

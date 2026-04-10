@@ -9,12 +9,22 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 
 from team_memory import io_logger
 from team_memory.embedding.base import EmbeddingProvider
 from team_memory.storage.repository import ExperienceRepository
 
 logger = logging.getLogger("team_memory.search_orchestrator")
+
+
+@dataclass
+class OrchestratedSearchResult:
+    """Search hits plus pipeline metadata for MCP/API."""
+
+    results: list[dict]
+    reranked: bool = False
+    cached: bool = False
 
 
 class SearchOrchestrator:
@@ -46,11 +56,12 @@ class SearchOrchestrator:
         top_k_children: int = 3,
         project: str | None = None,
         include_archives: bool = False,
-    ) -> list[dict]:
+    ) -> OrchestratedSearchResult:
         """Search experiences using the enhanced search pipeline.
 
         If a SearchPipeline is configured, uses the full pipeline
-        (hybrid search + RRF fusion + adaptive filter + compression).
+        (hybrid search +
+        RRF fusion + adaptive filter + optional rerank + compression).
         Otherwise, falls back to legacy vector/FTS search.
         """
         from team_memory.storage.database import get_session
@@ -103,7 +114,11 @@ class SearchOrchestrator:
                         except Exception:
                             pass
 
-                return pipeline_result.results
+                return OrchestratedSearchResult(
+                    results=pipeline_result.results,
+                    reranked=pipeline_result.reranked,
+                    cached=pipeline_result.cached,
+                )
 
             # Legacy fallback: direct vector/FTS search
             results = await self._legacy_search(
@@ -128,7 +143,7 @@ class SearchOrchestrator:
                 },
                 duration_ms=duration_ms,
             )
-            return results
+            return OrchestratedSearchResult(results=results, reranked=False, cached=False)
 
     async def _legacy_search(
         self,

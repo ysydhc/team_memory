@@ -69,7 +69,7 @@ _LOG_RECORD_STD_ATTRS = frozenset(
     }
 )
 
-# Sensitive keys to redact in extra; see docs/design-docs/ops/logging-format.md
+# Sensitive keys to redact in extra (see tests/test_logging_json.py).
 _SENSITIVE_KEYS = frozenset(
     {
         "api_key",
@@ -99,7 +99,7 @@ def _redact_sensitive(extra: dict) -> dict:
 class _JsonFormatter(logging.Formatter):
     """JSON Lines formatter.
 
-    Spec: docs/design-docs/ops/logging-format.md
+    JSON log shape: timestamp, level, logger, message, optional extra (redacted).
     """
 
     def format(self, record: logging.LogRecord) -> str:
@@ -371,7 +371,12 @@ def bootstrap(
     _validate_embedding_dimension(settings)
     auth = _configure_auth(settings)
 
+    from team_memory.reranker.factory import create_reranker
     from team_memory.services.search_pipeline import SearchPipeline
+
+    rerank_cfg = settings.reranker
+    rerank_enabled = rerank_cfg.provider != "none"
+    reranker_provider = create_reranker(rerank_cfg, settings.llm) if rerank_enabled else None
 
     search_pipeline = SearchPipeline(
         embedding_provider=embedding,
@@ -381,6 +386,10 @@ def bootstrap(
         llm_config=settings.llm,
         tag_synonyms=getattr(settings, "tag_synonyms", None) or {},
         db_url=db_url,
+        reranker_provider=reranker_provider,
+        rerank_enabled=rerank_enabled,
+        reranker_signature=rerank_cfg.cache_signature(),
+        rerank_max_document_chars=rerank_cfg.max_document_chars,
     )
 
     event_bus = EventBus()

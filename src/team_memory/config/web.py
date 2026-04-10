@@ -22,7 +22,7 @@ class UploadsConfig(BaseModel):
     """Local multipart uploads for archive attachments (MVP disk storage)."""
 
     enabled: bool = True
-    root_dir: str = "data/uploads"
+    root_dir: str = ".tmp/uploads"
     max_bytes: int = 52_428_800  # ~50 MiB
     # Empty list = allow any non-empty extension; non-empty = lowercase suffix whitelist
     allowed_extensions: list[str] = Field(default_factory=lambda: [".md", ".txt", ".json", ".pdf"])
