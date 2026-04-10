@@ -28,6 +28,10 @@ config.local.yaml
 htmlcov/
 .pytest_cache/
 
+# Local upload storage (archive attachments); configurable via uploads.root_dir
+# Local scratch: upload staging, TM export/remediation cache (.tmp/data/tm-archive-export 等)
+.tmp/
+
 # Debug / operations docs (personal)
 .debug/
 
@@ -44,6 +48,9 @@ Thumbs.db
 .mcpregistry_github_token
 .mcpregistry_registry_token
 .playwright-mcp/
+
+# GitNexus local graph index (regenerate with npx gitnexus analyze)
+.gitnexus/
 
 # Internal docs (not for public repo)
 pm.md
