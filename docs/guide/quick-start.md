@@ -1,7 +1,7 @@
 # 一键启动全部服务
 
 > 运维文档 | 新手使用
-> 相关：[database-operations 数据库操作](database-operations.md) | [web-server Web 服务](web-server.md)
+> 相关：[database-operations 数据库操作](../cmd/database-operations.md) | [web-server Web 服务](web-server.md)
 
 ## 常用术语
 
@@ -38,13 +38,16 @@ make web
 
 > **简化配置**：本地开发可优先编辑 `config.development.yaml` 中的 `auth` 段；勿依赖已移除的 `config.minimal.yaml` 示例文件。
 
-**首次运行可能看到的输出**：`make setup` 会拉取 Docker 镜像、创建虚拟环境、执行 alembic 迁移；`make web` 启动后终端显示 `Uvicorn running on http://0.0.0.0:9111`。**常见首次错误**：端口 5432 或 9111 被占用，见 [troubleshooting](troubleshooting.md)。
+**首次运行可能看到的输出**：`make setup` 会拉取 Docker 镜像、创建虚拟环境、执行 alembic 迁移；`make web` 启动后终端显示 `Uvicorn running on http://0.0.0.0:9111`。**常见首次错误**：本机数据库映射端口 **5433**（或 9111 Web）被占用、Ollama 未就绪等，见 [troubleshooting](../ops/troubleshooting.md)。
 
 ## 手动初始化（不使用 Make）
 
 ```bash
-# ---- 第 1 步：启动基础设施（PostgreSQL + Ollama + Redis）----
+# ---- 第 1 步：启动基础设施（PostgreSQL + Redis；与 make setup / dev 对齐）----
 docker compose up -d
+
+# Ollama：若本机未跑 ollama（无进程监听 11434），可启动容器画像（与 Makefile 一致）：
+# docker compose --profile ollama up -d
 
 # 验证数据库是否就绪（看到 "accepting connections" 就 OK）
 docker compose logs postgres | tail -5
@@ -75,8 +78,10 @@ cd /path/to/team_memory   # 或你的项目根目录
 # 方式一（推荐）
 make dev
 
-# 方式二（手动）
-docker compose up -d          # 确保基础设施在跑
+# 方式二（手动，与 dev 目标一致时至少 postgres + redis）
+docker compose up -d postgres redis
+# 可选：Ollama 容器（本机 11434 空闲时）
+# docker compose --profile ollama up -d
 python -m team_memory.web.app    # 启动 Web 服务
 ```
 

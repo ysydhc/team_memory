@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Layer mapping (document for contributors in README / AGENTS / design-docs)
+# Layer mapping (document for contributors in README / AGENTS / docs/{decision,cmd,guide,ops})
 # ---------------------------------------------------------------------------
 
 # (path_pattern, layer) - order matters for prefix matching

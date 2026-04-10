@@ -13,7 +13,8 @@
                                         ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                          认证时服务端计算                                       │
-│  key_hash = SHA256(raw_key)  →  64 位十六进制                                  │
+│  key_hash = ApiKeyAuth.hash_key(raw_key)：默认 plain SHA256；若配置              │
+│  TEAM_MEMORY_KEY_HASH_SECRET（或 auth.key_hash_secret）则为 HMAC-SHA256         │
 └─────────────────────────────────────────────────────────────────────────────┘
                                         │
                                         ▼
@@ -29,7 +30,7 @@
 | 层级 | 名称 | 长度 | 谁持有 | 存储位置 |
 |------|------|------|--------|----------|
 | **L1** | Raw API Key（原始密钥） | 64  hex | 用户 | 不存储，创建时仅返回一次 |
-| **L2** | key_hash（SHA256） | 64 hex | 服务端 | `api_keys.key_hash` |
+| **L2** | key_hash（见 `ApiKeyAuth.hash_key`） | 64 hex | 服务端 | `api_keys.key_hash` |
 | **L3** | key_prefix / key_suffix | 各 4 字符 | 服务端 | 用于展示 `a1b2****c3d4` |
 
 **你拿到的 `0D5007FEF6A98F5A99ED521327C9A698` 属于哪一层？**
@@ -87,18 +88,18 @@
 
 ## 五、TEAM_MEMORY_API_KEY 的特殊行为
 
-在 `bootstrap._configure_auth` 中：
+在 `bootstrap._configure_auth` 中（`auth.type=api_key` 时使用内存型 `ApiKeyAuth`；`db_api_key` 时 subclass 仍会继承 `register_key` 行为）：
 
-```python
-env_key = (os.environ.get("TEAM_MEMORY_API_KEY") or "").strip()
-if env_key:
-    user_name = (os.environ.get("TEAM_MEMORY_USER") or "admin").strip()
-    auth.register_key(env_key, user_name, "admin")  # 写入内存 _keys
-```
+- 先按配置/YAML 的 `auth.api_key`（若非空）`register_key(..., settings.auth.user, "admin")`
+- 再对 **`TEAM_MEMORY_API_KEY`**：`register_key(env_key, settings.auth.user, "admin")`
+
+其中 **`settings.auth.user`** 默认 `admin`，可被 YAML `auth.user` 或环境变量 **`TEAM_MEMORY_AUTH__USER`**（嵌套配置）覆盖。
+
+注意：**`TEAM_MEMORY_USER` 不会**通过 `Settings` 写入 `auth.user`；该变量在别处（如 MCP 工具回退用户名）使用，勿与预注册内存 Key 的用户名混淆。
 
 因此：
-- 设置 `TEAM_MEMORY_API_KEY=0D5007FEF6A98F5A99ED521327C9A698` 时，该值会**直接作为 Raw Key** 注册到内存
-- 认证时先查内存 → 命中 → 以 admin 身份通过
+- 设置 `TEAM_MEMORY_API_KEY=…` 时，该值会**直接作为 Raw Key** 注册到内存（用户名为 `settings.auth.user`）
+- 认证时先查内存 → 命中 → 以配置的 user / role 通过
 - **无需**在 DB 中存在对应 key_hash
 
 所以你能用 32 字符的 key 登录，是因为**环境变量预注册**，而不是 DB 中有这条记录。

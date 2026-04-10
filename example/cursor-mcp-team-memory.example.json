@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "team_memory": {
+      "command": "bash",
+      "args": ["/ABSOLUTE/PATH/TO/team_doc/scripts/run_mcp_with_dotenv.sh"],
+      "cwd": "/ABSOLUTE/PATH/TO/team_doc"
+    }
+  }
+}

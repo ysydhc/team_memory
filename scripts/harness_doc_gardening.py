@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Doc gardening: scan markdown links for broken refs, deprecated refs, stale markers.
 
-Scans docs/design-docs and docs/exec-plans for:
+Scans docs/decision, docs/cmd, docs/guide, docs/ops and docs/README.md for:
 - DOC_LINK_404: internal link points to non-existent file
 - DOC_LINK_BROKEN: broken path or anchor
 - DOC_DEPRECATED_REF: new doc references archive/deprecated (violation)
@@ -297,8 +297,16 @@ def main() -> int:
         root = path  # Use fixture dir as root for path resolution
         md_files = sorted(path.rglob("*.md"))
     else:
-        scan_dirs = ["docs/design-docs", "docs/exec-plans"]
+        scan_dirs = [
+            "docs/decision",
+            "docs/cmd",
+            "docs/guide",
+            "docs/ops",
+        ]
         md_files = collect_md_files(root, scan_dirs)
+        hub = root / "docs" / "README.md"
+        if hub.is_file():
+            md_files = sorted({*md_files, hub})
 
     all_violations: list[tuple[Path, int, str, str]] = []
     for md_path in md_files:

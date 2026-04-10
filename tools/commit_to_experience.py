@@ -110,7 +110,7 @@ COMMIT_NOTES: list[tuple[str, tuple[str, str]]] = [
     (
         "docs:",
         (
-            "设计文档实现小节、README、ops/mcp-server 与文件位置绑定参数及清理/可观测性说明。",
+            "设计文档实现小节、README、docs/guide/mcp-server 与文件位置绑定参数及清理/可观测性说明。",
             "MCP 工具列表需与 server 参数一致。",
         ),
     ),

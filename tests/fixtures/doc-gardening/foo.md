@@ -2,4 +2,4 @@
 
 See [missing doc](missing.md) for details.
 
-Also [another broken](docs/design-docs/nonexistent.md).
+Also [another broken](docs/cmd/nonexistent.md).

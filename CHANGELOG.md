@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-04-07
+
 ### Security
 
 - **`tm_get_archive` / `ArchiveService.get_archive`**：按与向量检索一致的规则校验可见性（创建者或 `published` 且同 `project`）；**越权 ID 不再返回正文**（视为未找到）。
@@ -17,10 +19,14 @@
 
 ### Changed（破坏性 · CLI / 本地开发）
 
-- **`make mcp`**：启动 MCP（**`python -m team_memory.server`**，仅 **`memory_*`** 五工具）。
+- **`make mcp`**：经 **`scripts/run_mcp_with_dotenv.sh`** 启动 MCP（需仓库根 **`.env`**；内部 **`python -m team_memory.server`**，**`memory_*`** 六工具；附件走 HTTP 或 **`python -m team_memory.cli upload`**，见 [mcp-server.md](docs/guide/mcp-server.md)）。
 - **`team_memory.server_lite`**、**`make mcp-full`**、**`team-memory-full`**：**已移除**；统一入口为 **`team_memory.server`** / **`team-memory`**。
 - **Console `team-memory`**：等同 **`python -m team_memory.server`**。
 
+### Fixed
+
+- **`tm-cli` / `python -m team_memory.cli archive`**：解析 **`POST /api/v1/archives`** 响应中的 **`item`** 包裹层，正确输出 `archive_id`（与 Web API 一致）。
+- **测试**：`test_search_uses_default_project` 在无请求 `project` 时使用 **`monkeypatch.delenv("TEAM_MEMORY_PROJECT")`**，避免本机/CI 环境变量覆盖 `default_project` 断言。
 
 ### Changed（Lite MCP JSON）
 
@@ -30,10 +36,10 @@
 
 ### Documentation
 
-- README、`docs/design-docs/ops/mcp-server.md`：MCP 示例统一为 **`team_memory.server`**；决策见 [docs/design-docs/ops/mcp-lite-default.md](docs/design-docs/ops/mcp-lite-default.md)。
+- README、`docs/guide/mcp-server.md`：MCP 示例与方案 A（`.env` + 包装脚本）；决策见 [docs/decision/mcp-lite-default.md](docs/decision/mcp-lite-default.md)。
 
 ---
 
 ## [0.1.2] — 此前版本
 
-未在此文件维护历史条目；自 **0.1.3**（或下一正式发布）起按上表累积。
+未在此文件维护历史条目；自 **0.1.3** 起按上表累积。

@@ -6,7 +6,7 @@ mcp-name: io.github.ysydhc/team-memory
 
 > 这是我学 AI 时萌生的一个想法。市面上已有类似产品，但总觉得不太贴合自己的使用习惯。做这个项目，既想通过和 AI 一起写代码来加深对大模型的理解，也希望能按自己的工作流，打磨出真正顺手的功能。
 
-**给 Agent / 贡献者**：[AGENTS.md](AGENTS.md) · [docs/架构设计图.md](docs/架构设计图.md) · [docs/design-docs/README.md](docs/design-docs/README.md) · MCP 实现 [src/team_memory/server.py](src/team_memory/server.py)
+**给 Agent / 贡献者**：[AGENTS.md](AGENTS.md) · [docs/README.md](docs/README.md) · MCP 实现 [src/team_memory/server.py](src/team_memory/server.py) · 分层约束见 `scripts/harness_import_check.py`（`LAYER_MAP`）
 
 ## 为什么需要 TeamMemory？
 
@@ -28,8 +28,8 @@ mcp-name: io.github.ysydhc/team-memory
 # 1. 初始化（Docker + 依赖 + 数据库）
 make setup
 
-# 2. 设置 API Key（唯一必改项）
-export TEAM_MEMORY_API_KEY=$(openssl rand -hex 16)
+# 2. 设置 API Key（唯一必改项；与 Web 签发的原始密钥同为 64 位十六进制，见 docs/decision/auth-api-key-design.md）
+export TEAM_MEMORY_API_KEY=$(openssl rand -hex 32)
 echo "API Key: $TEAM_MEMORY_API_KEY"
 
 # 3. 拉取 Embedding 模型（仅首次需要）
@@ -43,7 +43,9 @@ make web
 
 ## MCP 接入（Cursor / Claude）
 
-安装：`pip install team_memory`，然后在 `.cursor/mcp.json` 里加上：
+**本仓库（克隆源码）推荐**：不要把 API Key 写进 mcp.json。在仓库根维护 **`.env`**（从 [example/env.team-memory.example](example/env.team-memory.example) 复制），其中至少设置 **`TEAM_MEMORY_API_KEY`**、**`TEAM_MEMORY_PROJECT`**；MCP 配置为 **`bash`** + **`scripts/run_mcp_with_dotenv.sh`** + **`cwd`= 仓库根**。详见 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)。**Cursor** 一般用 `.cursor/mcp.json`，**Claude Code** 可用根目录 `.mcp.json`，两处内容建议保持一致。
+
+**仅 `pip install team_memory`、无本地仓库目录**时，可在 `.cursor/mcp.json` 里用本机 Python 与环境变量（数据库与 Key 仍需提供）：
 
 ```json
 {
@@ -60,13 +62,13 @@ make web
 }
 ```
 
-（MCP 仅 **`memory_*` 五工具**：`memory_save`、`memory_recall`、`memory_context`、`memory_get_archive`、`memory_feedback`。未注册 **Resources / Prompts**；详情见下文 [MCP 工具列表（当前）](#mcp-工具列表当前) 与 [docs/design-docs/ops/mcp-server.md](docs/design-docs/ops/mcp-server.md)。）
+（MCP 仅 **`memory_*` 六工具**：`memory_save`、`memory_recall`、`memory_context`、`memory_get_archive`、`memory_archive_upsert`、`memory_feedback`。未注册 **Resources / Prompts**；详情见下文 [MCP 工具列表（当前）](#mcp-工具列表当前) 与 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)。）
 
-本机直连数据库时需要配 `TEAM_MEMORY_DB_URL`；从源码跑且项目里已有 config 的，可以不配。
+本机直连数据库时需要配 `TEAM_MEMORY_DB_URL`（或通过 config）；从源码跑且项目里已有 config 的，可不单独设 DB_URL。
 
-## 架构可视化（可选）
+## 架构可视化（现状）
 
-在 Web 主导航点击「架构」可预览项目代码结构（概览、集群、依赖图、影响面）。需配置 `architecture.gitnexus.bridge_url` 并启动 `tools/gitnexus-bridge/`，详见下文 [架构可视化配置](#架构可视化配置)。
+Web 内「架构」导航与 `/api/v1/architecture/*` **已移除**（实现见 `src/team_memory/web/static/js/pages.js`）。若需要代码库图谱，请在本机单独使用 **GitNexus**（CLI / Bridge 等），与当前 TM Web **无集成**。
 
 ---
 
@@ -158,7 +160,7 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 - **PageIndex-Lite**：长文档自动分块建立节点索引，支持节点级精准检索
 - **个人扩写**：per-user tag_synonyms 在检索前生效（词表替换 + LLM 扩写），MCP 搜索返回后自动维护；Web 设置 → 个人扩写
 - **个人记忆 / 用户画像**：按 `user_id` 隔离；**Lite** 下由 **`memory_save(..., content=...)`** 解析等路径可写入；**`memory_context`** 返回 `profile.static` / `profile.dynamic`（字符串列表）。Web **设置 → 用户画像** 可分组查看、过滤 **static/dynamic** 并 **删除** 错误条目（还可调 HTTP API `profile_kind`）。
-- **文件位置绑定**：保存经验时可传 `file_locations`（路径 + 行范围，可选 snippet/file_mtime/file_content_hash）；检索时可传 `current_file_locations`，与当前编辑位置匹配的经验会获得 location 加分，详见 [src/team_memory/server.py](src/team_memory/server.py) 工具参数与 [docs/design-docs/ops/mcp-server.md](docs/design-docs/ops/mcp-server.md)。
+- **文件位置绑定**：保存经验时可传 `file_locations`（路径 + 行范围，可选 snippet/file_mtime/file_content_hash）；检索时可传 `current_file_locations`，与当前编辑位置匹配的经验会获得 location 加分，详见 [src/team_memory/server.py](src/team_memory/server.py) 工具参数与 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)。
 
 ### 三层作用域
 
@@ -205,7 +207,7 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 
 原生 MCP 协议支持，AI 助手通过 stdio 接入：
 
-- **MCP 工具（5 个）**：`memory_context`、`memory_recall`、`memory_get_archive`、`memory_save`、`memory_feedback`（见 [MCP 工具列表](#mcp-工具列表当前)）
+- **MCP 工具（6 个）**：`memory_context`、`memory_recall`、`memory_get_archive`、`memory_archive_upsert`、`memory_save`、`memory_feedback`（见 [MCP 工具列表](#mcp-工具列表当前)）
 - **当前 MCP 未注册** Resources / Prompts；补齐体验以 Web、`/docs` HTTP API 为准
 - **Web 管理界面**：浏览、搜索、审核、档案馆、配置等
 
@@ -254,7 +256,7 @@ make setup
 设置环境变量作为管理员引导密钥（首次部署必须；**勿提交 Git、勿明文写入配置文件**）：
 
 ```bash
-export TEAM_MEMORY_API_KEY=$(openssl rand -hex 16)
+export TEAM_MEMORY_API_KEY=$(openssl rand -hex 32)
 echo "你的管理员 API Key: $TEAM_MEMORY_API_KEY"
 ```
 
@@ -361,7 +363,21 @@ pip install team_memory
 
 在 **Cursor** 中编辑项目或用户下的 `.cursor/mcp.json`；在 **Claude Desktop** 中编辑 MCP Servers 对应配置。MCP 的当前用户由 **TEAM_MEMORY_API_KEY** 解析（与 Web 同账号即同一人）；`TEAM_MEMORY_USER` 仅在不设 Key 或解析失败时作为回退，可选。
 
-- **从 pip 安装、无项目目录**（推荐）：用本机 Python + 环境变量，无需 `cwd`：
+- **从源码运行本仓库**（推荐：`TEAM_MEMORY_*` 进 `.env`，密钥不进 JSON）：将 [example/env.team-memory.example](example/env.team-memory.example) 复制为仓库根 `.env` 并填写；执行 `chmod +x scripts/run_mcp_with_dotenv.sh`；把 [example/cursor-mcp-team-memory.example.json](example/cursor-mcp-team-memory.example.json) 里的绝对路径换成你的目录后写入 `.cursor/mcp.json` / `.mcp.json`：
+
+```json
+{
+  "mcpServers": {
+    "team_memory": {
+      "command": "bash",
+      "args": ["/ABSOLUTE/PATH/TO/team_doc/scripts/run_mcp_with_dotenv.sh"],
+      "cwd": "/ABSOLUTE/PATH/TO/team_doc"
+    }
+  }
+}
+```
+
+- **从 pip 安装、无项目目录**：用本机 Python + `env` 块（无需 `cwd`）：
 
 ```json
 {
@@ -378,28 +394,11 @@ pip install team_memory
 }
 ```
 
-- **从源码运行**（本地有仓库、用项目 venv 和 config）：替换路径为你的项目根目录。`env` 中建议加上 **TEAM_MEMORY_USER**（你的 Web 账号）和 **TEAM_MEMORY_PROJECT**（经验归属项目名），这样 MCP 写入的经验明确归到你名下：
-
-```json
-{
-  "mcpServers": {
-    "team_memory": {
-      "command": "/path/to/team_memory/.venv/bin/python",
-      "args": ["-m", "team_memory.server"],
-      "cwd": "/path/to/team_memory",
-      "env": {
-        "TEAM_MEMORY_API_KEY": "你的 API Key",
-        "TEAM_MEMORY_USER": "admin",
-        "TEAM_MEMORY_PROJECT": "team_memory"
-      }
-    }
-  }
-}
-```
+- **备选（不建议提交到 Git）**：仍可在 mcp.json 的 `env` 里写 `TEAM_MEMORY_API_KEY` / `TEAM_MEMORY_PROJECT`；多仓库时更易分叉泄露，优先用 `.env` + 包装脚本。
 
 **4. 验证**
 
-重启 Cursor 或 Claude Desktop，在对话里请 Agent 使用 **`memory_recall`**（或 **`memory_context`**）搜索与 Docker 相关的经验。若配置正确，会返回 JSON 结果。约定见 [mcp-lite-default.md](docs/design-docs/ops/mcp-lite-default.md)。
+重启 Cursor 或 Claude Desktop，在对话里请 Agent 使用 **`memory_recall`**（或 **`memory_context`**）搜索与 Docker 相关的经验。若配置正确，会返回 JSON 结果。约定见 [mcp-lite-default.md](docs/decision/mcp-lite-default.md)。
 
 ---
 
@@ -411,6 +410,8 @@ pip install team_memory
 ---
 
 ## MCP 接入指南（配置参考）
+
+**克隆本仓库时**：优先 **`.env` + [scripts/run_mcp_with_dotenv.sh](scripts/run_mcp_with_dotenv.sh)**，`mcp.json` 不写密钥；完整步骤见 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)。
 
 **Cursor**（`.cursor/mcp.json`）— 从 pip 安装、无项目目录：
 
@@ -429,9 +430,9 @@ pip install team_memory
 }
 ```
 
-**从源码目录运行**（使用项目 venv 与 config）：将 `command` 改为 `/path/to/team_memory/.venv/bin/python`，增加 `"cwd": "/path/to/team_memory"`，`env` 中至少保留 `TEAM_MEMORY_API_KEY`（数据库由项目内 config 提供）。
+**从源码目录运行且不用包装脚本时**（备选）：将 `command` 指向项目 `.venv/bin/python`，设 `"cwd"` 为仓库根，`env` 中提供 `TEAM_MEMORY_API_KEY` 等（数据库可由项目内 config 提供）。
 
-**Claude Desktop**：在 MCP 设置中添加同名 `team_memory` 条目，`command` / `args` / `env` 与上一致即可。
+**Claude Desktop**：在 MCP 设置中添加同名 `team_memory` 条目；源码场景推荐与上文相同的 `bash` + `run_mcp_with_dotenv.sh`，pip 场景与上一致即可。
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
@@ -443,7 +444,7 @@ pip install team_memory
 
 **MCP 身份与 Web 统一**：MCP 的当前用户（current_user）优先由 **TEAM_MEMORY_API_KEY** 经服务端 AuthProvider 解析得到，与 Web 使用同一套用户体系。配置与 Web 同账号的 API Key 后，在 Cursor 里写入的 personal 经验在同一 Cursor 会话内可被检索到，且 Web 用该账号登录后也能看到。推荐只配置 `TEAM_MEMORY_API_KEY`（与 Web 同账号的 Key），无需再设 `TEAM_MEMORY_USER`。
 
-**项目级 mcp.json 配置用户名与项目名**：在**你项目**的 `.cursor/mcp.json` 里，给 team_memory 的 `env` 增加 **TEAM_MEMORY_USER**（你的 Web 登录账号）和 **TEAM_MEMORY_PROJECT**（经验归属的项目名）。这样 MCP 工具写入的经验会明确归到该用户、该项目，并在 Web 端可见，避免「不知道是谁写入的」。未配置时回退为 `anonymous` / 服务端 default_project。
+**项目级归属（用户 / 项目名）**：推荐在仓库根 **`.env`** 中设置 **TEAM_MEMORY_PROJECT**（及按需 **TEAM_MEMORY_USER**），与包装脚本一起使用。若必须在 JSON 里配，可在 `env` 中加同名变量；未配置时回退为 `anonymous` / 服务端 default_project。解析顺序见 `src/team_memory/utils/project.py`（工具参数 **`project`** > **`TEAM_MEMORY_PROJECT`** > 配置 default）。
 
 **Docker/Helm**：若通过容器或编排部署，在配置中注入上述环境变量；生产环境禁止使用占位或默认 Key（如 `changeme`）。
 
@@ -483,6 +484,7 @@ AI 可调用 memory_recall(file_path="k8s/deployment.yaml", framework="kubernete
 | `memory_context` | 任务开始拉上下文 + 用户画像摘要 + 相关经验 | `file_paths` 等（以工具 schema 为准） |
 | `memory_recall` | 统一检索：problem / query / file_path 等 | 至少提供其一；可选 `include_archives`、`include_user_profile` |
 | `memory_get_archive` | 档案 L2 全文 | `archive_id`（通常在 recall 命中 `type=archive` 后调用） |
+| `memory_archive_upsert` | 创建/更新档案馆（与 `POST /api/v1/archives` 一致） | `title`、`solution_doc` 等；大文件见 [mcp-server 档案馆流程](docs/guide/mcp-server.md)（HTTP / `tm-cli upload`） |
 | `memory_save` | 保存或长文解析保存 | `title`+`problem` 或 `content`；**勿**使用已移除的 `scope=archive` |
 | `memory_feedback` | 对结果评分 | `experience_id`、`rating` 等 |
 
@@ -498,23 +500,9 @@ AI 可调用 memory_recall(file_path="k8s/deployment.yaml", framework="kubernete
 | 草稿箱 | 查看 AI 自动提取的待审核草稿 |
 | 审核队列 | 审核团队成员提交的经验 |
 | 去重检测 | 发现和合并相似经验 |
-| **架构** | 代码架构可视化：概览、集群、依赖图、影响面；经验可挂载到架构节点 |
 | 系统设置 | 检索参数、搜索配置等 |
 
 档案馆、去重、个人记忆等以当前 Web 导航与 OpenAPI 为准。
-
-### 架构可视化
-
-在主导航点击「架构」可预览项目代码架构（概览、集群、依赖图、影响面），无需跳转外部工具。架构数据由 **GitNexus** 提供，通过 Bridge 服务接入。
-
-**功能概览**：
-- **概览**：symbols、relationships、processes 数量及索引是否过期
-- **集群**：按模块/目录分组的代码集群列表及成员
-- **依赖图**：节点与边的可视化，支持按集群筛选、按文件聚焦
-- **影响面**：选中节点后查看上游/下游依赖
-- **经验挂载**：经验可挂载到架构节点；节点侧栏可查看关联经验
-
-**配置与启动**：见 [架构可视化配置](#架构可视化配置)。
 
 创建经验支持三种模式：
 - **手动填写**：逐字段填写标题、问题、方案
@@ -569,45 +557,6 @@ embedding:
 
 支持 Ollama（默认，本地运行，无需 API Key）、OpenAI API、本地 sentence-transformers 模型、generic 自定义端点。
 
-### 架构可视化配置
-
-架构页展示项目代码架构（概览、集群、依赖图、影响面），数据由 GitNexus 通过 Bridge 提供。
-
-**1. 在 `config.development.yaml`（或当前使用的单文件配置）中**
-
-```yaml
-architecture:
-  provider: gitnexus  # gitnexus | builtin
-  gitnexus:
-    bridge_url: "http://127.0.0.1:9321"  # 空则架构不可用
-```
-
-**2. 启动 GitNexus Bridge**
-
-在项目根目录（或含 `.gitnexus/meta.json` 的目录）执行：
-
-```bash
-# 从 team_doc 根目录
-node tools/gitnexus-bridge/server.js
-
-# 或从 bridge 目录
-cd tools/gitnexus-bridge && npm start
-```
-
-环境变量：`PORT`（默认 9321）、`GITNEXUS_REPO_PATH`（默认自动检测）。
-
-**3. 运行 GitNexus 索引**
-
-首次使用或代码变更后，在**目标仓库**根目录执行：
-
-```bash
-npx gitnexus analyze
-```
-
-**4. 架构页入口**
-
-启动 TM Web 后，主导航点击「架构」。有 Bridge 且索引就绪时展示概览、集群、图、影响面；无 Bridge 或 `bridge_url` 为空时显示「未配置或不可用」。
-
 ## 运维
 
 ### 常用命令
@@ -635,7 +584,8 @@ make lint          # 代码检查（ruff）
 | `make setup` | 首次安装 | `docker compose up -d` → 等 PG 就绪 → 建库（若无）→ 按需启动 Ollama 容器 → `pip install -e ".[dev]"` → `alembic upgrade head` |
 | `make dev` | 启动全部服务 | 先执行 `make release-9111`（避免 9111 被占）→ `docker compose up -d postgres redis` → 若 11434 未被占用则 `docker compose --profile ollama up -d` → 前台运行 `python -m team_memory.web.app` |
 | `make web` | 仅启动 Web | 先执行 `make release-9111` → 前台运行 `python -m team_memory.web.app`（默认 http://0.0.0.0:9111） |
-| `make mcp` | 启动 MCP | `python -m team_memory.server`（stdio，**`memory_*` 五工具**），见 [mcp-lite-default.md](docs/design-docs/ops/mcp-lite-default.md) |
+| `make mcp` | 启动 MCP | `bash scripts/run_mcp_with_dotenv.sh`（需仓库根 `.env`；stdio，**`memory_*` 六工具**），配置见 [docs/guide/mcp-server.md](docs/guide/mcp-server.md) |
+| `make mcp-verify` | 校验 MCP 工具注册 | 跑 `TestLiteToolRegistration` 中工具数量与名称（无需长驻 MCP 进程） |
 | `make health` | 健康检查 | `./scripts/healthcheck.sh`（检测 DB、Web、Ollama 等） |
 | `make migrate` | 数据库迁移 | `alembic upgrade head` |
 | `make migrate-fts` | 补齐经验表 FTS 字段（存量迁移） | `python scripts/migrate_fts.py`；可用 `--dry-run` 预览待更新条数 |
@@ -665,8 +615,6 @@ make backup
 ./scripts/restore.sh backups/team_memory_20260209_120000.sql.gz
 ```
 
-更多运维细节：FTS 迁移（`make migrate-fts`）、Alembic 多 head、Embedding 重算（`python scripts/migrate_embeddings.py`）等，在项目根目录执行对应脚本即可。
-
 ### Docker 部署
 
 ```bash
@@ -689,7 +637,7 @@ docker compose up -d
 - **文件输出**：启用 `LOG_FILE_ENABLED` 或 `TEAM_MEMORY_LOGGING__FILE_ENABLED=1`，日志写入 `LOG_FILE_PATH`（默认 `logs/team_memory.log`），支持按大小轮转。
 - **热加载**：运行时通过 `GET /api/v1/config/logging` 查询、`PUT /api/v1/config/logging` 更新日志配置（需认证），无需重启即可生效；持久化需写入当前使用的 YAML（如 `config.development.yaml`）。
 
-更多配置项与格式规范见 [日志格式规范](docs/design-docs/logging-format.md)、[日志系统设计](docs/exec-plans/completed/logging-system/1-plan/plan.md)。
+日志 JSON 形态与脱敏逻辑见 `src/team_memory/bootstrap.py`（`_JsonFormatter`、`_SENSITIVE_KEYS`）及 `tests/test_logging_json.py`。
 
 ## 技术栈
 
@@ -767,5 +715,4 @@ ruff check src/ --fix
 
 ## 文档结构
 
-- **设计文档**：[docs/design-docs](docs/design-docs/)（索引：[docs/design-docs/README.md](docs/design-docs/README.md)）
-- **执行计划**：[docs/exec-plans](docs/exec-plans/)
+- **设计文档**：[docs/](docs/)（索引：[docs/README.md](docs/README.md)）

@@ -1,7 +1,7 @@
 # Alembic 多个 head 的成因与修复
 
 > 运维文档 | 数据库迁移
-> 相关：[database-operations 数据库操作](database-operations.md)
+> 相关：[database-operations 数据库操作](../cmd/database-operations.md)
 
 ## 现象
 

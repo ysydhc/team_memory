@@ -1,7 +1,7 @@
 # PostgreSQL 数据库操作
 
 > 运维文档 | 数据库启停、查看、迁移、备份
-> 技术概念：[设计文档索引](../README.md#tech-concepts) | 表结构：[database-schema](../backend-architecture/database-schema.md)
+> 表结构以 [`src/team_memory/storage/models.py`](../../src/team_memory/storage/models.py) 与 `migrations/versions/` 为准
 
 ## 基本信息
 
@@ -73,13 +73,12 @@ SELECT * FROM experience_feedbacks ORDER BY created_at DESC LIMIT 10;
 ### 方法 2：通过 Web API 查看
 
 ```bash
-# 列出经验（需要先启动 Web 服务）
-curl -s http://localhost:9111/api/experiences \
-  -H "Authorization: Bearer 0D5007FEF6A90F5A99ED521327C9A698" | python3 -m json.tool
+# 列出经验（需先启动 Web，Bearer 换成你的 API Key）
+curl -s 'http://localhost:9111/api/v1/experiences?limit=5' \
+  -H "Authorization: Bearer YOUR_API_KEY" | python3 -m json.tool
 
-# 查看统计
-curl -s http://localhost:9111/api/stats \
-  -H "Authorization: Bearer 0D5007FEF6A90F5A99ED521327C9A698" | python3 -m json.tool
+# 健康检查（可选）
+curl -s http://localhost:9111/health | python3 -m json.tool
 ```
 
 ## 数据库迁移（schema 变更后）

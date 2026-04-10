@@ -1,7 +1,7 @@
 # FTS 存量迁移（migrate_fts）说明
 
 > 运维文档 | 全文索引补全
-> 相关：[database-operations 数据库操作](database-operations.md) | 技术概念：[tech-concepts/pgvector-fts](../tech-concepts/pgvector-fts.md)
+> 相关：[database-operations 数据库操作](database-operations.md)
 
 ## 一、如何使用（照着做就会）
 
@@ -51,5 +51,5 @@ python scripts/migrate_fts.py
 
 ## 三、相关
 
-- 故障排查：[troubleshooting](troubleshooting.md)
+- 故障排查：[troubleshooting](../ops/troubleshooting.md)
 - 主项目 README FAQ 有「存量数据如何支持全文检索（FTS）？」说明

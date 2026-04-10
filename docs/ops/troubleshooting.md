@@ -1,24 +1,22 @@
 # 常见问题排查
 
 > 运维文档 | 故障排查
-> 相关：[quick-start 快速启动](quick-start.md) | [database-operations 数据库操作](database-operations.md) | [web-server Web 服务](web-server.md)
+> 相关：[quick-start 快速启动](../guide/quick-start.md) | [database-operations 数据库操作](../cmd/database-operations.md) | [web-server Web 服务](../guide/web-server.md)
 
-## 1. 端口 5432 被占用（数据库启动失败）
+## 1. 端口冲突（数据库 / 本机 PostgreSQL）
 
-**症状**：`docker compose up -d` 后 `docker compose ps` 显示状态不是 healthy
+本仓库 `docker-compose.yml` 已将容器内 `5432` 映射到主机 **5433**（避免与宿主机默认 PostgreSQL 抢 **5432**）。**症状**：`docker compose ps` 里 postgres 不健康，或宿主机上已有服务占用你要映射的端口。
 
 ```bash
-# 查看谁在用 5432 端口
+# 查看谁在用本机 5432、5433（按你 compose 里的映射改查）
 lsof -i :5432
+lsof -i :5433
 
-# 如果是本机安装的 PostgreSQL，先停掉
+# 若是本机安装的 PostgreSQL 占了口，可先停服务
 brew services stop postgresql    # macOS Homebrew 安装的
 sudo systemctl stop postgresql   # Linux
 
-# 或者修改 docker-compose.yml 改用其他端口，比如 5433
-# ports:
-#   - "5433:5432"
-# 同时修改 config.yaml 中的数据库 URL 端口为 5433
+# 若改映射端口：同时改 compose 的 ports 与配置里的 `database.url`（或 `TEAM_MEMORY_DB_URL`），见 [database-operations](../cmd/database-operations.md)
 ```
 
 ## 2. 端口 9111 被占用（Web 服务启动失败）
@@ -56,7 +54,7 @@ pip install -e ".[dev]"
 
 ## 4. 数据库连接失败
 
-**症状**：`ConnectionRefusedError` 或 `Connection to localhost:5432 refused`
+**症状**：`ConnectionRefusedError` 或连接字符串中的主机/端口拒绝（本仓库开发默认 **`localhost:5433`** + `postgresql+asyncpg://`，见 `config.development.yaml` / [database-operations](../cmd/database-operations.md)；报错信息里可能是 5432 或 5433，以配置为准）。
 
 ```bash
 # 1. 确认 Docker 在运行
@@ -72,7 +70,7 @@ docker compose up -d
 docker compose logs --tail=5 postgres
 # 看到 "database system is ready to accept connections" 就 OK
 
-# 4. 手动测试连接
+# 4. 手动测试连接（容器内 5432）
 docker compose exec postgres psql -U developer -d team_memory -c "SELECT 1;"
 ```
 
@@ -93,9 +91,10 @@ ollama list | grep nomic-embed-text
 # 如果没有，拉取：
 ollama pull nomic-embed-text
 
-# 3. 确认 LLM 模型可用（用于文档解析）
-ollama list | grep gpt-oss
-# 如果没有你配置的模型，修改 config.yaml 中的 llm.model
+# 3. 确认 LLM 模型可用（用于文档解析等，走 /api/chat）
+# 须与当前配置一致；开发默认常为 llama3.2（见 config.development.yaml 的 llm.model）
+ollama list | grep -E 'llama3\.2|你的模型名'
+# 若没有，执行 ollama pull <模型名> 或改配置里的 llm.model
 
 # 4. 测试 Ollama API
 curl http://localhost:11434/api/tags
@@ -129,9 +128,9 @@ alembic upgrade head
 - Embedding 维度不匹配（换过 provider 但没迁移数据库）
 
 ```bash
-# 检查经验数量
-curl -s http://localhost:9111/api/stats \
-  -H "Authorization: Bearer 0D5007FEF6A90F5A99ED521327C9A698" | python3 -m json.tool
+# 检查经验数量（无 /api/v1/stats 时直接用 SQL）
+docker compose exec -T postgres psql -U developer -d team_memory -tAc \
+  "SELECT count(*) FROM experiences WHERE is_deleted = false;"
 
 # 检查是否有经验的 embedding 为 null
 docker compose exec postgres psql -U developer -d team_memory \
@@ -158,64 +157,29 @@ docker compose exec postgres psql -U developer -d team_memory \
 # 如果后台运行（nohup），查看日志文件
 tail -f .debug/web.log
 
-# 更详细的日志（DEBUG 级别）
-LOG_LEVEL=debug \
-TEAM_MEMORY_API_KEY=0D5007FEF6A90F5A99ED521327C9A698 \
+# 更详细的应用日志：TEAM_MEMORY_DEBUG=1（bootstrap）；Uvicorn access 日志在 web.app 中为 log_level=info
+TEAM_MEMORY_DEBUG=1 \
+TEAM_MEMORY_API_KEY=你的Key \
 .venv/bin/python -m team_memory.web.app
 ```
 
-## 10. 架构页显示「未配置或不可用」
+## 10. Web「架构 / GitNexus」
 
-**症状**：Web 主导航「架构」进入后提示未配置或不可用。
+前端 **架构页已移除**（`src/team_memory/web/static/js/pages.js`）；当前 **无** `/api/v1/architecture/*`。GitNexus Bridge（如 `9321`）为可选独立进程，与 TM Web 路由无直接绑定。
 
-```bash
-# 1. 检查 config.yaml 中 architecture 配置
-grep -A5 "architecture:" config.yaml
-# 需有 provider: gitnexus 且 bridge_url 非空
+## 11. （保留节号占位）
 
-# 2. 检查 Bridge 是否启动（默认 9321）
-curl -s http://127.0.0.1:9321/context
-
-# 3. 若 Bridge 未启动，从项目根目录执行
-node tools/gitnexus-bridge/server.js
-
-# 4. 确认目标仓库已索引（在目标仓库根目录）
-npx gitnexus analyze
-
-# 5. 验证 TM 架构 API
-curl -s http://localhost:9111/api/v1/architecture/context \
-  -H "Authorization: Bearer 你的API_KEY"
-```
-
-## 11. 架构搜索返回空结果（200 OK 但无节点）
-
-**症状**：架构页「图」Tab 搜索返回 200 OK，但结果列表为空或显示「未找到匹配节点」。
-
-**原因**：Bridge 未启动或不可达时，Provider 会返回空；现已改为返回 503，前端会提示「架构服务未配置」。
-
-**排查**：
-
-```bash
-# 1. 确认 Bridge 已启动（默认 9321）
-curl -s "http://127.0.0.1:9321/search?q=OllamaLLMRerankerProvider&scope=global"
-# 应返回 {"nodes":[...]}，若 connection refused 则 Bridge 未启动
-
-# 2. 启动 Bridge（从项目根目录）
-node tools/gitnexus-bridge/server.js
-
-# 3. 确认 GitNexus 已索引
-npx gitnexus analyze
-```
+（原「架构搜索」小节已删除，避免与已移除前端不一致。）
 
 ## 12. 个人记忆（personal_memories）没有写入
 
-**写入只在**：`tm_learn` 或 **Lite** 的 **`memory_save(..., content=...)`** 成功保存经验**之后**才会异步尝试；**仅 `tm_save` / 只有 `title+problem` 的 `memory_save` 不会跑个人记忆提取**。
+**大致条件**：在 **`memory_save(..., content=...)`** 等长文/解析保存路径成功后，才可能异步抽取个人记忆；具体以 `ExperienceService` 与事件为准。
 
 **怎么从日志判断**（`team_memory` logger，默认 INFO；MCP 看 Cursor MCP 日志或终端）：
 
 | 日志片段 | 含义 |
 |---------|------|
-| `personal_memory: skipped — user is anonymous` | 当前 MCP 用户是 `anonymous`：检查 `TEAM_MEMORY_API_KEY` 能否通过鉴权，或设置 `TEAM_MEMORY_USER` |
+| `personal_memory: skipped — user is anonymous` | 当前 MCP 用户是 `anonymous`：检查 `TEAM_MEMORY_API_KEY` 能否通过鉴权；或设 `TEAM_MEMORY_USER`（MCP 侧回退用户名），与 Web 预注册用户名 `TEAM_MEMORY_AUTH__USER` 不同 |
 | `personal_memory: no rows to save` | LLM 未抽出任何偏好条目（对话里没可抽内容、JSON 解析失败、或连不上 LLM——后者见 `llm_parser` 的 WARNING） |
 | `personal_memory: saved N item(s) for user= ... (static=M dynamic=N)` | 已写入 N 条，含 static/dynamic 计数 |
 | `personal_memory: saved N item(s) for user=`（旧日志） | 已写入 N 条 |
@@ -236,11 +200,12 @@ docker compose exec -T postgres psql -U developer -d team_memory -c \
 # 一键检查所有服务状态
 echo "=== Docker ===" && docker compose ps 2>/dev/null || echo "Docker not running"
 echo ""
-echo "=== Port 5432 (PostgreSQL) ===" && lsof -i :5432 2>/dev/null || echo "Not in use"
+echo "=== Port 5433 (本仓库 PG 映射) ===" && lsof -i :5433 2>/dev/null || echo "Not in use"
+echo "=== Port 5432 (本机 Postgres 常见) ===" && lsof -i :5432 2>/dev/null || echo "Not in use"
 echo ""
 echo "=== Port 9111 (Web) ===" && lsof -i :9111 2>/dev/null || echo "Not in use"
 echo ""
 echo "=== Ollama ===" && ollama list 2>/dev/null || echo "Ollama not running"
 echo ""
-echo "=== Port 9321 (GitNexus Bridge) ===" && curl -s http://127.0.0.1:9321/context >/dev/null 2>&1 && echo "Bridge running" || echo "Bridge not running"
+echo "=== Port 9321 (可选 GitNexus Bridge) ===" && curl -s http://127.0.0.1:9321/context >/dev/null 2>&1 && echo "Bridge running" || echo "Bridge not running"
 ```

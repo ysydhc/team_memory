@@ -3,17 +3,16 @@ version: 1
 project_id: team_memory
 
 design_docs:
-  root: docs/design-docs
-  index: docs/design-docs/README.md
+  root: docs
+  index: docs/README.md
 
 commands:
-  doc_check: make harness-doc-check
+  doc_check: python scripts/harness_doc_gardening.py
 
 whitelists:
   doc_gardening: scripts/doc-gardening-whitelist.txt
 
 sync_reminders:
-  - docs/design-docs/README.md
+  - docs/README.md
   - README.md
-  - docs/架构设计图.md
   - AGENTS.md

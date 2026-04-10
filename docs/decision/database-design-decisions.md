@@ -1,7 +1,7 @@
 # 数据库设计决策
 
 > 技术架构 / thinking | 为什么这样设计
-> 表结构：[database-schema](database-schema.md)
+> 表结构：[`src/team_memory/storage/models.py`](../../src/team_memory/storage/models.py) · `migrations/versions/`
 
 ## 为什么选 PostgreSQL？
 
