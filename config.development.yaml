@@ -91,6 +91,7 @@ extraction:
 auth:
   type: db_api_key
   api_key: "${TEAM_MEMORY_API_KEY}"
+  default_admin_password: "admin"
   session_secret: "dev-session-secret-change-in-production"
 
 # -----------------------------------------------------------------------------
@@ -180,6 +181,28 @@ search:
   query_expansion_timeout_seconds: 5
 
 # -----------------------------------------------------------------------------
+# reranker — 检索主路径服务端精排（adaptive filter 之后、截断之前）
+# -----------------------------------------------------------------------------
+# provider: none（默认，关闭）| ollama_llm | cross_encoder | jina
+# max_document_chars: 单条送入精排模型的文本上限（title+problem+solution 拼接）
+reranker:
+  provider: none
+  max_document_chars: 8000
+  ollama_llm:
+    model: null
+    base_url: null
+    top_k: 10
+    batch_size: 5
+  cross_encoder:
+    model_name: cross-encoder/ms-marco-MiniLM-L6-v2
+    device: cpu
+    top_k: 10
+  jina:
+    api_key: ""
+    model: jina-reranker-v2-base-multilingual
+    top_k: 10
+
+# -----------------------------------------------------------------------------
 # cache — 检索结果与向量嵌入缓存
 # -----------------------------------------------------------------------------
 # backend: memory（进程内）或 redis（多实例/可持久）
@@ -227,7 +250,7 @@ mcp:
 # -----------------------------------------------------------------------------
 # logging — 日志子系统（可选；未写时走 Settings 默认值）
 # -----------------------------------------------------------------------------
-# 可通过本段或环境变量 TEAM_MEMORY_LOGGING__* 配置；详见 docs/design-docs/ops/logging-format.md
+# 可通过本段或环境变量 TEAM_MEMORY_LOGGING__* 配置（与 src/team_memory/io_logger.py 一致）
 # 示例：
 # logging:
 #   log_io_enabled: false
@@ -250,7 +273,7 @@ tag_synonyms:
   k8s: Kubernetes
 
 # -----------------------------------------------------------------------------
-# uploads — 档案附件本地上传（multipart → 磁盘；与 L2 可见性一致）
+# uploads — 档案附件本地上传（multipart → 磁盘；与 DB 元数据配合；默认 .tmp 便于本地开发不入库）
 # -----------------------------------------------------------------------------
 # enabled: false 时 POST 上传返回 503；已落盘的附件仍可按 GET 下载
 # root_dir: 相对仓库根或绝对路径；生产建议独立数据卷
@@ -258,7 +281,7 @@ tag_synonyms:
 # allowed_extensions: 非空时为后缀白名单（小写带点，如 .pdf）；空列表表示允许任意非空扩展名
 uploads:
   enabled: true
-  root_dir: "data/uploads"
+  root_dir: ".tmp/uploads"
   max_bytes: 52428800
   allowed_extensions: [".md", ".txt", ".json", ".pdf"]
 

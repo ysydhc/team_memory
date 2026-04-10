@@ -34,6 +34,7 @@ extraction:
 auth:
   type: db_api_key
   api_key: "${TEAM_MEMORY_API_KEY}"
+  default_admin_password: "admin"
 
 default_project: "default"
 
@@ -73,6 +74,10 @@ search:
   query_expansion_enabled: false
   query_expansion_timeout_seconds: 5
 
+reranker:
+  provider: none
+  max_document_chars: 8000
+
 cache:
   enabled: true
   backend: redis
@@ -111,6 +116,6 @@ logging:
   # Mount a persistent volume at /data/logs in production
   log_file_path: "/data/logs/team_memory.log"
   log_file_backup_count: 10
-  log_file_max_bytes: 52428800  # 50 MB
+  log_file_max_bytes: 52428800 # 50 MB
 
 log_format: json
