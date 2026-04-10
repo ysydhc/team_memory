@@ -1,0 +1,167 @@
+# Single source of truth for agent/prompt *metadata*.
+# Bodies live under agents/shared/{bodies,prompts}/. Run: make sync-agent-artifacts
+version: 1
+
+prompts:
+  - id: plan-eval-multi-agent-review
+    skill_name: plan-eval-multi-agent-review
+    skill_description: "协调多位专家对技术方案做多维度分析（Plan 虚拟评审委员会）。"
+  - id: project-director-subagent-driven
+    skill_name: project-director-subagent-driven
+    skill_description: "Harness 项目总负责人：任务拆解与 subagent 调度（不亲自实现）。"
+  - id: doc-organize-task
+    skill_name: doc-organize-task
+    skill_description: "文档整理任务（doc-harness / doc-health）。"
+  - id: doc-health-check-task
+    skill_name: doc-health-check-task
+    skill_description: "文档健康巡检任务。"
+
+agents:
+  - id: code-reviewer
+    claude:
+      name: code-reviewer
+      description: "代码质量评审。spec 合规通过后，检查整洁、可测试、可维护。"
+      tools: [Read, Grep, Glob]
+      disallowed_tools: [Edit, Write, Bash]
+    cursor:
+      name: code-reviewer
+      model: default
+      description: "代码质量评审。spec 合规通过后，检查整洁、可测试、可维护。"
+      readonly: true
+
+  - id: spec-reviewer
+    claude:
+      name: spec-reviewer
+      description: "规格合规评审。核对实现与 Plan/需求一致，读代码逐项验证，不信任实现者报告。"
+      tools: [Read, Grep, Glob]
+      disallowed_tools: [Edit, Write, Bash]
+    cursor:
+      name: spec-reviewer
+      model: default
+      description: "规格合规评审。核对实现与 Plan/需求一致，读代码逐项验证，不信任实现者报告。"
+      readonly: true
+
+  - id: plan-implementer
+    claude:
+      name: plan-implementer
+      description: "实现计划任务。按任务逐步执行，遵循 TDD，自审后汇报。"
+      tools: [Read, Grep, Glob, Edit, Write, Bash, Agent]
+    cursor:
+      name: plan-implementer
+      model: default
+      description: "实现计划任务。按任务逐步执行，遵循 TDD，自审后汇报。"
+      readonly: true
+
+  - id: doc-admin-organize
+    claude:
+      name: doc-admin-organize
+      description: "文档整理员。按 doc-health 修复链接与索引；白名单仅 doc_gardening。"
+      tools: [Read, Grep, Glob, Edit, Write, Bash]
+    cursor:
+      name: doc-admin-organize
+      model: default
+      description: "文档整理员。按 doc-health 修复链接与索引；白名单仅 doc_gardening。"
+
+  - id: plan-eval-qa-engineer
+    claude:
+      name: plan-eval-qa-engineer
+      description: "QA 专家。评审可测试性、边界、自动化、验收标准。影响模块 >3 时启用。"
+      tools: [Read, Grep, Glob]
+      disallowed_tools: [Edit, Write, Bash]
+    cursor:
+      name: plan-eval-qa-engineer
+      model: default
+      description: "QA 专家。评审可测试性、边界、自动化、验收标准。影响模块 >3 时启用。"
+      readonly: true
+
+  - id: plan-eval-ux-designer
+    claude:
+      name: plan-eval-ux-designer
+      description: "UX 设计师。评审体验、交互、视觉一致性、无障碍。涉及 UI 修改时启用。"
+      tools: [Read, Grep, Glob]
+      disallowed_tools: [Edit, Write, Bash]
+    cursor:
+      name: plan-eval-ux-designer
+      model: default
+      description: "UX 设计师。评审体验、交互、视觉一致性、无障碍。涉及 UI 修改时启用。"
+      readonly: true
+
+  - id: plan-eval-product-manager
+    claude:
+      name: plan-eval-product-manager
+      description: "产品经理。评审商业价值、需求对齐、ROI、MVP。涉及用户交互/UI 时启用。"
+      tools: [Read, Grep, Glob]
+      disallowed_tools: [Edit, Write, Bash]
+    cursor:
+      name: plan-eval-product-manager
+      model: default
+      description: "产品经理。评审商业价值、需求对齐、ROI、MVP。涉及用户交互/UI 时启用。"
+      readonly: true
+
+  - id: plan-eval-architect
+    claude:
+      name: plan-eval-architect
+      description: "首席架构师。评审技术风险、架构合理性、扩展性、安全性。"
+      tools: [Read, Grep, Glob]
+      disallowed_tools: [Edit, Write, Bash]
+    cursor:
+      name: plan-eval-architect
+      model: default
+      description: "首席架构师。评审技术风险、架构合理性、扩展性、安全性。"
+      readonly: true
+
+  - id: plan-eval-tech-lead
+    claude:
+      name: plan-eval-tech-lead
+      description: "技术主管。评审代码逻辑、实现细节、依赖管理、技术债务。"
+      tools: [Read, Grep, Glob]
+      disallowed_tools: [Edit, Write, Bash]
+    cursor:
+      name: plan-eval-tech-lead
+      model: default
+      description: "技术主管。评审代码逻辑、实现细节、依赖管理、技术债务。"
+      readonly: true
+
+  - id: plan-eval-devops-expert
+    claude:
+      name: plan-eval-devops-expert
+      description: "运维专家。评审部署、可观测性、监控、灾备。"
+      tools: [Read, Grep, Glob]
+      disallowed_tools: [Edit, Write, Bash]
+    cursor:
+      name: plan-eval-devops-expert
+      model: default
+      description: "运维专家。评审部署、可观测性、监控、灾备。"
+      readonly: true
+
+  - id: plan-evaluator
+    claude:
+      name: plan-evaluator
+      description: "Plan 细节评估。评估功能清晰度、任务拆分、计划完善性，输出结构化报告。"
+      tools: [Read, Grep, Glob]
+      disallowed_tools: [Edit, Write, Bash]
+    cursor:
+      name: plan-evaluator
+      model: default
+      description: "Plan 细节评估。评估功能清晰度、任务拆分、计划完善性，输出结构化报告。"
+      readonly: true
+
+  - id: project-manager-senior
+    claude:
+      name: project-manager-senior
+      description: "Converts specs to tasks and remembers previous projects. Focused on realistic scope, no background processes, exact spec requirements"
+      tools: [Read, Grep, Glob, Edit, Write, Bash, Agent]
+    cursor:
+      name: "Senior Project Manager"
+      description: "Converts specs to tasks and remembers previous projects. Focused on realistic scope, no background processes, exact spec requirements"
+      color: blue
+
+  - id: engineering-autonomous-optimization-architect
+    claude:
+      name: engineering-autonomous-optimization-architect
+      description: "Intelligent system governor that continuously shadow-tests APIs for performance while enforcing strict financial and security guardrails against runaway costs."
+      tools: [Read, Grep, Glob, Edit, Write, Bash, Agent]
+    cursor:
+      name: "Autonomous Optimization Architect"
+      description: "Intelligent system governor that continuously shadow-tests APIs for performance while enforcing strict financial and security guardrails against runaway costs."
+      color: "#673AB7"
