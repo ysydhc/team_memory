@@ -11,16 +11,13 @@ alwaysApply: true
 ## 任务开始前
 1. 读 `CLAUDE.md`（结构、命令、规范入口）
 2. 首次进仓库或做大范围改动前读 `README.md` 与 `AGENTS.md`
-3. 读任务相关 docs（MCP → `docs/design-docs/ops/mcp-server.md` + `src/team_memory/server.py`，架构 → `docs/架构设计图.md` + `scripts/harness_import_check.py`）
+3. 读任务相关 docs（MCP → `docs/guide/mcp-server.md` + `src/team_memory/server.py`，分层 → `scripts/harness_import_check.py` + `docs/README.md`）
 4. 确认「完成标准」再编码
 
 ## 反馈回路
 1. 出错 → 更新 rules 或 docs，记根因
 2. 未追踪改动 → 关键内容写入规则/文档
 3. 可 `memory_save` 沉淀经验
-
-## Plan 执行
-见 [harness-plan-execution](harness-plan-execution.mdc)。
 
 ## 不确定时
 停下来问，不猜测。
