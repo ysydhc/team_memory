@@ -22,7 +22,10 @@ ALEMBIC ?= $(shell \
 	else echo alembic; fi)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp test lint lint-fix lint-js harness-check harness-doc-check doc-harness-config-check verify verify-web backup health clean migrate migrate-fts install-knowledge release-9111 hooks-install
+.PHONY: help setup dev web mcp mcp-verify test lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web backup health clean migrate migrate-fts release-9111 hooks-install sync-agent-artifacts
+
+sync-agent-artifacts: ## 由 agents/shared + agents/manifest.yaml 生成 .claude/.cursor 下 agents、prompts、skills
+	python scripts/sync_agent_artifacts.py
 
 help:           ## 显示所有可用命令
 	@echo ""
@@ -61,7 +64,7 @@ setup:          ## 首次安装：启动 Docker + 安装依赖 + 初始化数据
 	@echo ""
 	@echo "  ✔ Setup complete!"
 	@echo "  Run 'make web' to start the Web UI."
-	@echo "  Run 'make mcp' to start the MCP server (memory_* tools)."
+	@echo "  Run 'make mcp' to start the MCP server (requires repo-root .env; see docs/guide/mcp-server.md)."
 	@echo "  If Ollama is unavailable, set embedding.provider to openai in config for embedding."
 	@echo ""
 
@@ -75,8 +78,11 @@ web:            ## 仅启动 Web 管理界面（默认端口 9111）；自动释
 	@$(MAKE) -s release-9111 || true
 	python -m team_memory.web.app
 
-mcp:            ## 启动 MCP（memory_save / recall / context / get_archive / feedback）
-	python -m team_memory.server
+mcp:            ## 启动 MCP（需仓库根 .env；经 scripts/run_mcp_with_dotenv.sh）
+	bash scripts/run_mcp_with_dotenv.sh
+
+mcp-verify:     ## 校验 MCP 工具注册（6 个 memory_* 名称与数量）
+	$(PYTEST) tests/test_server.py::TestLiteToolRegistration::test_exactly_six_tools tests/test_server.py::TestLiteToolRegistration::test_tool_names -q
 
 test:           ## 运行全部测试（默认 uv / .venv 中的 pytest）
 	@case "$(PYTEST)" in \
@@ -103,17 +109,13 @@ lint-fix:       ## Ruff 代码检查并自动修复
 lint-js:        ## Web 前端 JS 检查：重复声明、语法类问题
 	python scripts/lint_js_duplicates.py
 
-harness-doc-check:  ## Doc gardening：扫描 docs/design-docs、docs/exec-plans 链接与 deprecated 引用
-	python scripts/harness_doc_gardening.py
-
 doc-harness-config-check:  ## 校验 doc-harness.project.yaml 必填键与引用的文件存在
 	python scripts/check_doc_harness_config.py
 
-harness-check:  ## Harness 门禁：import 方向检查 + ruff + lint-js + harness_ref_verify + doc-harness 配置
+harness-check:  ## Harness 门禁：import 方向检查 + ruff + lint-js + doc-harness 配置
 	python scripts/harness_import_check.py
 	$(MAKE) lint
 	$(MAKE) lint-js
-	./scripts/harness_ref_verify.sh
 	$(MAKE) doc-harness-config-check
 
 verify:         ## 标准验收：lint + 全量测试
@@ -166,9 +168,6 @@ clean:          ## 清理 Python 缓存文件
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
-
-install-knowledge: ## 一键安装固化知识包（rules + skill）
-	./scripts/install_codified_knowledge.sh
 
 hooks-install:  ## 安装 Git hooks（post-commit 自动更新任务）
 	cp scripts/post-commit-hook.sh .git/hooks/post-commit
