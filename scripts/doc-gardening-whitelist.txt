@@ -1,21 +1,4 @@
 # Doc gardening whitelist: path, path:line, path:line:rule_id, or path:rule_id
 # Lines starting with # are ignored
-
-# index: intentionally lists archive docs for navigation
-docs/exec-plans/README.md:DOC_DEPRECATED_REF
-
-# completed/archive: historical docs with links to moved/deleted files
-docs/exec-plans/completed/archive/workflow-writing-alternatives.md:DOC_LINK_404
-docs/exec-plans/completed/workflow-optimization/task-execution-workflow-design.md:DOC_LINK_404
-docs/exec-plans/completed/workflow-optimization/workflow-guide.md:DOC_LINK_404
-docs/exec-plans/completed/workflow-optimization/workflow-optimization-tasks.md:DOC_STALE_MARKER
-docs/exec-plans/completed/workflow-optimization/workflow-optimization.md:DOC_LINK_404
-
-# debugMigration: contains 已过时 marker
-docs/exec-plans/wait/debug-migration/debug-migration-plan202503.md:DOC_STALE_MARKER
-
-# workflow-optimization: YAML/workflows paths moved or not yet migrated
-docs/exec-plans/completed/workflow-optimization/task-execution-workflow.md:3:DOC_LINK_404
-docs/exec-plans/completed/workflow-optimization/workflow-improvement-checklist.md:4:DOC_LINK_404
-docs/exec-plans/completed/workflow-optimization/workflow-improvement-checklist.md:6:DOC_LINK_404
-docs/exec-plans/completed/workflow-optimization/workflow-improvement-checklist.md:8:DOC_LINK_404
+#
+# 2026-04: docs/exec-plans/ 已删除，原白名单路径已移除。
