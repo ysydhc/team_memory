@@ -9,16 +9,24 @@ make help           # 列出可用命令
 make setup          # 首次安装（Docker + 依赖 + 数据库迁移）
 make dev            # 启动全部服务（Docker + Web）
 make web            # 仅启动 Web（http://localhost:9111）
-make mcp            # MCP（memory_* 五工具，team_memory.server）
+make mcp            # MCP（需仓库根 .env；run_mcp_with_dotenv → team_memory.server）
+make mcp-verify     # 校验 6 个 memory_* 工具注册（pytest 快速单测）
 make test           # 运行全部测试
 make lint           # Ruff 代码检查
 make verify         # 标准验收：lint + 全量测试
-make harness-check  # Harness 门禁：import 检查 + ruff + lint-js
+make harness-check  # Harness 门禁：import 检查 + ruff + lint-js + doc-harness 配置
+make sync-agent-artifacts  # 由 agents/shared 生成 agents、prompts、skills（Claude 侧为 /slash skill）
 
 # 单测 / 筛选
-pytest tests/test_server.py::TestLiteToolRegistration::test_exactly_five_tools -v
+pytest tests/test_server.py::TestLiteToolRegistration::test_exactly_six_tools -v
 pytest -k "search" -v
 ```
+
+## Agent / 流程提示词（SSOT）
+
+- **源**：`agents/shared/bodies/`、`agents/shared/prompts/`、`agents/manifest.yaml`。
+- **同步**：`make sync-agent-artifacts` → `.claude/agents/`、`.cursor/agents/`、`.cursor/prompts/`、`.claude/skills/*/SKILL.md`。
+- **与 Cursor 对齐**：`.cursor/prompts` 下的流程说明与 **同名 skill**（`/plan-eval-multi-agent-review` 等）同源。
 
 ## 架构概览
 
@@ -50,11 +58,11 @@ pytest -k "search" -v
 
 ## 开发指南
 
-新进仓库或要做跨模块改动时，建议先读 [README.md](README.md)，再按需查 [docs/design-docs/README.md](docs/design-docs/README.md)。
+新进仓库或要做跨模块改动时，建议先读 [README.md](README.md)，再按需查 [docs/README.md](docs/README.md)。
 
 ### MCP 工具开发
 
-1. 在 [README.md](README.md) 与 [docs/design-docs/ops/mcp-server.md](docs/design-docs/ops/mcp-server.md) 保持叙述一致；实现以 [src/team_memory/server.py](src/team_memory/server.py) 为准
+1. 在 [README.md](README.md) 与 [docs/guide/mcp-server.md](docs/guide/mcp-server.md) 保持叙述一致；实现以 [src/team_memory/server.py](src/team_memory/server.py) 为准
 2. `@mcp.tool` + `@track_usage` 装饰 `async def memory_xxx(...) -> str`
 3. 在 `tests/test_server.py` 补充测试
 4. `make verify` 验收
@@ -85,21 +93,21 @@ alembic upgrade head
 - [ ] `make lint` 零报错
 - [ ] `make test` 全绿（新功能须有测试）
 - [ ] 若修改 model，须有 Alembic 迁移
-- [ ] 若新增 MCP 工具，已更新 [README.md](README.md) / [docs/design-docs/ops/mcp-server.md](docs/design-docs/ops/mcp-server.md) 且测试覆盖
+- [ ] 若新增 MCP 工具，已更新 [README.md](README.md) / [docs/guide/mcp-server.md](docs/guide/mcp-server.md) 且测试覆盖
 - [ ] 无硬编码密钥、无裸 `print()`
 - [ ] Web 改动通过 `make lint-js`
-- [ ] 若变更架构分层、MCP 对外契约或用户可见文档，已同步 [README.md](README.md)、[AGENTS.md](AGENTS.md) 与 design-docs 相关篇目
+- [ ] 若变更架构分层、MCP 对外契约或用户可见文档，已同步 [README.md](README.md)、[AGENTS.md](AGENTS.md) 与 [docs/](docs/) 下相关篇目
 
 ## 导航
 
 | 主题 | 文件 |
 |------|------|
 | 人类指南与 MCP | [README.md](README.md) |
-| 架构图（Mermaid） | [docs/架构设计图.md](docs/架构设计图.md) |
+| 分层 / import 门禁 | `scripts/harness_import_check.py`（`LAYER_MAP`）；设计文档索引 [docs/README.md](docs/README.md) |
 | Import 分层 | `scripts/harness_import_check.py` |
 | MCP 实现 | [src/team_memory/server.py](src/team_memory/server.py) |
-| 设计文档 | [docs/design-docs/](docs/design-docs/) |
-| 执行计划 | [docs/exec-plans/](docs/exec-plans/) |
+| MCP 运维与配置 | [docs/guide/mcp-server.md](docs/guide/mcp-server.md)、[docs/decision/mcp-lite-default.md](docs/decision/mcp-lite-default.md) |
+| 设计文档 | [docs/](docs/) |
 | Harness 框架 | [.harness/docs/harness-spec.md](.harness/docs/harness-spec.md) |
 | Agent 入口（本仓库） | [AGENTS.md](AGENTS.md) |
 

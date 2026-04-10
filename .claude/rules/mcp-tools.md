@@ -40,7 +40,7 @@ async def memory_xxx(...) -> str:
 - `include_user_profile=True` 时返回 `{"profile": {"static": [...], "dynamic": [...]}}`
 - `include_user_profile=False`（默认）时返回 `{"profile": null}`
 
-## 当前工具（5 个）
+## 当前工具（6 个）
 
 | 工具 | 用途 |
 |------|------|
@@ -48,6 +48,7 @@ async def memory_xxx(...) -> str:
 | `memory_recall` | 搜索团队知识库（solve/search/suggest 三模式） |
 | `memory_context` | 获取用户画像 + 相关经验 |
 | `memory_get_archive` | 按 ID 获取归档全文（L2） |
+| `memory_archive_upsert` | 创建/更新档案馆记录（与 `POST /api/v1/archives` 一致） |
 | `memory_feedback` | 对搜索结果评分（1-5） |
 
 ## 参数
@@ -57,4 +58,4 @@ async def memory_xxx(...) -> str:
 - 正常、空结果、service 报错返回 error 格式
 - 测试在 `tests/test_server.py`
 
-详见 [README.md](../../README.md)、[docs/design-docs/ops/mcp-server.md](../../docs/design-docs/ops/mcp-server.md)。
+详见 [README.md](../../README.md)、[docs/guide/mcp-server.md](../../docs/guide/mcp-server.md)。
