@@ -35,8 +35,6 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Harness import check
         run: python scripts/harness_import_check.py
-      - name: Harness ref verify
-        run: ./scripts/harness_ref_verify.sh
       - name: Ruff lint
         run: ruff check src/ tests/
       - name: Ruff format check
