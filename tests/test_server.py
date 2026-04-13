@@ -14,6 +14,7 @@ import pytest
 from team_memory.server import mcp
 from team_memory.services.search_orchestrator import OrchestratedSearchResult
 from tests.conftest import (
+    _O,
     _P,
     _patch_expansion,
     _patch_personal,
@@ -77,9 +78,9 @@ class TestMemoryGetArchive:
             "attachments": [],
         }
         with (
-            patch(f"{_P}._get_archive_service") as mock_get,
+            patch(f"{_O}._get_archive_service") as mock_get,
             patch(f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"),
-            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_O}._resolve_project", return_value="default"),
         ):
             mock_svc = MagicMock()
             mock_svc.get_archive = AsyncMock(return_value=l2)
@@ -111,10 +112,10 @@ class TestMemoryArchiveUpsert:
     async def test_success_created(self):
         aid = uuid.uuid4()
         with (
-            patch(f"{_P}._get_archive_service") as mock_get,
+            patch(f"{_O}._get_archive_service") as mock_get,
             patch(f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"),
-            patch(f"{_P}._resolve_project", return_value="myproj"),
-            patch(f"{_P}._get_settings") as mock_settings,
+            patch(f"{_O}._resolve_project", return_value="myproj"),
+            patch(f"{_O}._get_settings") as mock_settings,
         ):
             mock_settings.return_value = MagicMock()
             mock_settings.return_value.mcp.max_archive_solution_doc_chars = 64_000
@@ -138,7 +139,7 @@ class TestMemoryArchiveUpsert:
 
     @pytest.mark.asyncio
     async def test_validation_error_from_schema(self):
-        with patch(f"{_P}._get_settings") as mock_settings:
+        with patch(f"{_O}._get_settings") as mock_settings:
             mock_settings.return_value = MagicMock()
             mock_settings.return_value.mcp.max_archive_solution_doc_chars = 64_000
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -155,7 +156,7 @@ class TestMemoryArchiveUpsert:
 
     @pytest.mark.asyncio
     async def test_solution_doc_exceeds_mcp_limit(self):
-        with patch(f"{_P}._get_settings") as mock_settings:
+        with patch(f"{_O}._get_settings") as mock_settings:
             mock_settings.return_value = MagicMock()
             mock_settings.return_value.mcp.max_archive_solution_doc_chars = 10
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -171,10 +172,10 @@ class TestMemoryArchiveUpsert:
         from team_memory.services.archive import ArchiveUploadError
 
         with (
-            patch(f"{_P}._get_archive_service") as mock_get,
+            patch(f"{_O}._get_archive_service") as mock_get,
             patch(f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"),
-            patch(f"{_P}._resolve_project", return_value=None),
-            patch(f"{_P}._get_settings") as mock_settings,
+            patch(f"{_O}._resolve_project", return_value=None),
+            patch(f"{_O}._get_settings") as mock_settings,
         ):
             mock_settings.return_value = MagicMock()
             mock_settings.return_value.mcp.max_archive_solution_doc_chars = 64_000
@@ -214,11 +215,11 @@ class TestMemorySave:
         }
 
         with (
-            patch(f"{_P}._get_service") as mock_get_service,
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_service") as mock_get_service,
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_P}.get_session") as mock_get_session,
+            patch(f"{_O}._resolve_project", return_value="default"),
+            patch(f"{_O}.get_session") as mock_get_session,
         ):
             mock_service = MagicMock()
             mock_service.save = AsyncMock(return_value=mock_result)
@@ -258,12 +259,12 @@ class TestMemorySave:
         }
 
         with (
-            patch(f"{_P}._get_service") as mock_get_service,
-            patch(f"{_P}._get_settings") as mock_get_settings,
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_service") as mock_get_service,
+            patch(f"{_O}._get_settings") as mock_get_settings,
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_P}.get_session") as mock_get_session,
+            patch(f"{_O}._resolve_project", return_value="default"),
+            patch(f"{_O}.get_session") as mock_get_session,
             patch(
                 "team_memory.services.llm_parser.parse_content",
                 new_callable=AsyncMock,
@@ -299,11 +300,11 @@ class TestMemorySave:
     async def test_archive_scope_rejected(self):
         """scope='archive' → hard error, no longer supported."""
         with (
-            patch(f"{_P}._get_settings"),
+            patch(f"{_O}._get_settings"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_P}._get_service"),
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._resolve_project", return_value="default"),
+            patch(f"{_O}._get_service"),
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
         ):
             tools = {t.name: t for t in await mcp.list_tools()}
             fn = tools["memory_save"].fn
@@ -326,11 +327,11 @@ class TestMemorySave:
         mock_settings.mcp.max_tag_length = 50
 
         with (
-            patch(f"{_P}._get_service"),
-            patch(f"{_P}._get_settings", return_value=mock_settings),
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_service"),
+            patch(f"{_O}._get_settings", return_value=mock_settings),
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_O}._resolve_project", return_value="default"),
         ):
             tools = {t.name: t for t in await mcp.list_tools()}
             fn = tools["memory_save"].fn
@@ -364,11 +365,11 @@ class TestMemoryRecall:
         ]
 
         with (
-            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_P}.get_session") as mock_get_session,
+            patch(f"{_O}._resolve_project", return_value="default"),
+            patch(f"{_O}.get_session") as mock_get_session,
             _patch_expansion(),
         ):
             mock_orchestrator = MagicMock()
@@ -406,10 +407,10 @@ class TestMemoryRecall:
         ]
 
         with (
-            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_O}._resolve_project", return_value="default"),
             _patch_expansion(),
         ):
             mock_orchestrator = MagicMock()
@@ -445,12 +446,12 @@ class TestMemoryRecall:
         mock_settings.mcp.truncate_solution_at = 2000
 
         with (
-            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_P}.get_context") as mock_get_ctx,
-            patch(f"{_P}._get_settings", return_value=mock_settings),
+            patch(f"{_O}._resolve_project", return_value="default"),
+            patch(f"{_O}.get_context") as mock_get_ctx,
+            patch(f"{_O}._get_settings", return_value=mock_settings),
             patch(
                 "team_memory.services.personal_memory.PersonalMemoryService",
             ) as mock_pm_cls,
@@ -495,10 +496,10 @@ class TestMemoryRecall:
         ]
 
         with (
-            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_O}._resolve_project", return_value="default"),
         ):
             mock_orchestrator = MagicMock()
             mock_orchestrator.search = AsyncMock(
@@ -520,10 +521,10 @@ class TestMemoryRecall:
     async def test_empty_params_error(self):
         """No params → error."""
         with (
-            patch(f"{_P}._get_search_orchestrator"),
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_search_orchestrator"),
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_O}._resolve_project", return_value="default"),
         ):
             tools = {t.name: t for t in await mcp.list_tools()}
             fn = tools["memory_recall"].fn
@@ -536,10 +537,10 @@ class TestMemoryRecall:
     async def test_no_results_suggests_save(self):
         """No results in solve mode → suggest memory_save."""
         with (
-            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_O}._resolve_project", return_value="default"),
         ):
             mock_orchestrator = MagicMock()
             mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=[]))
@@ -566,10 +567,10 @@ class TestMemoryRecall:
         ]
 
         with (
-            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_O}._resolve_project", return_value="default"),
             _patch_expansion(),
         ):
             mock_orchestrator = MagicMock()
@@ -603,10 +604,10 @@ class TestMemoryRecall:
         ]
 
         with (
-            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_O}._resolve_project", return_value="default"),
             _patch_expansion(),
         ):
             mock_orchestrator = MagicMock()
@@ -633,10 +634,10 @@ class TestMemoryRecall:
         monkeypatch.setenv("TEAM_MEMORY_ENV", "development")
 
         with (
-            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_O}._resolve_project", return_value="default"),
             _patch_expansion(),
         ):
             mock_orchestrator = MagicMock()
@@ -656,10 +657,10 @@ class TestMemoryRecall:
         monkeypatch.setenv("TEAM_MEMORY_ENV", "production")
 
         with (
-            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_O}._resolve_project", return_value="default"),
             _patch_expansion(),
         ):
             mock_orchestrator = MagicMock()
@@ -694,9 +695,9 @@ class TestMemoryContext:
 
         with (
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_P}.get_context") as mock_get_ctx,
-            patch(f"{_P}._get_search_orchestrator") as mock_get_orch,
+            patch(f"{_O}._resolve_project", return_value="default"),
+            patch(f"{_O}.get_context") as mock_get_ctx,
+            patch(f"{_O}._get_search_orchestrator") as mock_get_orch,
             patch(
                 "team_memory.services.personal_memory.PersonalMemoryService",
             ) as mock_pm_cls,
@@ -747,10 +748,10 @@ class TestMemoryFeedback:
     @pytest.mark.asyncio
     async def test_valid_rating(self):
         with (
-            patch(f"{_P}._get_service") as mock_get_service,
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_service") as mock_get_service,
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}.get_session") as mock_get_session,
+            patch(f"{_O}.get_session") as mock_get_session,
         ):
             mock_service = MagicMock()
             mock_service.feedback = AsyncMock(return_value=True)
@@ -773,8 +774,8 @@ class TestMemoryFeedback:
     @pytest.mark.asyncio
     async def test_invalid_rating(self):
         with (
-            patch(f"{_P}._get_service"),
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_service"),
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
         ):
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -855,11 +856,11 @@ class TestMemorySaveContentLimit:
         mock_settings.mcp.max_tag_length = 50
 
         with (
-            patch(f"{_P}._get_service"),
-            patch(f"{_P}._get_settings", return_value=mock_settings),
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_service"),
+            patch(f"{_O}._get_settings", return_value=mock_settings),
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_O}._resolve_project", return_value="default"),
         ):
             tools = {t.name: t for t in await mcp.list_tools()}
             fn = tools["memory_save"].fn
@@ -893,12 +894,12 @@ class TestMemorySaveContentLimit:
         mock_settings.llm = MagicMock()
 
         with (
-            patch(f"{_P}._get_service") as mock_get_service,
-            patch(f"{_P}._get_settings", return_value=mock_settings),
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_service") as mock_get_service,
+            patch(f"{_O}._get_settings", return_value=mock_settings),
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_P}.get_session") as mock_get_session,
+            patch(f"{_O}._resolve_project", return_value="default"),
+            patch(f"{_O}.get_session") as mock_get_session,
             patch(
                 "team_memory.services.llm_parser.parse_content",
                 new_callable=AsyncMock,
@@ -941,11 +942,11 @@ class TestMemorySaveTagsValidation:
         mock_settings.mcp.max_tag_length = 50
 
         with (
-            patch(f"{_P}._get_service"),
-            patch(f"{_P}._get_settings", return_value=mock_settings),
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_service"),
+            patch(f"{_O}._get_settings", return_value=mock_settings),
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_O}._resolve_project", return_value="default"),
         ):
             tools = {t.name: t for t in await mcp.list_tools()}
             fn = tools["memory_save"].fn
@@ -968,11 +969,11 @@ class TestMemorySaveTagsValidation:
         mock_settings.mcp.max_tag_length = 10
 
         with (
-            patch(f"{_P}._get_service"),
-            patch(f"{_P}._get_settings", return_value=mock_settings),
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_service"),
+            patch(f"{_O}._get_settings", return_value=mock_settings),
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_O}._resolve_project", return_value="default"),
         ):
             tools = {t.name: t for t in await mcp.list_tools()}
             fn = tools["memory_save"].fn
@@ -1000,12 +1001,12 @@ class TestMemorySaveTagsValidation:
         mock_settings.mcp.max_tag_length = 50
 
         with (
-            patch(f"{_P}._get_service") as mock_get_service,
-            patch(f"{_P}._get_settings", return_value=mock_settings),
-            patch(f"{_P}._get_db_url", return_value="sqlite://"),
+            patch(f"{_O}._get_service") as mock_get_service,
+            patch(f"{_O}._get_settings", return_value=mock_settings),
+            patch(f"{_O}._get_db_url", return_value="sqlite://"),
             _patch_user(),
-            patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_P}.get_session") as mock_get_session,
+            patch(f"{_O}._resolve_project", return_value="default"),
+            patch(f"{_O}.get_session") as mock_get_session,
         ):
             mock_service = MagicMock()
             mock_service.save = AsyncMock(return_value=mock_result)

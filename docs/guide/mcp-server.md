@@ -99,6 +99,30 @@ bash scripts/run_mcp_with_dotenv.sh
 
 完整模板见 [cursor-mcp-team-memory.example.json](../../example/cursor-mcp-team-memory.example.json)。**Claude Code** 可使用仓库根 `.mcp.json`；**Cursor** 通常使用 `.cursor/mcp.json`，**内容保持一致**即可。
 
+## CLI 兼容层
+
+所有 6 个 MCP 工具均可通过 `tm-cli` 命令行等价调用，无需 MCP 协议支持。
+
+### 前提
+
+- Web 服务运行中（`make dev` 或 `make web`）
+- 环境变量 `TEAM_MEMORY_API_KEY` 已设置
+
+### 命令速查
+
+| 工具 | CLI 命令 | 示例 |
+|------|---------|------|
+| memory_save | `tm-cli save` | `tm-cli save --title "Bug fix" --problem "..." --solution "..."` |
+| memory_recall | `tm-cli recall` | `tm-cli recall --query "MCP 配置"` |
+| memory_context | `tm-cli context` | `tm-cli context --file-paths "src/server.py"` |
+| memory_get_archive | `tm-cli get-archive` | `tm-cli get-archive --id "uuid"` |
+| memory_archive_upsert | `tm-cli archive` | `tm-cli archive --title "..." --solution-doc "..."` |
+| memory_feedback | `tm-cli feedback` | `tm-cli feedback --experience-id "uuid" --rating 5` |
+
+### REST API
+
+CLI 底层调用 `/api/v1/mcp/*` 端点，认证方式与 Web API 一致（`Authorization: Bearer $TEAM_MEMORY_API_KEY`）。
+
 ## 验证 MCP
 
 1. `make mcp-verify`（工具注册数量与名称）

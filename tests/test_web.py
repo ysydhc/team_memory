@@ -175,6 +175,7 @@ def setup_app():
         patch("team_memory.web.routes.archives.get_context", return_value=mock_ctx),
         patch("team_memory.web.routes.search.get_context", return_value=mock_ctx),
         patch("team_memory.web.routes.config.get_context", return_value=mock_ctx),
+        patch("team_memory.services.memory_operations.get_context", return_value=mock_ctx),
         patch("team_memory.web.app.start_background_tasks", new_callable=AsyncMock),
         patch("team_memory.web.app.stop_background_tasks", new_callable=AsyncMock),
     ):
@@ -1491,3 +1492,54 @@ class TestErrorScenarios:
         )
         assert resp.status_code == 429
         assert "rate limit" in resp.json()["detail"].lower()
+
+
+# ============================================================
+# MCP compat HTTP (/api/v1/mcp/* — memory_operations parity)
+# ============================================================
+
+
+class TestMcpCompat:
+    def test_mcp_feedback_requires_auth(self, client):
+        resp = client.post(
+            "/api/v1/mcp/feedback",
+            json={"experience_id": str(uuid.uuid4()), "rating": 5},
+        )
+        assert resp.status_code == 401
+
+    def test_mcp_feedback_ok(self, client, auth_headers, setup_app):
+        eid = str(uuid.uuid4())
+        resp = client.post(
+            "/api/v1/mcp/feedback",
+            headers=auth_headers,
+            json={"experience_id": eid, "rating": 5},
+        )
+        assert resp.status_code == 200
+        assert resp.json().get("message")
+        setup_app.feedback.assert_awaited_once()
+        kw = setup_app.feedback.call_args.kwargs
+        assert kw["experience_id"] == eid
+        assert kw["feedback_by"] == "test_admin"
+        assert kw["rating"] == 5
+
+    def test_mcp_recall_query_ok(self, client, auth_headers):
+        resp = client.post(
+            "/api/v1/mcp/recall",
+            headers=auth_headers,
+            json={"query": "hello world", "max_results": 3},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "message" in data
+        assert "results" in data
+
+    def test_mcp_get_archive_not_found(self, client, auth_headers):
+        aid = str(uuid.uuid4())
+        resp = client.get(
+            f"/api/v1/mcp/archive/{aid}",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 404
+        body = resp.json()
+        assert body.get("error") is True
+        assert body.get("code") == "not_found"

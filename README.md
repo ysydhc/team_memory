@@ -41,6 +41,26 @@ make web
 
 浏览器访问 http://localhost:9111 ，用上面的 API Key 登录即可。更完整的部署与用户流程见下文 [按角色导航](#按角色导航) 与 [快速开始](#快速开始)。
 
+## CLI 工具
+
+除 MCP 外，所有 `memory_*` 工具也可通过 `tm-cli` 命令行调用：
+
+```bash
+# 搜索团队知识
+tm-cli recall --query "如何配置"
+
+# 保存经验
+tm-cli save --title "Bug fix" --problem "连接超时" --solution "增加重试"
+
+# 获取上下文
+tm-cli context --file-paths "src/server.py"
+
+# 查看所有命令
+tm-cli --help
+```
+
+前提：`make dev` 启动服务 + `TEAM_MEMORY_API_KEY` 环境变量已设置。
+
 ## MCP 接入（Cursor / Claude）
 
 **本仓库（克隆源码）推荐**：不要把 API Key 写进 mcp.json。在仓库根维护 **`.env`**（从 [example/env.team-memory.example](example/env.team-memory.example) 复制），其中至少设置 **`TEAM_MEMORY_API_KEY`**、**`TEAM_MEMORY_PROJECT`**；MCP 配置为 **`bash`** + **`scripts/run_mcp_with_dotenv.sh`** + **`cwd`= 仓库根**。详见 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)。**Cursor** 一般用 `.cursor/mcp.json`，**Claude Code** 可用根目录 `.mcp.json`，两处内容建议保持一致。
@@ -83,7 +103,7 @@ Web 内「架构」导航与 `/api/v1/architecture/*` **已移除**（实现见 
 
 ## 目录
 
-- [功能概览](#功能概览) · [快速开始](#快速开始) · [MCP 接入](#mcp-接入指南配置参考) · [Web 管理](#web-管理界面) · [配置](#配置说明) · [运维](#运维) · [FAQ](#faq) · [开发](#开发)
+- [功能概览](#功能概览) · [快速开始](#快速开始) · [CLI 工具](#cli-工具) · [MCP 接入](#mcp-接入指南配置参考) · [Web 管理](#web-管理界面) · [配置](#配置说明) · [运维](#运维) · [FAQ](#faq) · [开发](#开发)
 
 **安装与获取**
 

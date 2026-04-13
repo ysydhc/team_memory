@@ -17,6 +17,9 @@ make verify         # 标准验收：lint + 全量测试
 make harness-check  # Harness 门禁：import 检查 + ruff + lint-js + doc-harness 配置
 make sync-agent-artifacts  # 由 agents/shared 生成 agents、prompts、skills（Claude 侧为 /slash skill）
 
+tm-cli --help    # CLI 兼容层（MCP 工具的 Shell 等价）
+tm-cli recall --query "..." # 搜索团队知识
+
 # 单测 / 筛选
 pytest tests/test_server.py::TestLiteToolRegistration::test_exactly_six_tools -v
 pytest -k "search" -v
@@ -34,7 +37,7 @@ pytest -k "search" -v
 
 ```
 ┌─────────────────────────────────────────┐
-│  MCP Server (server.py)                 │  ← AI 入口，memory_* 工具
+│  MCP Server / CLI (server.py, cli.py)   │  ← AI 入口，memory_* 工具
 │  Web Routes (web/routes/)               │  ← HTTP API 入口
 ├─────────────────────────────────────────┤
 │  Services (services/)                   │  ← 业务逻辑
@@ -106,6 +109,7 @@ alembic upgrade head
 | 分层 / import 门禁 | `scripts/harness_import_check.py`（`LAYER_MAP`）；设计文档索引 [docs/README.md](docs/README.md) |
 | Import 分层 | `scripts/harness_import_check.py` |
 | MCP 实现 | [src/team_memory/server.py](src/team_memory/server.py) |
+| CLI 兼容层 | [src/team_memory/cli.py](src/team_memory/cli.py)、[docs/guide/mcp-server.md](docs/guide/mcp-server.md) |
 | MCP 运维与配置 | [docs/guide/mcp-server.md](docs/guide/mcp-server.md)、[docs/decision/mcp-lite-default.md](docs/decision/mcp-lite-default.md) |
 | 设计文档 | [docs/](docs/) |
 | Harness 框架 | [.harness/docs/harness-spec.md](.harness/docs/harness-spec.md) |

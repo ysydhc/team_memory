@@ -15,7 +15,9 @@ from team_memory.embedding.base import EmbeddingProvider
 # ============================================================
 
 LITE_PATCH_BASE = "team_memory.server"
+_OPS_PATCH_BASE = "team_memory.services.memory_operations"
 _P = LITE_PATCH_BASE  # short alias
+_O = _OPS_PATCH_BASE  # MCP orchestration (memory_operations)
 
 
 def _patch_user(username: str = "admin"):
@@ -31,7 +33,7 @@ def _patch_expansion():
 def _patch_personal():
     """Patch _try_extract_and_save_personal_memory to no-op."""
     return patch(
-        f"{_P}._try_extract_and_save_personal_memory",
+        f"{_O}._try_extract_and_save_personal_memory",
         new_callable=AsyncMock,
     )
 
