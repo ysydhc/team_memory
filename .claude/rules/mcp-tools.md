@@ -58,4 +58,19 @@ async def memory_xxx(...) -> str:
 - 正常、空结果、service 报错返回 error 格式
 - 测试在 `tests/test_server.py`
 
+## CLI 兼容端点
+
+每个 MCP 工具都有对应的 REST API 和 CLI 命令，行为与返回格式一致：
+
+| MCP 工具 | REST 端点 | CLI 命令 |
+|----------|----------|---------|
+| `memory_save` | `POST /api/v1/mcp/save` | `tm-cli save` |
+| `memory_recall` | `POST /api/v1/mcp/recall` | `tm-cli recall` |
+| `memory_context` | `POST /api/v1/mcp/context` | `tm-cli context` |
+| `memory_get_archive` | `GET /api/v1/mcp/archive/{id}` | `tm-cli get-archive` |
+| `memory_archive_upsert` | `POST /api/v1/mcp/archive-upsert` | `tm-cli archive` |
+| `memory_feedback` | `POST /api/v1/mcp/feedback` | `tm-cli feedback` |
+
+新增 MCP 工具时须同步添加 REST 端点和 CLI 子命令。
+
 详见 [README.md](../../README.md)、[docs/guide/mcp-server.md](../../docs/guide/mcp-server.md)。

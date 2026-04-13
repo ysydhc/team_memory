@@ -4,23 +4,26 @@ description: Team Memory 使用规则（Lite 模式）
 
 ## Team Memory
 
+> 如果 MCP 不可用（如 Agent 无 MCP 支持），所有工具均可通过 `tm-cli` 命令行等价调用。
+> 前提：`TEAM_MEMORY_API_KEY` 环境变量已设置，Web 服务运行中（`make dev`）。
+
 6 个工具，2 条核心规则：
 
 1. **遇到问题 → 先 `memory_recall`，再动手**
 2. **解决问题 / 做了决定 / 发现坑 → `memory_save`**
 
-| 场景 | 工具 | 示例 |
-|------|------|------|
-| 开始新任务 | `memory_context(file_paths=[...])` | 返回 `profile.static` / `profile.dynamic`（字符串数组）及相关团队经验 |
-| 遇到 bug / 错误 | `memory_recall(problem="...")` | 检查团队是否已有方案；只 recall 不调 context 时可加 `include_user_profile=True` |
-| 探索性搜索 | `memory_recall(query="...")` | 搜索相关经验；需要含档案时加 `include_archives=True` |
-| recall 命中档案需全文 | `memory_get_archive(archive_id="...")` | `type=archive` 仅为预览，按需拉 L2 |
-| 会话/计划归档（文案） | `memory_archive_upsert(title=..., solution_doc=..., ...)` | 与 `POST /api/v1/archives` 等价；大文件用 HTTP 或 **`python -m team_memory.cli upload`**（见 [docs/guide/mcp-server.md](../../docs/guide/mcp-server.md)） |
-| 不熟悉的代码 | `memory_recall(file_path="...")` | 获取文件相关经验 |
-| 解决了问题 | `memory_save(title=..., problem=..., solution=...)` | 保存到团队知识库 |
-| 长对话有价值内容 | `memory_save(content="...", scope="project")` | LLM 自动提取保存 |
-| 个人偏好 | `memory_save(title=..., problem=..., solution=..., scope="personal")` | 保存个人偏好 |
-| 搜索结果有帮助 | `memory_feedback(experience_id=..., rating=5)` | 提升未来排名 |
+| 场景 | MCP 工具 | CLI 等价 |
+|------|---------|---------|
+| 开始新任务 | `memory_context(file_paths=[...])` | `tm-cli context --file-paths "a.py,b.py"` |
+| 遇到 bug / 错误 | `memory_recall(problem="...")` | `tm-cli recall --problem "..."` |
+| 探索性搜索 | `memory_recall(query="...")` | `tm-cli recall --query "..."` |
+| recall 命中档案需全文 | `memory_get_archive(archive_id="...")` | `tm-cli get-archive --id "..."` |
+| 会话/计划归档（文案） | `memory_archive_upsert(title=..., solution_doc=..., ...)` | `tm-cli archive --title "..." --solution-doc "..."` |
+| 不熟悉的代码 | `memory_recall(file_path="...")` | `tm-cli recall --file-path "..."` |
+| 解决了问题 | `memory_save(title=..., problem=..., solution=...)` | `tm-cli save --title "..." --problem "..." --solution "..."` |
+| 长对话有价值内容 | `memory_save(content="...", scope="project")` | `tm-cli save --content "..." --scope project` |
+| 个人偏好 | `memory_save(title=..., problem=..., solution=..., scope="personal")` | `tm-cli save --title "..." ... --scope personal` |
+| 搜索结果有帮助 | `memory_feedback(experience_id=..., rating=5)` | `tm-cli feedback --experience-id "..." --rating 5` |
 
 ## 自动触发检查点
 
