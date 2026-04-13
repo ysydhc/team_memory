@@ -10,6 +10,7 @@ from team_memory.web.routes import (
     config,
     dedup,
     experiences,
+    mcp_compat,
     personal_memory,
     search,
 )
@@ -25,3 +26,4 @@ def mount_all(parent_router: APIRouter) -> None:
     parent_router.include_router(config.router)
     parent_router.include_router(search.router)
     parent_router.include_router(personal_memory.router)
+    parent_router.include_router(mcp_compat.router)
