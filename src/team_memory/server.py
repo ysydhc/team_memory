@@ -1,7 +1,7 @@
-"""MCP Server — 6 tools for persistent team memory across coding sessions.
+"""MCP Server — 8 tools for persistent team memory across coding sessions.
 
 Registers memory_save, memory_recall, memory_get_archive, memory_archive_upsert,
-memory_context, memory_feedback.
+memory_context, memory_feedback, memory_draft_save, memory_draft_publish.
 Delegates to the shared service layer via AppContext singleton.
 
 Usage:
@@ -440,6 +440,68 @@ async def memory_feedback(
         experience_id=experience_id,
         rating=rating,
         comment=comment,
+    )
+    return _guard_output(json.dumps(result, ensure_ascii=False))
+
+
+# ============================================================
+# Tool 7: memory_draft_save (pipeline write)
+# ============================================================
+
+
+@mcp.tool(
+    name="memory_draft_save",
+    description=(
+        "Pipeline-only: save a draft memory. "
+        "source is always 'pipeline', exp_status is always 'draft'."
+    ),
+)
+@track_usage
+async def memory_draft_save(
+    title: str,
+    content: str,
+    tags: list[str] | None = None,
+    project: str | None = None,
+    group_key: str | None = None,
+    conversation_id: str | None = None,
+) -> str:
+    """Pipeline write: save a draft memory with forced source='pipeline', exp_status='draft'."""
+    user = await _get_current_user()
+    result = await memory_operations.op_draft_save(
+        user,
+        title=title,
+        content=content,
+        tags=tags,
+        project=project,
+        group_key=group_key,
+        conversation_id=conversation_id,
+    )
+    return _guard_output(json.dumps(result, ensure_ascii=False))
+
+
+# ============================================================
+# Tool 8: memory_draft_publish (pipeline write)
+# ============================================================
+
+
+@mcp.tool(
+    name="memory_draft_publish",
+    description=(
+        "Pipeline-only: promote a draft to published. "
+        "Only works on experiences with source='pipeline' and exp_status='draft'."
+    ),
+)
+@track_usage
+async def memory_draft_publish(
+    draft_id: str,
+    refined_content: str | None = None,
+) -> str:
+    """Pipeline write: promote a pipeline draft to published."""
+    user = await _get_current_user()
+    result = await memory_operations.op_draft_publish(
+        user,
+        draft_id=draft_id,
+        refined_content=refined_content,
     )
     return _guard_output(json.dumps(result, ensure_ascii=False))
 

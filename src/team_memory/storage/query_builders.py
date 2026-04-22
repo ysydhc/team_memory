@@ -15,18 +15,18 @@ def active_filter(current_user: str | None = None) -> list:
 
     Returns a list of SQLAlchemy filter expressions:
     - is_deleted == False (always)
-    - published for all; OR published + owned-by-user when current_user is set
+    - published/promoted for all; OR published/promoted/draft(own) when current_user is set
     """
     base = [Experience.is_deleted == False]  # noqa: E712
     if current_user:
         base.append(
             or_(
-                Experience.exp_status == "published",
+                Experience.exp_status.in_(["published", "promoted"]),
                 (Experience.created_by == current_user),
             )
         )
     else:
-        base.append(Experience.exp_status == "published")
+        base.append(Experience.exp_status.in_(["published", "promoted"]))
     return base
 
 

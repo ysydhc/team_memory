@@ -32,8 +32,10 @@ from team_memory.auth.provider import AuthProvider, create_auth_provider
 from team_memory.config import Settings, load_settings
 from team_memory.embedding.base import ConcurrencyLimitedEmbedding, EmbeddingProvider
 from team_memory.services.archive import ArchiveService
+from team_memory.services.evaluation import EvaluationService
 from team_memory.services.event_bus import EventBus, Events
 from team_memory.services.experience import ExperienceService
+from team_memory.services.intent_router import DefaultIntentRouter, IntentRouter
 from team_memory.services.search_orchestrator import SearchOrchestrator
 
 if TYPE_CHECKING:
@@ -211,6 +213,8 @@ class AppContext:
     service: ExperienceService
     archive_service: ArchiveService
     search_orchestrator: SearchOrchestrator
+    evaluation_service: EvaluationService | None = None
+    intent_router: IntentRouter = None  # type: ignore[assignment]
     janitor: MemoryJanitor | None = None
     janitor_scheduler: JanitorScheduler | None = None
     _log_listener: QueueListener | None = None
@@ -404,10 +408,16 @@ def bootstrap(
         event_bus=event_bus,
     )
 
+    intent_router = DefaultIntentRouter()
+
+    evaluation_service = EvaluationService(db_url=db_url, embedding_provider=embedding)
+
     search_orchestrator = SearchOrchestrator(
         search_pipeline=search_pipeline,
         embedding_provider=embedding,
         db_url=db_url,
+        intent_router=intent_router,
+        evaluation_service=evaluation_service,
     )
 
     service = ExperienceService(
@@ -458,6 +468,8 @@ def bootstrap(
         service=service,
         archive_service=archive_service,
         search_orchestrator=search_orchestrator,
+        evaluation_service=evaluation_service,
+        intent_router=intent_router,
         janitor=janitor,
         janitor_scheduler=janitor_scheduler,
         _log_listener=log_listener,

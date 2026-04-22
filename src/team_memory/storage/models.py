@@ -90,7 +90,7 @@ class Experience(Base):
     )  # private, project, global
     exp_status: Mapped[str] = mapped_column(
         String(20), default="draft", nullable=False, server_default="draft"
-    )  # draft, published
+    )  # draft, published, promoted
 
     # Quality scoring and management
     quality_score: Mapped[float] = mapped_column(
@@ -468,3 +468,28 @@ class BackgroundTask(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     max_retries: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3")
+
+
+# ============================================================
+# SearchLog (evaluation tracking)
+# ============================================================
+
+
+class SearchLog(Base):
+    """Search query log for evaluation."""
+
+    __tablename__ = "search_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    intent_type: Mapped[str] = mapped_column(String(20), default="unknown")
+    project: Mapped[str] = mapped_column(String(100), default="default")
+    source: Mapped[str] = mapped_column(String(20), default="mcp")
+    result_ids: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # [{"id": "exp-xxx", "score": 0.85, "source_layer": "L2"}, ...]
+    was_used: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # None=unjudged
+    agent_response_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )

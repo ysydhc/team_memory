@@ -100,8 +100,9 @@ class ExperienceRepository:
 
     # Valid status transitions
     VALID_STATUS_TRANSITIONS = {
-        "draft": ["published"],
-        "published": ["draft"],
+        "draft": ["published", "promoted"],
+        "published": ["draft", "promoted"],
+        "promoted": ["published", "draft"],
     }
 
     # ======================== CREATE ========================
@@ -518,7 +519,7 @@ class ExperienceRepository:
             return None
 
         current_status = experience.exp_status
-        if current_status not in ("draft", "published"):
+        if current_status not in ("draft", "published", "promoted"):
             current_status = "draft"
         allowed = self.VALID_STATUS_TRANSITIONS.get(current_status, [])
 

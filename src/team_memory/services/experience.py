@@ -22,6 +22,14 @@ from team_memory.storage.repository import ExperienceRepository
 logger = logging.getLogger("team_memory.service")
 
 
+def _validate_source_status(source: str, exp_status: str) -> None:
+    """Validate that draft status is only allowed for source='pipeline'."""
+    if exp_status == "draft" and source not in ("pipeline",):
+        raise ValueError(
+            f"exp_status='draft' requires source='pipeline', got source='{source}'"
+        )
+
+
 class ExperienceService:
     """High-level service for experience write operations.
 
@@ -128,6 +136,9 @@ class ExperienceService:
             "status": "duplicate_detected" and "candidates" list.
         """
         async with self._session_or(session) as session:
+            # Validate source/status constraint
+            _validate_source_status(source, exp_status)
+
             prepare_start = time.monotonic()
             repo = ExperienceRepository(session)
 
@@ -516,6 +527,19 @@ class ExperienceService:
                 },
             )
             return True
+
+    async def get_by_id(self, experience_id: str) -> dict | None:
+        """Get an experience by ID as a dict (or None if not found)."""
+        async with self._session() as session:
+            repo = ExperienceRepository(session)
+            try:
+                exp_uuid = uuid.UUID(experience_id)
+            except (ValueError, TypeError, AttributeError):
+                return None
+            exp = await repo.get_by_id(exp_uuid)
+            if exp is None:
+                return None
+            return exp.to_dict()
 
     async def list_projects(self) -> list[str]:
         """Return distinct project names."""

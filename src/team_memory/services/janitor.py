@@ -356,6 +356,125 @@ class MemoryJanitor:
                 "cutoff_date": cutoff_date.isoformat(),
             }
 
+    async def run_promotion(self, project: str | None = None) -> dict:
+        """Promote published experiences to 'promoted' status based on thresholds.
+
+        Two promotion paths:
+        1. use_count threshold: experiences with use_count >= threshold get promoted
+        2. group_key threshold: group_keys with count >= threshold cause all
+           published experiences in that group to be promoted
+
+        Only experiences with exp_status="published" are eligible; already-promoted
+        experiences are excluded to prevent double promotion.
+
+        Args:
+            project: Project to limit promotion to, None for all projects
+
+        Returns:
+            Dict with promotion statistics
+        """
+        use_count_threshold = self._get_config("promotion_use_count_threshold", 3)
+        group_key_threshold = self._get_config("promotion_group_key_threshold", 5)
+
+        promoted_by_use_count = 0
+        promoted_by_group = 0
+
+        async with self._session() as session:
+            # 1. Promote by use_count threshold
+            use_count_query = select(Experience).where(
+                and_(
+                    Experience.is_deleted == False,  # noqa: E712
+                    Experience.exp_status == "published",
+                    Experience.use_count >= use_count_threshold,
+                )
+            )
+            if project:
+                use_count_query = use_count_query.where(Experience.project == project)
+
+            result = await session.execute(use_count_query)
+            use_count_experiences = result.scalars().all()
+
+            for exp in use_count_experiences:
+                exp.exp_status = "promoted"
+                promoted_by_use_count += 1
+                logger.debug(
+                    "Promoted experience by use_count: %s (use_count=%d)",
+                    exp.id,
+                    exp.use_count,
+                )
+
+            # 2. Promote by group_key threshold
+            # Find group_keys with enough published experiences
+            from sqlalchemy import func
+
+            group_count_query = (
+                select(Experience.group_key, func.count(Experience.id).label("cnt"))
+                .where(
+                    and_(
+                        Experience.is_deleted == False,  # noqa: E712
+                        Experience.exp_status == "published",
+                        Experience.group_key.isnot(None),
+                    )
+                )
+                .group_by(Experience.group_key)
+                .having(func.count(Experience.id) >= group_key_threshold)
+            )
+            if project:
+                group_count_query = group_count_query.where(
+                    Experience.project == project
+                )
+
+            group_result = await session.execute(group_count_query)
+            qualifying_groups = [row[0] for row in group_result.all()]
+
+            if qualifying_groups:
+                # Get all published experiences in qualifying groups
+                group_exp_query = select(Experience).where(
+                    and_(
+                        Experience.is_deleted == False,  # noqa: E712
+                        Experience.exp_status == "published",
+                        Experience.group_key.in_(qualifying_groups),
+                    )
+                )
+                if project:
+                    group_exp_query = group_exp_query.where(
+                        Experience.project == project
+                    )
+
+                group_exp_result = await session.execute(group_exp_query)
+                group_experiences = group_exp_result.scalars().all()
+
+                for exp in group_experiences:
+                    # Avoid double-counting if already promoted by use_count
+                    if exp.exp_status == "published":
+                        exp.exp_status = "promoted"
+                        promoted_by_group += 1
+                        logger.debug(
+                            "Promoted experience by group_key: %s (group_key=%s)",
+                            exp.id,
+                            exp.group_key,
+                        )
+
+            await session.commit()
+
+        total = promoted_by_use_count + promoted_by_group
+
+        logger.info(
+            "Promotion completed: %d by use_count, %d by group_key, %d total",
+            promoted_by_use_count,
+            promoted_by_group,
+            total,
+        )
+
+        return {
+            "promoted_by_use_count": promoted_by_use_count,
+            "promoted_by_group": promoted_by_group,
+            "total": total,
+            "use_count_threshold": use_count_threshold,
+            "group_key_threshold": group_key_threshold,
+            "project": project,
+        }
+
     async def run_all(self, project: str | None = None) -> dict:
         """Run all janitor operations in sequence.
 
@@ -373,6 +492,7 @@ class MemoryJanitor:
         purge_days = self._get_config("purge_soft_deleted_days", 30)
         draft_expiry_days = self._get_config("draft_expiry_days", 7)
         personal_memory_days = self._get_config("personal_memory_retention_days", 90)
+        promotion_enabled = self._get_config("promotion_enabled", True)
 
         results = {}
 
@@ -395,6 +515,10 @@ class MemoryJanitor:
                     personal_memory_days
                 )
 
+            # 6. Promote experiences (L2→L3)
+            if promotion_enabled:
+                results["promotion"] = await self.run_promotion(project)
+
             logger.info(
                 "Full janitor run completed successfully for project '%s'", project or "all"
             )
@@ -415,5 +539,6 @@ class MemoryJanitor:
                 "purge_days": purge_days,
                 "draft_expiry_days": draft_expiry_days,
                 "personal_memory_days": personal_memory_days,
+                "promotion_enabled": promotion_enabled,
             },
         }

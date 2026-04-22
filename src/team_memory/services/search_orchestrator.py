@@ -13,6 +13,8 @@ from dataclasses import dataclass
 
 from team_memory import io_logger
 from team_memory.embedding.base import EmbeddingProvider
+from team_memory.services.evaluation import EvaluationService
+from team_memory.services.intent_router import DefaultIntentRouter, IntentRouter
 from team_memory.storage.repository import ExperienceRepository
 
 logger = logging.getLogger("team_memory.search_orchestrator")
@@ -25,6 +27,7 @@ class OrchestratedSearchResult:
     results: list[dict]
     reranked: bool = False
     cached: bool = False
+    intent_type: str = "general"
 
 
 class SearchOrchestrator:
@@ -39,10 +42,14 @@ class SearchOrchestrator:
         search_pipeline: object | None,
         embedding_provider: EmbeddingProvider,
         db_url: str,
+        intent_router: IntentRouter | None = None,
+        evaluation_service: EvaluationService | None = None,
     ) -> None:
         self._search_pipeline = search_pipeline
         self._embedding = embedding_provider
         self._db_url = db_url
+        self._intent_router = intent_router or DefaultIntentRouter()
+        self._evaluation_service = evaluation_service
 
     async def search(
         self,
@@ -56,6 +63,7 @@ class SearchOrchestrator:
         top_k_children: int = 3,
         project: str | None = None,
         include_archives: bool = False,
+        include_promoted: bool = False,
     ) -> OrchestratedSearchResult:
         """Search experiences using the enhanced search pipeline.
 
@@ -65,6 +73,9 @@ class SearchOrchestrator:
         Otherwise, falls back to legacy vector/FTS search.
         """
         from team_memory.storage.database import get_session
+
+        # Classify query intent
+        intent = await self._intent_router.classify(query)
 
         async with get_session(self._db_url) as session:
             search_start = time.monotonic()
@@ -116,10 +127,19 @@ class SearchOrchestrator:
                         except Exception:
                             pass
 
+                # Apply status-based post-processing: exclude promoted, penalize draft
+                processed_results = self._apply_status_filter(
+                    pipeline_result.results, include_promoted=include_promoted
+                )
+
+                # Inject [mem:xxx] markers if evaluation_service is configured
+                processed_results = self._maybe_inject_markers(processed_results)
+
                 return OrchestratedSearchResult(
-                    results=pipeline_result.results,
+                    results=processed_results,
                     reranked=pipeline_result.reranked,
                     cached=pipeline_result.cached,
+                    intent_type=intent.intent_type,
                 )
 
             # Legacy fallback: direct vector/FTS search
@@ -145,7 +165,50 @@ class SearchOrchestrator:
                 },
                 duration_ms=duration_ms,
             )
-            return OrchestratedSearchResult(results=results, reranked=False, cached=False)
+            # Apply status-based post-processing to legacy results
+            processed_legacy = self._apply_status_filter(
+                results, include_promoted=include_promoted
+            )
+
+            # Inject [mem:xxx] markers if evaluation_service is configured
+            processed_legacy = self._maybe_inject_markers(processed_legacy)
+
+            return OrchestratedSearchResult(
+                results=processed_legacy,
+                reranked=False,
+                cached=False,
+                intent_type=intent.intent_type,
+            )
+
+    _DRAFT_SCORE_MULTIPLIER = 0.7
+
+    def _maybe_inject_markers(self, results: list[dict]) -> list[dict]:
+        """Inject [mem:xxx] markers if evaluation_service is configured."""
+        if self._evaluation_service is not None:
+            return self._evaluation_service.inject_markers(results)
+        return results
+
+    def _apply_status_filter(
+        self,
+        results: list[dict],
+        include_promoted: bool = False,
+    ) -> list[dict]:
+        """Post-process search results based on exp_status.
+
+        - Promoted experiences are excluded unless include_promoted=True.
+        - Draft experiences have their score multiplied by _DRAFT_SCORE_MULTIPLIER.
+        """
+        filtered: list[dict] = []
+        for r in results:
+            status = r.get("status") or r.get("exp_status", "published")
+            # Exclude promoted unless explicitly requested
+            if status == "promoted" and not include_promoted:
+                continue
+            # Penalize draft scores
+            if status == "draft" and "score" in r:
+                r = {**r, "score": round(r["score"] * self._DRAFT_SCORE_MULTIPLIER, 4)}
+            filtered.append(r)
+        return filtered
 
     async def _legacy_search(
         self,

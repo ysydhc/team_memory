@@ -16,6 +16,7 @@ from team_memory.bootstrap import bootstrap, get_context  # noqa  # noqa: layer-
 from team_memory.schemas import ArchiveCreateRequest
 from team_memory.services.archive import ArchiveUploadError
 from team_memory.storage.database import get_session
+from team_memory.storage.search_log_repository import SearchLogRepository
 from team_memory.utils.project import resolve_project as _resolve_project
 
 logger = logging.getLogger("team_memory")
@@ -55,6 +56,34 @@ def _get_settings():
 
 def _get_db_url() -> str:
     return get_context().db_url
+
+
+async def write_search_log(
+    *,
+    db_url: str,
+    query: str,
+    intent_type: str = "unknown",
+    project: str = "default",
+    source: str = "mcp",
+    result_ids: list[dict] | None = None,
+) -> None:
+    """Write a SearchLog entry after a search completes.
+
+    Failures are logged and do not propagate — search logging is best-effort.
+    """
+    try:
+        async with get_session(db_url) as session:
+            repo = SearchLogRepository(session)
+            await repo.create(
+                query=query,
+                intent_type=intent_type,
+                project=project,
+                source=source,
+                result_ids=result_ids,
+            )
+            await session.commit()
+    except Exception:
+        logger.debug("write_search_log failed (best-effort)", exc_info=True)
 
 
 async def _try_extract_and_save_personal_memory(
@@ -279,6 +308,7 @@ async def _recall_solve(
             ),
             "results": [],
             "reranked": False,
+            "intent_type": osearch.intent_type,
         }
 
     best_id = results[0].get("group_id") or results[0].get("id", "")
@@ -286,6 +316,7 @@ async def _recall_solve(
         "message": f"Found {len(results)} solution(s).",
         "results": results,
         "reranked": osearch.reranked,
+        "intent_type": osearch.intent_type,
         "feedback_hint": (f"If helpful, call memory_feedback(experience_id='{best_id}', rating=5)"),
     }
 
@@ -320,6 +351,7 @@ async def _recall_search(
             "message": "No matching experiences found.",
             "results": [],
             "reranked": False,
+            "intent_type": osearch.intent_type,
         }
 
     best_id = results[0].get("group_id") or results[0].get("id", "")
@@ -327,6 +359,7 @@ async def _recall_search(
         "message": f"Found {len(results)} result(s).",
         "results": results,
         "reranked": osearch.reranked,
+        "intent_type": osearch.intent_type,
         "feedback_hint": (f"If helpful, call memory_feedback(experience_id='{best_id}', rating=5)"),
     }
 
@@ -399,6 +432,7 @@ async def _recall_suggest(
             "message": "No relevant experiences for this context.",
             "results": [],
             "reranked": False,
+            "intent_type": osearch.intent_type,
         }
 
     suggestions = []
@@ -418,6 +452,7 @@ async def _recall_suggest(
         "message": f"Found {len(suggestions)} suggestion(s) for your context.",
         "results": suggestions,
         "reranked": osearch.reranked,
+        "intent_type": osearch.intent_type,
     }
 
 
@@ -541,6 +576,39 @@ async def op_save(
     }
 
 
+async def _maybe_write_search_log(
+    recall_result: dict,
+    db_url: str,
+    project: str,
+    query: str = "",
+) -> None:
+    """Best-effort write of a SearchLog entry after recall completes.
+
+    Extracts intent_type and result_ids from the recall result dict.
+    Failures are logged and do not propagate.
+    """
+    results = recall_result.get("results", [])
+    intent_type = recall_result.get("intent_type", "unknown")
+
+    # Build result_ids from the results list
+    result_ids: list[dict] | None = None
+    if results:
+        result_ids = []
+        for r in results:
+            rid = r.get("group_id") or r.get("id", "")
+            score = r.get("score", r.get("similarity", 0))
+            result_ids.append({"id": str(rid), "score": score})
+
+    await write_search_log(
+        db_url=db_url,
+        query=query or "(recall)",
+        intent_type=intent_type,
+        project=project,
+        source="mcp",
+        result_ids=result_ids,
+    )
+
+
 async def op_recall(
     user: str,
     *,
@@ -563,6 +631,7 @@ async def op_recall(
 
     search_orchestrator = _get_search_orchestrator()
     resolved_project = _resolve_project(project)
+    db_url = _get_db_url()
 
     ctx_hint: str | None = None
     if problem:
@@ -585,12 +654,14 @@ async def op_recall(
             project=resolved_project,
             include_archives=include_archives,
         )
-        return await _append_user_profile_to_recall_json(
+        result = await _append_user_profile_to_recall_json(
             raw,
             user=user,
             context_text=ctx_hint,
             include_user_profile=include_user_profile,
         )
+        await _maybe_write_search_log(result, db_url, resolved_project, query=problem or "")
+        return result
 
     if query:
         raw = await _recall_search(
@@ -602,12 +673,14 @@ async def op_recall(
             project=resolved_project,
             include_archives=include_archives,
         )
-        return await _append_user_profile_to_recall_json(
+        result = await _append_user_profile_to_recall_json(
             raw,
             user=user,
             context_text=ctx_hint,
             include_user_profile=include_user_profile,
         )
+        await _maybe_write_search_log(result, db_url, resolved_project, query=query or "")
+        return result
 
     if file_path or language or framework:
         raw = await _recall_suggest(
@@ -619,12 +692,14 @@ async def op_recall(
             user=user,
             project=resolved_project,
         )
-        return await _append_user_profile_to_recall_json(
+        result = await _append_user_profile_to_recall_json(
             raw,
             user=user,
             context_text=ctx_hint,
             include_user_profile=include_user_profile,
         )
+        await _maybe_write_search_log(result, db_url, resolved_project, query=ctx_hint or "")
+        return result
 
     raw = {
         "error": True,
@@ -833,6 +908,99 @@ async def op_archive_upsert(
         "action": action,
         "message": msg,
         "item": item,
+    }
+
+
+async def op_draft_save(
+    user: str,
+    *,
+    title: str,
+    content: str,
+    tags: list[str] | None = None,
+    project: str | None = None,
+    group_key: str | None = None,
+    conversation_id: str | None = None,
+) -> dict:
+    """Pipeline write: save draft. Forces source='pipeline', exp_status='draft'."""
+    service = _get_service()
+    db_url = _get_db_url()
+    resolved_project = _resolve_project(project)
+
+    async with get_session(db_url) as session:
+        result = await service.save(
+            session=session,
+            title=title,
+            problem=content,
+            tags=tags,
+            project=resolved_project,
+            source="pipeline",
+            exp_status="draft",
+            visibility="project",
+            experience_type="general",
+            group_key=group_key,
+            created_by=user,
+        )
+
+    if result.get("error"):
+        return {
+            "error": True,
+            "message": result.get("message", "Save failed."),
+            "code": "internal_error",
+        }
+
+    return {
+        "id": result.get("id"),
+        "status": "draft",
+    }
+
+
+async def op_draft_publish(
+    user: str,
+    *,
+    draft_id: str,
+    refined_content: str | None = None,
+) -> dict:
+    """Pipeline write: promote draft to published. Only works on pipeline drafts."""
+    service = _get_service()
+
+    # First verify the experience exists and is a pipeline draft
+    exp = await service.get_by_id(draft_id)
+    if not exp:
+        return {
+            "error": True,
+            "message": f"Experience {draft_id} not found",
+            "code": "not_found",
+        }
+    if exp.get("source") != "pipeline":
+        return {
+            "error": True,
+            "message": f"Can only publish pipeline drafts, got source='{exp.get('source')}'",
+            "code": "validation_error",
+        }
+    if exp.get("status") != "draft":
+        return {
+            "error": True,
+            "message": f"Can only publish drafts, got status='{exp.get('status')}'",
+            "code": "validation_error",
+        }
+
+    # Update to published
+    update_kwargs = {"experience_id": draft_id, "exp_status": "published", "user": user}
+    if refined_content:
+        update_kwargs["description"] = refined_content
+
+    result = await service.update(**update_kwargs)
+
+    if result is None:
+        return {
+            "error": True,
+            "message": f"Failed to update experience {draft_id}",
+            "code": "internal_error",
+        }
+
+    return {
+        "id": result.get("id"),
+        "status": "published",
     }
 
 

@@ -27,12 +27,12 @@ from tests.conftest import (
 
 
 class TestLiteToolRegistration:
-    """Verify lite server registers exactly 6 memory_* tools."""
+    """Verify lite server registers exactly 8 memory_* tools."""
 
     @pytest.mark.asyncio
     async def test_exactly_six_tools(self):
         tools = {t.name: t for t in await mcp.list_tools()}
-        assert len(tools) == 6, f"Expected 6 tools, got {len(tools)}: {list(tools.keys())}"
+        assert len(tools) == 8, f"Expected 8 tools, got {len(tools)}: {list(tools.keys())}"
 
     @pytest.mark.asyncio
     async def test_tool_names(self):
@@ -44,6 +44,8 @@ class TestLiteToolRegistration:
             "memory_archive_upsert",
             "memory_context",
             "memory_feedback",
+            "memory_draft_save",
+            "memory_draft_publish",
         }
         assert set(tools.keys()) == expected
 
