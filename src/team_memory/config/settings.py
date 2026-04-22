@@ -17,6 +17,7 @@ from pydantic_settings import (
 from team_memory.config.auth import AuthConfig
 from team_memory.config.database import DatabaseConfig
 from team_memory.config.embedding import EmbeddingConfig
+from team_memory.config.janitor import JanitorConfig
 from team_memory.config.lifecycle import LifecycleConfig
 from team_memory.config.llm import ExtractionConfig, LLMConfig
 from team_memory.config.logging_config import LoggingConfig
@@ -54,6 +55,7 @@ class Settings(BaseSettings):
     lifecycle: LifecycleConfig = Field(default_factory=LifecycleConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    janitor: JanitorConfig = Field(default_factory=JanitorConfig)
     tag_synonyms: dict[str, str] = Field(default_factory=dict)
     log_format: Literal["human", "json"] = "human"
     uploads: UploadsConfig = Field(default_factory=UploadsConfig)
