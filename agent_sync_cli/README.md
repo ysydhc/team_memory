@@ -2,26 +2,46 @@
 
 **AgentSync** 是一个专为 AI Agent（如 Cursor、Claude Code、Hermes 等）设计的跨项目提示词（Prompt / Skill）包管理器。
 
-它的核心理念是：**“一处定义，多处执行，零侵入分享”**。你只需要提供一个 GitHub 目录链接或文件链接，AgentSync 就能自动拉取、缓存、转换，并将其注入到你当前项目的对应 AI 工具目录中。
+它的核心理念是：**“全局统一管理，按需分发到项目”**。你只需要在一个统一的“配置中心”仓库里维护你所有的 AI 技能，AgentSync 就能自动拉取、缓存、转换，并将其精准注入到你指定的业务项目目录或全局（User 级别）目录中。
 
 ---
 
 ## 🌟 核心特性
 
-- **无需上游配合**：直接引用任意 GitHub 目录，无需对方仓库提供 `manifest` 文件。
-- **极速拉取**：底层基于 Git 稀疏检出（Sparse Checkout），只下载需要的 Markdown 文件。
+- **全局配置中心**：告别在每个业务项目里写配置文件的烦恼！所有项目的 AI 技能依赖，都在你电脑上的一个统一仓库（如 `~/.agent-sync-center`）中集中管理。
+- **项目级与全局级分发**：支持将技能分发到具体的业务项目（如 `/work/project-A/.cursor/agents/`），也支持分发到全局/用户级目录（如 `~/.claude/skills/`）。
+- **极速拉取与缓存**：底层基于 Git 稀疏检出（Sparse Checkout），只下载需要的 Markdown 文件，并在本地全局缓存。
 - **多平台适配**：自动为纯文本 Markdown 加上 Cursor / Claude 等平台所需的 Frontmatter（头部元数据）。
 - **高度可配**：支持“引用模式（Reference）”，支持自定义是否保留原文件头部、是否注入防篡改警告。
-- **平滑迁移**：一键扫描老项目，提取现存的 Agent 文件并自动生成配置文件。
 
 ---
 
 ## 🚀 快速开始
 
-### 1. 初始化配置
-在你的业务项目根目录下，创建一个名为 `agent-lock.yaml` 的文件：
+### 1. 初始化配置中心
+在你的电脑上找一个地方（比如 `~/.agent-sync-center`），初始化你的配置中心：
+
+```bash
+mkdir ~/.agent-sync-center
+cd ~/.agent-sync-center
+agent-sync init
+```
+这会生成一个默认的目录结构：
+```text
+~/.agent-sync-center/
+├── global.yaml       # 定义发放到当前电脑全局/User级别目录的技能
+└── projects/         # 存放各个业务项目的独立配置文件
+    ├── project-A.yaml
+    └── project-B.yaml
+```
+
+### 2. 编写项目配置
+在 `projects/` 目录下创建一个配置文件（例如 `project-A.yaml`），绑定你的业务项目路径，并声明需要的技能：
 
 ```yaml
+# ~/.agent-sync-center/projects/project-A.yaml
+target_path: "/Users/me/work/project-A"  # 绑定的业务项目绝对路径
+
 dependencies:
   # 引用一个 GitHub 目录（自动扫描里面的 .md 文件）
   - source: "https://github.com/your-org/awesome-prompts/tree/main/cursor-rules"
@@ -31,27 +51,36 @@ dependencies:
     source: "https://github.com/another-org/repo/blob/main/skills/architect.md"
 ```
 
-### 2. 安装依赖
-在项目根目录运行：
-```bash
-agent-sync install
+### 3. 配置全局/用户级技能 (可选)
+如果你想让某些技能在所有项目中默认可用，可以编辑 `global.yaml`：
+
+```yaml
+# ~/.agent-sync-center/global.yaml
+# 目标路径默认为当前用户的全局配置目录
+# Cursor: ~/.cursor/rules/ (或对应的全局目录)
+# Claude: ~/.claude/skills/
+
+dependencies:
+  - name: "company-guidelines"
+    source: "https://github.com/our-org/docs/tree/main/ai-rules"
 ```
-*AgentSync 会自动下载这些文件，加上 Cursor/Claude 认识的头部信息，并生成到 `.cursor/agents/` 和 `.claude/skills/` 目录中。*
+
+### 4. 执行安装与分发
+在配置中心目录下，运行安装命令：
+
+```bash
+# 安装并分发所有项目和全局的技能
+agent-sync install
+
+# 或者，只针对某个特定的项目进行安装
+agent-sync install --project project-A
+```
+*AgentSync 会自动下载这些文件，加上 Cursor/Claude 认识的头部信息，并精准投放到你配置的 `target_path` 中的 `.cursor/agents/` 和 `.claude/skills/` 目录里。*
 
 ---
 
-## ⚙️ 配置文件详解 (`agent-lock.yaml`)
+## ⚙️ 依赖配置项详解
 
-`agent-lock.yaml` 是当前项目引入外部 AI 技能的唯一凭证。
-
-### 基础配置
-```yaml
-dependencies:
-  - name: "code-reviewer"
-    source: "https://github.com/org/repo/blob/main/reviewer.md"
-```
-
-### 进阶配置项
 你可以为每个依赖项配置额外的行为：
 
 ```yaml
@@ -60,8 +89,8 @@ dependencies:
     source: "https://github.com/our-org/docs/tree/main/ai-rules"
     
     # 【生成模式】
-    # inline (默认): 将远程文件全文拉取并写入本地的 .cursor/agents/xxx.md
-    # reference: 本地只生成一个极简的壳文件，里面包含指向远程 URL 或本地缓存的链接（适合超长文档）
+    # inline (默认): 将远程文件全文拉取并写入目标目录的 xxx.md
+    # reference: 目标目录只生成一个极简的壳文件，里面包含指向远程 URL 或本地缓存的链接（适合超长文档）
     mode: "reference"
     
     # 【头部处理】
@@ -79,44 +108,44 @@ dependencies:
 
 ## 💻 命令行参考 (CLI Commands)
 
-### `agent-sync install`
-读取 `agent-lock.yaml`，执行拉取、缓存、转换、注入的全流程。如果全局缓存中已有对应版本，则直接使用缓存。
+所有命令都建议在你的配置中心目录（如 `~/.agent-sync-center`）下执行。
 
-### `agent-sync update`
-强制忽略本地缓存，去 GitHub 拉取源的最新 `main` 分支代码，更新全局缓存并重新生成当前项目的 Agent 文件。
+### `agent-sync install [--project <name>]`
+读取配置中心的 `projects/*.yaml` 和 `global.yaml`，执行拉取、缓存、转换、注入的全流程。
+如果指定了 `--project`，则只处理该项目。
 
-### `agent-sync import`
+### `agent-sync update [--project <name>]`
+强制忽略本地缓存，去 GitHub 拉取源的最新 `main` 分支代码，更新全局缓存并重新生成目标项目中的 Agent 文件。
+
+### `agent-sync status`
+查看当前配置中心管理了哪些项目，每个项目绑定了什么路径，安装了哪些技能，分别来自哪里，当前使用的版本（Commit SHA）是什么。
+
+### `agent-sync import <project-path>`
 **遗留项目救星！** 
 如果你接手了一个已经手动拷入了一堆 `.cursor/agents/` 的老项目：
-1. 运行此命令，工具会自动扫描这些文件。
-2. 剥离它们的平台专属头部，提取纯文本。
-3. 将纯文本存入本机的统一注册表（`~/.agent-sync/local-registry/`），并自动去重。
-4. 在当前项目自动生成 `agent-lock.yaml`，指向这些本地文件。
+1. 运行 `agent-sync import /Users/me/work/legacy-project`。
+2. 工具会自动扫描该项目，剥离平台专属头部，提取纯文本。
+3. 将纯文本存入本机的统一注册表，并自动去重。
+4. 在配置中心的 `projects/` 下自动生成一个 `legacy-project.yaml`，指向这些本地文件。
 
 ### `agent-sync push <skill-name>`
 **反向反哺！**
-如果你在当前项目里修改了某个下载下来的 Skill，觉得改得很好：
+如果你在某个业务项目里修改了下载下来的 Skill，觉得改得很好：
 运行此命令，工具会计算 Diff，并帮你把修改同步回本地注册表（如果是本地源），或者提示你如何提交 PR（如果是远程源）。
-
-### `agent-sync list`
-查看当前项目安装了哪些技能，分别来自哪里，当前使用的版本（Commit SHA）是什么。
 
 ---
 
 ## 🛠️ 常见工作流示例
 
-### 场景 A：我只想用别人写好的牛逼 Prompt
-1. 在 GitHub 上看到一个好用的 Prompt 目录。
-2. 在项目里写进 `agent-lock.yaml`。
-3. 运行 `agent-sync install`。
-4. 搞定，Cursor 里直接能用。
+### 场景 A：我接手了一个新项目
+1. 进入我的 `~/.agent-sync-center`。
+2. 复制一份 `projects/template.yaml` 为 `projects/new-project.yaml`。
+3. 修改里面的 `target_path` 为新项目的路径。
+4. 运行 `agent-sync install --project new-project`。
+5. 瞬间，新项目就拥有了我常用的一套 AI 技能配置。
 
-### 场景 B：公司内部统一管理代码规范 Agent
-1. 架构组建一个独立的 Git 仓库 `company-ai-agents`，里面放满纯 Markdown 文件。
-2. 所有业务项目在 `agent-lock.yaml` 里引用这个仓库的 URL。
-3. 架构组更新了规范，业务开发只要早上跑一下 `agent-sync update`，所有人的 IDE 瞬间同步最新规范。
-
-### 场景 C：我想在项目里微调官方的 Agent
-1. 不要直接修改生成的 `.cursor/agents/xxx.md`（下次 update 会被覆盖）。
-2. 在项目里建一个 `overrides/xxx.md`。
-3. AgentSync 在生成时会自动发现它，并将其内容追加到官方技能的末尾。
+### 场景 B：公司发布了新的代码规范
+1. 公司的规范存放在 GitHub 仓库中。
+2. 我在 `global.yaml` 中配置了这个仓库的链接。
+3. 运行 `agent-sync update`。
+4. 我电脑上所有项目的 AI 助手（无论是 Cursor 还是 Claude），都立刻学习到了最新的规范。
