@@ -11,6 +11,7 @@ class Dependency:
     mode: str = "inline"
     strip_frontmatter: bool = True
     add_warning: bool = True
+    commit_sha: Optional[str] = None  # 用于锁定版本 (Lockfile)
 
 
 @dataclass
