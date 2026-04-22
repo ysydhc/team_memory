@@ -1,0 +1,22 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "command": "python3 /Users/yeshouyou/Work/agent/team_doc/scripts/hooks/claude_session_start.py"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "command": "python3 /Users/yeshouyou/Work/agent/team_doc/scripts/hooks/cursor_after_response.py"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "command": "python3 /Users/yeshouyou/Work/agent/team_doc/scripts/hooks/cursor_before_prompt.py"
+      }
+    ]
+  }
+}

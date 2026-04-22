@@ -52,6 +52,7 @@
 | [web-server](guide/web-server.md) | Web 端口、环境变量、界面能力概览 |
 | [mcp-server](guide/mcp-server.md) | MCP：`.env`、包装脚本、`mcp.json` |
 | [mcp-pypi-local](guide/mcp-pypi-local.md) | PyPI 包装包本机跑 MCP |
+| [cli-pypi-quickstart](guide/cli-pypi-quickstart.md) | CLI 全流程：构建→发布→安装→启动→验证 |
 | [env.team-memory.example](../example/env.team-memory.example) | `.env` 模板 |
 | [cursor-mcp-team-memory.example.json](../example/cursor-mcp-team-memory.example.json) | Cursor / Claude `mcp.json` 模板 |
 

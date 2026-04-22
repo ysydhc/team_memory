@@ -1,6 +1,6 @@
 # MCP：本机通过 PyPI 包（`pip install team_memory`）接入
 
-> 运维文档 | 与「克隆本仓库、方案 A 包装脚本」并列的一种接法  
+> 运维文档 | 与「克隆本仓库、方案 A 包装脚本」并列的一种接法
 > 相关：[mcp-server.md](mcp-server.md)（方案 A、附件、验证清单）· [mcp-lite-default.md](../decision/mcp-lite-default.md) · [README.md](../../README.md)
 
 ## 何时用这种方式
@@ -20,7 +20,7 @@
 python3.11 -m venv ~/.venvs/team-memory-mcp
 source ~/.venvs/team-memory-mcp/bin/activate
 python -m pip install -U pip
-pip install "team_memory>=0.1.3"
+pip install "team_memory>=0.2.0"
 ```
 
 确认版本与模块：
@@ -89,7 +89,7 @@ export TEAM_MEMORY_PROJECT="team_memory"
 
 ```bash
 source ~/.venvs/team-memory-mcp/bin/activate
-pip install -U "team_memory==0.1.x"
+pip install -U "team_memory>=0.2.0"
 ```
 
 升级后若变更了依赖或入口，可再次执行 `python -c "import team_memory; print(team_memory.__version__)"` 确认。

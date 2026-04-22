@@ -112,6 +112,7 @@ class TestExperienceServiceUnit:
         mock_experience = MagicMock()
         mock_repo_instance.get_by_id = AsyncMock(return_value=mock_experience)
         mock_repo_instance.add_feedback = AsyncMock()
+        mock_repo_instance.increment_quality_score = AsyncMock()
 
         exp_id = str(uuid.uuid4())
 
@@ -337,6 +338,7 @@ class TestPhase2Fixes:
         mock_experience = MagicMock()
         mock_repo_instance.get_by_id = AsyncMock(return_value=mock_experience)
         mock_repo_instance.add_feedback = AsyncMock()
+        mock_repo_instance.increment_quality_score = AsyncMock()
 
         @asynccontextmanager
         async def mock_get_session(_db_url):
