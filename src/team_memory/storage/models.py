@@ -10,6 +10,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -91,6 +92,18 @@ class Experience(Base):
         String(20), default="draft", nullable=False, server_default="draft"
     )  # draft, published
 
+    # Quality scoring and management
+    quality_score: Mapped[float] = mapped_column(
+        Float, default=100.0, nullable=False, server_default="100.0"
+    )
+    quality_tier: Mapped[str] = mapped_column(
+        String(20), default="Silver", nullable=False, server_default="Silver"
+    )
+    last_scored_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    is_pinned: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false"
+    )
+
     # Soft delete
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -135,6 +148,10 @@ class Experience(Base):
             "visibility": self.visibility,
             "status": self.exp_status,
             "project": self.project,
+            "quality_score": self.quality_score,
+            "quality_tier": self.quality_tier,
+            "last_scored_at": self.last_scored_at.isoformat() if self.last_scored_at else None,
+            "is_pinned": self.is_pinned,
             "is_deleted": self.is_deleted,
             "use_count": self.use_count,
             "created_at": self.created_at.isoformat() if self.created_at else None,
