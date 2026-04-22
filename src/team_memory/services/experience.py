@@ -502,6 +502,11 @@ class ExperienceService:
                 comment=comment,
                 fitness_score=fitness_score,
             )
+
+            # Add quality score bonus for positive feedback (rating >= 4)
+            if rating >= 4:
+                await repo.increment_quality_score(exp_uuid, 1.0)
+
             await self._event_bus.emit(
                 Events.FEEDBACK_ADDED,
                 {

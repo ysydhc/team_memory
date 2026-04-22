@@ -37,6 +37,8 @@ from team_memory.services.experience import ExperienceService
 from team_memory.services.search_orchestrator import SearchOrchestrator
 
 if TYPE_CHECKING:
+    from team_memory.services.janitor import MemoryJanitor
+    from team_memory.services.janitor_scheduler import JanitorScheduler
     from team_memory.services.search_pipeline import SearchPipeline
 
 logger = logging.getLogger("team_memory.bootstrap")
@@ -209,6 +211,8 @@ class AppContext:
     service: ExperienceService
     archive_service: ArchiveService
     search_orchestrator: SearchOrchestrator
+    janitor: MemoryJanitor | None = None
+    janitor_scheduler: JanitorScheduler | None = None
     _log_listener: QueueListener | None = None
 
 
@@ -420,6 +424,30 @@ def bootstrap(
         _register_cache_invalidation(event_bus, search_orchestrator)
         _register_pattern_extraction(event_bus, embedding, settings.llm, db_url)
 
+    # Initialize janitor services
+    janitor = None
+    janitor_scheduler = None
+
+    if settings.janitor.enabled:
+        from team_memory.services.janitor import MemoryJanitor
+        from team_memory.services.janitor_scheduler import JanitorScheduler
+
+        janitor = MemoryJanitor(db_url=db_url, config=settings.janitor)
+        janitor_scheduler = JanitorScheduler(janitor=janitor, config=settings.janitor)
+
+        # Start scheduler if background tasks are enabled
+        if enable_background:
+            import asyncio
+
+            try:
+                # Try to start scheduler in current event loop if available
+                loop = asyncio.get_running_loop()
+                loop.create_task(janitor_scheduler.start())
+                logger.info("Janitor scheduler started in background")
+            except RuntimeError:
+                # No running event loop, scheduler will be started later
+                logger.debug("No running event loop, janitor scheduler will start later")
+
     _instance = AppContext(
         settings=settings,
         db_url=db_url,
@@ -430,6 +458,8 @@ def bootstrap(
         service=service,
         archive_service=archive_service,
         search_orchestrator=search_orchestrator,
+        janitor=janitor,
+        janitor_scheduler=janitor_scheduler,
         _log_listener=log_listener,
     )
 
@@ -528,6 +558,14 @@ async def start_background_tasks(ctx: AppContext) -> None:
 
 async def stop_background_tasks(ctx: AppContext) -> None:
     """Gracefully stop background tasks."""
+    # Stop janitor scheduler first
+    if ctx.janitor_scheduler is not None:
+        try:
+            await ctx.janitor_scheduler.stop()
+            logger.info("Janitor scheduler stopped")
+        except Exception as e:
+            logger.warning("Error stopping janitor scheduler: %s", e)
+
     if ctx._log_listener is not None:
         try:
             await asyncio.wait_for(asyncio.to_thread(ctx._log_listener.stop), timeout=5)

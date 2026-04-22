@@ -111,6 +111,8 @@ class SearchOrchestrator:
                     for rid in result_ids:
                         try:
                             await repo.increment_use_count(rid)
+                            # Add quality score bonus for recalled experiences
+                            await repo.increment_quality_score(rid, 2.0)
                         except Exception:
                             pass
 
