@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import desc, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -619,3 +619,146 @@ class ExperienceRepository:
                 UNBOUNDED_QUERY_LIMIT,
             )
         return rows
+
+    # ======================== QUALITY SCORING ========================
+
+    async def list_for_score_decay(
+        self, project: str | None = None, batch_size: int = 500
+    ) -> list[Experience]:
+        """List experiences that need score decay (last_scored_at > 24h ago)."""
+        cutoff_time = _utcnow() - timedelta(hours=24)
+        proj = self._project_value(project)
+
+        query = (
+            select(Experience)
+            .where(Experience.is_deleted == False)  # noqa: E712
+            .where(Experience.is_pinned == False)  # noqa: E712
+            .where(Experience.exp_status == "published")
+            .where(Experience.parent_id.is_(None))  # Only root nodes
+            .where(Experience.last_scored_at < cutoff_time)
+            .where(Experience.project == proj)
+            .order_by(Experience.last_scored_at)
+            .limit(batch_size)
+        )
+
+        result = await self._session.execute(query)
+        return list(result.scalars().all())
+
+    async def batch_update_scores(self, updates: list[tuple]) -> int:
+        """Batch update quality scores and tiers.
+
+        Args:
+            updates: List of (experience_id, quality_score, quality_tier, last_scored_at) tuples
+
+        Returns:
+            Number of updated records
+        """
+        if not updates:
+            return 0
+
+        # Build update statements for each record
+        updated_count = 0
+        for experience_id, quality_score, quality_tier, last_scored_at in updates:
+            result = await self._session.execute(
+                update(Experience)
+                .where(Experience.id == experience_id)
+                .values(
+                    quality_score=quality_score,
+                    quality_tier=quality_tier,
+                    last_scored_at=last_scored_at,
+                    updated_at=_utcnow(),
+                )
+            )
+            updated_count += result.rowcount
+
+        await self._session.flush()
+        return updated_count
+
+    async def list_outdated(self, project: str | None = None, limit: int = 100) -> list[Experience]:
+        """List experiences marked as outdated."""
+        proj = self._project_value(project)
+
+        query = (
+            select(Experience)
+            .where(Experience.quality_tier == "Outdated")
+            .where(Experience.is_deleted == False)  # noqa: E712
+            .where(Experience.project == proj)
+            .order_by(Experience.updated_at.desc())
+            .limit(limit)
+        )
+
+        result = await self._session.execute(query)
+        return list(result.scalars().all())
+
+    async def list_soft_deleted_older_than(self, days: int) -> list[Experience]:
+        """List soft-deleted experiences older than specified days."""
+        cutoff_time = _utcnow() - timedelta(days=days)
+
+        query = (
+            select(Experience)
+            .where(Experience.is_deleted == True)  # noqa: E712
+            .where(Experience.deleted_at < cutoff_time)
+            .order_by(Experience.deleted_at)
+        )
+
+        result = await self._session.execute(query)
+        return list(result.scalars().all())
+
+    async def list_expired_drafts(
+        self, older_than_days: int = 30, project: str | None = None
+    ) -> list[Experience]:
+        """List draft experiences older than specified days."""
+        cutoff_time = _utcnow() - timedelta(days=older_than_days)
+        proj = self._project_value(project)
+
+        query = (
+            select(Experience)
+            .where(Experience.exp_status == "draft")
+            .where(Experience.created_at < cutoff_time)
+            .where(Experience.is_deleted == False)  # noqa: E712
+            .where(Experience.project == proj)
+            .order_by(Experience.created_at)
+        )
+
+        result = await self._session.execute(query)
+        return list(result.scalars().all())
+
+    def _calculate_quality_tier(self, score: float) -> str:
+        """Calculate quality tier based on score."""
+        if score >= 120.0:
+            return "Gold"
+        elif score >= 100.0:
+            return "Silver"
+        elif score >= 80.0:
+            return "Bronze"
+        else:
+            return "Outdated"
+
+    async def increment_quality_score(self, experience_id: uuid.UUID, delta: float) -> bool:
+        """Increment quality score and update tier and timestamp.
+
+        Args:
+            experience_id: Experience ID to update
+            delta: Score change (can be negative)
+
+        Returns:
+            True if update succeeded, False if experience not found
+        """
+        experience = await self.get_by_id(experience_id, include_deleted=False)
+        if experience is None:
+            return False
+
+        new_score = max(0.0, experience.quality_score + delta)
+        new_tier = self._calculate_quality_tier(new_score)
+        now = _utcnow()
+
+        result = await self._session.execute(
+            update(Experience)
+            .where(Experience.id == experience_id)
+            .values(
+                quality_score=new_score, quality_tier=new_tier, last_scored_at=now, updated_at=now
+            )
+        )
+
+        await self._session.flush()
+        return result.rowcount > 0
