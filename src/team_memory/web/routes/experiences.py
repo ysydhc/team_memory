@@ -336,6 +336,78 @@ async def add_feedback(
     return {"message": "Feedback recorded"}
 
 
+@router.patch("/experiences/{experience_id}/pin")
+async def toggle_pin_experience(
+    experience_id: str,
+    user: User = Depends(require_role("update")),
+):
+    """Toggle pin status for an experience.
+
+    Pinned experiences are exempt from quality score decay.
+    Body: { "pinned": true | false }
+    """
+    db_url = _get_db_url()
+    async with app_module.get_session(db_url) as session:
+        from team_memory.storage.repository import ExperienceRepository
+
+        repo = ExperienceRepository(session)
+        exp_uuid = uuid.UUID(experience_id)
+        exp = await repo.get_by_id(exp_uuid)
+        if exp is None:
+            raise HTTPException(status_code=404, detail="Experience not found")
+
+        new_pinned = not exp.is_pinned
+        await repo.update(exp_uuid, is_pinned=new_pinned)
+
+        label = "已置顶" if new_pinned else "已取消置顶"
+        return {
+            "message": label,
+            "is_pinned": new_pinned,
+        }
+
+
+@router.post("/experiences/{experience_id}/revive")
+async def revive_outdated_experience(
+    experience_id: str,
+    user: User = Depends(require_role("update")),
+):
+    """Revive an Outdated experience by resetting quality_score to 100.
+
+    Sets quality_score=100, quality_tier='Silver', last_scored_at=now.
+    """
+    db_url = _get_db_url()
+    async with app_module.get_session(db_url) as session:
+        from datetime import datetime, timezone
+
+        from team_memory.storage.repository import ExperienceRepository
+
+        repo = ExperienceRepository(session)
+        exp_uuid = uuid.UUID(experience_id)
+        exp = await repo.get_by_id(exp_uuid)
+        if exp is None:
+            raise HTTPException(status_code=404, detail="Experience not found")
+
+        if exp.quality_tier != "Outdated":
+            raise HTTPException(
+                status_code=400,
+                detail="Only Outdated experiences can be revived",
+            )
+
+        now = datetime.now(timezone.utc)
+        await repo.update(
+            exp_uuid,
+            quality_score=100.0,
+            quality_tier="Silver",
+            last_scored_at=now,
+        )
+
+        return {
+            "message": "经验已恢复，质量评分重置为 100",
+            "quality_score": 100.0,
+            "quality_tier": "Silver",
+        }
+
+
 @router.patch("/experiences/{experience_id}/status")
 async def change_experience_status(
     experience_id: str,

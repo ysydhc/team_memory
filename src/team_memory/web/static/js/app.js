@@ -339,9 +339,9 @@ function reloadCurrentPage() {
 function navigate(page) {
     if (state.currentPage === page && page !== 'archives') return;
     const fromSettings = state.currentPage === 'settings';
-    const toSubPage = ['personal-memory', 'dedup'].includes(page);
+    const toSubPage = ['personal-memory', 'dedup', 'janitor'].includes(page);
     const toSettings = page === 'settings';
-    const fromSubPage = ['personal-memory', 'dedup'].includes(state.currentPage);
+    const fromSubPage = ['personal-memory', 'dedup', 'janitor'].includes(state.currentPage);
 
     if (fromSettings && toSubPage) {
         state.settingsScrollTop = window.scrollY || document.documentElement.scrollTop;
@@ -374,6 +374,7 @@ function navigate(page) {
         pages.loadArchivesList(1);
     }
     else if (page === 'personal-memory') pages.loadPersonalMemoryList();
+    else if (page === 'janitor') pages.loadJanitorPage();
     else if (page === 'settings') {
         const dotEl = document.getElementById('health-status-dot');
         if (dotEl) {
@@ -499,6 +500,8 @@ window.addEditChild = components.addEditChild;
 window.removeEditChild = components.removeEditChild;
 window.submitEdit = components.submitEdit;
 window.deleteExp = components.deleteExp;
+window.togglePin = components.togglePin;
+window.reviveExp = components.reviveExp;
 
 // Key management exports
 window.loadAccountSecurity = pages.loadAccountSecurity;
@@ -509,6 +512,8 @@ window.saveRetrievalConfig = pages.saveRetrievalConfig;
 window.saveSearchConfig = pages.saveSearchConfig;
 window.loadAllConfig = pages.loadAllConfig;
 window.loadDuplicates = pages.loadDuplicates;
+window.loadJanitorPage = pages.loadJanitorPage;
+window.runJanitorNow = pages.runJanitorNow;
 window.reembedGroups = pages.reembedGroups;
 window.approveUser = pages.approveUser;
 window.rejectUser = pages.rejectUser;

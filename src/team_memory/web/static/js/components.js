@@ -554,3 +554,26 @@ export async function deleteExp(id) {
         toast('删除失败: ' + e.message, 'error');
     }
 }
+
+// ===== Pin / Unpin =====
+export async function togglePin(id, currentPinned) {
+    try {
+        const res = await api('PATCH', `/api/v1/experiences/${id}/pin`);
+        toast(res.message || (currentPinned ? '已取消置顶' : '已置顶'), 'success');
+        showDetail(id, { isBack: true });
+    } catch (e) {
+        toast('操作失败: ' + e.message, 'error');
+    }
+}
+
+// ===== Revive Outdated =====
+export async function reviveExp(id) {
+    if (!confirm('确定要恢复这条 Outdated 经验吗？质量评分将重置为 100。')) return;
+    try {
+        const res = await api('POST', `/api/v1/experiences/${id}/revive`);
+        toast(res.message || '已恢复', 'success');
+        showDetail(id, { isBack: true });
+    } catch (e) {
+        toast('恢复失败: ' + e.message, 'error');
+    }
+}

@@ -21,6 +21,21 @@ const typeIcons = {
     general: '📝',
 };
 
+/** Generate quality tier badge HTML. */
+function tierBadge(tier, score) {
+    if (!tier || tier === 'Silver') return ''; // Silver is default, skip
+    const cls = { Gold: 'tier-gold', Silver: 'tier-silver', Bronze: 'tier-bronze', Outdated: 'tier-outdated' }[tier] || 'tier-silver';
+    const label = { Gold: 'Gold', Silver: '', Bronze: 'Bronze', Outdated: 'Outdated' }[tier] || tier;
+    if (!label) return '';
+    const scoreStr = score !== undefined ? ` ${Number(score).toFixed(0)}` : '';
+    return `<span class="tier-badge ${cls}">${label}${scoreStr}</span>`;
+}
+
+/** Generate pin icon HTML. */
+function pinIcon(isPinned) {
+    return isPinned ? '<span class="pin-icon">📌</span>' : '';
+}
+
 /** Copy text to clipboard; works in non-secure context (no HTTPS) via execCommand fallback. */
 function copyTextToClipboard(text) {
     if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
@@ -231,7 +246,7 @@ export function renderExpList(containerId, experiences) {
     <div class="exp-card" onclick="showDetail('${cardId}')">
       <div class="exp-card-header">
         <div class="exp-card-title">
-          <span class="type-icon">${typeIcon}</span>${esc(view.title)}${view.status === 'draft' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--accent-glow);color:var(--accent);margin-left:6px">草稿</span>' : ''}${view.visibility === 'private' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--green-bg,#e8f5e9);color:var(--green,#2e7d32);margin-left:6px">仅自己</span>' : ''}${view.visibility === 'global' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:#e0f2fe;color:#0369a1;margin-left:6px">全局</span>' : ''}
+          <span class="type-icon">${typeIcon}</span>${pinIcon(view.is_pinned)}${esc(view.title)}${tierBadge(view.quality_tier, view.quality_score)}${view.status === 'draft' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--accent-glow);color:var(--accent);margin-left:6px">草稿</span>' : ''}${view.visibility === 'private' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--green-bg,#e8f5e9);color:var(--green,#2e7d32);margin-left:6px">仅自己</span>' : ''}${view.visibility === 'global' ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:#e0f2fe;color:#0369a1;margin-left:6px">全局</span>' : ''}
         </div>
         <div class="exp-card-meta">
           ${projectTag}
@@ -378,7 +393,7 @@ export async function showDetail(id, opts = {}) {
       <button type="button" class="back-btn" onclick="${backBtnOnclick}">← ${backBtnLabel}</button>
       <div class="detail-view">
         <div class="detail-header">
-          <h1>${typeBadges} ${esc(exp.title)}
+          <h1>${pinIcon(exp.is_pinned)}${typeBadges} ${esc(exp.title)}${tierBadge(exp.quality_tier, exp.quality_score)}
             ${exp.status === 'draft' ? '<span style="font-size:13px;padding:2px 10px;border-radius:4px;background:var(--accent-glow);color:var(--accent);margin-left:12px;vertical-align:middle">草稿</span>' : ''}
             ${exp.status === 'published' ? '<span style="font-size:13px;padding:2px 10px;border-radius:4px;background:var(--green-bg,#e8f5e9);color:var(--green,#2e7d32);margin-left:12px;vertical-align:middle">已发布</span>' : ''}
             ${exp.visibility === 'private' ? '<span style="font-size:11px;padding:1px 8px;border-radius:3px;background:#f3e8ff;color:#7c3aed;margin-left:6px;vertical-align:middle">仅自己</span>' : ''}
@@ -389,6 +404,7 @@ export async function showDetail(id, opts = {}) {
             <span>👤 ${esc(exp.created_by)}</span>
             <span>📅 ${formatDate(exp.created_at)}</span>
             <span>📊 ${exp.use_count} 次引用</span>
+            ${exp.quality_score !== undefined ? `<span>⭐ ${Number(exp.quality_score).toFixed(0)} 分</span>` : ''}
             ${getCopyDropdownDetailHtml()}
           </div>
           <div style="margin-top:12px">${(exp.tags || []).map((t) => `<span class="tag" onclick="filterByTag('${esc(t)}')">${esc(t)}</span>`).join('')}</div>
@@ -454,6 +470,9 @@ export async function showDetail(id, opts = {}) {
             <button class="btn btn-sm" style="background:var(--green);color:#fff;margin-left:4px" onclick="changeExpStatus('${exp.id}','published')">直接发布</button>` : ''}
           ${exp.status === 'published' ? `
             <button class="btn btn-sm" style="background:var(--accent-glow);color:var(--accent)" onclick="changeExpStatus('${exp.id}','draft')">撤回到草稿</button>` : ''}
+          ${exp.quality_tier === 'Outdated' ? `
+            <button class="btn btn-sm" style="background:var(--green);color:#fff" onclick="reviveExp('${exp.id}')">🔄 恢复</button>` : ''}
+          <button class="btn btn-primary btn-sm" onclick="togglePin('${exp.id}', ${exp.is_pinned})">${exp.is_pinned ? '📌 取消置顶' : '📌 置顶'}</button>
           <button class="btn btn-primary btn-sm" onclick="openEditModal('${exp.id}')">✏️ 编辑</button>
           <button class="btn btn-primary btn-sm" onclick="openFeedbackModal('${exp.id}')">💬 提交反馈</button>
           <button class="btn btn-danger btn-sm" onclick="deleteExp('${exp.id}')">🗑 删除</button>
@@ -1322,6 +1341,90 @@ function _renderPmCard(m) {
               </div>
             </div>
           </div>`;
+}
+
+// ===== Janitor / Memory Cleanup =====
+export async function loadJanitorPage() {
+    // Load status
+    const statusEl = document.getElementById('janitor-status');
+    const configEl = document.getElementById('janitor-config');
+    const listEl = document.getElementById('janitor-outdated-list');
+
+    // Status
+    try {
+        const status = await api('GET', '/api/v1/janitor/status');
+        const running = status.scheduler_running ? '✅ 运行中' : '⏸ 未运行';
+        statusEl.innerHTML = `
+          <div style="display:flex;gap:24px;flex-wrap:wrap">
+            <span>Janitor: ${status.janitor_available ? '✅ 可用' : '❌ 不可用'}</span>
+            <span>调度器: ${running}</span>
+          </div>`;
+        // Config
+        const jc = status.janitor_config || {};
+        configEl.innerHTML = `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 24px">
+            <span style="color:var(--text-muted)">保护期</span><span>${jc.protection_period_days ?? 10} 天</span>
+            <span style="color:var(--text-muted)">自动软删 Outdated</span><span>${jc.auto_soft_delete_outdated ? '是' : '否'}</span>
+            <span style="color:var(--text-muted)">软删清除</span><span>${jc.purge_soft_deleted_days ?? 30} 天后</span>
+            <span style="color:var(--text-muted)">草稿过期</span><span>${jc.draft_expiry_days ?? 30} 天</span>
+            <span style="color:var(--text-muted)">个人记忆保留</span><span>${jc.personal_memory_retention_days ?? 90} 天</span>
+          </div>`;
+    } catch (e) {
+        statusEl.innerHTML = `<span style="color:var(--red)">加载失败: ${esc(e.message)}</span>`;
+        configEl.innerHTML = `<span style="color:var(--text-muted)">不可用</span>`;
+    }
+
+    // Outdated list
+    try {
+        const data = await api('GET', '/api/v1/experiences/outdated?limit=50');
+        const items = data.items || [];
+        // Update dot indicator
+        const dotEl = document.getElementById('janitor-outdated-dot');
+        if (dotEl && items.length > 0) dotEl.style.display = 'inline-block';
+
+        if (items.length === 0) {
+            listEl.innerHTML = '<div class="empty-state"><div class="icon">✨</div><h3>没有 Outdated 经验</h3><p>所有经验状态健康</p></div>';
+            return;
+        }
+        listEl.innerHTML = items.map((exp) => `
+          <div class="exp-card" style="cursor:default;border-left-color:var(--red,#ef4444)">
+            <div class="exp-card-header">
+              <div class="exp-card-title">${esc(exp.title)} <span class="tier-badge tier-outdated">Outdated ${Number(exp.cleanup_info?.quality_score ?? 0).toFixed(0)}</span></div>
+              <div class="exp-card-meta"><span>${timeAgo(exp.created_at)}</span></div>
+            </div>
+            <div class="exp-card-desc">${esc((exp.description || '').substring(0, 120))}</div>
+            <div class="exp-card-footer">
+              <div class="exp-card-tags">${(exp.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-sm" style="background:var(--green);color:#fff;font-size:11px;padding:2px 10px" onclick="reviveExp('${exp.id}')">🔄 恢复</button>
+                <button class="btn btn-sm" style="background:var(--accent-glow);color:var(--accent);font-size:11px;padding:2px 10px" onclick="togglePin('${exp.id}', ${exp.cleanup_info?.is_pinned ?? false})">📌 置顶</button>
+                <button class="btn btn-sm" style="background:var(--red-bg);color:var(--red);font-size:11px;padding:2px 10px" onclick="deleteExp('${exp.id}')">🗑 删除</button>
+              </div>
+            </div>
+          </div>
+        `).join('');
+    } catch (e) {
+        listEl.innerHTML = `<div class="empty-state"><h3>加载失败</h3><p>${esc(e.message)}</p></div>`;
+    }
+}
+
+export async function runJanitorNow() {
+    if (!confirm('确定要手动执行记忆清理吗？')) return;
+    try {
+        toast('正在执行清理...', 'info');
+        const res = await api('POST', '/api/v1/janitor/run');
+        const ops = res.results?.operations || {};
+        const parts = [];
+        if (ops.score_decay) parts.push(`衰减: ${ops.score_decay.updated_count ?? 0} 条`);
+        if (ops.outdated_sweep) parts.push(`过期: ${ops.outdated_sweep.found_count ?? 0} 条`);
+        if (ops.soft_deleted_purge) parts.push(`清除: ${ops.soft_deleted_purge.purged_count ?? 0} 条`);
+        if (ops.draft_expiration) parts.push(`草稿过期: ${ops.draft_expiration.expired_count ?? 0} 条`);
+        if (ops.personal_memory_pruning) parts.push(`记忆修剪: ${ops.personal_memory_pruning.pruned_count ?? 0} 条`);
+        toast('清理完成: ' + (parts.length ? parts.join(', ') : '无变更'), 'success');
+        loadJanitorPage();
+    } catch (e) {
+        toast('清理失败: ' + e.message, 'error');
+    }
 }
 
 export async function loadPersonalMemoryList() {
