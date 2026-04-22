@@ -88,6 +88,12 @@ dependencies:
   - name: "company-guidelines"
     source: "https://github.com/our-org/docs/tree/main/ai-rules"
     
+    # 【目标平台过滤 (Target Platforms)】
+    # 默认不填时: 安装到所有支持的平台 (Cursor, Claude, Hermes 等)
+    # 如果指定了 targets，则只安装到指定的平台目录
+    targets: ["cursor", "claude"] # 只安装给 Cursor 和 Claude，忽略其他
+    # targets: ["cursor"]         # 仅安装给 Cursor
+    
     # 【生成模式】
     # inline (默认): 将远程文件全文拉取并写入目标目录的 xxx.md
     # reference: 目标目录只生成一个极简的壳文件，里面包含指向远程 URL 或本地缓存的链接（适合超长文档）
