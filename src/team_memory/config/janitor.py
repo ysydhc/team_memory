@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -67,3 +67,6 @@ class JanitorConfig:
 
     tier_bronze: float = 20.0
     """Quality score threshold for Bronze tier."""
+
+    promotion_output_dirs: dict[str, str] = field(default_factory=dict)
+    """project → Obsidian output directory mapping for promoted Markdown files."""

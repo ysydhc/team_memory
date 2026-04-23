@@ -127,11 +127,19 @@ class TestCheckWasUsedFuzzy:
     """Test EvaluationService.check_was_used_fuzzy."""
 
     @pytest.mark.asyncio
-    async def test_returns_false_without_embedding(self):
-        """Without embedding provider, fuzzy always returns False."""
+    async def test_high_overlap_returns_true(self):
+        """When keywords overlap > threshold, fuzzy returns True."""
         svc = EvaluationService()
-        results = [{"id": "exp-001", "solution": "Use async"}]
-        out = await svc.check_was_used_fuzzy("Use async", results)
+        results = [{"id": "exp-001", "solution": "Use async await pattern"}]
+        out = await svc.check_was_used_fuzzy("Use async await pattern", results)
+        assert out == {"exp-001": True}
+
+    @pytest.mark.asyncio
+    async def test_low_overlap_returns_false(self):
+        """When keywords overlap < threshold, fuzzy returns False."""
+        svc = EvaluationService()
+        results = [{"id": "exp-001", "solution": "Use async await pattern"}]
+        out = await svc.check_was_used_fuzzy("Docker compose networking", results)
         assert out == {"exp-001": False}
 
     @pytest.mark.asyncio

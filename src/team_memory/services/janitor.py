@@ -11,11 +11,14 @@ Provides automated maintenance operations for team memory:
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, select
 
+from team_memory.services.promotion_compiler import PromotionCompiler
 from team_memory.storage.models import Experience, PersonalMemory
 
 logger = logging.getLogger("team_memory.services.janitor")
@@ -367,6 +370,9 @@ class MemoryJanitor:
         Only experiences with exp_status="published" are eligible; already-promoted
         experiences are excluded to prevent double promotion.
 
+        After identifying candidates, Markdown is compiled via PromotionCompiler
+        and optionally written to Obsidian output directories (git add + commit).
+
         Args:
             project: Project to limit promotion to, None for all projects
 
@@ -375,6 +381,7 @@ class MemoryJanitor:
         """
         use_count_threshold = self._get_config("promotion_use_count_threshold", 3)
         group_key_threshold = self._get_config("promotion_group_key_threshold", 5)
+        output_dirs: dict[str, str] = self._get_config("promotion_output_dirs", {})
 
         promoted_by_use_count = 0
         promoted_by_group = 0
@@ -392,16 +399,7 @@ class MemoryJanitor:
                 use_count_query = use_count_query.where(Experience.project == project)
 
             result = await session.execute(use_count_query)
-            use_count_experiences = result.scalars().all()
-
-            for exp in use_count_experiences:
-                exp.exp_status = "promoted"
-                promoted_by_use_count += 1
-                logger.debug(
-                    "Promoted experience by use_count: %s (use_count=%d)",
-                    exp.id,
-                    exp.use_count,
-                )
+            use_count_experiences = list(result.scalars().all())
 
             # 2. Promote by group_key threshold
             # Find group_keys with enough published experiences
@@ -427,6 +425,7 @@ class MemoryJanitor:
             group_result = await session.execute(group_count_query)
             qualifying_groups = [row[0] for row in group_result.all()]
 
+            group_experiences: list[Experience] = []
             if qualifying_groups:
                 # Get all published experiences in qualifying groups
                 group_exp_query = select(Experience).where(
@@ -442,18 +441,57 @@ class MemoryJanitor:
                     )
 
                 group_exp_result = await session.execute(group_exp_query)
-                group_experiences = group_exp_result.scalars().all()
+                group_experiences = list(group_exp_result.scalars().all())
 
-                for exp in group_experiences:
-                    # Avoid double-counting if already promoted by use_count
-                    if exp.exp_status == "published":
-                        exp.exp_status = "promoted"
-                        promoted_by_group += 1
-                        logger.debug(
-                            "Promoted experience by group_key: %s (group_key=%s)",
-                            exp.id,
-                            exp.group_key,
-                        )
+            # ----------------------------------------------------------
+            # 3. Compile Markdown + write files BEFORE status change
+            # ----------------------------------------------------------
+            compiler = PromotionCompiler()
+            promoted_ids: set[str] = set()
+
+            # 3a. use_count promotions — one Markdown per experience
+            for exp in use_count_experiences:
+                exp_dict = exp.to_dict()
+                markdown = await compiler.compile([exp_dict], exp.group_key)
+                await self._write_promoted(exp, markdown, output_dirs)
+                promoted_ids.add(str(exp.id))
+                promoted_by_use_count += 1
+                logger.debug(
+                    "Promoted experience by use_count: %s (use_count=%d)",
+                    exp.id,
+                    exp.use_count,
+                )
+
+            # 3b. group_key promotions — one Markdown per group
+            # Group experiences by group_key for batch compilation
+            by_group: dict[str, list[Experience]] = {}
+            for exp in group_experiences:
+                if str(exp.id) in promoted_ids:
+                    continue  # avoid double compilation
+                by_group.setdefault(exp.group_key, []).append(exp)
+
+            for gk, exps in by_group.items():
+                exp_dicts = [e.to_dict() for e in exps]
+                markdown = await compiler.compile(exp_dicts, gk)
+                for exp in exps:
+                    await self._write_promoted(exp, markdown, output_dirs)
+                    promoted_ids.add(str(exp.id))
+                    promoted_by_group += 1
+                    logger.debug(
+                        "Promoted experience by group_key: %s (group_key=%s)",
+                        exp.id,
+                        exp.group_key,
+                    )
+
+            # ----------------------------------------------------------
+            # 4. Mark all promoted experiences
+            # ----------------------------------------------------------
+            for exp in use_count_experiences:
+                exp.exp_status = "promoted"
+
+            for exp in group_experiences:
+                if str(exp.id) not in set(str(e.id) for e in use_count_experiences):
+                    exp.exp_status = "promoted"
 
             await session.commit()
 
@@ -474,6 +512,48 @@ class MemoryJanitor:
             "group_key_threshold": group_key_threshold,
             "project": project,
         }
+
+    async def _write_promoted(
+        self, exp: Experience, markdown: str, output_dirs: dict[str, str]
+    ) -> None:
+        """Write compiled Markdown to the Obsidian output directory and git add/commit.
+
+        Args:
+            exp: The promoted Experience ORM object.
+            markdown: The compiled Markdown string.
+            output_dirs: project → output directory mapping.
+        """
+        project = getattr(exp, "project", "default") or "default"
+        output_dir = output_dirs.get(project)
+        if not output_dir:
+            return
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        group_key = exp.group_key or "misc"
+        filename = f"promoted-{today}-{group_key}.md"
+        filepath = os.path.join(output_dir, filename)
+
+        with open(filepath, "w") as f:
+            f.write(markdown)
+
+        # git add + commit (best effort)
+        try:
+            subprocess.run(
+                ["git", "add", filepath],
+                cwd=output_dir,
+                capture_output=True,
+                timeout=10,
+            )
+            subprocess.run(
+                ["git", "commit", "-m", f"promoted: {group_key}"],
+                cwd=output_dir,
+                capture_output=True,
+                timeout=10,
+            )
+        except Exception:
+            pass  # best effort
 
     async def run_all(self, project: str | None = None) -> dict:
         """Run all janitor operations in sequence.

@@ -34,6 +34,12 @@ def _make_experience(
     group_key: str | None = None,
     is_deleted: bool = False,
     exp_id: uuid.UUID | None = None,
+    project: str = "default",
+    title: str = "Test Experience",
+    description: str = "Test description",
+    solution: str = "Test solution",
+    tags: list[str] | None = None,
+    created_at: str = "2026-04-23T00:00:00",
 ) -> MagicMock:
     """Create a mock Experience object."""
     exp = MagicMock()
@@ -42,6 +48,23 @@ def _make_experience(
     exp.use_count = use_count
     exp.group_key = group_key
     exp.is_deleted = is_deleted
+    exp.project = project
+    exp.title = title
+    exp.description = description
+    exp.solution = solution
+    exp.tags = tags or []
+    exp.created_at = created_at
+    exp.to_dict = lambda: {
+        "id": str(exp.id),
+        "title": title,
+        "description": description,
+        "solution": solution,
+        "tags": tags or [],
+        "project": project,
+        "group_key": group_key,
+        "created_at": created_at,
+        "exp_status": exp_status,
+    }
     return exp
 
 

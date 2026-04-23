@@ -50,18 +50,45 @@ class EvaluationService:
         results: list[dict],
         threshold: float = 0.8,
     ) -> dict[str, bool]:
-        """Fuzzy match: check if agent response is semantically similar to any result.
+        """Fuzzy match: check if agent response overlaps with result keywords.
 
-        Only called when exact marker match fails.
+        Uses simple text overlap (no embeddings required).
+        For each result, extracts keywords from description/solution,
+        then computes what fraction of those keywords appear in agent_response.
+        If overlap > threshold → was_used = True.
+
         Returns dict mapping result_id -> was_used.
         """
-        # If no embedding provider, can't do fuzzy matching
-        if not self._embedding:
-            return {r.get("id", ""): False for r in results}
-        # Compute similarity between agent_response and each result.
-        # If similarity > threshold, mark as used.
-        # Placeholder — actual implementation needs embedding comparison.
-        return {r.get("id", ""): False for r in results}
+        import re
+
+        used: dict[str, bool] = {}
+        response_lower = agent_response.lower()
+
+        for r in results:
+            rid = r.get("id", "")
+            # Extract text for keyword generation: prefer solution, fall back to description
+            text = r.get("solution", "") or r.get("description", "") or ""
+            if not text:
+                used[rid] = False
+                continue
+
+            # Tokenize: split by spaces and punctuation, keep tokens with length > 2
+            keywords = [
+                tok.lower()
+                for tok in re.split(r"[^\w]+", text)
+                if len(tok) > 2
+            ]
+
+            if not keywords:
+                used[rid] = False
+                continue
+
+            # Count how many keywords appear in the agent response
+            matched = sum(1 for kw in keywords if kw in response_lower)
+            overlap_ratio = matched / len(keywords)
+            used[rid] = overlap_ratio > threshold
+
+        return used
 
     async def get_weekly_stats(self) -> dict:
         """Return weekly evaluation statistics using SearchLogRepository."""
