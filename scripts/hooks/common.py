@@ -76,12 +76,21 @@ def get_project_from_path(workspace_root: str, config: dict | None = None) -> st
     if config is None:
         config = load_config()
 
-    projects: dict = config.get("projects", {})
-    for project_name, project_cfg in projects.items():
-        patterns: list[str] = project_cfg.get("path_patterns", [])
-        for pattern in patterns:
-            if pattern in workspace_root:
-                return project_name
+    projects = config.get("projects", {})
+    # Support both dict format {"name": {"path_patterns": [...]}} and list format [{"name": ..., "path_patterns": [...]}]
+    if isinstance(projects, list):
+        for entry in projects:
+            project_name = entry.get("name", "")
+            patterns = entry.get("path_patterns", [])
+            for pattern in patterns:
+                if pattern in workspace_root:
+                    return project_name
+    else:
+        for project_name, project_cfg in projects.items():
+            patterns: list[str] = project_cfg.get("path_patterns", [])
+            for pattern in patterns:
+                if pattern in workspace_root:
+                    return project_name
     return None
 
 

@@ -92,9 +92,16 @@ class TestLoadConfig:
     def test_has_projects_section(self):
         config = common.load_config()
         assert "projects" in config
-        assert "team_doc" in config["projects"]
-        assert "ad_learning" in config["projects"]
-        assert "ai_learning" in config["projects"]
+        # projects is now a list of dicts with name + path_patterns
+        if isinstance(config["projects"], list):
+            names = [p["name"] for p in config["projects"]]
+            assert "team_doc" in names
+            assert "ad_learning" in names
+            assert "ai_learning" in names
+        else:
+            assert "team_doc" in config["projects"]
+            assert "ad_learning" in config["projects"]
+            assert "ai_learning" in config["projects"]
 
     def test_has_retrieval_section(self):
         config = common.load_config()
