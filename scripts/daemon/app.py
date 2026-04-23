@@ -96,6 +96,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         sink: TMSink = create_sink(sink_config)
         application.state.sink = sink
         application.state.tm_mode = config.tm.mode
+        application.state.config = config
 
         db_path = config.draft.db_path or ":memory:"
         buf = DraftBuffer(db_path)
@@ -135,11 +136,12 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
     async def hook_after_response(payload: HookPayload) -> dict[str, Any]:
         """Process agent response (draft pipeline)."""
         result = await process_after_response(
+            input_data=payload.model_dump(),
+            config=app.state.config,
             sink=app.state.sink,
             buf=app.state.buf,
             detector=app.state.detector,
             refiner=app.state.refiner,
-            payload=payload.model_dump(),
         )
         return result
 
@@ -147,8 +149,9 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
     async def hook_session_start(payload: HookPayload) -> dict[str, Any]:
         """Inject project context at session start."""
         result = await process_session_start(
+            input_data=payload.model_dump(),
+            config=app.state.config,
             sink=app.state.sink,
-            payload=payload.model_dump(),
         )
         return result
 
@@ -156,8 +159,9 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
     async def hook_before_prompt(payload: HookPayload) -> dict[str, Any]:
         """Retrieve relevant memories before prompt."""
         result = await process_before_prompt(
+            input_data=payload.model_dump(),
+            config=app.state.config,
             sink=app.state.sink,
-            payload=payload.model_dump(),
         )
         return result
 
@@ -165,10 +169,11 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
     async def hook_session_end(payload: HookPayload) -> dict[str, Any]:
         """Flush remaining drafts at session end."""
         result = await process_session_end(
+            input_data=payload.model_dump(),
+            config=app.state.config,
             sink=app.state.sink,
             buf=app.state.buf,
             refiner=app.state.refiner,
-            payload=payload.model_dump(),
         )
         return result
 
