@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.teammemory.daemon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/yeshouyou/Work/agent/team_doc/.venv/bin/python</string>
+        <string>-m</string>
+        <string>daemon</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/yeshouyou/Work/agent/team_doc</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/tm-daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/tm-daemon.err</string>
+</dict>
+</plist>

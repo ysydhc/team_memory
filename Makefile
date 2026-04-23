@@ -22,7 +22,7 @@ ALEMBIC ?= $(shell \
 	else echo alembic; fi)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp mcp-verify test lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web backup health clean migrate migrate-fts release-9111 hooks-install sync-agent-artifacts
+.PHONY: help setup dev web mcp mcp-verify test lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web backup health clean migrate migrate-fts release-9111 hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-install
 
 sync-agent-artifacts: ## 由 agents/shared + agents/manifest.yaml 生成 .claude/.cursor 下 agents、prompts、skills
 	python scripts/sync_agent_artifacts.py
@@ -173,3 +173,15 @@ hooks-install:  ## 安装 Git hooks（post-commit 自动更新任务）
 	cp scripts/post-commit-hook.sh .git/hooks/post-commit
 	chmod +x .git/hooks/post-commit
 	@echo "  ✔ Git post-commit hook installed."
+
+daemon-start:    ## Start TM Daemon (launchd)
+	launchctl load ~/Library/LaunchAgents/com.teammemory.daemon.plist
+
+daemon-stop:     ## Stop TM Daemon
+	launchctl unload ~/Library/LaunchAgents/com.teammemory.daemon.plist
+
+daemon-run:      ## Run TM Daemon in foreground (for testing)
+	.venv/bin/python -m daemon
+
+daemon-install:  ## Install launchd plist
+	cp scripts/daemon/com.teammemory.daemon.plist ~/Library/LaunchAgents/
