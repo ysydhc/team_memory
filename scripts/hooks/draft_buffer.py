@@ -18,11 +18,13 @@ import aiosqlite
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS drafts (
     id TEXT PRIMARY KEY,
+    title TEXT DEFAULT '',
     project TEXT NOT NULL,
     conversation_id TEXT,
     content TEXT NOT NULL,
     status TEXT DEFAULT 'pending',
     source TEXT DEFAULT 'pipeline',
+    group_key TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
@@ -255,3 +257,98 @@ class DraftBuffer:
         await db.commit()
         if cursor.rowcount == 0:
             raise ValueError(f"Draft '{draft_id}' not found")
+
+    # ------------------------------------------------------------------
+    # Convenience methods used by DraftRefiner
+    # ------------------------------------------------------------------
+
+    async def upsert_draft(
+        self,
+        session_id: str,
+        title: str,
+        content: str,
+        project: str | None = None,
+        group_key: str | None = None,
+    ) -> str:
+        """Create or update a draft keyed by *session_id* (conversation_id).
+
+        If a pending draft for this session already exists, its content is
+        appended.  Otherwise a new draft row is inserted.
+
+        Args:
+            session_id: Conversation / session identifier (stored as conversation_id).
+            title: Draft title.
+            content: Draft content.
+            project: Optional project name (defaults to "default").
+            group_key: Optional grouping key.
+
+        Returns:
+            The draft UUID (existing or newly created).
+        """
+        db = self._require_db()
+        project = project or "default"
+        existing = await self.find_pending_by_conversation(project, session_id)
+        if existing:
+            draft_id: str = existing[0]["id"]
+            old_content: str = existing[0].get("content", "")
+            new_content = f"{old_content}\n{content}" if old_content else content
+            now = datetime.now(timezone.utc).isoformat()
+            await db.execute(
+                "UPDATE drafts SET content = ?, updated_at = ? WHERE id = ?",
+                (new_content, now, draft_id),
+            )
+            await db.commit()
+            return draft_id
+
+        # No existing draft — create one.
+        return await self.create_draft(project, session_id, content)
+
+    async def get_pending(self, session_id: str) -> list[dict[str, Any]]:
+        """Return pending drafts for a given session (conversation_id).
+
+        Args:
+            session_id: Conversation / session identifier.
+
+        Returns:
+            List of matching draft dicts with status='pending'.
+        """
+        db = self._require_db()
+        cursor = await db.execute(
+            """
+            SELECT * FROM drafts
+            WHERE status = 'pending' AND conversation_id = ?
+            ORDER BY created_at
+            """,
+            (session_id,),
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    async def get_all_pending(self) -> list[dict[str, Any]]:
+        """Return all pending drafts across all sessions.
+
+        Unlike ``get_pending(session_id)`` which filters by conversation_id,
+        this method returns every draft with status='pending' regardless of
+        which session it belongs to.
+
+        Returns:
+            List of all pending draft dicts.
+        """
+        return await self.get_pending_drafts(project=None)
+
+    async def mark_published_by_session(self, session_id: str) -> None:
+        """Mark all pending drafts for *session_id* as published.
+
+        Args:
+            session_id: Conversation / session identifier.
+        """
+        db = self._require_db()
+        now = datetime.now(timezone.utc).isoformat()
+        await db.execute(
+            """
+            UPDATE drafts SET status = 'published', updated_at = ?
+            WHERE conversation_id = ? AND status = 'pending'
+            """,
+            (now, session_id),
+        )
+        await db.commit()

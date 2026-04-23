@@ -27,5 +27,7 @@ def parse_lockfile(path: str) -> LockfileConfig:
         data = yaml.safe_load(f) or {}
     deps = [Dependency(**d) for d in data.get("dependencies", [])]
     return LockfileConfig(
-        target_path=data.get("target_path"), variables=data.get("variables", {}), dependencies=deps
+        target_path=data.get("target_path"),
+        variables=data.get("variables", {}),
+        dependencies=deps,
     )

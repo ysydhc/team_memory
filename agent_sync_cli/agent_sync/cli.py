@@ -16,7 +16,9 @@ def main():
     subparsers.add_parser("link", help="在当前业务项目目录执行，自动将其绑定到配置中心")
     subparsers.add_parser("add", help="向当前绑定的项目添加新的 Skill 链接")
     subparsers.add_parser("search", help="浏览远程 GitHub 目录中的可用 Skills")
-    subparsers.add_parser("check", help="CI/CD 门禁：检查配置与实际文件是否一致，不一致则报错")
+    subparsers.add_parser(
+        "check", help="CI/CD 门禁：检查配置与实际文件是否一致，不一致则报错"
+    )
 
     args = parser.parse_args()
 

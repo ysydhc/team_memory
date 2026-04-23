@@ -122,3 +122,220 @@ class TestDetectConvergenceNegative:
     def test_whitespace_only(self):
         det = ConvergenceDetector()
         assert det.detect_convergence("   ") is False
+
+
+# ---------------------------------------------------------------------------
+# check_tool_pattern
+# ---------------------------------------------------------------------------
+
+class TestCheckToolPatternGitCommit:
+    """check_tool_pattern returns True when a git commit is present."""
+
+    def test_git_commit_in_cmd(self):
+        det = ConvergenceDetector()
+        tools = [{"tool": "terminal", "cmd": "git commit -m 'fix: typo'"}]
+        assert det.check_tool_pattern(tools) is True
+
+    def test_git_commit_with_other_tools(self):
+        det = ConvergenceDetector()
+        tools = [
+            {"tool": "terminal", "cmd": "ls -la"},
+            {"tool": "terminal", "cmd": "git commit -m 'feat: add X'"},
+        ]
+        assert det.check_tool_pattern(tools) is True
+
+    def test_git_commit_non_terminal_tool(self):
+        """Even a non-terminal tool with git commit should match."""
+        det = ConvergenceDetector()
+        tools = [{"tool": "editor", "cmd": "git commit -m 'fix'"}]
+        assert det.check_tool_pattern(tools) is True
+
+
+class TestCheckToolPatternTestPass:
+    """check_tool_pattern returns True when pytest/test/make verify/make test
+    with exit_code==0."""
+
+    def test_pytest_exit_code_zero(self):
+        det = ConvergenceDetector()
+        tools = [{"tool": "terminal", "cmd": "pytest", "exit_code": 0}]
+        assert det.check_tool_pattern(tools) is True
+
+    def test_pytest_nonzero_exit_code(self):
+        det = ConvergenceDetector()
+        tools = [{"tool": "terminal", "cmd": "pytest", "exit_code": 1}]
+        assert det.check_tool_pattern(tools) is False
+
+    def test_test_command_exit_zero(self):
+        det = ConvergenceDetector()
+        tools = [{"tool": "terminal", "cmd": "python -m test", "exit_code": 0}]
+        assert det.check_tool_pattern(tools) is True
+
+    def test_make_verify_exit_zero(self):
+        det = ConvergenceDetector()
+        tools = [{"tool": "terminal", "cmd": "make verify", "exit_code": 0}]
+        assert det.check_tool_pattern(tools) is True
+
+    def test_make_test_exit_zero(self):
+        det = ConvergenceDetector()
+        tools = [{"tool": "terminal", "cmd": "make test", "exit_code": 0}]
+        assert det.check_tool_pattern(tools) is True
+
+    def test_make_verify_nonzero(self):
+        det = ConvergenceDetector()
+        tools = [{"tool": "terminal", "cmd": "make verify", "exit_code": 2}]
+        assert det.check_tool_pattern(tools) is False
+
+    def test_test_cmd_missing_exit_code(self):
+        """If exit_code key is absent, should not match."""
+        det = ConvergenceDetector()
+        tools = [{"tool": "terminal", "cmd": "pytest"}]
+        assert det.check_tool_pattern(tools) is False
+
+    def test_test_cmd_exit_code_none(self):
+        """If exit_code is None, should not match."""
+        det = ConvergenceDetector()
+        tools = [{"tool": "terminal", "cmd": "pytest", "exit_code": None}]
+        assert det.check_tool_pattern(tools) is False
+
+
+class TestCheckToolPatternNegative:
+    """check_tool_pattern returns False when no completion pattern found."""
+
+    def test_empty_list(self):
+        det = ConvergenceDetector()
+        assert det.check_tool_pattern([]) is False
+
+    def test_unrelated_commands(self):
+        det = ConvergenceDetector()
+        tools = [
+            {"tool": "terminal", "cmd": "ls -la"},
+            {"tool": "terminal", "cmd": "echo hello"},
+        ]
+        assert det.check_tool_pattern(tools) is False
+
+    def test_non_terminal_without_git_commit(self):
+        det = ConvergenceDetector()
+        tools = [{"tool": "editor", "cmd": "open file.py"}]
+        assert det.check_tool_pattern(tools) is False
+
+
+# ---------------------------------------------------------------------------
+# check_topic_shift
+# ---------------------------------------------------------------------------
+
+class TestCheckTopicShift:
+    """check_topic_shift detects context switches via file path changes."""
+
+    def test_different_paths(self):
+        det = ConvergenceDetector()
+        assert det.check_topic_shift("src/a.py", "src/b.py") is True
+
+    def test_same_path(self):
+        det = ConvergenceDetector()
+        assert det.check_topic_shift("src/a.py", "src/a.py") is False
+
+    def test_current_none(self):
+        det = ConvergenceDetector()
+        assert det.check_topic_shift(None, "src/a.py") is False
+
+    def test_previous_none(self):
+        det = ConvergenceDetector()
+        assert det.check_topic_shift("src/a.py", None) is False
+
+    def test_both_none(self):
+        det = ConvergenceDetector()
+        assert det.check_topic_shift(None, None) is False
+
+
+# ---------------------------------------------------------------------------
+# detect_convergence — updated signature with keyword-only params
+# ---------------------------------------------------------------------------
+
+class TestDetectConvergenceWithToolPattern:
+    """detect_convergence delegates to check_tool_pattern."""
+
+    def test_tool_pattern_git_commit(self):
+        det = ConvergenceDetector()
+        tools = [{"tool": "terminal", "cmd": "git commit -m 'done'"}]
+        assert det.detect_convergence(None, recent_tools=tools) is True
+
+    def test_tool_pattern_test_pass(self):
+        det = ConvergenceDetector()
+        tools = [{"tool": "terminal", "cmd": "pytest", "exit_code": 0}]
+        assert det.detect_convergence("still working", recent_tools=tools) is True
+
+    def test_tool_pattern_no_match(self):
+        det = ConvergenceDetector()
+        tools = [{"tool": "terminal", "cmd": "ls"}]
+        assert det.detect_convergence("still working", recent_tools=tools) is False
+
+    def test_no_tools_no_signal(self):
+        det = ConvergenceDetector()
+        assert det.detect_convergence("still working", recent_tools=[]) is False
+
+
+class TestDetectConvergenceWithTopicShift:
+    """detect_convergence delegates to check_topic_shift."""
+
+    def test_topic_shift_detected(self):
+        det = ConvergenceDetector()
+        assert det.detect_convergence(
+            "no signal here",
+            current_path="src/new.py",
+            previous_path="src/old.py",
+        ) is True
+
+    def test_same_path_no_shift(self):
+        det = ConvergenceDetector()
+        assert det.detect_convergence(
+            "no signal here",
+            current_path="src/a.py",
+            previous_path="src/a.py",
+        ) is False
+
+
+class TestDetectConvergencePriority:
+    """Explicit signals checked first, then tool pattern, then topic shift."""
+
+    def test_explicit_signal_overrides_all(self):
+        det = ConvergenceDetector()
+        assert det.detect_convergence(
+            "解决了",
+            recent_tools=[],
+            current_path=None,
+            previous_path=None,
+        ) is True
+
+    def test_tool_pattern_after_no_signal(self):
+        det = ConvergenceDetector()
+        tools = [{"tool": "terminal", "cmd": "git commit -m 'x'"}]
+        assert det.detect_convergence(
+            "no signal",
+            recent_tools=tools,
+            current_path="a.py",
+            previous_path="a.py",
+        ) is True
+
+    def test_topic_shift_after_no_signal_no_tools(self):
+        det = ConvergenceDetector()
+        assert det.detect_convergence(
+            "no signal",
+            recent_tools=[],
+            current_path="a.py",
+            previous_path="b.py",
+        ) is True
+
+    def test_all_false(self):
+        det = ConvergenceDetector()
+        assert det.detect_convergence(
+            "no signal",
+            recent_tools=[{"tool": "terminal", "cmd": "ls"}],
+            current_path="a.py",
+            previous_path="a.py",
+        ) is False
+
+    def test_backward_compat_positional_text(self):
+        """Existing callers using detect_convergence(text) still work."""
+        det = ConvergenceDetector()
+        assert det.detect_convergence("解决了") is True
+        assert det.detect_convergence("no signal") is False

@@ -35,7 +35,13 @@ class PlatformAdapter(ABC):
 
     @abstractmethod
     def format_content(
-        self, name: str, desc: str, body: str, mode: str, add_warning: bool, variables: dict = None
+        self,
+        name: str,
+        desc: str,
+        body: str,
+        mode: str,
+        add_warning: bool,
+        variables: dict = None,
     ) -> str:
         """根据平台要求，组装最终的文件内容（如 Frontmatter, JSON 等）"""
         pass
@@ -60,7 +66,13 @@ class CursorAdapter(PlatformAdapter):
         return os.path.join(project_root, ".cursor", "agents", f"{skill_name}.md")
 
     def format_content(
-        self, name: str, desc: str, body: str, mode: str, add_warning: bool, variables: dict = None
+        self,
+        name: str,
+        desc: str,
+        body: str,
+        mode: str,
+        add_warning: bool,
+        variables: dict = None,
     ) -> str:
         # 注入变量
         body = inject_variables(body, variables)
@@ -99,7 +111,13 @@ class ClaudeAdapter(PlatformAdapter):
         return os.path.join(project_root, ".claude", "skills", skill_name, "SKILL.md")
 
     def format_content(
-        self, name: str, desc: str, body: str, mode: str, add_warning: bool, variables: dict = None
+        self,
+        name: str,
+        desc: str,
+        body: str,
+        mode: str,
+        add_warning: bool,
+        variables: dict = None,
     ) -> str:
         # 注入变量
         body = inject_variables(body, variables)
