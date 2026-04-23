@@ -144,6 +144,34 @@ class TMClient:
             args["project"] = project
         return await self._call("memory_context", args)
 
+    async def save(
+        self,
+        title: str,
+        content: str,
+        tags: list[str] | None = None,
+        project: str | None = None,
+        source: str | None = None,
+        group_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Call the memory_save MCP tool.
+
+        Creates a published Experience directly (skipping the draft stage).
+        Used by the initial full-index pipeline to import existing files.
+
+        Returns:
+            Dict with at least an ``id`` key identifying the saved Experience.
+        """
+        args: dict[str, Any] = {"title": title, "content": content}
+        if tags is not None:
+            args["tags"] = tags
+        if project is not None:
+            args["project"] = project
+        if source is not None:
+            args["source"] = source
+        if group_key is not None:
+            args["group_key"] = group_key
+        return await self._call("memory_save", args)
+
     async def recall(
         self,
         query: str,

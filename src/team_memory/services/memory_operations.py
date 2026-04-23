@@ -971,10 +971,10 @@ async def op_draft_publish(
             "message": f"Experience {draft_id} not found",
             "code": "not_found",
         }
-    if exp.get("source") != "pipeline":
+    if exp.get("source") not in ("pipeline", "obsidian"):
         return {
             "error": True,
-            "message": f"Can only publish pipeline drafts, got source='{exp.get('source')}'",
+            "message": f"Can only publish pipeline/obsidian drafts, got source='{exp.get('source')}'",
             "code": "validation_error",
         }
     if exp.get("status") != "draft":

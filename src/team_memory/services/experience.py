@@ -23,10 +23,10 @@ logger = logging.getLogger("team_memory.service")
 
 
 def _validate_source_status(source: str, exp_status: str) -> None:
-    """Validate that draft status is only allowed for source='pipeline'."""
-    if exp_status == "draft" and source not in ("pipeline",):
+    """Validate that draft status is only allowed for source='pipeline' or 'obsidian'."""
+    if exp_status == "draft" and source not in ("pipeline", "obsidian"):
         raise ValueError(
-            f"exp_status='draft' requires source='pipeline', got source='{source}'"
+            f"exp_status='draft' requires source='pipeline' or 'obsidian', got source='{source}'"
         )
 
 

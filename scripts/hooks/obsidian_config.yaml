@@ -1,0 +1,24 @@
+vaults:
+  - path: /Users/yeshouyou/Work/ad_learning
+    project: ad_learning
+    index_patterns:
+      - "docs/**/*.md"
+      - "ad_literacy/**/*.md"
+      - "technology/**/*.md"
+    exclude_patterns:
+      - ".obsidian/**"
+      - ".git/**"
+  - path: /Users/yeshouyou/Work/agent/ai_learning
+    project: ai_learning
+    index_patterns:
+      - "**/*.md"
+    exclude_patterns:
+      - ".obsidian/**"
+      - ".git/**"
+  - path: /Users/yeshouyou/Work/agent/team_doc
+    project: team_doc
+    index_patterns:
+      - "plans/**/*.md"
+    exclude_patterns:
+      - ".obsidian/**"
+      - ".git/**"

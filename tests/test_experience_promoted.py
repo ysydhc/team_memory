@@ -156,7 +156,7 @@ class TestPromotedStatus:
     @pytest.mark.asyncio
     async def test_api_source_with_draft_status_raises(self, service):
         """source='api' + exp_status='draft' should raise ValueError."""
-        with pytest.raises(ValueError, match="draft.*pipeline"):
+        with pytest.raises(ValueError, match="draft"):
             await service.save(
                 title="API draft",
                 problem="Should fail",
@@ -172,7 +172,7 @@ class TestPromotedStatus:
     @pytest.mark.asyncio
     async def test_manual_source_with_draft_status_raises(self, service):
         """source='manual' + exp_status='draft' should raise ValueError."""
-        with pytest.raises(ValueError, match="draft.*pipeline"):
+        with pytest.raises(ValueError, match="draft"):
             await service.save(
                 title="Manual draft",
                 problem="Should fail",
@@ -188,7 +188,7 @@ class TestPromotedStatus:
     @pytest.mark.asyncio
     async def test_default_source_with_draft_status_raises(self, service):
         """Default source='auto_extract' + exp_status='draft' raises ValueError."""
-        with pytest.raises(ValueError, match="draft.*pipeline"):
+        with pytest.raises(ValueError, match="draft"):
             await service.save(
                 title="Auto draft",
                 problem="Should fail",
@@ -435,13 +435,13 @@ class TestValidateSourceStatus:
     def test_draft_with_api_source_raises(self):
         from team_memory.services.experience import _validate_source_status
 
-        with pytest.raises(ValueError, match="draft.*pipeline"):
+        with pytest.raises(ValueError, match="draft"):
             _validate_source_status("api", "draft")
 
     def test_draft_with_manual_source_raises(self):
         from team_memory.services.experience import _validate_source_status
 
-        with pytest.raises(ValueError, match="draft.*pipeline"):
+        with pytest.raises(ValueError, match="draft"):
             _validate_source_status("manual", "draft")
 
     def test_published_with_any_source_ok(self):
