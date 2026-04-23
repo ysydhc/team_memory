@@ -1,12 +1,24 @@
+daemon:
+  host: "127.0.0.1"
+  port: 3901
+
 tm:
+  mode: "local"
   base_url: "http://localhost:3900"
+  user: "daemon"
+
+obsidian:
+  vaults:
+    - path: ""
+      project: "knowledge"
+      exclude: [".obsidian", ".trash"]
 
 projects:
-  team_doc:
+  - name: "team_doc"
     path_patterns: ["team_doc"]
-  ad_learning:
+  - name: "ad_learning"
     path_patterns: ["ad_learning"]
-  ai_learning:
+  - name: "ai_learning"
     path_patterns: ["ai_learning"]
 
 retrieval:
