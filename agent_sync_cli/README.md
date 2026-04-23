@@ -42,13 +42,21 @@ agent-sync init
 # ~/.agent-sync-center/projects/project-A.yaml
 target_path: "/Users/me/work/project-A"  # 绑定的业务项目绝对路径
 
+# 【项目级全局变量】
+# 可以在 Skill 中使用 {{ STYLE_PATH }} 或 {{ FRAMEWORK }} 进行动态替换
+variables:
+  STYLE_PATH: "frontend/docs/style.md"
+  FRAMEWORK: "React"
+
 dependencies:
   # 引用一个 GitHub 目录（自动扫描里面的 .md 文件）
   - source: "https://github.com/your-org/awesome-prompts/tree/main/cursor-rules"
     
-  # 引用一个具体的 GitHub 文件
+  # 引用一个具体的 GitHub 文件，并覆盖部分变量
   - name: "senior-architect"
     source: "https://github.com/another-org/repo/blob/main/skills/architect.md"
+    variables:
+      FRAMEWORK: "Vue" # 仅对当前 skill 生效
 ```
 
 ### 3. 配置全局/用户级技能 (可选)
@@ -144,6 +152,25 @@ dependencies:
 **反向反哺！**
 如果你在某个业务项目里修改了下载下来的 Skill，觉得改得很好：
 运行此命令，工具会计算 Diff，并帮你把修改同步回本地注册表（如果是本地源），或者提示你如何提交 PR（如果是远程源）。
+
+### `agent-sync link` & `agent-sync add`
+**无感绑定与极简交互**
+不需要手动去配置中心写 YAML。直接在你的业务项目目录里执行：
+```bash
+# 自动在配置中心生成当前项目的 .yaml，并绑定当前绝对路径
+agent-sync link 
+
+# 自动向当前项目追加新技能并执行安装
+agent-sync add https://github.com/org/repo/blob/main/reviewer.md
+```
+
+### `agent-sync search <github-url>`
+**远程技能发现**
+不想在浏览器里翻看 GitHub？直接在终端运行 `agent-sync search https://github.com/org/repo/tree/main/skills`，工具会利用 GitHub Tree API 快速扫描该目录，并在终端打印出所有可用的 Skills 列表及简短描述。
+
+### `agent-sync check --ci`
+**CI/CD 门禁守护**
+在业务项目的 Git Pre-commit Hook 或 CI 流水线中运行。如果检测到配置文件与实际生成的 Agent 文件存在**状态漂移（Drift）**，直接以 `Exit Code 1` 报错，阻止提交或合并。保证团队内所有人使用的 AI 提示词绝对一致。
 
 ---
 
