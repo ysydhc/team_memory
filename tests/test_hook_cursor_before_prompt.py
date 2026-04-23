@@ -1,153 +1,70 @@
-"""Tests for scripts/hooks/cursor_before_prompt.py — beforeSubmitPrompt hook."""
+"""Tests for scripts/hooks/cursor_before_prompt.py — thin forwarder to TM Daemon."""
 from __future__ import annotations
 
+import io
 import json
-import sys
-from pathlib import Path
 from unittest.mock import patch
 
-# Ensure scripts/hooks/ is importable
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "hooks"))
-
-import cursor_before_prompt  # noqa: I001,E402
+import httpx
+import pytest
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+class TestCursorBeforePromptThin:
+    """Tests for the thin cursor_before_prompt hook."""
 
-def _hook_input(
-    prompt: str = "帮我写个函数",
-    workspace_roots: list | None = None,
-    conversation_id: str = "conv-prompt-1",
-) -> dict:
-    return {
-        "prompt": prompt,
-        "workspace_roots": workspace_roots or ["/Users/yeshouyou/Work/agent/team_doc"],
-        "conversation_id": conversation_id,
-    }
+    def test_forwards_input_to_daemon(self) -> None:
+        from hooks.cursor_before_prompt import main
 
+        mock_response = httpx.Response(
+            200,
+            text=json.dumps({"additionalContext": "retrieved context"}),
+            request=httpx.Request("POST", "http://127.0.0.1:3901/hooks/before_prompt"),
+        )
 
-# ---------------------------------------------------------------------------
-# Test: keyword-triggered retrieval
-# ---------------------------------------------------------------------------
+        input_data = {"prompt": "之前的问题", "workspace_roots": ["/tmp"]}
+        with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
+            with patch("hooks.cursor_before_prompt.httpx.post", return_value=mock_response) as mock_post:
+                with patch("builtins.print") as mock_print:
+                    main()
 
-class TestBeforePromptRetrieval:
-    """beforeSubmitPrompt triggers retrieval for keyword prompts."""
+        mock_post.assert_called_once()
+        mock_print.assert_called_once_with(
+            json.dumps({"additionalContext": "retrieved context"})
+        )
 
-    def test_retrieval_triggered_for_keyword_prompt(self):
-        mock_mcp_result = {
-            "results": [
-                {"title": "Docker经验", "content": "之前遇到Docker问题时..."}
-            ]
-        }
-        inp = _hook_input(prompt="之前遇到的Docker问题")
-        with patch("cursor_before_prompt.parse_hook_input", return_value=inp):
-            with patch("cursor_before_prompt.get_project_from_path", return_value="team_doc"):
-                with patch(
-                    "cursor_before_prompt.call_mcp_tool",
-                    return_value=mock_mcp_result,
-                ) as mock_call:
-                    output = cursor_before_prompt.main()
+    def test_daemon_not_running_returns_ok(self) -> None:
+        from hooks.cursor_before_prompt import main
 
-        result = json.loads(output)
-        assert "additionalContext" in result
-        mock_call.assert_called_once()
-        call_args = mock_call.call_args
-        assert call_args[0][0] == "memory_recall"
-        assert call_args[0][1]["query"] == "之前遇到的Docker问题"
-        assert call_args[0][1]["max_results"] == 3
-        assert call_args[0][1]["project"] == "team_doc"
+        input_data = {"prompt": "test", "workspace_roots": []}
+        with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
+            with patch("hooks.cursor_before_prompt.httpx.post", side_effect=httpx.ConnectError("refused")):
+                with patch("builtins.print") as mock_print:
+                    main()
 
-    def test_retrieval_triggered_for_shangci(self):
-        inp = _hook_input(prompt="上次说的方案怎么样")
-        with patch("cursor_before_prompt.parse_hook_input", return_value=inp):
-            with patch("cursor_before_prompt.get_project_from_path", return_value="team_doc"):
-                with patch(
-                    "cursor_before_prompt.call_mcp_tool",
-                    return_value={"results": []},
-                ) as mock_call:
-                    output = cursor_before_prompt.main()
+        mock_print.assert_called_once_with(
+            json.dumps({"action": "ok", "message": "daemon not running"})
+        )
 
-        result = json.loads(output)
-        assert "additionalContext" in result
-        mock_call.assert_called_once()
+    def test_invalid_stdin_returns_error(self) -> None:
+        from hooks.cursor_before_prompt import main
 
-    def test_retrieval_skipped_for_normal_prompt(self):
-        inp = _hook_input(prompt="帮我写个函数")
-        with patch("cursor_before_prompt.parse_hook_input", return_value=inp):
-            with patch("cursor_before_prompt.get_project_from_path", return_value="team_doc"):
-                with patch("cursor_before_prompt.call_mcp_tool", return_value={}) as mock_call:
-                    output = cursor_before_prompt.main()
+        with patch("sys.stdin", io.StringIO("not-json")):
+            with patch("builtins.print") as mock_print:
+                main()
 
-        result = json.loads(output)
-        assert result == {}
-        mock_call.assert_not_called()
+        mock_print.assert_called_once_with(
+            json.dumps({"action": "error", "message": "invalid input"})
+        )
 
-    def test_retrieval_skipped_for_english_prompt(self):
-        inp = _hook_input(prompt="help me debug this")
-        with patch("cursor_before_prompt.parse_hook_input", return_value=inp):
-            with patch("cursor_before_prompt.get_project_from_path", return_value="team_doc"):
-                with patch("cursor_before_prompt.call_mcp_tool", return_value={}) as mock_call:
-                    output = cursor_before_prompt.main()
+    def test_timeout_returns_error(self) -> None:
+        from hooks.cursor_before_prompt import main
 
-        result = json.loads(output)
-        assert result == {}
-        mock_call.assert_not_called()
+        input_data = {"prompt": "test"}
+        with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
+            with patch("hooks.cursor_before_prompt.httpx.post", side_effect=httpx.TimeoutException("timed out")):
+                with patch("builtins.print") as mock_print:
+                    main()
 
-
-# ---------------------------------------------------------------------------
-# Test: no project resolved
-# ---------------------------------------------------------------------------
-
-class TestBeforePromptNoProject:
-    """When project can't be resolved, skip retrieval."""
-
-    def test_no_project_keyword_prompt_returns_empty(self):
-        inp = _hook_input(prompt="之前遇到的问题")
-        with patch("cursor_before_prompt.parse_hook_input", return_value=inp):
-            with patch("cursor_before_prompt.get_project_from_path", return_value=None):
-                with patch("cursor_before_prompt.call_mcp_tool", return_value={}) as mock_call:
-                    output = cursor_before_prompt.main()
-
-        result = json.loads(output)
-        assert result == {}
-        mock_call.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# Test: error handling
-# ---------------------------------------------------------------------------
-
-class TestBeforePromptErrorHandling:
-    """beforeSubmitPrompt should never crash — errors produce empty output."""
-
-    def test_mcp_failure_returns_empty(self):
-        inp = _hook_input(prompt="之前遇到的问题")
-        with patch("cursor_before_prompt.parse_hook_input", return_value=inp):
-            with patch("cursor_before_prompt.get_project_from_path", return_value="team_doc"):
-                with patch(
-                    "cursor_before_prompt.call_mcp_tool",
-                    side_effect=Exception("MCP down"),
-                ):
-                    output = cursor_before_prompt.main()
-
-        result = json.loads(output)
-        assert result == {}
-
-    def test_empty_input_returns_empty(self):
-        with patch("cursor_before_prompt.parse_hook_input", return_value={}):
-            output = cursor_before_prompt.main()
-
-        result = json.loads(output)
-        assert result == {}
-
-    def test_malformed_input_returns_empty(self):
-        with patch(
-            "cursor_before_prompt.parse_hook_input",
-            return_value={"conversation_id": "conv-1"},
-        ):
-            output = cursor_before_prompt.main()
-
-        result = json.loads(output)
-        assert result == {}
+        mock_print.assert_called_once_with(
+            json.dumps({"action": "error", "message": "timed out"})
+        )

@@ -1,113 +1,70 @@
-"""Tests for scripts/hooks/cursor_session_start.py — sessionStart hook."""
+"""Tests for scripts/hooks/cursor_session_start.py — thin forwarder to TM Daemon."""
 from __future__ import annotations
 
+import io
 import json
-import sys
-from pathlib import Path
 from unittest.mock import patch
 
-# Ensure scripts/hooks/ is importable
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "hooks"))
-
-import cursor_session_start  # noqa: I001,E402
+import httpx
+import pytest
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+class TestCursorSessionStartThin:
+    """Tests for the thin cursor_session_start hook."""
 
-def _hook_input(
-    workspace_roots: list | None = None,
-    conversation_id: str = "conv-session-1",
-) -> dict:
-    return {
-        "workspace_roots": workspace_roots or ["/Users/yeshouyou/Work/agent/team_doc"],
-        "conversation_id": conversation_id,
-    }
+    def test_forwards_input_to_daemon(self) -> None:
+        from hooks.cursor_session_start import main
 
+        mock_response = httpx.Response(
+            200,
+            text=json.dumps({"additionalContext": "some context"}),
+            request=httpx.Request("POST", "http://127.0.0.1:3901/hooks/session_start"),
+        )
 
-# ---------------------------------------------------------------------------
-# Test: successful session start
-# ---------------------------------------------------------------------------
+        input_data = {"workspace_roots": ["/tmp"], "conversation_id": "sess-1"}
+        with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
+            with patch("hooks.cursor_session_start.httpx.post", return_value=mock_response) as mock_post:
+                with patch("builtins.print") as mock_print:
+                    main()
 
-class TestSessionStartSuccess:
-    """sessionStart hook outputs additionalContext on success."""
+        mock_post.assert_called_once()
+        mock_print.assert_called_once_with(
+            json.dumps({"additionalContext": "some context"})
+        )
 
-    def test_outputs_additional_context_on_success(self):
-        mock_mcp_result = {
-            "results": [
-                {"title": "Docker部署经验", "content": "使用docker-compose时需要注意..."}
-            ]
-        }
-        with patch("cursor_session_start.parse_hook_input", return_value=_hook_input()):
-            with patch("cursor_session_start.get_project_from_path", return_value="team_doc"):
-                with patch(
-                    "cursor_session_start.call_mcp_tool",
-                    return_value=mock_mcp_result,
-                ):
-                    output = cursor_session_start.main()
+    def test_daemon_not_running_returns_ok(self) -> None:
+        from hooks.cursor_session_start import main
 
-        result = json.loads(output)
-        assert "additionalContext" in result
-        assert result["additionalContext"]  # non-empty
+        input_data = {"workspace_roots": ["/tmp"]}
+        with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
+            with patch("hooks.cursor_session_start.httpx.post", side_effect=httpx.ConnectError("refused")):
+                with patch("builtins.print") as mock_print:
+                    main()
 
-    def test_calls_memory_context_with_project(self):
-        mock_mcp_result = {"results": []}
-        with patch("cursor_session_start.parse_hook_input", return_value=_hook_input()):
-            with patch("cursor_session_start.get_project_from_path", return_value="team_doc"):
-                with patch(
-                    "cursor_session_start.call_mcp_tool",
-                    return_value=mock_mcp_result,
-                ) as mock_call:
-                    cursor_session_start.main()
+        mock_print.assert_called_once_with(
+            json.dumps({"action": "ok", "message": "daemon not running"})
+        )
 
-        mock_call.assert_called_once_with("memory_context", {"project": "team_doc"})
+    def test_invalid_stdin_returns_error(self) -> None:
+        from hooks.cursor_session_start import main
 
-    def test_no_project_returns_empty_additional_context(self):
-        with patch("cursor_session_start.parse_hook_input", return_value=_hook_input()):
-            with patch("cursor_session_start.get_project_from_path", return_value=None):
-                output = cursor_session_start.main()
+        with patch("sys.stdin", io.StringIO("invalid!")):
+            with patch("builtins.print") as mock_print:
+                main()
 
-        result = json.loads(output)
-        # No project resolved — should still output valid JSON
-        assert "additionalContext" in result
-        assert result["additionalContext"] == ""
+        mock_print.assert_called_once_with(
+            json.dumps({"action": "error", "message": "invalid input"})
+        )
 
+    def test_timeout_returns_error(self) -> None:
+        from hooks.cursor_session_start import main
 
-# ---------------------------------------------------------------------------
-# Test: error handling
-# ---------------------------------------------------------------------------
+        input_data = {"workspace_roots": ["/tmp"]}
+        with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
+            with patch("hooks.cursor_session_start.httpx.post", side_effect=httpx.TimeoutException("timed out")):
+                with patch("builtins.print") as mock_print:
+                    main()
 
-class TestSessionStartErrorHandling:
-    """sessionStart hook should never crash."""
-
-    def test_mcp_failure_returns_error_output(self):
-        with patch("cursor_session_start.parse_hook_input", return_value=_hook_input()):
-            with patch("cursor_session_start.get_project_from_path", return_value="team_doc"):
-                with patch(
-                    "cursor_session_start.call_mcp_tool",
-                    side_effect=Exception("MCP down"),
-                ):
-                    output = cursor_session_start.main()
-
-        result = json.loads(output)
-        assert result.get("status") == "error"
-        assert "message" in result
-
-    def test_empty_input_returns_error(self):
-        with patch("cursor_session_start.parse_hook_input", return_value={}):
-            output = cursor_session_start.main()
-
-        result = json.loads(output)
-        # Should not crash — either error or empty additionalContext
-        assert isinstance(result, dict)
-
-    def test_no_workspace_roots_returns_empty_context(self):
-        inp = {"conversation_id": "conv-1"}
-        with patch("cursor_session_start.parse_hook_input", return_value=inp):
-            with patch("cursor_session_start.get_project_from_path", return_value=None):
-                output = cursor_session_start.main()
-
-        result = json.loads(output)
-        assert "additionalContext" in result
-        assert result["additionalContext"] == ""
+        mock_print.assert_called_once_with(
+            json.dumps({"action": "error", "message": "timed out"})
+        )

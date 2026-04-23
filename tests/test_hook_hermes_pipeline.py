@@ -1,313 +1,198 @@
-"""Tests for scripts/hooks/hermes_pipeline.py — Hermes-side memory pipeline.
+"""Tests for scripts/hooks/hermes_pipeline.py — thin forwarder to TM Daemon.
 
-HermesPipeline integrates retrieval, draft buffering, convergence detection,
-and draft refining into a single pipeline that Hermes can call directly
-(without external hook mechanisms).
+The HermesPipeline now delegates all heavy logic to the TM Daemon HTTP API.
 """
 from __future__ import annotations
 
-import os
-import sys
-import tempfile
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+import json
+from unittest.mock import patch
 
+import httpx
 import pytest
 
-# Ensure scripts/hooks/ is importable
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "hooks"))
-
-from convergence_detector import ConvergenceDetector  # noqa: E402
-from draft_buffer import DraftBuffer  # noqa: E402
-from draft_refiner import DraftRefiner  # noqa: E402
-from hermes_pipeline import HermesPipeline  # noqa: E402
+from hooks.hermes_pipeline import HermesPipeline
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_db_path() -> str:
-    """Return a unique temp file path for a test SQLite DB."""
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    return path
-
-
-@pytest.fixture
-def db_path():
-    """Provide a temporary DB path and clean up after the test."""
-    path = _make_db_path()
-    yield path
-    if os.path.exists(path):
-        os.unlink(path)
-
-
-def _make_tm_client() -> AsyncMock:
-    """Create a mock TMClient with recall, get_context, draft_save, draft_publish."""
-    tm = AsyncMock()
-    tm.recall = AsyncMock(return_value={"results": ["result-1", "result-2"]})
-    tm.get_context = AsyncMock(return_value={"context": "project-context"})
-    tm.draft_save = AsyncMock(return_value={"id": "tm-draft-001"})
-    tm.draft_publish = AsyncMock(return_value={"status": "ok"})
-    return tm
-
-
-def _make_pipeline(db_path: str, tm: AsyncMock | None = None) -> HermesPipeline:
-    """Create a HermesPipeline with mocked TMClient and real buffer/detector."""
-    tm = tm or _make_tm_client()
-    pipeline = HermesPipeline.__new__(HermesPipeline)
-    pipeline._tm = tm
-    pipeline._buffer = DraftBuffer(db_path)
-    pipeline._detector = ConvergenceDetector()
-    pipeline._refiner = DraftRefiner(tm, pipeline._buffer)
-    return pipeline
-
-
-# ---------------------------------------------------------------------------
-# on_turn_start — keyword triggered → full retrieval
-# ---------------------------------------------------------------------------
-
-
-class TestOnTurnStartKeywordTrigger:
-    """on_turn_start with keyword triggers full retrieval via tm.recall."""
+class TestHermesPipelineOnTurnStart:
+    """Tests for HermesPipeline.on_turn_start — forwards to daemon /hooks/before_prompt."""
 
     @pytest.mark.asyncio
-    async def test_keyword_before_triggers_recall(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            result = await pipeline.on_turn_start("之前我们怎么做这个的？", project="team_doc")
-        assert result["action"] == "full_retrieval"
-        pipeline._tm.recall.assert_awaited_once()
+    async def test_success(self) -> None:
+        pipeline = HermesPipeline()
+
+        mock_response = httpx.Response(
+            200,
+            json={"action": "project_context", "context": "some context"},
+            request=httpx.Request("POST", "http://127.0.0.1:3901/hooks/before_prompt"),
+        )
+
+        with patch.object(pipeline._client, "post", return_value=mock_response) as mock_post:
+            result = await pipeline.on_turn_start("之前的问题", project="team_doc")
+
+        assert result == {"action": "project_context", "context": "some context"}
+        mock_post.assert_called_once()
+        await pipeline.close()
 
     @pytest.mark.asyncio
-    async def test_keyword_last_time_triggers_recall(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            result = await pipeline.on_turn_start("上次踩坑了", project="team_doc")
-        assert result["action"] == "full_retrieval"
+    async def test_daemon_not_running(self) -> None:
+        pipeline = HermesPipeline()
+
+        with patch.object(pipeline._client, "post", side_effect=httpx.ConnectError("refused")):
+            result = await pipeline.on_turn_start("hello", project="team_doc")
+
+        assert result == {"action": "ok", "message": "daemon not running"}
+        await pipeline.close()
 
     @pytest.mark.asyncio
-    async def test_keyword_experience_triggers_recall(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            result = await pipeline.on_turn_start("分享一下经验", project="team_doc")
-        assert result["action"] == "full_retrieval"
+    async def test_generic_error(self) -> None:
+        pipeline = HermesPipeline()
+
+        with patch.object(pipeline._client, "post", side_effect=RuntimeError("fail")):
+            result = await pipeline.on_turn_start("hello")
+
+        assert result == {"action": "error", "message": "fail"}
+        await pipeline.close()
 
     @pytest.mark.asyncio
-    async def test_keyword_pitfall_triggers_recall(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            result = await pipeline.on_turn_start("这个有踩坑", project="team_doc")
-        assert result["action"] == "full_retrieval"
+    async def test_sends_prompt_and_project(self) -> None:
+        pipeline = HermesPipeline()
+
+        mock_response = httpx.Response(
+            200,
+            json={"action": "ok"},
+            request=httpx.Request("POST", "http://127.0.0.1:3901/hooks/before_prompt"),
+        )
+
+        with patch.object(pipeline._client, "post", return_value=mock_response) as mock_post:
+            await pipeline.on_turn_start("之前遇到的问题", project="my_proj")
+
+        call_kwargs = mock_post.call_args
+        assert call_kwargs[1]["json"]["prompt"] == "之前遇到的问题"
+        assert call_kwargs[1]["json"]["project"] == "my_proj"
+        await pipeline.close()
+
+
+class TestHermesPipelineOnTurnEnd:
+    """Tests for HermesPipeline.on_turn_end — forwards to daemon /hooks/after_response."""
 
     @pytest.mark.asyncio
-    async def test_keyword_remember_triggers_recall(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            result = await pipeline.on_turn_start("Remember to check this", project="team_doc")
-        assert result["action"] == "full_retrieval"
+    async def test_success(self) -> None:
+        pipeline = HermesPipeline()
+
+        mock_response = httpx.Response(
+            200,
+            json={"action": "draft_saved", "draft_id": "d1"},
+            request=httpx.Request("POST", "http://127.0.0.1:3901/hooks/after_response"),
+        )
+
+        with patch.object(pipeline._client, "post", return_value=mock_response):
+            result = await pipeline.on_turn_end("sess-1", "response text", project="team_doc")
+
+        assert result == {"action": "draft_saved", "draft_id": "d1"}
+        await pipeline.close()
 
     @pytest.mark.asyncio
-    async def test_keyword_previously_triggers_recall(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            result = await pipeline.on_turn_start("Previously we fixed this", project="team_doc")
-        assert result["action"] == "full_retrieval"
+    async def test_daemon_not_running(self) -> None:
+        pipeline = HermesPipeline()
+
+        with patch.object(pipeline._client, "post", side_effect=httpx.ConnectError("refused")):
+            result = await pipeline.on_turn_end("sess-1", "response text")
+
+        assert result == {"action": "ok", "message": "daemon not running"}
+        await pipeline.close()
 
     @pytest.mark.asyncio
-    async def test_full_retrieval_returns_results(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            result = await pipeline.on_turn_start("之前怎么做的", project="team_doc")
-        assert "results" in result
+    async def test_generic_error(self) -> None:
+        pipeline = HermesPipeline()
 
+        with patch.object(pipeline._client, "post", side_effect=RuntimeError("fail")):
+            result = await pipeline.on_turn_end("sess-1", "hello")
 
-# ---------------------------------------------------------------------------
-# on_turn_start — no keyword → project-level context
-# ---------------------------------------------------------------------------
-
-
-class TestOnTurnStartNoKeyword:
-    """on_turn_start without keyword returns project-level context."""
+        assert result == {"action": "error", "message": "fail"}
+        await pipeline.close()
 
     @pytest.mark.asyncio
-    async def test_no_keyword_returns_project_context(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            result = await pipeline.on_turn_start("帮我写个函数", project="team_doc")
-        assert result["action"] == "project_context"
-        pipeline._tm.get_context.assert_awaited_once()
+    async def test_sends_conversation_id_and_prompt(self) -> None:
+        pipeline = HermesPipeline()
 
-    @pytest.mark.asyncio
-    async def test_project_context_returns_context(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            result = await pipeline.on_turn_start("写代码", project="team_doc")
-        assert "context" in result
+        mock_response = httpx.Response(
+            200,
+            json={"action": "draft_saved"},
+            request=httpx.Request("POST", "http://127.0.0.1:3901/hooks/after_response"),
+        )
 
-    @pytest.mark.asyncio
-    async def test_no_keyword_does_not_call_recall(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            await pipeline.on_turn_start("帮我写个函数", project="team_doc")
-        pipeline._tm.recall.assert_not_awaited()
-
-
-# ---------------------------------------------------------------------------
-# on_turn_end — converged → publish draft
-# ---------------------------------------------------------------------------
-
-
-class TestOnTurnEndConverged:
-    """on_turn_end with convergence signal publishes the draft."""
-
-    @pytest.mark.asyncio
-    async def test_converged_publishes_draft(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            # First save a draft so there's something to publish
-            await pipeline._refiner.save_draft(
-                "sess-1", "Draft", "因为服务器配置。", project="team_doc"
-            )
-            result = await pipeline.on_turn_end(
-                session_id="sess-1",
-                agent_response="问题解决了，不需要再改",
-                project="team_doc",
-            )
-        assert result["action"] == "published"
-        pipeline._tm.draft_publish.assert_awaited()
-
-    @pytest.mark.asyncio
-    async def test_converged_publish_result_has_status(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            await pipeline._refiner.save_draft(
-                "sess-2", "Draft", "因为服务器配置。", project="team_doc"
-            )
-            result = await pipeline.on_turn_end(
-                session_id="sess-2",
-                agent_response="搞定了",
-                project="team_doc",
-            )
-        assert result["result"]["status"] == "published"
-
-
-# ---------------------------------------------------------------------------
-# on_turn_end — not converged → save draft
-# ---------------------------------------------------------------------------
-
-
-class TestOnTurnEndNotConverged:
-    """on_turn_end without convergence saves the draft."""
-
-    @pytest.mark.asyncio
-    async def test_not_converged_saves_draft(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            result = await pipeline.on_turn_end(
-                session_id="sess-3",
-                agent_response="我还在调试中",
-                project="team_doc",
-            )
-        assert result["action"] == "draft_saved"
-
-    @pytest.mark.asyncio
-    async def test_not_converged_calls_draft_save(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
+        with patch.object(pipeline._client, "post", return_value=mock_response) as mock_post:
             await pipeline.on_turn_end(
-                session_id="sess-3",
-                agent_response="我还在调试中",
-                project="team_doc",
+                "sess-42", "agent response", project="my_proj",
+                recent_tools=[{"name": "edit"}],
             )
-        pipeline._tm.draft_save.assert_awaited()
+
+        call_kwargs = mock_post.call_args
+        payload = call_kwargs[1]["json"]
+        assert payload["conversation_id"] == "sess-42"
+        assert payload["prompt"] == "agent response"
+        assert payload["project"] == "my_proj"
+        assert payload["recent_tools"] == [{"name": "edit"}]
+        await pipeline.close()
 
 
-# ---------------------------------------------------------------------------
-# on_turn_end — text accumulation
-# ---------------------------------------------------------------------------
-
-
-class TestOnTurnEndAccumulation:
-    """on_turn_end accumulates text across multiple turns."""
+class TestHermesPipelineOnSessionEnd:
+    """Tests for HermesPipeline.on_session_end — forwards to daemon /hooks/session_end."""
 
     @pytest.mark.asyncio
-    async def test_accumulates_text_across_turns(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            # First turn — no convergence
-            await pipeline.on_turn_end(
-                session_id="sess-acc",
-                agent_response="第一步：因为服务器超时",
-                project="team_doc",
-            )
-            # Second turn — no convergence
-            await pipeline.on_turn_end(
-                session_id="sess-acc",
-                agent_response="第二步：所以需要重启",
-                project="team_doc",
-            )
-            # Verify accumulated content in buffer
-            pending = await pipeline._buffer.get_pending("sess-acc")
-        assert len(pending) == 1
-        content = pending[0]["content"]
-        assert "第一步" in content
-        assert "第二步" in content
+    async def test_success(self) -> None:
+        pipeline = HermesPipeline()
+
+        mock_response = httpx.Response(
+            200,
+            json={"action": "published", "draft_id": "d1"},
+            request=httpx.Request("POST", "http://127.0.0.1:3901/hooks/session_end"),
+        )
+
+        with patch.object(pipeline._client, "post", return_value=mock_response):
+            result = await pipeline.on_session_end("sess-1")
+
+        assert result == {"action": "published", "draft_id": "d1"}
+        await pipeline.close()
 
     @pytest.mark.asyncio
-    async def test_first_turn_no_existing(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            result = await pipeline.on_turn_end(
-                session_id="sess-new",
-                agent_response="开始新任务",
-                project="team_doc",
-            )
-        assert result["action"] == "draft_saved"
+    async def test_daemon_not_running_returns_none(self) -> None:
+        pipeline = HermesPipeline()
 
+        with patch.object(pipeline._client, "post", side_effect=httpx.ConnectError("refused")):
+            result = await pipeline.on_session_end("sess-1")
 
-# ---------------------------------------------------------------------------
-# on_session_end — with pending drafts → publish
-# ---------------------------------------------------------------------------
-
-
-class TestOnSessionEndWithDrafts:
-    """on_session_end with pending drafts publishes them."""
-
-    @pytest.mark.asyncio
-    async def test_publishes_pending_drafts(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            # Save a draft first
-            await pipeline._refiner.save_draft(
-                "sess-end-1", "Draft", "因为服务器配置。", project="team_doc"
-            )
-            result = await pipeline.on_session_end("sess-end-1")
-        assert result is not None
-        assert result["status"] == "published"
-        pipeline._tm.draft_publish.assert_awaited()
-
-
-# ---------------------------------------------------------------------------
-# on_session_end — no drafts → return None
-# ---------------------------------------------------------------------------
-
-
-class TestOnSessionEndNoDrafts:
-    """on_session_end with no pending drafts returns None."""
-
-    @pytest.mark.asyncio
-    async def test_returns_none_no_drafts(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            result = await pipeline.on_session_end("sess-empty")
         assert result is None
+        await pipeline.close()
 
     @pytest.mark.asyncio
-    async def test_does_not_call_publish(self, db_path):
-        pipeline = _make_pipeline(db_path)
-        async with pipeline._buffer:
-            await pipeline.on_session_end("sess-empty")
-        pipeline._tm.draft_publish.assert_not_awaited()
+    async def test_generic_error(self) -> None:
+        pipeline = HermesPipeline()
+
+        with patch.object(pipeline._client, "post", side_effect=RuntimeError("fail")):
+            result = await pipeline.on_session_end("sess-1")
+
+        assert result == {"action": "error", "message": "fail"}
+        await pipeline.close()
+
+
+class TestHermesPipelineContextManager:
+    """Tests for HermesPipeline async context manager."""
+
+    @pytest.mark.asyncio
+    async def test_context_manager(self) -> None:
+        async with HermesPipeline() as pipeline:
+            mock_response = httpx.Response(
+                200,
+                json={"action": "ok"},
+                request=httpx.Request("POST", "http://127.0.0.1:3901/hooks/before_prompt"),
+            )
+            with patch.object(pipeline._client, "post", return_value=mock_response):
+                result = await pipeline.on_turn_start("test")
+                assert result == {"action": "ok"}
+
+    @pytest.mark.asyncio
+    async def test_custom_daemon_url(self) -> None:
+        pipeline = HermesPipeline(daemon_url="http://localhost:9999")
+        assert pipeline._daemon_url == "http://localhost:9999"
+        await pipeline.close()
