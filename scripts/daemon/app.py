@@ -159,6 +159,13 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             detector=app.state.detector,
             refiner=app.state.refiner,
         )
+        project = result.get("project", "")
+        action = result.get("action", "")
+        convergence = result.get("convergence", False)
+        logger.info(
+            "[WRITE] after_response → project=%s action=%s convergence=%s",
+            project, action, convergence,
+        )
         return result
 
     @app.post("/hooks/session_start")
@@ -169,6 +176,12 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             config=app.state.config,
             sink=app.state.sink,
         )
+        project = result.get("project", "")
+        has_ctx = bool(result.get("additional_context", ""))
+        logger.info(
+            "[READ]  session_start → project=%s context=%s",
+            project, "yes" if has_ctx else "none",
+        )
         return result
 
     @app.post("/hooks/before_prompt")
@@ -178,6 +191,13 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             input_data=payload.model_dump(),
             config=app.state.config,
             sink=app.state.sink,
+        )
+        project = result.get("project", "")
+        n_results = len(result.get("results", []))
+        query_preview = payload.prompt[:60] if payload.prompt else ""
+        logger.info(
+            "[READ]  before_prompt → project=%s query=\"%s\" results=%d",
+            project, query_preview, n_results,
         )
         return result
 
@@ -190,6 +210,11 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             sink=app.state.sink,
             buf=app.state.buf,
             refiner=app.state.refiner,
+        )
+        flushed = result.get("flushed", False)
+        logger.info(
+            "[WRITE] session_end → conversation=%s flushed=%s",
+            payload.conversation_id[:8] if payload.conversation_id else "?", flushed,
         )
         return result
 
@@ -204,6 +229,10 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             group_key=payload.group_key,
             conversation_id=payload.conversation_id,
         )
+        logger.info(
+            "[WRITE] draft_save → title=\"%s\" project=%s",
+            payload.title[:40], payload.project or "?",
+        )
         return result
 
     @app.post("/draft/publish")
@@ -213,6 +242,10 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         result = await sink_obj.draft_publish(
             draft_id=payload.draft_id,
             refined_content=payload.refined_content,
+        )
+        logger.info(
+            "[WRITE] draft_publish → draft_id=%s",
+            payload.draft_id[:8],
         )
         return result
 
@@ -228,6 +261,10 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             query=query,
             project=project,
             max_results=max_results,
+        )
+        logger.info(
+            "[READ]  recall → query=\"%s\" project=%s results=%d",
+            (query or "")[:60], project or "?", len(results) if isinstance(results, list) else 0,
         )
         return results
 

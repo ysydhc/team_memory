@@ -82,7 +82,10 @@ async def _process_changes(
                     project=vault.project,
                     group_key=entry.get("group_key"),
                 )
-                logger.info("Indexed: %s", path.name)
+                logger.info(
+                    "[WATCH] obsidian → file=%s action=%s project=%s",
+                    path.name, change_type.name, vault.project,
+                )
             except Exception:
                 logger.exception("Failed to index: %s", path)
 
