@@ -8,6 +8,7 @@ This thin version delegates all heavy logic to the TM Daemon HTTP API.
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 import httpx
@@ -22,9 +23,9 @@ class HermesPipeline:
     Usage::
 
         pipeline = HermesPipeline()
-        result = await pipeline.on_turn_start("之前的问题", project="team_doc")
+        result = await pipeline.on_turn_start("之前的问题", workspace_roots=["/path/to/project"])
         ...
-        result = await pipeline.on_turn_end("sess-1", "解决了", project="team_doc")
+        result = await pipeline.on_turn_end("sess-1", "解决了", workspace_roots=["/path/to/project"])
         ...
         result = await pipeline.on_session_end("sess-1")
     """
@@ -33,10 +34,19 @@ class HermesPipeline:
         self._daemon_url = daemon_url.rstrip("/")
         self._client = httpx.AsyncClient(base_url=self._daemon_url, timeout=10.0)
 
+    @staticmethod
+    def _default_workspace_roots() -> list[str]:
+        """Return [os.getcwd()] as default workspace roots."""
+        try:
+            return [os.getcwd()]
+        except OSError:
+            return []
+
     async def on_turn_start(
         self,
         user_message: str,
         project: str | None = None,
+        workspace_roots: list[str] | None = None,
     ) -> dict[str, Any]:
         """Called at the start of each conversation turn for auto-retrieval.
 
@@ -45,6 +55,8 @@ class HermesPipeline:
         Args:
             user_message: The user's input message for this turn.
             project: Optional project name to scope the retrieval.
+            workspace_roots: Optional list of workspace root paths.
+                Defaults to [os.getcwd()] so _resolve_project can match.
 
         Returns:
             Dict with retrieval results from the daemon.
@@ -52,6 +64,7 @@ class HermesPipeline:
         payload = {
             "prompt": user_message,
             "project": project or "",
+            "workspace_roots": workspace_roots or self._default_workspace_roots(),
         }
         try:
             resp = await self._client.post("/hooks/before_prompt", json=payload)
@@ -66,6 +79,7 @@ class HermesPipeline:
         session_id: str,
         agent_response: str,
         project: str | None = None,
+        workspace_roots: list[str] | None = None,
         recent_tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Called at the end of each conversation turn to update drafts.
@@ -76,6 +90,8 @@ class HermesPipeline:
             session_id: The conversation / session identifier.
             agent_response: The agent's response text for this turn.
             project: Optional project name.
+            workspace_roots: Optional list of workspace root paths.
+                Defaults to [os.getcwd()] so _resolve_project can match.
             recent_tools: Optional list of recent tool invocations (passed through).
 
         Returns:
@@ -85,6 +101,7 @@ class HermesPipeline:
             "conversation_id": session_id,
             "prompt": agent_response,
             "project": project or "",
+            "workspace_roots": workspace_roots or self._default_workspace_roots(),
             "recent_tools": recent_tools or [],
         }
         try:

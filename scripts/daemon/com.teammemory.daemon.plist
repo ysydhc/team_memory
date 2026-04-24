@@ -12,10 +12,17 @@
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/yeshouyou/Work/agent/team_doc</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>src:scripts</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
     <key>StandardOutPath</key>
     <string>/tmp/tm-daemon.log</string>
     <key>StandardErrorPath</key>

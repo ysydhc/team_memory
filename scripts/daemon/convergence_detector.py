@@ -31,13 +31,27 @@ class ConvergenceDetector:
     """
 
     EXPLICIT_SIGNALS: list[str] = [
+        # 直接完成
         "解决了",
+        "已解决",
         "问题修复",
+        "修复了",
+        "搞定了",
         "完成了",
+        "已完成",
         "先这样",
         "搞定",
-        "test passed",
+        "done",
+        # 确认类
         "已确认",
+        "确认无误",
+        "验证通过",
+        "test passed",
+        "all tests passed",
+        "tests pass",
+        # 提交类
+        "已提交",
+        "committed",
     ]
 
     # Regex patterns for test-like commands that indicate completion
