@@ -73,17 +73,16 @@ async def _process_changes(
 
         if change_type in (Change.added, Change.modified):
             try:
-                entries = indexer.index_file(path, project=vault.project)
-                for entry in entries:
-                    await sink.save(
-                        title=entry.get("title", path.stem),
-                        content=entry.get("content", ""),
-                        tags=entry.get("tags"),
-                        project=vault.project,
-                        source="obsidian",
-                        group_key=entry.get("group_key"),
-                    )
-                logger.info("Indexed: %s (%d entries)", path.name, len(entries))
+                entry = indexer.parse_file(str(path))
+                await sink.save(
+                    title=entry.get("title", path.stem),
+                    problem=entry.get("description", "")[:200],
+                    solution=entry.get("solution", ""),
+                    tags=entry.get("tags"),
+                    project=vault.project,
+                    group_key=entry.get("group_key"),
+                )
+                logger.info("Indexed: %s", path.name)
             except Exception:
                 logger.exception("Failed to index: %s", path)
 

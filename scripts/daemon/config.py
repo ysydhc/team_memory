@@ -180,4 +180,11 @@ def load_config(config_path: str | None = None) -> DaemonConfig:
     else:
         kwargs["projects"] = []
 
-    return DaemonConfig(**kwargs)
+    config = DaemonConfig(**kwargs)
+
+    # 展开所有路径中的 ~
+    config.draft.db_path = os.path.expanduser(config.draft.db_path) if config.draft.db_path else ""
+    for vault in config.obsidian.vaults:
+        vault.path = os.path.expanduser(vault.path) if vault.path else ""
+
+    return config

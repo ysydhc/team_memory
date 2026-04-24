@@ -7,6 +7,7 @@ and recall queries. Uses TMSink abstraction for TM access.
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -99,6 +100,8 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         application.state.config = config
 
         db_path = config.draft.db_path or ":memory:"
+        if db_path != ":memory:":
+            os.makedirs(os.path.dirname(db_path), exist_ok=True)
         buf = DraftBuffer(db_path)
         await buf.__aenter__()
         application.state.buf = buf
@@ -109,8 +112,21 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         refiner = DraftRefiner(sink=sink, draft_buffer=buf)
         application.state.refiner = refiner
 
+        # Start Obsidian vault watcher as background task
+        import asyncio
+        from daemon.watcher import start_watcher
+        watcher_task = asyncio.create_task(start_watcher(config, sink))
+        application.state.watcher_task = watcher_task
+
         logger.info("TM Daemon started (mode=%s)", config.tm.mode)
         yield
+
+        # -- Shutdown --
+        watcher_task.cancel()
+        try:
+            await asyncio.wait_for(watcher_task, timeout=3.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass
 
         # -- Shutdown --
         buf_obj: DraftBuffer | None = getattr(application.state, "buf", None)

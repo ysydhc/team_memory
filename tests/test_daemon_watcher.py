@@ -34,11 +34,11 @@ def _make_sink() -> AsyncMock:
     return sink
 
 
-def _make_indexer(entries: list[dict] | None = None) -> MagicMock:
+def _make_indexer(entry: dict | None = None) -> MagicMock:
     indexer = MagicMock()
-    indexer.index_file = MagicMock(return_value=entries or [
-        {"title": "Test Note", "content": "test content", "tags": ["test"]},
-    ])
+    indexer.parse_file = MagicMock(return_value=entry or {
+        "title": "Test Note", "description": "test desc", "solution": "test content", "tags": ["test"],
+    })
     return indexer
 
 
@@ -101,13 +101,13 @@ class TestProcessChanges:
         changes = {(Change.added, str(md_file))}
         await _process_changes(changes, config, indexer, sink)
 
-        indexer.index_file.assert_called_once()
+        indexer.parse_file.assert_called_once()
         sink.save.assert_called_once_with(
             title="Test Note",
-            content="test content",
+            problem="test desc",
+            solution="test content",
             tags=["test"],
             project="knowledge",
-            source="obsidian",
             group_key=None,
         )
 
@@ -145,7 +145,7 @@ class TestProcessChanges:
         await _process_changes(changes, config, indexer, sink)
 
         sink.save.assert_not_called()
-        indexer.index_file.assert_not_called()
+        indexer.parse_file.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_excluded_dir_ignored(self, tmp_path):
@@ -182,7 +182,7 @@ class TestProcessChanges:
         await _process_changes(changes, config, indexer, sink)
 
         sink.save.assert_not_called()
-        indexer.index_file.assert_not_called()
+        indexer.parse_file.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_file_outside_vault_ignored(self, tmp_path):
@@ -204,21 +204,20 @@ class TestProcessChanges:
         sink.save.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_multiple_entries_from_one_file(self, tmp_path):
+    async def test_single_entry_from_one_file(self, tmp_path):
         from watchfiles import Change
 
         vault_dir = tmp_path / "vault"
         vault_dir.mkdir()
-        md_file = vault_dir / "multi.md"
+        md_file = vault_dir / "single.md"
 
         config = _make_config(str(vault_dir))
         sink = _make_sink()
-        indexer = _make_indexer(entries=[
-            {"title": "Part 1", "content": "c1", "tags": ["a"]},
-            {"title": "Part 2", "content": "c2", "tags": ["b"]},
-        ])
+        indexer = _make_indexer(entry={
+            "title": "Single Entry", "description": "desc", "solution": "body text", "tags": ["x"],
+        })
 
         changes = {(Change.added, str(md_file))}
         await _process_changes(changes, config, indexer, sink)
 
-        assert sink.save.call_count == 2
+        assert sink.save.call_count == 1

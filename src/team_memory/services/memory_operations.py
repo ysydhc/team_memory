@@ -191,7 +191,7 @@ async def _save_from_content(
             solution=parsed.get("solution"),
             created_by=user,
             tags=extracted_tags,
-            source="auto_extract",
+            source="pipeline",
             exp_status="draft",
             visibility="project",
             experience_type=parsed.get("experience_type") or "general",

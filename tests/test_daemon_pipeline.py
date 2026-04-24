@@ -42,7 +42,7 @@ def _make_buf(pending: list[dict] | None = None) -> AsyncMock:
 
 def _make_detector(result: bool = False) -> MagicMock:
     det = MagicMock()
-    det.detect = MagicMock(return_value=result)
+    det.detect_convergence = MagicMock(return_value=result)
     return det
 
 

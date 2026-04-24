@@ -64,7 +64,7 @@ async def process_after_response(
         accumulated = response_text
 
     # Detect convergence
-    converged = detector.detect(
+    converged = detector.detect_convergence(
         response_text,
         recent_tools=[],
         current_path=project,

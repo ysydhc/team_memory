@@ -9,8 +9,8 @@ tm:
 
 obsidian:
   vaults:
-    - path: ""
-      project: "knowledge"
+    - path: "/Users/yeshouyou/Work/ad_learning"
+      project: "ad_learning"
       exclude: [".obsidian", ".trash"]
 
 projects:
