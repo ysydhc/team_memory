@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -30,7 +30,7 @@ def _make_config(vault_path: str = "/tmp/test_vault") -> DaemonConfig:
 
 def _make_sink() -> AsyncMock:
     sink = AsyncMock()
-    sink.save = AsyncMock(return_value={"id": "exp-1"})
+    sink.draft_save = AsyncMock(return_value={"id": "exp-1"})
     return sink
 
 
@@ -102,10 +102,9 @@ class TestProcessChanges:
         await _process_changes(changes, config, indexer, sink)
 
         indexer.parse_file.assert_called_once()
-        sink.save.assert_called_once_with(
+        sink.draft_save.assert_called_once_with(
             title="Test Note",
-            problem="test desc",
-            solution="test content",
+            content=ANY,
             tags=["test"],
             project="knowledge",
             group_key=None,
@@ -127,7 +126,7 @@ class TestProcessChanges:
         changes = {(Change.modified, str(md_file))}
         await _process_changes(changes, config, indexer, sink)
 
-        sink.save.assert_called_once()
+        sink.draft_save.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_non_md_file_ignored(self, tmp_path):
@@ -144,7 +143,7 @@ class TestProcessChanges:
         changes = {(Change.added, str(py_file))}
         await _process_changes(changes, config, indexer, sink)
 
-        sink.save.assert_not_called()
+        sink.draft_save.assert_not_called()
         indexer.parse_file.assert_not_called()
 
     @pytest.mark.asyncio
@@ -164,7 +163,7 @@ class TestProcessChanges:
         changes = {(Change.added, str(md_file))}
         await _process_changes(changes, config, indexer, sink)
 
-        sink.save.assert_not_called()
+        sink.draft_save.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_deleted_md_logged_no_sink_call(self, tmp_path):
@@ -181,7 +180,7 @@ class TestProcessChanges:
         changes = {(Change.deleted, str(md_file))}
         await _process_changes(changes, config, indexer, sink)
 
-        sink.save.assert_not_called()
+        sink.draft_save.assert_not_called()
         indexer.parse_file.assert_not_called()
 
     @pytest.mark.asyncio
@@ -201,7 +200,7 @@ class TestProcessChanges:
         changes = {(Change.added, str(md_file))}
         await _process_changes(changes, config, indexer, sink)
 
-        sink.save.assert_not_called()
+        sink.draft_save.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_single_entry_from_one_file(self, tmp_path):
@@ -220,4 +219,4 @@ class TestProcessChanges:
         changes = {(Change.added, str(md_file))}
         await _process_changes(changes, config, indexer, sink)
 
-        assert sink.save.call_count == 1
+        assert sink.draft_save.call_count == 1

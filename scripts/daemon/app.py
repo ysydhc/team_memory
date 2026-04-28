@@ -6,6 +6,7 @@ and recall queries. Uses TMSink abstraction for TM access.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -17,11 +18,13 @@ from pydantic import BaseModel, Field
 from daemon.config import DaemonConfig, load_config
 from daemon.draft_refiner import DraftRefiner
 from daemon.pipeline import (
+    _resolve_project,
     process_after_response,
     process_before_prompt,
     process_session_end,
     process_session_start,
 )
+from daemon.search_log_writer import SearchLogWriter
 from daemon.tm_sink import TMSink, create_sink
 from hooks.convergence_detector import ConvergenceDetector
 from hooks.draft_buffer import DraftBuffer
@@ -39,6 +42,7 @@ class HookPayload(BaseModel):
 
     conversation_id: str = ""
     prompt: str = ""
+    response_text: str = ""
     workspace_roots: list[str] = Field(default_factory=list)
     model: str = ""
 
@@ -89,6 +93,17 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
     async def lifespan(application: FastAPI):
         """Initialize resources on startup, cleanup on shutdown."""
         # -- Startup --
+        # When running in local mode, bootstrap the TM AppContext so that
+        # LocalTMSink → op_draft_save → _get_service() uses a properly
+        # initialised ExperienceService (with Embedding provider ready).
+        # Without this, _get_service() falls back to bootstrap() on every
+        # call, which can fail or return a service without Embedding — causing
+        # draft_save to return {"error": True} with no "id" field.
+        if config.tm.mode == "local":
+            from team_memory.bootstrap import bootstrap as _tm_bootstrap  # noqa: PLC0415
+            _tm_bootstrap(enable_background=False)
+            logger.info("TM AppContext bootstrapped for local mode")
+
         sink_config = {
             "mode": config.tm.mode,
             "base_url": config.tm.base_url,
@@ -112,21 +127,49 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         refiner = DraftRefiner(sink=sink, draft_buffer=buf)
         application.state.refiner = refiner
 
+        # LLM background refinement worker
+        from daemon.refinement_worker import RefinementWorker
+        refinement_worker = RefinementWorker(config=config, buf=buf, sink=sink)
+        refinement_task = refinement_worker.start()
+        application.state.refinement_worker = refinement_worker
+        application.state.refinement_task = refinement_task
+
+        # Search log writer for evaluation
+        search_log = SearchLogWriter()
+        application.state.search_log = search_log
+
         # Start Obsidian vault watcher as background task
-        import asyncio
         from daemon.watcher import start_watcher
-        watcher_task = asyncio.create_task(start_watcher(config, sink))
+        watcher_task = asyncio.create_task(start_watcher(config, sink, buf))
         application.state.watcher_task = watcher_task
 
         logger.info("TM Daemon started (mode=%s)", config.tm.mode)
         yield
 
         # -- Shutdown --
-        watcher_task.cancel()
-        try:
-            await asyncio.wait_for(watcher_task, timeout=3.0)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
-            pass
+        search_log_obj: SearchLogWriter | None = getattr(application.state, "search_log", None)
+        if search_log_obj is not None:
+            await search_log_obj.close()
+
+        # Stop refinement worker
+        refinement_worker_obj: RefinementWorker | None = getattr(application.state, "refinement_worker", None)
+        if refinement_worker_obj is not None:
+            refinement_worker_obj.stop()
+        refinement_task_obj = getattr(application.state, "refinement_task", None)
+        if refinement_task_obj is not None:
+            refinement_task_obj.cancel()
+            try:
+                await asyncio.wait_for(refinement_task_obj, timeout=5.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+
+        watcher_task = getattr(application.state, "watcher_task", None)
+        if watcher_task is not None:
+            watcher_task.cancel()
+            try:
+                await asyncio.wait_for(watcher_task, timeout=3.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
 
         # -- Shutdown --
         buf_obj: DraftBuffer | None = getattr(application.state, "buf", None)
@@ -159,13 +202,25 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             detector=app.state.detector,
             refiner=app.state.refiner,
         )
-        project = result.get("project", "")
+        # Resolve project from workspace_roots for logging
+        resolved_project = _resolve_project(payload.workspace_roots, app.state.config) or ""
         action = result.get("action", "")
         convergence = result.get("convergence", False)
+        result["project"] = resolved_project
         logger.info(
             "[WRITE] after_response → project=%s action=%s convergence=%s",
-            project, action, convergence,
+            resolved_project, action, convergence,
         )
+        # Scan for [mem:xxx] markers to mark search logs as used
+        response_text = payload.response_text or payload.prompt
+        if response_text:
+            search_log: SearchLogWriter = app.state.search_log
+            marked = await search_log.mark_used_from_response(
+                response_text,
+                project=resolved_project or None,
+            )
+            if marked > 0:
+                logger.info("[EVAL]  marked %d search_log(s) as was_used", marked)
         return result
 
     @app.post("/hooks/session_start")
@@ -193,12 +248,33 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             sink=app.state.sink,
         )
         project = result.get("project", "")
-        n_results = len(result.get("results", []))
+        all_results = result.get("results", [])
+        n_results = len(all_results)
         query_preview = payload.prompt[:60] if payload.prompt else ""
+        # Log result titles and ids for debugging
+        result_lines = []
+        for i, r in enumerate(all_results[:5]):
+            tid = r.get("id", "?")
+            title = r.get("title", "?")[:50]
+            result_lines.append(f"  #{i+1} \"{title}\" [{tid[:8]}]")
+        extra = "\n" + "\n".join(result_lines) if result_lines else ""
         logger.info(
-            "[READ]  before_prompt → project=%s query=\"%s\" results=%d",
-            project, query_preview, n_results,
+            "[READ]  before_prompt → project=%s query=\"%s\" results=%d%s",
+            project, query_preview, n_results, extra,
         )
+        # Write search log for evaluation
+        if query_preview:
+            search_log: SearchLogWriter = app.state.search_log
+            log_result_ids = [
+                {"id": r.get("id", ""), "score": r.get("score", 0)}
+                for r in all_results[:5]
+            ]
+            await search_log.log_search(
+                query=query_preview,
+                project=project or "default",
+                source="daemon",
+                result_ids=log_result_ids if log_result_ids else None,
+            )
         return result
 
     @app.post("/hooks/session_end")
@@ -262,10 +338,23 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             project=project,
             max_results=max_results,
         )
+        result_list = results if isinstance(results, list) else []
+        result_lines = []
+        for i, r in enumerate(result_list[:5]):
+            tid = r.get("id", "?")
+            title = r.get("title", "?")[:50]
+            result_lines.append(f"  #{i+1} \"{title}\" [{tid[:8]}]")
+        extra = "\n" + "\n".join(result_lines) if result_lines else ""
         logger.info(
-            "[READ]  recall → query=\"%s\" project=%s results=%d",
-            (query or "")[:60], project or "?", len(results) if isinstance(results, list) else 0,
+            "[READ]  recall → query=\"%s\" project=%s results=%d%s",
+            (query or "")[:60], project or "?", len(result_list), extra,
         )
         return results
+
+    @app.get("/stats")
+    async def get_stats(days: int = 7) -> dict[str, Any]:
+        """Get evaluation statistics for the last N days."""
+        search_log: SearchLogWriter = app.state.search_log
+        return await search_log.get_stats(days=days)
 
     return app

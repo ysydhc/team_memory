@@ -26,7 +26,7 @@ class TestTMSinkABC:
         from daemon.tm_sink import TMSink
 
         abstracts = set(TMSink.__abstractmethods__)
-        expected = {"draft_save", "draft_publish", "save", "recall", "context"}
+        expected = {"draft_save", "draft_publish", "save", "recall", "context", "update_experience"}
         assert expected == abstracts, f"Missing abstract methods: {expected - abstracts}"
 
     def test_is_abc_subclass(self):
@@ -97,6 +97,7 @@ class TestLocalTMSink:
                 project="test_proj",
                 group_key="gk1",
                 conversation_id="conv1",
+                skip_dedup=False,
             )
             assert result == {"id": "abc-123", "status": "draft"}
 

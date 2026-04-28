@@ -225,45 +225,52 @@ class TestClaudeSessionStart:
     def test_forwards_to_daemon(self) -> None:
         from hooks.claude_session_start import main
 
+        # Daemon returns additional_context with experiences/profile
         mock_response = httpx.Response(
             200,
-            text=json.dumps({"additionalContext": "claude context"}),
+            text=json.dumps({
+                "project": "test_proj",
+                "additional_context": {
+                    "relevant_experiences": [
+                        {"id": "abcd1234efgh", "title": "Test experience"},
+                    ],
+                    "profile": {"static": [], "dynamic": []},
+                },
+            }),
             request=httpx.Request("POST", "http://127.0.0.1:3901/hooks/session_start"),
         )
 
-        input_data = {"workspace_roots": ["/tmp"], "conversation_id": "sess-1"}
+        input_data = {"workspace": "/tmp/project", "session_id": "sess-1"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
             with patch("hooks.claude_session_start.httpx.post", return_value=mock_response):
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"additionalContext": "claude context"})
-        )
+        mock_print.assert_called_once()
+        printed = json.loads(mock_print.call_args[0][0])
+        assert "additionalContext" in printed
+        assert "abcd1234" in printed["additionalContext"]
 
     def test_daemon_not_running(self) -> None:
         from hooks.claude_session_start import main
 
-        input_data = {"workspace_roots": ["/tmp"]}
+        input_data = {"workspace": "/tmp/project"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
             with patch("hooks.claude_session_start.httpx.post", side_effect=httpx.ConnectError("Connection refused")):
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "ok", "message": "daemon not running"})
-        )
+        # When daemon is not running, output is empty JSON object
+        mock_print.assert_called_once_with("{}")
 
     def test_invalid_stdin(self) -> None:
         from hooks.claude_session_start import main
 
         with patch("sys.stdin", io.StringIO("not-json")):
-            with patch("builtins.print") as mock_print:
+            with pytest.raises(SystemExit) as exc_info:
                 main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "error", "message": "invalid input"})
-        )
+        assert exc_info.value.code == 0
 
 
 # -----------------------------------------------------------------------

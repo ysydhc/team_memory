@@ -49,7 +49,7 @@ def _make_detector(result: bool = False) -> MagicMock:
 def _make_refiner() -> AsyncMock:
     ref = AsyncMock()
     ref.save_draft = AsyncMock(return_value={"id": "draft-1"})
-    ref.refine_and_publish = AsyncMock(return_value=None)
+    ref.mark_for_refinement = AsyncMock(return_value=None)
     return ref
 
 
@@ -115,12 +115,12 @@ class TestProcessAfterResponse:
         config = _make_config()
         buf = _make_buf(pending=[{"id": "d1", "content": "old text"}])
         refiner = _make_refiner()
-        refiner.refine_and_publish = AsyncMock(return_value={"draft_id": "d1"})
+        refiner.mark_for_refinement = AsyncMock(return_value={"draft_id": "d1"})
         result = await process_after_response(
             {"conversation_id": "123", "prompt": "问题解决了", "workspace_roots": ["/x/team_doc"]},
             config, _make_sink(), buf, _make_detector(result=True), refiner,
         )
-        assert result["action"] == "published"
+        assert result["action"] == "needs_refinement"
         assert result["convergence"] is True
         buf.update_draft.assert_called_once()
 
@@ -129,14 +129,14 @@ class TestProcessAfterResponse:
         config = _make_config()
         buf = _make_buf()
         refiner = _make_refiner()
-        refiner.refine_and_publish = AsyncMock(return_value={"draft_id": "draft-1"})
+        refiner.mark_for_refinement = AsyncMock(return_value={"draft_id": "draft-1"})
         result = await process_after_response(
             {"conversation_id": "123", "prompt": "总结完毕", "workspace_roots": ["/x/team_doc"]},
             config, _make_sink(), buf, _make_detector(result=True), refiner,
         )
-        assert result["action"] == "published"
+        assert result["action"] == "needs_refinement"
         refiner.save_draft.assert_called_once()
-        refiner.refine_and_publish.assert_called_once()
+        refiner.mark_for_refinement.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

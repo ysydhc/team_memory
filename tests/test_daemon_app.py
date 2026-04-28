@@ -50,15 +50,22 @@ class _StubTMSink(TMSink):
         self.recall_calls.append(kwargs)
         return self._results
 
+    async def update_experience(self, **kwargs) -> dict:
+        return {"id": kwargs.get("experience_id", ""), "status": "updated"}
+
     async def context(self, **kwargs) -> dict:
         return {"user": "test", "relevant_experiences": []}
 
 
 def _make_config() -> DaemonConfig:
-    """Create a DaemonConfig suitable for testing (local mode, in-memory DB)."""
+    """Create a DaemonConfig suitable for testing (remote mode, in-memory DB).
+
+    Use remote mode so the lifespan does NOT call bootstrap() — tests stub
+    the sink anyway, so no real TM connection is needed.
+    """
     return DaemonConfig(
         daemon=DaemonSettings(host="127.0.0.1", port=3901),
-        tm=TMSettings(mode="local", user="test"),
+        tm=TMSettings(mode="remote", base_url="http://tm-stub", user="test"),
         draft=DraftSettings(db_path=""),  # will use :memory:
     )
 
@@ -112,7 +119,7 @@ class TestStatusEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "running"
-        assert data["tm_mode"] == "local"
+        assert data["tm_mode"] == "remote"
 
     @pytest.mark.asyncio
     async def test_status_remote_mode(self, stub_sink: _StubTMSink):
