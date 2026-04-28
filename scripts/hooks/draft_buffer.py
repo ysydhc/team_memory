@@ -88,6 +88,8 @@ class DraftBuffer:
         project: str,
         conversation_id: str | None,
         content: str,
+        title: str = "",
+        source: str = "pipeline",
     ) -> str:
         """Create a new draft and return its UUID.
 
@@ -95,6 +97,8 @@ class DraftBuffer:
             project: Project name (e.g. "team_doc").
             conversation_id: Optional conversation identifier.
             content: Draft content (extracted facts).
+            title: Optional title for the draft.
+            source: Source tag, e.g. "pipeline" or "obsidian".
 
         Returns:
             The UUID string of the newly created draft.
@@ -104,10 +108,10 @@ class DraftBuffer:
         now = datetime.now(timezone.utc).isoformat()
         await db.execute(
             """
-            INSERT INTO drafts (id, project, conversation_id, content, status, source, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'pending', 'pipeline', ?, ?)
+            INSERT INTO drafts (id, title, project, conversation_id, content, status, source, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)
             """,
-            (draft_id, project, conversation_id, content, now, now),
+            (draft_id, title, project, conversation_id, content, source, now, now),
         )
         await db.commit()
         return draft_id
@@ -250,6 +254,37 @@ class DraftBuffer:
         cursor = await db.execute(
             """
             UPDATE drafts SET status = 'published', updated_at = ?
+            WHERE id = ?
+            """,
+            (now, draft_id),
+        )
+        await db.commit()
+        if cursor.rowcount == 0:
+            raise ValueError(f"Draft '{draft_id}' not found")
+
+    async def get_needs_refinement(self) -> list[dict[str, Any]]:
+        """Return all drafts with status='needs_refinement'."""
+        db = self._require_db()
+        cursor = await db.execute(
+            "SELECT * FROM drafts WHERE status = 'needs_refinement' ORDER BY created_at",
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    async def mark_needs_refinement(self, draft_id: str) -> None:
+        """Mark a draft as waiting for LLM refinement (status='needs_refinement').
+
+        Args:
+            draft_id: The UUID of the draft to mark.
+
+        Raises:
+            ValueError: If no draft with the given id exists.
+        """
+        db = self._require_db()
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = await db.execute(
+            """
+            UPDATE drafts SET status = 'needs_refinement', updated_at = ?
             WHERE id = ?
             """,
             (now, draft_id),

@@ -18,6 +18,26 @@ EXPERIENCE_TYPES = (
     "learning",
 )
 
+SEVERITY_LEVELS = (
+    "critical",
+    "high",
+    "medium",
+    "low",
+    "info",
+)
+
+CATEGORIES = (
+    "backend",
+    "frontend",
+    "mobile",
+    "infra",
+    "data",
+    "security",
+    "process",
+    "product",
+    "other",
+)
+
 
 class ArchiveCreateRequest(BaseModel):
     """Request body for POST /api/v1/archives (create or upsert)."""
