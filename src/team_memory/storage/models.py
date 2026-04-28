@@ -493,3 +493,146 @@ class SearchLog(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
+
+
+# ============================================================
+# Entity Graph (L2.5)
+# ============================================================
+
+
+class Entity(Base):
+    """Named entity extracted from experiences (tool, concept, person, project, etc.)."""
+
+    __tablename__ = "entities"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    entity_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="concept"
+    )  # tool, concept, person, project, config, error
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    aliases: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list)
+    source_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    project: Mapped[str] = mapped_column(
+        String(100), nullable=False, server_default="default", index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    # ORM relationships
+    outgoing: Mapped[list["Relationship"]] = relationship(
+        "Relationship",
+        foreign_keys="Relationship.source_entity_id",
+        back_populates="source",
+        cascade="all, delete-orphan",
+    )
+    incoming: Mapped[list["Relationship"]] = relationship(
+        "Relationship",
+        foreign_keys="Relationship.target_entity_id",
+        back_populates="target",
+        cascade="all, delete-orphan",
+    )
+    experience_links: Mapped[list["ExperienceEntity"]] = relationship(
+        "ExperienceEntity",
+        back_populates="entity",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("name", "project", name="uq_entity_name_project"),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "name": self.name,
+            "entity_type": self.entity_type,
+            "description": self.description,
+            "aliases": self.aliases or [],
+            "source_count": self.source_count,
+            "project": self.project,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class Relationship(Base):
+    """Directed relationship between two entities."""
+
+    __tablename__ = "relationships"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source_entity_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("entities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    target_entity_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("entities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    relation_type: Mapped[str] = mapped_column(
+        String(100), nullable=False, server_default="related_to"
+    )  # depends_on, configures, causes, fixes, related_to, uses, part_of
+    weight: Mapped[float] = mapped_column(Float, nullable=False, server_default="1.0")
+    evidence: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list)
+    # evidence stores list of experience_id strings as supporting references
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    source: Mapped["Entity"] = relationship(
+        "Entity", foreign_keys=[source_entity_id], back_populates="outgoing"
+    )
+    target: Mapped["Entity"] = relationship(
+        "Entity", foreign_keys=[target_entity_id], back_populates="incoming"
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "source_entity_id",
+            "target_entity_id",
+            "relation_type",
+            name="uq_relationship_src_tgt_type",
+        ),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "source_entity_id": str(self.source_entity_id),
+            "target_entity_id": str(self.target_entity_id),
+            "relation_type": self.relation_type,
+            "weight": self.weight,
+            "evidence": self.evidence or [],
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class ExperienceEntity(Base):
+    """Junction table linking experiences to entities (many-to-many)."""
+
+    __tablename__ = "experience_entities"
+
+    experience_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("experiences.id", ondelete="CASCADE"),
+        nullable=False,
+        primary_key=True,
+        index=True,
+    )
+    entity_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("entities.id", ondelete="CASCADE"),
+        nullable=False,
+        primary_key=True,
+        index=True,
+    )
+    role: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="mentioned"
+    )  # mentioned, subject, solution, tool
+
+    entity: Mapped["Entity"] = relationship("Entity", back_populates="experience_links")

@@ -217,6 +217,7 @@ class AppContext:
     intent_router: IntentRouter = None  # type: ignore[assignment]
     janitor: MemoryJanitor | None = None
     janitor_scheduler: JanitorScheduler | None = None
+    entity_extractor: object | None = None  # EntityExtractor (lazy import)
     _log_listener: QueueListener | None = None
 
 
@@ -433,6 +434,9 @@ def bootstrap(
     if enable_background:
         _register_cache_invalidation(event_bus, search_orchestrator)
         _register_pattern_extraction(event_bus, embedding, settings.llm, db_url)
+        entity_extractor = _register_entity_extraction(event_bus, settings.llm, db_url)
+    else:
+        entity_extractor = None
 
     # Initialize janitor services
     janitor = None
@@ -472,6 +476,7 @@ def bootstrap(
         intent_router=intent_router,
         janitor=janitor,
         janitor_scheduler=janitor_scheduler,
+        entity_extractor=entity_extractor,
         _log_listener=log_listener,
     )
 
@@ -566,6 +571,41 @@ def _register_pattern_extraction(
 async def start_background_tasks(ctx: AppContext) -> None:
     """Start background tasks (placeholder for future use)."""
     logger.info("Background tasks started")
+
+
+def _register_entity_extraction(
+    event_bus: EventBus,
+    llm_config: object,
+    db_url: str,
+) -> object:
+    """Subscribe to EXPERIENCE_CREATED to fire async entity extraction."""
+    import asyncio
+
+    from team_memory.services.entity_extractor import EntityExtractor
+
+    extractor = EntityExtractor(llm_config=llm_config, db_url=db_url)
+
+    async def _on_experience_created(payload: dict) -> None:
+        exp_id = payload.get("experience_id", "")
+        title = payload.get("title", "")
+        status = payload.get("status", "")
+        # Only extract for published experiences
+        if not exp_id or status not in ("published", "promoted"):
+            return
+        # Fire-and-forget: don't await directly so we don't block the event bus
+        asyncio.get_event_loop().create_task(
+            extractor.extract_and_persist(
+                experience_id=exp_id,
+                title=title,
+                description=payload.get("description", ""),
+                solution=payload.get("solution", ""),
+                tags=payload.get("tags") or [],
+                project=payload.get("project", "default"),
+            )
+        )
+
+    event_bus.on(Events.EXPERIENCE_CREATED, _on_experience_created)
+    return extractor
 
 
 async def stop_background_tasks(ctx: AppContext) -> None:

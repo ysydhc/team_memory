@@ -247,6 +247,24 @@ class SearchPipeline:
             if "workflow" in tags_lower:
                 effective_min_similarity = min(effective_min_similarity, 0.5)
 
+        # Stage 1.5: Entity-graph query enrichment (rule-based, best-effort)
+        # Extracts entity names from query and appends them for better recall.
+        try:
+            from team_memory.services.entity_search import extract_entities_from_query
+            entity_names = extract_entities_from_query(retrieval_query)
+            if entity_names and self._db_url:
+                retrieval_query = retrieval_query.rstrip()
+                # Append entity names as additional search terms (deduplicated)
+                extra = " ".join(
+                    n for n in entity_names
+                    if n.lower() not in retrieval_query.lower()
+                )
+                if extra:
+                    retrieval_query = f"{retrieval_query} {extra}"
+                retrieval_query = retrieval_query[:2000]
+        except Exception:
+            pass  # entity enrichment must never break search
+
         # Stage 2: Embedding
         stage_begin = time.monotonic()
         query_embedding = None
