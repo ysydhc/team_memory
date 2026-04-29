@@ -350,6 +350,14 @@ class ExperienceService:
                         "experience_id": experience_id,
                         "fields_updated": fields_updated,
                         "user": user,
+                        # Include content fields for entity extraction
+                        "title": updated.title if updated else None,
+                        "description": updated.description if updated else None,
+                        "solution": updated.solution if updated else None,
+                        "tags": updated.tags if updated else None,
+                        "project": updated.project if updated else None,
+                        "status": updated.exp_status if updated else None,
+                        "visibility": updated.visibility if updated else None,
                     },
                 )
 

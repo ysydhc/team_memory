@@ -589,7 +589,7 @@ def _register_entity_extraction(
         exp_id = payload.get("experience_id", "")
         title = payload.get("title", "")
         status = payload.get("status", "")
-        # Only extract for published experiences
+        # Only extract for published experiences (covers both CREATED and UPDATED)
         if not exp_id or status not in ("published", "promoted"):
             return
         # Fire-and-forget: don't await directly so we don't block the event bus
@@ -605,6 +605,7 @@ def _register_entity_extraction(
         )
 
     event_bus.on(Events.EXPERIENCE_CREATED, _on_experience_created)
+    event_bus.on(Events.EXPERIENCE_UPDATED, _on_experience_created)
     return extractor
 
 
