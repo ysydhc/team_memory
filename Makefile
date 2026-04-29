@@ -3,6 +3,15 @@
 # 使用 make help 查看所有可用命令
 # ============================================================
 
+# Python 解释器：优先 .env 中的 PYTHON，其次自动探测 (.venv / conda env / system)
+# 换电脑时只需改 .env 中的 PYTHON 即可
+DOTENV_PYTHON  ?= $(shell grep -E '^PYTHON=' .env 2>/dev/null | sed 's/^PYTHON=//' | tr -d '"' | tr -d "'")
+AUTO_PYTHON    ?= $(shell \
+	if [ -x .venv/bin/python ]; then echo .venv/bin/python; \
+	elif command -v conda >/dev/null 2>&1 && conda run -n team_memory python -c "pass" 2>/dev/null; then echo "conda run -n team_memory python"; \
+	else echo python; fi)
+PYTHON_BIN     ?= $(or $(DOTENV_PYTHON),$(AUTO_PYTHON))
+
 # 屏蔽 jieba/pkg_resources 等第三方库的 DeprecationWarning；可覆盖：make web PYTHONWARNINGS=
 export PYTHONWARNINGS ?= ignore::DeprecationWarning
 
@@ -22,7 +31,7 @@ ALEMBIC ?= $(shell \
 	else echo alembic; fi)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp mcp-verify test lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-install daemon-uninstall
+.PHONY: help setup dev web mcp mcp-verify test lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-install daemon-uninstall
 
 sync-agent-artifacts: ## 由 agents/shared + agents/manifest.yaml 生成 .claude/.cursor 下 agents、prompts、skills
 	python scripts/sync_agent_artifacts.py
@@ -127,7 +136,7 @@ verify-web:     ## Web 验收：lint + lint-js + web测试 + health/stats smoke
 	@$(MAKE) lint
 	@$(MAKE) lint-js
 	$(PYTEST) tests/test_web.py -v
-	@API_KEY=$${TEAM_MEMORY_API_KEY:-dev-key}; \
+	@API_KEY=*** \
 	echo "  Starting Web for smoke on :9111 ..."; \
 	python -m team_memory.web.app >/tmp/tm-web-smoke.log 2>&1 & \
 	WEB_PID=$$!; \
@@ -136,7 +145,11 @@ verify-web:     ## Web 验收：lint + lint-js + web测试 + health/stats smoke
 	  curl -fsS http://localhost:9111/health >/dev/null 2>&1 && break; \
 	  sleep 1; \
 	done; \
-	TEAM_MEMORY_API_KEY=$$API_KEY python scripts/smoke/smoke_web_dashboard.py --api-key $$API_KEY --port 9111
+	TEAM_MEMORY_API_KEY=*** python scripts/smoke/smoke_web_dashboard.py --api-key $$API_KEY --port 9111
+
+verify-entities: ## 验证 L2.5 实体图表（建表 + 规则提取 + 样例数据 + 搜索/图遍历）
+	@set -a && [ -f .env ] && source .env || true && set +a; \
+	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/verify/verify_entity_graph.py
 
 migrate:        ## 运行数据库迁移（默认 uv / .venv 内 python -m alembic）
 	@case "$(ALEMBIC)" in \
@@ -181,12 +194,15 @@ daemon-stop:     ## Stop TM Daemon (launchd)
 	launchctl unload ~/Library/LaunchAgents/com.teammemory.daemon.plist
 
 daemon-run:      ## Run TM Daemon in foreground (for testing)
-	.venv/bin/python -m daemon
+	PYTHONPATH=src:scripts $(PYTHON_BIN) -m daemon
 
 daemon-install:  ## Install launchd plist (auto-start on login + crash restart)
-	cp scripts/daemon/com.teammemory.daemon.plist ~/Library/LaunchAgents/
-	launchctl load ~/Library/LaunchAgents/com.teammemory.daemon.plist
-	@echo "  ✔ TM Daemon installed as launchd service (auto-start + KeepAlive)"
+	@PLIST_SRC=scripts/daemon/com.teammemory.daemon.plist; \
+	PLIST_DST=$(HOME)/Library/LaunchAgents/com.teammemory.daemon.plist; \
+	REPO_ABS=$$(pwd); \
+	sed -e "s|__PYTHON_PATH__|$(PYTHON_BIN)|g" -e "s|__REPO_ROOT__|$$REPO_ABS|g" "$$PLIST_SRC" > "$$PLIST_DST"; \
+	launchctl load "$$PLIST_DST" 2>/dev/null || true; \
+	echo "  ✔ TM Daemon installed as launchd service (python=$(PYTHON_BIN))"
 
 daemon-uninstall: ## Uninstall launchd plist (stop auto-start)
 	launchctl unload ~/Library/LaunchAgents/com.teammemory.daemon.plist 2>/dev/null || true
