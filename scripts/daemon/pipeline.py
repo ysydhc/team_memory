@@ -112,6 +112,15 @@ async def process_after_response(
 
     else:
         # Not converged → save/update draft
+        if existing:
+            # Session already has a pending draft in Buffer — just update
+            # the content.  No need to write another PG experience.
+            draft_id = existing[0].get("id", "")
+            await buf.update_draft(draft_id, accumulated)
+            return {"action": "draft_updated", "convergence": False, "draft_id": draft_id}
+
+        # First response for this session — create a new draft in both
+        # Buffer and PG so we get a tm_id for later publishing.
         title = f"Session {session_id[:8]} draft"
         tm_resp = await refiner.save_draft(
             session_id, title, accumulated, project=project,
