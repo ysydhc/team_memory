@@ -101,8 +101,8 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         # draft_save to return {"error": True} with no "id" field.
         if config.tm.mode == "local":
             from team_memory.bootstrap import bootstrap as _tm_bootstrap  # noqa: PLC0415
-            _tm_bootstrap(enable_background=False)
-            logger.info("TM AppContext bootstrapped for local mode")
+            _tm_bootstrap(enable_background=True)
+            logger.info("TM AppContext bootstrapped for local mode (background=True)")
 
         sink_config = {
             "mode": config.tm.mode,

@@ -108,6 +108,9 @@ async def _call_llm(prompt: str, llm_config: LLMConfig) -> str | None:
     """Call the LLM via OpenAI-compatible API. Returns raw response text or None on error."""
     api_key = llm_config.api_key or "none"
     base_url = llm_config.base_url.rstrip("/")
+    # Ensure /v1 prefix for OpenAI-compatible endpoints
+    if not base_url.endswith("/v1"):
+        base_url = f"{base_url}/v1"
     model = llm_config.model
 
     payload = {
