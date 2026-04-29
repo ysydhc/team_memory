@@ -46,7 +46,9 @@ async def process_after_response(
         Dict with action, convergence flag, and draft_id.
     """
     session_id = input_data.get("conversation_id", "") or "unknown"
-    response_text = input_data.get("prompt", "") or ""
+    # Accept both "response_text" (Claude Code / claude_stop.py) and "prompt"
+    # (Hermes / tm_hook.py) so the pipeline stays platform-agnostic.
+    response_text = input_data.get("response_text") or input_data.get("prompt", "") or ""
     workspace_roots = input_data.get("workspace_roots", [])
     project = _resolve_project(workspace_roots, config)
 
@@ -72,29 +74,29 @@ async def process_after_response(
     )
 
     if converged and existing:
-        # Converged with existing draft → update buffer + refine and publish
+        # Converged with existing draft → update buffer + mark for LLM refinement
         draft_id = existing[0].get("id", "")
         await buf.update_draft(draft_id, accumulated)
 
-        result = await refiner.refine_and_publish(session_id)
+        result = await refiner.mark_for_refinement(session_id)
         if result is not None:
             return {
-                "action": "published",
+                "action": "needs_refinement",
                 "convergence": True,
                 "draft_id": result.get("draft_id", draft_id),
             }
         return {"action": "ok", "convergence": True, "draft_id": draft_id}
 
     elif converged and not existing:
-        # Converged on first response — save draft then publish
+        # Converged on first response — save draft then mark for refinement
         title = f"Session {session_id[:8]} draft"
         tm_resp = await refiner.save_draft(
             session_id, title, accumulated, project=project,
         )
-        result = await refiner.refine_and_publish(session_id)
+        result = await refiner.mark_for_refinement(session_id)
         if result is not None:
             return {
-                "action": "published",
+                "action": "needs_refinement",
                 "convergence": True,
                 "draft_id": result.get("draft_id", tm_resp.get("id", "")),
             }

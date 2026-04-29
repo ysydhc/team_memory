@@ -38,7 +38,15 @@ logger = logging.getLogger("daemon.app")
 
 
 class HookPayload(BaseModel):
-    """Payload for hook callback endpoints."""
+    """Payload for hook callback endpoints.
+
+    Different platforms send the agent response under different field names:
+    - Hermes / tm_hook.py: uses ``prompt``
+    - Claude Code / claude_stop.py: uses ``response_text``
+
+    The pipeline layer reads both (response_text takes precedence) so new
+    platforms can use either convention without touching pipeline code.
+    """
 
     conversation_id: str = ""
     prompt: str = ""
