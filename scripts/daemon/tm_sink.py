@@ -63,6 +63,7 @@ class TMSink(ABC):
         project: str | None = None,
         group_key: str | None = None,
         conversation_id: str | None = None,
+        skip_dedup: bool = False,
     ) -> dict:
         """保存草稿。"""
 
@@ -107,6 +108,20 @@ class TMSink(ABC):
         """搜索经验，返回结果列表。"""
 
     @abstractmethod
+    async def update_experience(
+        self,
+        *,
+        experience_id: str,
+        title: str | None = None,
+        problem: str | None = None,
+        solution: str | None = None,
+        tags: list[str] | None = None,
+        experience_type: str | None = None,
+        exp_status: str | None = None,
+    ) -> dict:
+        """Update an existing experience in-place."""
+
+    @abstractmethod
     async def context(
         self,
         *,
@@ -138,6 +153,7 @@ class LocalTMSink(TMSink):
         project: str | None = None,
         group_key: str | None = None,
         conversation_id: str | None = None,
+        skip_dedup: bool = False,
     ) -> dict:
         return await _op_draft_save(
             self._user,
@@ -147,6 +163,7 @@ class LocalTMSink(TMSink):
             project=project,
             group_key=group_key,
             conversation_id=conversation_id,
+            skip_dedup=skip_dedup,
         )
 
     async def draft_publish(
@@ -217,6 +234,30 @@ class LocalTMSink(TMSink):
             return raw.get("results", [])
         return []
 
+    async def update_experience(
+        self,
+        *,
+        experience_id: str,
+        title: str | None = None,
+        problem: str | None = None,
+        solution: str | None = None,
+        tags: list[str] | None = None,
+        experience_type: str | None = None,
+        exp_status: str | None = None,
+    ) -> dict:
+        _ensure_ops()
+        from team_memory.services.memory_operations import op_experience_update
+        return await op_experience_update(
+            self._user,
+            experience_id=experience_id,
+            title=title,
+            problem=problem,
+            solution=solution,
+            tags=tags,
+            experience_type=experience_type,
+            exp_status=exp_status,
+        )
+
     async def context(
         self,
         *,
@@ -238,18 +279,54 @@ class LocalTMSink(TMSink):
 
 
 class RemoteTMSink(TMSink):
-    """通过 HTTP POST 调用远程 TM 服务的 MCP 端点。"""
+    """通过 HTTP 调用远程 team_memory_service 的 /mcp/ REST 端点。
+
+    base_url 指向服务根，例如 http://localhost:9111 或 https://tm.example.com
+    认证通过 TEAM_MEMORY_API_KEY 环境变量读取，写入 Authorization: Bearer header。
+    """
+
+    # MCP 操作名 → 实际 REST 路径（相对于 /mcp/）
+    _ROUTES: dict[str, tuple[str, str]] = {
+        "draft_save":          ("POST", "/mcp/draft-save"),
+        "draft_publish":       ("POST", "/mcp/draft-publish"),
+        "save":                ("POST", "/mcp/save"),
+        "recall":              ("POST", "/mcp/recall"),
+        "context":             ("POST", "/mcp/context"),
+        "archive_upsert":      ("POST", "/mcp/archive-upsert"),
+        "get_archive":         ("GET",  "/mcp/archive/{archive_id}"),
+        "feedback":            ("POST", "/mcp/feedback"),
+        # update_experience 暂无 /mcp/ 端点，fallback 到 REST API
+        "update_experience":   ("PUT",  "/api/v1/experiences/{experience_id}"),
+    }
 
     def __init__(self, base_url: str, user: str = "daemon") -> None:
         self._base_url = base_url.rstrip("/")
         self._user = user
+        import os
+        self._api_key = os.environ.get("TEAM_MEMORY_API_KEY", "")
 
-    async def _post(self, tool_name: str, arguments: dict[str, Any]) -> Any:
-        """发送 POST 请求到远程 TM 服务。"""
-        url = f"{self._base_url}/{tool_name}"
-        payload = {"arguments": arguments}
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(url, json=payload)
+    def _headers(self) -> dict[str, str]:
+        h: dict[str, str] = {"Content-Type": "application/json"}
+        if self._api_key:
+            h["Authorization"] = f"Bearer {self._api_key}"
+        return h
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None = None,
+        path_params: dict[str, str] | None = None,
+    ) -> Any:
+        """发送 HTTP 请求到 team_memory_service。"""
+        if path_params:
+            path = path.format(**path_params)
+        url = f"{self._base_url}{path}"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            if method == "GET":
+                resp = await client.get(url, headers=self._headers())
+            else:
+                resp = await client.request(method, url, json=body or {}, headers=self._headers())
             resp.raise_for_status()
             return resp.json()
 
@@ -262,17 +339,20 @@ class RemoteTMSink(TMSink):
         project: str | None = None,
         group_key: str | None = None,
         conversation_id: str | None = None,
+        skip_dedup: bool = False,
     ) -> dict:
-        args: dict[str, Any] = {"title": title, "content": content}
+        body: dict[str, Any] = {"title": title, "content": content}
         if tags is not None:
-            args["tags"] = tags
+            body["tags"] = tags
         if project is not None:
-            args["project"] = project
+            body["project"] = project
         if group_key is not None:
-            args["group_key"] = group_key
+            body["group_key"] = group_key
         if conversation_id is not None:
-            args["conversation_id"] = conversation_id
-        return await self._post("memory_draft_save", args)
+            body["conversation_id"] = conversation_id
+        if skip_dedup:
+            body["skip_dedup"] = skip_dedup
+        return await self._request("POST", "/mcp/draft-save", body)
 
     async def draft_publish(
         self,
@@ -280,10 +360,10 @@ class RemoteTMSink(TMSink):
         draft_id: str,
         refined_content: str | None = None,
     ) -> dict:
-        args: dict[str, Any] = {"draft_id": draft_id}
+        body: dict[str, Any] = {"draft_id": draft_id}
         if refined_content is not None:
-            args["refined_content"] = refined_content
-        return await self._post("memory_draft_publish", args)
+            body["refined_content"] = refined_content
+        return await self._request("POST", "/mcp/draft-publish", body)
 
     async def save(
         self,
@@ -298,26 +378,26 @@ class RemoteTMSink(TMSink):
         project: str | None = None,
         group_key: str | None = None,
     ) -> dict:
-        args: dict[str, Any] = {}
+        body: dict[str, Any] = {}
         if title is not None:
-            args["title"] = title
+            body["title"] = title
         if problem is not None:
-            args["problem"] = problem
+            body["problem"] = problem
         if solution is not None:
-            args["solution"] = solution
+            body["solution"] = solution
         if content is not None:
-            args["content"] = content
+            body["content"] = content
         if tags is not None:
-            args["tags"] = tags
+            body["tags"] = tags
         if scope is not None:
-            args["scope"] = scope
+            body["scope"] = scope
         if experience_type is not None:
-            args["experience_type"] = experience_type
+            body["experience_type"] = experience_type
         if project is not None:
-            args["project"] = project
+            body["project"] = project
         if group_key is not None:
-            args["group_key"] = group_key
-        return await self._post("memory_save", args)
+            body["group_key"] = group_key
+        return await self._request("POST", "/mcp/save", body)
 
     async def recall(
         self,
@@ -331,24 +411,24 @@ class RemoteTMSink(TMSink):
         max_results: int = 5,
         project: str | None = None,
     ) -> list[dict]:
-        args: dict[str, Any] = {}
+        body: dict[str, Any] = {}
         if query is not None:
-            args["query"] = query
+            body["query"] = query
         if problem is not None:
-            args["problem"] = problem
+            body["problem"] = problem
         if file_path is not None:
-            args["file_path"] = file_path
+            body["file_path"] = file_path
         if language is not None:
-            args["language"] = language
+            body["language"] = language
         if framework is not None:
-            args["framework"] = framework
+            body["framework"] = framework
         if tags is not None:
-            args["tags"] = tags
+            body["tags"] = tags
         if max_results != 5:
-            args["max_results"] = max_results
+            body["max_results"] = max_results
         if project is not None:
-            args["project"] = project
-        raw = await self._post("memory_recall", args)
+            body["project"] = project
+        raw = await self._request("POST", "/mcp/recall", body)
         if isinstance(raw, dict):
             return raw.get("results", [])
         return []
@@ -360,14 +440,43 @@ class RemoteTMSink(TMSink):
         task_description: str | None = None,
         project: str | None = None,
     ) -> dict:
-        args: dict[str, Any] = {}
+        body: dict[str, Any] = {}
         if file_paths is not None:
-            args["file_paths"] = file_paths
+            body["file_paths"] = file_paths
         if task_description is not None:
-            args["task_description"] = task_description
+            body["task_description"] = task_description
         if project is not None:
-            args["project"] = project
-        return await self._post("memory_context", args)
+            body["project"] = project
+        return await self._request("POST", "/mcp/context", body)
+
+    async def update_experience(
+        self,
+        *,
+        experience_id: str,
+        title: str | None = None,
+        problem: str | None = None,
+        solution: str | None = None,
+        tags: list[str] | None = None,
+        experience_type: str | None = None,
+        exp_status: str | None = None,
+    ) -> dict:
+        body: dict[str, Any] = {}
+        if title is not None:
+            body["title"] = title
+        if problem is not None:
+            body["problem"] = problem
+        if solution is not None:
+            body["solution"] = solution
+        if tags is not None:
+            body["tags"] = tags
+        if experience_type is not None:
+            body["experience_type"] = experience_type
+        if exp_status is not None:
+            body["exp_status"] = exp_status
+        return await self._request(
+            "PUT", "/api/v1/experiences/{experience_id}", body,
+            path_params={"experience_id": experience_id},
+        )
 
 
 # ---------------------------------------------------------------------------

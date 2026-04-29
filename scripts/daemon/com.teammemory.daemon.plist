@@ -6,16 +6,18 @@
     <string>com.teammemory.daemon</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/yeshouyou/Work/agent/team_doc/.venv/bin/python</string>
-        <string>-m</string>
-        <string>daemon</string>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>cd __REPO_ROOT__ &amp;&amp; set -a &amp;&amp; source .env &amp;&amp; set +a &amp;&amp; exec __PYTHON_PATH__ -m daemon</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/yeshouyou/Work/agent/team_doc</string>
+    <string>__REPO_ROOT__</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PYTHONPATH</key>
-        <string>src:scripts</string>
+        <string>__REPO_ROOT__/src:__REPO_ROOT__/scripts</string>
+        <key>LOG_FORMAT</key>
+        <string>json</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>

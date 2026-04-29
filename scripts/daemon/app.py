@@ -101,8 +101,10 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         # draft_save to return {"error": True} with no "id" field.
         if config.tm.mode == "local":
             from team_memory.bootstrap import bootstrap as _tm_bootstrap  # noqa: PLC0415
-            _tm_bootstrap(enable_background=True)
-            logger.info("TM AppContext bootstrapped for local mode (background=True)")
+            # enable_background=False: Janitor scheduler runs exclusively in
+            # team_memory_service (Docker). Daemon must not start a duplicate.
+            _tm_bootstrap(enable_background=False)
+            logger.info("TM AppContext bootstrapped for local mode (background=False)")
 
         sink_config = {
             "mode": config.tm.mode,
@@ -220,7 +222,18 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                 project=resolved_project or None,
             )
             if marked > 0:
-                logger.info("[EVAL]  marked %d search_log(s) as was_used", marked)
+                logger.info("[EVAL]  marked %d search_log(s) as was_used (marker)", marked)
+
+            # Fuzzy match: check unjudged logs for keyword overlap
+            eval_config = app.state.config.evaluation
+            if eval_config.fuzzy_match_enabled:
+                fuzzy_marked = await search_log.mark_used_fuzzy(
+                    response_text,
+                    project=resolved_project or None,
+                    threshold=eval_config.fuzzy_match_threshold,
+                )
+                if fuzzy_marked > 0:
+                    logger.info("[EVAL]  marked %d search_log(s) as was_used (fuzzy)", fuzzy_marked)
         return result
 
     @app.post("/hooks/session_start")

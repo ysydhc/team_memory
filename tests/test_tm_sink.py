@@ -275,7 +275,7 @@ class TestRemoteTMSink:
 
         with patch("daemon.tm_sink.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
-            mock_client.post.return_value = mock_response
+            mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -285,16 +285,16 @@ class TestRemoteTMSink:
                 tags=["remote"],
                 project="proj",
             )
-            mock_client.post.assert_awaited_once_with(
-                "http://tm:3900/memory_draft_save",
+            mock_client.request.assert_awaited_once_with(
+                "POST",
+                "http://tm:3900/mcp/draft-save",
                 json={
-                    "arguments": {
-                        "title": "远程标题",
-                        "content": "远程内容",
-                        "tags": ["remote"],
-                        "project": "proj",
-                    },
+                    "title": "远程标题",
+                    "content": "远程内容",
+                    "tags": ["remote"],
+                    "project": "proj",
                 },
+                headers=mock_client.request.call_args.kwargs["headers"],
             )
             assert result == {"id": "draft-1", "status": "draft"}
 
@@ -309,7 +309,7 @@ class TestRemoteTMSink:
 
         with patch("daemon.tm_sink.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
-            mock_client.post.return_value = mock_response
+            mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -317,14 +317,11 @@ class TestRemoteTMSink:
                 draft_id="draft-1",
                 refined_content="精炼",
             )
-            mock_client.post.assert_awaited_once_with(
-                "http://tm:3900/memory_draft_publish",
-                json={
-                    "arguments": {
-                        "draft_id": "draft-1",
-                        "refined_content": "精炼",
-                    },
-                },
+            mock_client.request.assert_awaited_once_with(
+                "POST",
+                "http://tm:3900/mcp/draft-publish",
+                json={"draft_id": "draft-1", "refined_content": "精炼"},
+                headers=mock_client.request.call_args.kwargs["headers"],
             )
             assert result == {"id": "draft-1", "status": "published"}
 
@@ -339,25 +336,25 @@ class TestRemoteTMSink:
 
         with patch("daemon.tm_sink.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
-            mock_client.post.return_value = mock_response
+            mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
             result = await sink.save(
                 title="T", problem="P", solution="S", tags=["t"], project="proj"
             )
-            mock_client.post.assert_awaited_once_with(
-                "http://tm:3900/memory_save",
+            mock_client.request.assert_awaited_once_with(
+                "POST",
+                "http://tm:3900/mcp/save",
                 json={
-                    "arguments": {
-                        "title": "T",
-                        "problem": "P",
-                        "solution": "S",
-                        "tags": ["t"],
-                        "scope": "project",
-                        "project": "proj",
-                    },
+                    "title": "T",
+                    "problem": "P",
+                    "solution": "S",
+                    "tags": ["t"],
+                    "scope": "project",
+                    "project": "proj",
                 },
+                headers=mock_client.request.call_args.kwargs["headers"],
             )
 
     @pytest.mark.asyncio
@@ -374,7 +371,7 @@ class TestRemoteTMSink:
 
         with patch("daemon.tm_sink.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
-            mock_client.post.return_value = mock_response
+            mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -392,7 +389,7 @@ class TestRemoteTMSink:
 
         with patch("daemon.tm_sink.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
-            mock_client.post.return_value = mock_response
+            mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -410,20 +407,20 @@ class TestRemoteTMSink:
 
         with patch("daemon.tm_sink.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
-            mock_client.post.return_value = mock_response
+            mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
             result = await sink.context(file_paths=["a.py"], task_description="task", project="proj")
-            mock_client.post.assert_awaited_once_with(
-                "http://tm:3900/memory_context",
+            mock_client.request.assert_awaited_once_with(
+                "POST",
+                "http://tm:3900/mcp/context",
                 json={
-                    "arguments": {
-                        "file_paths": ["a.py"],
-                        "task_description": "task",
-                        "project": "proj",
-                    },
+                    "file_paths": ["a.py"],
+                    "task_description": "task",
+                    "project": "proj",
                 },
+                headers=mock_client.request.call_args.kwargs["headers"],
             )
             assert result["user"] == "ruser"
 

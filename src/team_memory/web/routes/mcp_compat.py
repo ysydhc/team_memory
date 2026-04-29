@@ -250,3 +250,75 @@ async def mcp_feedback(
     except Exception as e:
         logger.exception("mcp_compat feedback failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# ============================================================
+# Draft pipeline endpoints (used by Daemon RemoteTMSink)
+# ============================================================
+
+
+class McpDraftSaveRequest(BaseModel):
+    title: str
+    content: str
+    tags: list[str] | None = None
+    project: str | None = None
+    group_key: str | None = None
+    conversation_id: str | None = None
+    skip_dedup: bool = False
+
+
+class McpDraftPublishRequest(BaseModel):
+    draft_id: str
+    refined_content: str | None = None
+
+
+@router.post("/draft-save")
+async def mcp_draft_save(
+    body: McpDraftSaveRequest,
+    user: User = Depends(get_current_user),
+):
+    """POST /mcp/draft-save — same contract as memory_draft_save.
+
+    Used by Daemon RemoteTMSink to persist drafts into team_memory_service.
+    """
+    uid = user.name
+    try:
+        result = await memory_operations.op_draft_save(
+            uid,
+            title=body.title,
+            content=body.content,
+            tags=body.tags,
+            project=body.project,
+            group_key=body.group_key,
+            conversation_id=body.conversation_id,
+        )
+        return _json_response(result, user=uid, tool_name="draft_save")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("mcp_compat draft_save failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/draft-publish")
+async def mcp_draft_publish(
+    body: McpDraftPublishRequest,
+    user: User = Depends(get_current_user),
+):
+    """POST /mcp/draft-publish — same contract as memory_draft_publish.
+
+    Used by Daemon RemoteTMSink to promote a draft to published experience.
+    """
+    uid = user.name
+    try:
+        result = await memory_operations.op_draft_publish(
+            uid,
+            draft_id=body.draft_id,
+            refined_content=body.refined_content,
+        )
+        return _json_response(result, user=uid, tool_name="draft_publish")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("mcp_compat draft_publish failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
