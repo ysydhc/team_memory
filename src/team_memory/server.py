@@ -512,12 +512,38 @@ async def memory_draft_publish(
 
 
 def main() -> None:
-    """Run the Lite MCP server (stdio mode)."""
+    """Run the Lite MCP server (stdio mode).
+
+    Two operating modes, selected by environment variables:
+
+    LOCAL mode (default):
+        Bootstraps a local AppContext, connects directly to PostgreSQL.
+        Requires DB_URL, TEAM_MEMORY_API_KEY, and Ollama/embedding service.
+
+    REMOTE mode (set TEAM_MEMORY_REMOTE_URL):
+        No local DB or AppContext. All op_* calls are forwarded via HTTP to
+        a remote team_memory_service instance (Docker / server).
+        Requires TEAM_MEMORY_REMOTE_URL and TEAM_MEMORY_API_KEY.
+        Example:
+            export TEAM_MEMORY_REMOTE_URL=http://your-server:9111
+            export TEAM_MEMORY_API_KEY=your-key
+            python -m team_memory.server
+    """
     logging.basicConfig(level=logging.INFO)
-    bootstrap(enable_background=False)
+
+    remote_url = os.environ.get("TEAM_MEMORY_REMOTE_URL", "").strip()
+    if remote_url:
+        # Remote mode: patch memory_operations with HTTP client, skip bootstrap
+        from team_memory.remote_client import setup_remote_ops
+        api_key = os.environ.get("TEAM_MEMORY_API_KEY", "")
+        setup_remote_ops(base_url=remote_url, api_key=api_key)
+    else:
+        # Local mode: bootstrap AppContext with direct DB connection
+        bootstrap(enable_background=False)
+
     logger.info(
-        "TeamMemory Lite server started with %d tools",
-        len([t for t in dir(mcp) if not t.startswith("_")]),
+        "TeamMemory MCP server started (mode=%s)",
+        "remote" if remote_url else "local",
     )
     mcp.run()
 
