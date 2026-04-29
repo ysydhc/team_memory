@@ -56,6 +56,10 @@ async def process_after_response(
         logger.debug("No project resolved for workspace: %s", workspace_roots)
         return {"action": "ok", "convergence": False, "draft_id": ""}
 
+    if not response_text.strip():
+        logger.debug("Empty response_text, skipping draft pipeline for session=%s", session_id)
+        return {"action": "ok", "convergence": False, "draft_id": ""}
+
     # Get existing pending draft for this session
     existing = await buf.get_pending(session_id)
 

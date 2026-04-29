@@ -97,16 +97,14 @@ async def test_response_text_takes_precedence_over_prompt():
 
 @pytest.mark.asyncio
 async def test_empty_content_skips_save():
-    """If both fields are empty, pipeline should not crash and takes ok action."""
+    """If both fields are empty (or whitespace-only), pipeline skips draft creation."""
     config, sink, buf, detector, refiner = _make_mocks(converged=False)
 
-    payload = {
-        "conversation_id": "sess-4",
-        "response_text": "",
-        "prompt": "",
-        "workspace_roots": ["/repo"],
-    }
-
-    result = await process_after_response(payload, config, sink, buf, detector, refiner)
-    # Should not raise; returns some dict
-    assert isinstance(result, dict)
+    for payload in [
+        {"conversation_id": "sess-4", "response_text": "", "prompt": "", "workspace_roots": ["/repo"]},
+        {"conversation_id": "sess-5", "response_text": "\n\n", "prompt": "\n", "workspace_roots": ["/repo"]},
+    ]:
+        refiner.save_draft.reset_mock()
+        result = await process_after_response(payload, config, sink, buf, detector, refiner)
+        assert isinstance(result, dict)
+        refiner.save_draft.assert_not_called()
