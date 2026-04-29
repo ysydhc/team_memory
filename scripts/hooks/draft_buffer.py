@@ -25,9 +25,15 @@ CREATE TABLE IF NOT EXISTS drafts (
     status TEXT DEFAULT 'pending',
     source TEXT DEFAULT 'pipeline',
     group_key TEXT,
+    tm_id TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
+"""
+
+# Migration: add tm_id column to existing databases that lack it.
+_ADD_TM_ID_COL = """
+ALTER TABLE drafts ADD COLUMN tm_id TEXT
 """
 
 
@@ -57,6 +63,11 @@ class DraftBuffer:
         self._db = await aiosqlite.connect(self._db_path)
         self._db.row_factory = aiosqlite.Row
         await self._db.execute(_CREATE_TABLE)
+        # Migrate: add tm_id column if missing (existing DBs)
+        try:
+            await self._db.execute(_ADD_TM_ID_COL)
+        except aiosqlite.OperationalError:
+            pass  # Column already exists
         await self._db.commit()
         return self
 
@@ -387,3 +398,23 @@ class DraftBuffer:
             (now, session_id),
         )
         await db.commit()
+
+    async def set_tm_id(self, draft_id: str, tm_id: str) -> None:
+        """Store the PG experience id for a local draft.
+
+        Called by DraftRefiner.save_draft after successfully writing to PG,
+        so that refine_and_publish can later use the correct PG id.
+
+        Args:
+            draft_id: The local buffer UUID of the draft.
+            tm_id: The PG experience UUID returned by sink.draft_save().
+        """
+        db = self._require_db()
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = await db.execute(
+            "UPDATE drafts SET tm_id = ?, updated_at = ? WHERE id = ?",
+            (tm_id, now, draft_id),
+        )
+        await db.commit()
+        if cursor.rowcount == 0:
+            raise ValueError(f"Draft '{draft_id}' not found")

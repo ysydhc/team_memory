@@ -10,7 +10,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
+import logging
+
 from daemon.tm_sink import TMSink
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Factual-keyword list (simple heuristic)
@@ -75,7 +79,7 @@ class DraftRefiner:
         )
 
         # Sync to local buffer so we can track pending drafts by session.
-        await self._buf.upsert_draft(
+        local_id = await self._buf.upsert_draft(
             session_id=session_id,
             title=title,
             content=content,
@@ -83,10 +87,19 @@ class DraftRefiner:
             group_key=group_key,
         )
 
+        # Write PG experience id back to buffer so refine_and_publish
+        # can use the correct id instead of the local buffer id.
+        pg_id = tm_response.get("id") if not tm_response.get("error") else None
+        if pg_id and local_id:
+            await self._buf.set_tm_id(local_id, pg_id)
+
         return tm_response
 
     async def refine_and_publish(self, session_id: str) -> dict | None:
-        """Refine pending drafts for *session_id* and publish to TM.
+        """Fallback path: refine draft immediately (old behaviour).
+
+        Now used only when LLM refinement is disabled or for session-end flush.
+        Extracts keywords and publishes directly without LLM structured extraction.
 
         Steps:
           1. Get pending drafts from DraftBuffer for this session.
@@ -113,9 +126,9 @@ class DraftRefiner:
         facts = self.extract_facts(accumulated)
         refined_content = "\n".join(facts) if facts else accumulated
 
-        # Use the first pending draft's id as the TM draft_id.
+        # Use tm_id (PG experience id) if available, fallback to local id.
         first_draft = pending[0]
-        draft_id = first_draft.get("id", first_draft.get("draft_id", ""))
+        draft_id = first_draft.get("tm_id") or first_draft.get("id", first_draft.get("draft_id", ""))
 
         # Publish via TM.
         await self._sink.draft_publish(draft_id=draft_id, refined_content=refined_content)
@@ -124,6 +137,29 @@ class DraftRefiner:
         await self._buf.mark_published_by_session(session_id)
 
         return {"draft_id": draft_id, "status": "published"}
+
+    async def mark_for_refinement(self, session_id: str) -> dict | None:
+        """Mark a pending draft as needing LLM refinement.
+
+        Called by the pipeline when convergence is detected.
+        The RefinementWorker will later pick it up, call LLM, and publish.
+
+        Args:
+            session_id: The session identifier.
+
+        Returns:
+            Dict with draft_id if successful, None if no draft found.
+        """
+        pending = await self._buf.get_pending(session_id)
+        if not pending:
+            logger.warning("No pending draft for session %s to mark for refinement", session_id)
+            return None
+
+        first_draft = pending[0]
+        draft_id = first_draft.get("id", first_draft.get("draft_id", ""))
+        await self._buf.mark_needs_refinement(draft_id)
+        logger.info("[REFINE] Draft %s marked as needs_refinement", draft_id)
+        return {"draft_id": draft_id, "status": "needs_refinement"}
 
     # ------------------------------------------------------------------
     # Static helpers
