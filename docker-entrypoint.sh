@@ -14,7 +14,17 @@ PG_DB="${TEAM_MEMORY_PG_DB:-team_memory}"
 echo "[1/5] Waiting for PostgreSQL at ${PG_HOST}:${PG_PORT}..."
 MAX_RETRIES=30
 RETRY=0
-while ! pg_isready -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB" -q 2>/dev/null; do
+while ! python3 -c "
+import socket, sys
+s = socket.socket()
+s.settimeout(2)
+try:
+    s.connect(('${PG_HOST}', ${PG_PORT}))
+    s.close()
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; do
     RETRY=$((RETRY + 1))
     if [ "$RETRY" -ge "$MAX_RETRIES" ]; then
         echo "ERROR: PostgreSQL not ready after ${MAX_RETRIES} attempts. Exiting."

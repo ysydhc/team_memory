@@ -94,7 +94,7 @@ class RemoteMCPClient:
             body["project"] = project
         if group_key is not None:
             body["group_key"] = group_key
-        return await self._post("/mcp/save", body)
+        return await self._post("/api/v1/mcp/save", body)
 
     async def op_recall(
         self,
@@ -131,7 +131,7 @@ class RemoteMCPClient:
             body["project"] = project
         if include_archives is not None:
             body["include_archives"] = include_archives
-        return await self._post("/mcp/recall", body)
+        return await self._post("/api/v1/mcp/recall", body)
 
     async def op_context(
         self,
@@ -148,7 +148,7 @@ class RemoteMCPClient:
             body["task_description"] = task_description
         if project is not None:
             body["project"] = project
-        return await self._post("/mcp/context", body)
+        return await self._post("/api/v1/mcp/context", body)
 
     async def op_get_archive(
         self,
@@ -160,7 +160,7 @@ class RemoteMCPClient:
         params: dict[str, Any] = {}
         if project is not None:
             params["project"] = project
-        return await self._get(f"/mcp/archive/{archive_id}", params=params or None)
+        return await self._get(f"/api/v1/mcp/archive/{archive_id}", params=params or None)
 
     async def op_archive_upsert(
         self,
@@ -201,7 +201,7 @@ class RemoteMCPClient:
             body["project"] = project
         if scope_ref is not None:
             body["scope_ref"] = scope_ref
-        return await self._post("/mcp/archive-upsert", body)
+        return await self._post("/api/v1/mcp/archive-upsert", body)
 
     async def op_feedback(
         self,
@@ -217,7 +217,7 @@ class RemoteMCPClient:
         }
         if comment is not None:
             body["comment"] = comment
-        return await self._post("/mcp/feedback", body)
+        return await self._post("/api/v1/mcp/feedback", body)
 
     async def op_draft_save(
         self,
@@ -239,7 +239,7 @@ class RemoteMCPClient:
             body["group_key"] = group_key
         if conversation_id is not None:
             body["conversation_id"] = conversation_id
-        return await self._post("/mcp/draft-save", body)
+        return await self._post("/api/v1/mcp/draft-save", body)
 
     async def op_draft_publish(
         self,
@@ -251,7 +251,7 @@ class RemoteMCPClient:
         body: dict[str, Any] = {"draft_id": draft_id}
         if refined_content is not None:
             body["refined_content"] = refined_content
-        return await self._post("/mcp/draft-publish", body)
+        return await self._post("/api/v1/mcp/draft-publish", body)
 
 
 def setup_remote_ops(base_url: str, api_key: str) -> RemoteMCPClient:

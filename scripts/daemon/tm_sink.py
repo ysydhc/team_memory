@@ -285,16 +285,16 @@ class RemoteTMSink(TMSink):
     认证通过 TEAM_MEMORY_API_KEY 环境变量读取，写入 Authorization: Bearer header。
     """
 
-    # MCP 操作名 → 实际 REST 路径（相对于 /mcp/）
+    # MCP 操作名 → 实际 REST 路径
     _ROUTES: dict[str, tuple[str, str]] = {
-        "draft_save":          ("POST", "/mcp/draft-save"),
-        "draft_publish":       ("POST", "/mcp/draft-publish"),
-        "save":                ("POST", "/mcp/save"),
-        "recall":              ("POST", "/mcp/recall"),
-        "context":             ("POST", "/mcp/context"),
-        "archive_upsert":      ("POST", "/mcp/archive-upsert"),
-        "get_archive":         ("GET",  "/mcp/archive/{archive_id}"),
-        "feedback":            ("POST", "/mcp/feedback"),
+        "draft_save":          ("POST", "/api/v1/mcp/draft-save"),
+        "draft_publish":       ("POST", "/api/v1/mcp/draft-publish"),
+        "save":                ("POST", "/api/v1/mcp/save"),
+        "recall":              ("POST", "/api/v1/mcp/recall"),
+        "context":             ("POST", "/api/v1/mcp/context"),
+        "archive_upsert":      ("POST", "/api/v1/mcp/archive-upsert"),
+        "get_archive":         ("GET",  "/api/v1/mcp/archive/{archive_id}"),
+        "feedback":            ("POST", "/api/v1/mcp/feedback"),
         # update_experience 暂无 /mcp/ 端点，fallback 到 REST API
         "update_experience":   ("PUT",  "/api/v1/experiences/{experience_id}"),
     }
@@ -352,7 +352,7 @@ class RemoteTMSink(TMSink):
             body["conversation_id"] = conversation_id
         if skip_dedup:
             body["skip_dedup"] = skip_dedup
-        return await self._request("POST", "/mcp/draft-save", body)
+        return await self._request("POST", "/api/v1/mcp/draft-save", body)
 
     async def draft_publish(
         self,
@@ -363,7 +363,7 @@ class RemoteTMSink(TMSink):
         body: dict[str, Any] = {"draft_id": draft_id}
         if refined_content is not None:
             body["refined_content"] = refined_content
-        return await self._request("POST", "/mcp/draft-publish", body)
+        return await self._request("POST", "/api/v1/mcp/draft-publish", body)
 
     async def save(
         self,
@@ -397,7 +397,7 @@ class RemoteTMSink(TMSink):
             body["project"] = project
         if group_key is not None:
             body["group_key"] = group_key
-        return await self._request("POST", "/mcp/save", body)
+        return await self._request("POST", "/api/v1/mcp/save", body)
 
     async def recall(
         self,
@@ -428,7 +428,7 @@ class RemoteTMSink(TMSink):
             body["max_results"] = max_results
         if project is not None:
             body["project"] = project
-        raw = await self._request("POST", "/mcp/recall", body)
+        raw = await self._request("POST", "/api/v1/mcp/recall", body)
         if isinstance(raw, dict):
             return raw.get("results", [])
         return []
@@ -447,7 +447,7 @@ class RemoteTMSink(TMSink):
             body["task_description"] = task_description
         if project is not None:
             body["project"] = project
-        return await self._request("POST", "/mcp/context", body)
+        return await self._request("POST", "/api/v1/mcp/context", body)
 
     async def update_experience(
         self,

@@ -69,6 +69,8 @@ services:
       - ./src:/app/live-src:ro
     environment:
       TEAM_MEMORY_DB_URL: "postgresql+asyncpg://developer:devpass@postgres:5432/team_memory"
+      TEAM_MEMORY_DATABASE__URL: "postgresql+asyncpg://developer:devpass@postgres:5432/team_memory"
+      TEAM_MEMORY_PG_HOST: "postgres"
       TEAM_MEMORY_WEB_HOST: "0.0.0.0"
       TEAM_MEMORY_WEB_PORT: "9111"
       PYTHONPATH: /app/live-src
