@@ -6,12 +6,21 @@ draft buffer, convergence detection, refinement, and TMSink calls.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from daemon.config import DaemonConfig
 from daemon.tm_sink import TMSink
 
 logger = logging.getLogger("tm_daemon.pipeline")
+
+# Pattern: [mem:uuid] markers injected by search_orchestrator
+_MEM_REF_RE = re.compile(r"\[mem:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]", re.IGNORECASE)
+
+
+def _extract_mem_references(text: str) -> list[str]:
+    """Extract [mem:uuid] references from text, return unique experience IDs."""
+    return list(dict.fromkeys(_MEM_REF_RE.findall(text)))
 
 
 def _resolve_project(workspace_roots: list[str], config: DaemonConfig) -> str | None:
@@ -51,6 +60,16 @@ async def process_after_response(
     response_text = input_data.get("response_text") or input_data.get("prompt", "") or ""
     workspace_roots = input_data.get("workspace_roots", [])
     project = _resolve_project(workspace_roots, config)
+
+    # Detect [mem:xxx] references in response text → increment used_count
+    referenced_ids = _extract_mem_references(response_text)
+    if referenced_ids:
+        for exp_id in referenced_ids:
+            try:
+                await sink.increment_used_count(exp_id)
+                logger.info("[USED] referenced experience %s → used_count+1", exp_id[:8])
+            except Exception:
+                logger.debug("Failed to increment used_count for %s", exp_id[:8], exc_info=True)
 
     if project is None:
         logger.debug("No project resolved for workspace: %s", workspace_roots)

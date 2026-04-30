@@ -131,6 +131,10 @@ class TMSink(ABC):
     ) -> dict:
         """获取上下文（用户画像 + 相关经验）。"""
 
+    @abstractmethod
+    async def increment_used_count(self, experience_id: str) -> None:
+        """Increment used_count for an experience (agent referenced it)."""
+
 
 # ---------------------------------------------------------------------------
 # LocalTMSink — 直接 Python 调用
@@ -271,6 +275,18 @@ class LocalTMSink(TMSink):
             task_description=task_description,
             project=project,
         )
+
+    async def increment_used_count(self, experience_id: str) -> None:
+        """Increment used_count via direct DB access."""
+        _ensure_ops()
+        import uuid as _uuid
+        from team_memory.storage.database import get_session
+        from team_memory.storage.repository import ExperienceRepository
+        async for session in get_session():
+            repo = ExperienceRepository(session)
+            await repo.increment_used_count(_uuid.UUID(experience_id))
+            await session.commit()
+            break
 
 
 # ---------------------------------------------------------------------------
@@ -477,6 +493,18 @@ class RemoteTMSink(TMSink):
             "PUT", "/api/v1/experiences/{experience_id}", body,
             path_params={"experience_id": experience_id},
         )
+
+    async def increment_used_count(self, experience_id: str) -> None:
+        """Increment used_count via feedback endpoint (rating=5 triggers used_count+1)."""
+        body: dict[str, Any] = {
+            "experience_id": experience_id,
+            "rating": 5,
+            "comment": "auto:referenced",
+        }
+        try:
+            await self._request("POST", "/api/v1/mcp/feedback", body)
+        except Exception:
+            logger.debug("Remote increment_used_count failed for %s", experience_id, exc_info=True)
 
 
 # ---------------------------------------------------------------------------

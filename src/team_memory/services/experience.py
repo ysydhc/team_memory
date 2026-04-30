@@ -532,6 +532,7 @@ class ExperienceService:
             # Add quality score bonus for positive feedback (rating >= 4)
             if rating >= 4:
                 await repo.increment_quality_score(exp_uuid, 1.0)
+                await repo.increment_used_count(exp_uuid)
 
             await self._event_bus.emit(
                 Events.FEEDBACK_ADDED,

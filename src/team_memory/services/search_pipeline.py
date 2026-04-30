@@ -304,6 +304,12 @@ class SearchPipeline:
         # Stage 5: Exact match boost
         candidates = self._apply_exact_match_boost(candidates, request.query)
 
+        # Stage 5b: Popularity boost (反哺排序)
+        stage_begin = time.monotonic()
+        if self._search_config.popularity_enabled and candidates:
+            candidates = self._apply_popularity_boost(candidates)
+        stage_metrics["popularity_boost_ms"] = int((time.monotonic() - stage_begin) * 1000)
+
         total_candidates = len(candidates)
 
         # Stage 6: Adaptive Filtering
@@ -641,6 +647,98 @@ class SearchPipeline:
                 item.score = float(item.score) + boost
             else:
                 data["exact_title_match"] = ""
+
+        candidates.sort(key=lambda x: x.score, reverse=True)
+        return candidates
+
+    def _apply_popularity_boost(
+        self, candidates: list[SearchResultItem]
+    ) -> list[SearchResultItem]:
+        """Boost score based on recall_count and used_count with time decay.
+
+        Formula (multiplicative boost + log compression):
+            popularity = log(1 + α·recall_count + β·used_count)
+            effective_age = max(days(updated_at), days(created_at) × floor_ratio)
+            decay = exp(-λ × effective_age)
+            boost = 1 + popularity × decay × γ
+            final_score = rrf_score × boost
+
+        This ensures:
+        - Experiences never recalled get no boost (boost=1.0).
+        - Popular experiences are amplified proportionally, but log prevents
+          recall_count=100 from dominating recall_count=10.
+        - Time decay reduces boost for stale experiences.
+        - Age floor prevents valid-but-unused experiences from decaying too fast.
+        """
+        import math
+        from datetime import datetime, timezone
+
+        cfg = self._search_config
+        alpha = cfg.popularity_recall_weight   # 0.02
+        beta = cfg.popularity_used_weight       # 0.1
+        lam = cfg.popularity_decay_lambda       # 0.05
+        floor_ratio = cfg.popularity_age_floor_ratio  # 0.3
+        gamma = cfg.popularity_scale            # 0.3
+
+        now = datetime.now(timezone.utc)
+
+        for item in candidates:
+            data = item.data
+            recall_count = int(data.get("recall_count", 0) or 0)
+            used_count = int(data.get("used_count", 0) or 0)
+
+            if recall_count == 0 and used_count == 0:
+                # No popularity signal — skip computation
+                data["popularity_boost"] = 1.0
+                continue
+
+            # Popularity with log compression
+            popularity = math.log(1 + alpha * recall_count + beta * used_count)
+
+            # Time decay with age floor
+            # raw_age is based on updated_at (most recent activity)
+            age_days = 0.0
+            updated_raw = data.get("updated_at")
+            if updated_raw:
+                try:
+                    if isinstance(updated_raw, str):
+                        ts = datetime.fromisoformat(updated_raw)
+                    elif isinstance(updated_raw, datetime):
+                        ts = updated_raw
+                    else:
+                        ts = None
+                    if ts:
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        age_days = (now - ts).total_seconds() / 86400
+                except (ValueError, TypeError):
+                    pass
+
+            # Apply age floor: effective_age = max(raw_age, created_age × ratio)
+            created_age = 0.0
+            created_raw = data.get("created_at")
+            if created_raw:
+                try:
+                    if isinstance(created_raw, str):
+                        cts = datetime.fromisoformat(created_raw)
+                    elif isinstance(created_raw, datetime):
+                        cts = created_raw
+                    else:
+                        cts = None
+                    if cts:
+                        if cts.tzinfo is None:
+                            cts = cts.replace(tzinfo=timezone.utc)
+                        created_age = (now - cts).total_seconds() / 86400
+                except (ValueError, TypeError):
+                    pass
+            floor_age = created_age * floor_ratio
+            effective_age = max(age_days, floor_age)
+
+            decay = math.exp(-lam * effective_age)
+            boost = 1.0 + popularity * decay * gamma
+
+            item.score = float(item.score) * boost
+            data["popularity_boost"] = round(boost, 4)
 
         candidates.sort(key=lambda x: x.score, reverse=True)
         return candidates

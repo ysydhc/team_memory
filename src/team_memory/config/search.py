@@ -59,6 +59,32 @@ class SearchConfig(BaseModel):
     query_expansion_enabled: bool = False
     query_expansion_timeout_seconds: float = 3.0
 
+    # Popularity boost (反哺排序)
+    popularity_enabled: bool = Field(
+        default=True,
+        description="Enable popularity-based score boost using recall_count/used_count.",
+    )
+    popularity_recall_weight: float = Field(
+        default=0.02,
+        description="Weight for recall_count in popularity score (α). Recall is frequent but weak signal.",
+    )
+    popularity_used_weight: float = Field(
+        default=0.1,
+        description="Weight for used_count in popularity score (β). Used is rare but strong signal.",
+    )
+    popularity_decay_lambda: float = Field(
+        default=0.05,
+        description="Time decay coefficient (λ). exp(-λ×days). ~14-day half-life at 0.05.",
+    )
+    popularity_age_floor_ratio: float = Field(
+        default=0.3,
+        description="Floor ratio for age decay: effective_age = max(days(updated_at), days(created_at)×ratio).",
+    )
+    popularity_scale: float = Field(
+        default=0.3,
+        description="Overall scale factor (γ) for popularity boost. Prevents popularity from overwhelming relevance.",
+    )
+
 
 class CacheConfig(BaseModel):
     """Query result caching configuration."""
