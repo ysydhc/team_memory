@@ -196,10 +196,15 @@ def cmd_recall(args: argparse.Namespace) -> None:
 
 def cmd_save(args: argparse.Namespace) -> None:
     """Direct save experience."""
+    content_parts = []
+    if args.problem:
+        content_parts.append(f"Problem: {args.problem}")
+    if args.solution:
+        content_parts.append(f"Solution: {args.solution}")
+    content = "\n\n".join(content_parts) or args.title
     payload = {
         "title": args.title,
-        "problem": args.problem,
-        "solution": args.solution,
+        "content": content,
         "project": args.project or "",
         "tags": args.tags.split(",") if args.tags else [],
     }
@@ -219,6 +224,46 @@ def cmd_save(args: argparse.Namespace) -> None:
             print(f"[mem:saved] draft saved (not published): {args.title}")
     else:
         print(f"[mem:saved] draft saved: {args.title}")
+
+
+def cmd_stats(args: argparse.Namespace) -> None:
+    """Show evaluation statistics."""
+    result = _get(f"/stats?days={args.days}")
+    if result is None:
+        print("TM Daemon not running, cannot get stats.")
+        return
+    days = result.get("days", "?")
+    total = result.get("total_searches", 0)
+    hit = result.get("hit", 0)
+    used = result.get("used", 0)
+    unjudged = result.get("unjudged", 0)
+    use_rate = result.get("use_rate", 0.0)
+    by_project = result.get("by_project", {})
+
+    print(f"📊 TM Memory Evaluation (last {days} days)")
+    print(f"{'='*40}")
+    print(f"  Total searches: {total}")
+    print(f"  Hits (results found): {hit}")
+    print(f"  Used by agent: {used}")
+    print(f"  Unjudged: {unjudged}")
+    print(f"  Use rate: {use_rate:.1%}")
+    print()
+    if by_project:
+        print("  By project:")
+        for proj, data in by_project.items():
+            p_total = data.get("total", 0)
+            p_used = data.get("used", 0)
+            p_rate = p_used / p_total if p_total > 0 else 0
+            print(f"    {proj}: {p_used}/{p_total} used ({p_rate:.0%})")
+
+    # Quality assessment
+    print()
+    if use_rate > 0.4:
+        print("  ✅ System is effective (use_rate > 40%)")
+    elif use_rate > 0.2:
+        print("  ⚠️  System needs adjustment (use_rate 20-40%)")
+    else:
+        print("  ❌ System may not be effective (use_rate < 20%)")
 
 
 def main() -> None:
@@ -267,6 +312,10 @@ def main() -> None:
     p_sv.add_argument("--project", default="")
     p_sv.add_argument("--tags", default="")
 
+    # stats
+    p_st = sub.add_parser("stats", help="Show evaluation statistics")
+    p_st.add_argument("--days", type=int, default=7, help="Lookback window in days")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -281,6 +330,7 @@ def main() -> None:
         "session-end": cmd_session_end,
         "recall": cmd_recall,
         "save": cmd_save,
+        "stats": cmd_stats,
     }
 
     handler = commands.get(args.command)

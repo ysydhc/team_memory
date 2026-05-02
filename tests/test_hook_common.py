@@ -87,7 +87,7 @@ class TestLoadConfig:
         config = common.load_config()
         assert "tm" in config
         assert "base_url" in config["tm"]
-        assert config["tm"]["base_url"] == "http://localhost:3900"
+        assert config["tm"]["base_url"] == "http://localhost:9111"
 
     def test_has_projects_section(self):
         config = common.load_config()
@@ -142,4 +142,4 @@ class TestCallMcpTool:
         with patch("httpx.post", return_value=self._mock_response({})) as mock_post:
             common.call_mcp_tool("memory_search", {"query": "test"})
         url = mock_post.call_args[0][0]
-        assert url.startswith("http://localhost:3900")
+        assert url.startswith("http://localhost:9111")

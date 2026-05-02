@@ -153,8 +153,9 @@ class MarkdownIndexer:
         # description: first 500 chars of body (stripped)
         description = body.strip()[:500]
 
-        # solution: full text (body only, no frontmatter delimiter)
-        solution = body.strip()
+        # solution: body text truncated to 4000 chars to stay within
+        # nomic-embed-text's 8192-token context limit (Chinese ~1 char/token)
+        solution = body.strip()[:4000]
 
         return {
             "title": title,
