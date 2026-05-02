@@ -18,10 +18,17 @@ from daemon.tm_sink import TMSink
 logger = logging.getLogger("tm_daemon.watcher")
 
 
-async def start_watcher(config: DaemonConfig, sink: TMSink) -> None:
+async def start_watcher(config: DaemonConfig, sink: TMSink, buf: Any = None) -> None:
     """Watch all configured Obsidian vaults and index changes.
 
     Runs as a long-lived asyncio task. Cancel to stop.
+
+    Args:
+        config: Daemon configuration.
+        sink: TMSink instance for draft_save calls.
+        buf: Optional DraftBuffer. When provided, successfully saved drafts
+             are also recorded in the local SQLite buffer so RefinementWorker
+             can pick them up for LLM refinement.
     """
     from daemon.markdown_indexer import MarkdownIndexer
 
@@ -41,7 +48,7 @@ async def start_watcher(config: DaemonConfig, sink: TMSink) -> None:
 
     try:
         async for changes in awatch(*paths, debounce=2000):
-            await _process_changes(changes, config, indexer, sink)
+            await _process_changes(changes, config, indexer, sink, buf)
     except asyncio.CancelledError:
         logger.info("File watcher stopped")
     except Exception:
@@ -53,6 +60,7 @@ async def _process_changes(
     config: DaemonConfig,
     indexer: Any,  # MarkdownIndexer
     sink: TMSink,
+    buf: Any = None,  # DraftBuffer | None
 ) -> None:
     """Process a batch of file changes from watchfiles."""
     for change_type, path_str in changes:
@@ -74,18 +82,52 @@ async def _process_changes(
         if change_type in (Change.added, Change.modified):
             try:
                 entry = indexer.parse_file(str(path))
-                await sink.save(
-                    title=entry.get("title", path.stem),
-                    problem=entry.get("description", "")[:200],
-                    solution=entry.get("solution", ""),
-                    tags=entry.get("tags"),
-                    project=vault.project,
-                    group_key=entry.get("group_key"),
-                )
-                logger.info(
-                    "[WATCH] obsidian → file=%s action=%s project=%s",
-                    path.name, change_type.name, vault.project,
-                )
+                description = entry.get("description", "")
+                solution = entry.get("solution", "")
+                # Combine problem + solution into a single content block for
+                # the draft pipeline so RefinementWorker can LLM-refine it.
+                content_parts = []
+                if description:
+                    content_parts.append(f"## 背景\n{description}")
+                if solution:
+                    content_parts.append(f"## 内容\n{solution}")
+                content = "\n\n".join(content_parts) or solution
+
+                title = entry.get("title", path.stem)
+
+                if buf is not None:
+                    # Route through local DraftBuffer → RefinementWorker will
+                    # LLM-refine and publish to PostgreSQL via sink.draft_save
+                    # + sink.draft_publish.  We store title in the content
+                    # preamble so the worker can extract it later.
+                    full_content = f"# {title}\n\n{content}"
+                    local_id = await buf.create_draft(
+                        project=vault.project,
+                        conversation_id=None,
+                        content=full_content,
+                        title=title,
+                        source="obsidian",
+                    )
+                    # Immediately mark for refinement so RefinementWorker picks it up
+                    await buf.mark_needs_refinement(local_id)
+                    logger.info(
+                        "[WATCH] obsidian → file=%s action=%s project=%s local_draft_id=%s",
+                        path.name, change_type.name, vault.project, local_id,
+                    )
+                else:
+                    # Fallback: save directly (no LLM refinement)
+                    result = await sink.draft_save(
+                        title=title,
+                        content=content,
+                        tags=entry.get("tags"),
+                        project=vault.project,
+                        group_key=entry.get("group_key"),
+                    )
+                    draft_id = result.get("id") if isinstance(result, dict) else None
+                    logger.info(
+                        "[WATCH] obsidian → file=%s action=%s project=%s draft_id=%s",
+                        path.name, change_type.name, vault.project, draft_id,
+                    )
             except Exception:
                 logger.exception("Failed to index: %s", path)
 

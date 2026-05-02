@@ -81,6 +81,29 @@ class RetrievalSettings:
 
 
 @dataclass
+class RefinementSettings:
+    """LLM 精炼配置。"""
+
+    enabled: bool = True
+    provider: str = "litellm"  # "litellm" | "ollama"
+    model: str = "qwen-plus"
+    base_url: str = "http://localhost:4000/v1"
+    api_key_env: str = "LITELLM_MASTER_KEY"
+    timeout: int = 30
+    scan_interval_seconds: int = 30
+    max_input_chars: int = 6000
+    max_retries: int = 1
+    fallback_on_failure: bool = True
+
+
+@dataclass
+class EvaluationSettings:
+    """评估配置：模糊匹配开关与阈值。"""
+    fuzzy_match_enabled: bool = True
+    fuzzy_match_threshold: float = 0.8
+
+
+@dataclass
 class ProjectMapping:
     """项目名 → 路径模式映射。"""
 
@@ -97,6 +120,8 @@ class DaemonConfig:
     obsidian: ObsidianSettings = field(default_factory=ObsidianSettings)
     draft: DraftSettings = field(default_factory=DraftSettings)
     retrieval: RetrievalSettings = field(default_factory=RetrievalSettings)
+    refinement: RefinementSettings = field(default_factory=RefinementSettings)
+    evaluation: EvaluationSettings = field(default_factory=EvaluationSettings)
     projects: list[ProjectMapping] = field(default_factory=list)
 
 
@@ -112,6 +137,8 @@ _SUBCONFIG_KEYS = {
     "obsidian": (ObsidianSettings, "vaults"),
     "draft": (DraftSettings, None),
     "retrieval": (RetrievalSettings, None),
+    "refinement": (RefinementSettings, None),
+    "evaluation": (EvaluationSettings, None),
 }
 
 
