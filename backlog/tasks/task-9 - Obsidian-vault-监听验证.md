@@ -1,7 +1,7 @@
 ---
 id: TASK-9
 title: Obsidian vault 监听验证
-status: Blocked
+status: Done
 assignee: []
 created_date: '2026-04-27 15:36'
 labels: [obsidian, monitoring]

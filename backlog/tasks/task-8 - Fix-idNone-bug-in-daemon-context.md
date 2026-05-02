@@ -1,7 +1,7 @@
 ---
 id: TASK-8
 title: Fix id=None bug in daemon context
-status: In Progress
+status: Cancelled
 assignee: [hermes]
 created_date: '2026-04-27 15:36'
 labels: [bug, critical]
