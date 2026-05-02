@@ -108,8 +108,12 @@ class Experience(Base):
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    # Implicit feedback counter (incremented on recall hit)
-    use_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Recall counter (incremented when experience appears in search results)
+    recall_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Used counter (incremented when agent actually references the experience)
+    used_count: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False, server_default="0"
+    )
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
@@ -153,7 +157,8 @@ class Experience(Base):
             "last_scored_at": self.last_scored_at.isoformat() if self.last_scored_at else None,
             "is_pinned": self.is_pinned,
             "is_deleted": self.is_deleted,
-            "use_count": self.use_count,
+            "recall_count": self.recall_count,
+            "used_count": self.used_count,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -488,6 +493,7 @@ class SearchLog(Base):
     result_ids: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # [{"id": "exp-xxx", "score": 0.85, "source_layer": "L2"}, ...]
     was_used: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # None=unjudged
+    judgment_source: Mapped[str | None] = mapped_column(String(20), nullable=True)  # 'marker'|'fuzzy'|NULL
     agent_response_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(

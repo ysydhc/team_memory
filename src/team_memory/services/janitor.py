@@ -363,7 +363,7 @@ class MemoryJanitor:
         """Promote published experiences to 'promoted' status based on thresholds.
 
         Two promotion paths:
-        1. use_count threshold: experiences with use_count >= threshold get promoted
+        1. recall_count threshold: experiences with recall_count >= threshold get promoted
         2. group_key threshold: group_keys with count >= threshold cause all
            published experiences in that group to be promoted
 
@@ -379,27 +379,27 @@ class MemoryJanitor:
         Returns:
             Dict with promotion statistics
         """
-        use_count_threshold = self._get_config("promotion_use_count_threshold", 3)
+        recall_count_threshold = self._get_config("promotion_use_count_threshold", 3)
         group_key_threshold = self._get_config("promotion_group_key_threshold", 5)
         output_dirs: dict[str, str] = self._get_config("promotion_output_dirs", {})
 
-        promoted_by_use_count = 0
+        promoted_by_recall_count = 0
         promoted_by_group = 0
 
         async with self._session() as session:
-            # 1. Promote by use_count threshold
-            use_count_query = select(Experience).where(
+            # 1. Promote by recall_count threshold
+            recall_count_query = select(Experience).where(
                 and_(
                     Experience.is_deleted == False,  # noqa: E712
                     Experience.exp_status == "published",
-                    Experience.use_count >= use_count_threshold,
+                    Experience.recall_count >= recall_count_threshold,
                 )
             )
             if project:
-                use_count_query = use_count_query.where(Experience.project == project)
+                recall_count_query = recall_count_query.where(Experience.project == project)
 
-            result = await session.execute(use_count_query)
-            use_count_experiences = list(result.scalars().all())
+            result = await session.execute(recall_count_query)
+            recall_count_experiences = list(result.scalars().all())
 
             # 2. Promote by group_key threshold
             # Find group_keys with enough published experiences
@@ -449,17 +449,17 @@ class MemoryJanitor:
             compiler = PromotionCompiler()
             promoted_ids: set[str] = set()
 
-            # 3a. use_count promotions — one Markdown per experience
-            for exp in use_count_experiences:
+            # 3a. recall_count promotions — one Markdown per experience
+            for exp in recall_count_experiences:
                 exp_dict = exp.to_dict()
                 markdown = await compiler.compile([exp_dict], exp.group_key)
                 await self._write_promoted(exp, markdown, output_dirs)
                 promoted_ids.add(str(exp.id))
-                promoted_by_use_count += 1
+                promoted_by_recall_count += 1
                 logger.debug(
-                    "Promoted experience by use_count: %s (use_count=%d)",
+                    "Promoted experience by recall_count: %s (recall_count=%d)",
                     exp.id,
-                    exp.use_count,
+                    exp.recall_count,
                 )
 
             # 3b. group_key promotions — one Markdown per group
@@ -486,29 +486,29 @@ class MemoryJanitor:
             # ----------------------------------------------------------
             # 4. Mark all promoted experiences
             # ----------------------------------------------------------
-            for exp in use_count_experiences:
+            for exp in recall_count_experiences:
                 exp.exp_status = "promoted"
 
             for exp in group_experiences:
-                if str(exp.id) not in set(str(e.id) for e in use_count_experiences):
+                if str(exp.id) not in set(str(e.id) for e in recall_count_experiences):
                     exp.exp_status = "promoted"
 
             await session.commit()
 
-        total = promoted_by_use_count + promoted_by_group
+        total = promoted_by_recall_count + promoted_by_group
 
         logger.info(
-            "Promotion completed: %d by use_count, %d by group_key, %d total",
-            promoted_by_use_count,
+            "Promotion completed: %d by recall_count, %d by group_key, %d total",
+            promoted_by_recall_count,
             promoted_by_group,
             total,
         )
 
         return {
-            "promoted_by_use_count": promoted_by_use_count,
+            "promoted_by_recall_count": promoted_by_recall_count,
             "promoted_by_group": promoted_by_group,
             "total": total,
-            "use_count_threshold": use_count_threshold,
+            "recall_count_threshold": recall_count_threshold,
             "group_key_threshold": group_key_threshold,
             "project": project,
         }

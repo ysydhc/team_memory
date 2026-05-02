@@ -54,7 +54,7 @@ class JanitorConfig:
     """Whether L2→L3 auto-promotion is enabled."""
 
     promotion_use_count_threshold: int = 3
-    """use_count reaching this value triggers promotion."""
+    """recall_count reaching this value triggers promotion."""
 
     promotion_group_key_threshold: int = 5
     """Same group_key reaching this count triggers promotion."""

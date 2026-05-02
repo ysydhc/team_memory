@@ -231,7 +231,7 @@ class TestPromotedSearchExclusion:
 
         mock_session = AsyncMock()
         mock_repo = MagicMock()
-        mock_repo.increment_use_count = AsyncMock()
+        mock_repo.increment_recall_count = AsyncMock()
         mock_repo.increment_quality_score = AsyncMock()
 
         with (
@@ -280,7 +280,7 @@ class TestPromotedSearchExclusion:
 
         mock_session = AsyncMock()
         mock_repo = MagicMock()
-        mock_repo.increment_use_count = AsyncMock()
+        mock_repo.increment_recall_count = AsyncMock()
         mock_repo.increment_quality_score = AsyncMock()
 
         with (
@@ -340,7 +340,7 @@ class TestDraftScorePenalty:
 
         mock_session = AsyncMock()
         mock_repo = MagicMock()
-        mock_repo.increment_use_count = AsyncMock()
+        mock_repo.increment_recall_count = AsyncMock()
         mock_repo.increment_quality_score = AsyncMock()
 
         with (
@@ -394,7 +394,7 @@ class TestDraftScorePenalty:
 
         mock_session = AsyncMock()
         mock_repo = MagicMock()
-        mock_repo.increment_use_count = AsyncMock()
+        mock_repo.increment_recall_count = AsyncMock()
         mock_repo.increment_quality_score = AsyncMock()
 
         with (

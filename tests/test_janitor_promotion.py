@@ -30,7 +30,7 @@ from team_memory.services.janitor import MemoryJanitor
 def _make_experience(
     *,
     exp_status: str = "published",
-    use_count: int = 0,
+    recall_count: int = 0,
     group_key: str | None = None,
     is_deleted: bool = False,
     exp_id: uuid.UUID | None = None,
@@ -45,7 +45,7 @@ def _make_experience(
     exp = MagicMock()
     exp.id = exp_id or uuid.uuid4()
     exp.exp_status = exp_status
-    exp.use_count = use_count
+    exp.recall_count = recall_count
     exp.group_key = group_key
     exp.is_deleted = is_deleted
     exp.project = project
@@ -134,7 +134,7 @@ class TestRunPromotion:
     @pytest.mark.asyncio
     async def test_use_count_above_threshold_gets_promoted(self):
         """Published experience with use_count >= 3 should be promoted."""
-        exp = _make_experience(use_count=3, exp_status="published")
+        exp = _make_experience(recall_count=3, exp_status="published")
         janitor = _setup_janitor(JanitorConfig(promotion_use_count_threshold=3))
 
         mock_session = AsyncMock()
@@ -152,14 +152,14 @@ class TestRunPromotion:
             result = await janitor.run_promotion()
 
         assert exp.exp_status == "promoted"
-        assert result["promoted_by_use_count"] == 1
+        assert result["promoted_by_recall_count"] == 1
         assert result["promoted_by_group"] == 0
         assert result["total"] == 1
 
     @pytest.mark.asyncio
     async def test_use_count_below_threshold_not_promoted(self):
-        """Published experience with use_count=2 should NOT be promoted."""
-        exp = _make_experience(use_count=2, exp_status="published")
+        """Published experience with recall_count=2 should NOT be promoted."""
+        exp = _make_experience(recall_count=2, exp_status="published")
         janitor = _setup_janitor(JanitorConfig(promotion_use_count_threshold=3))
 
         mock_session = AsyncMock()
@@ -177,7 +177,7 @@ class TestRunPromotion:
             result = await janitor.run_promotion()
 
         assert exp.exp_status == "published"
-        assert result["promoted_by_use_count"] == 0
+        assert result["promoted_by_recall_count"] == 0
         assert result["promoted_by_group"] == 0
         assert result["total"] == 0
 
@@ -186,7 +186,7 @@ class TestRunPromotion:
         """5+ published experiences with the same group_key should all be promoted."""
         group_key = "python-error-handling"
         exps = [
-            _make_experience(use_count=0, exp_status="published", group_key=group_key)
+            _make_experience(recall_count=0, exp_status="published", group_key=group_key)
             for _ in range(5)
         ]
         janitor = _setup_janitor(JanitorConfig(promotion_group_key_threshold=5))
@@ -214,7 +214,7 @@ class TestRunPromotion:
 
         for exp in exps:
             assert exp.exp_status == "promoted"
-        assert result["promoted_by_use_count"] == 0
+        assert result["promoted_by_recall_count"] == 0
         assert result["promoted_by_group"] == 5
         assert result["total"] == 5
 
@@ -223,7 +223,7 @@ class TestRunPromotion:
         """4 published experiences with the same group_key should NOT be promoted."""
         group_key = "python-error-handling"
         exps = [
-            _make_experience(use_count=0, exp_status="published", group_key=group_key)
+            _make_experience(recall_count=0, exp_status="published", group_key=group_key)
             for _ in range(4)
         ]
         janitor = _setup_janitor(JanitorConfig(promotion_group_key_threshold=5))
@@ -244,15 +244,15 @@ class TestRunPromotion:
 
         for exp in exps:
             assert exp.exp_status == "published"
-        assert result["promoted_by_use_count"] == 0
+        assert result["promoted_by_recall_count"] == 0
         assert result["promoted_by_group"] == 0
         assert result["total"] == 0
 
     @pytest.mark.asyncio
     async def test_already_promoted_excluded(self):
         """Already-promoted experiences should NOT be double-promoted."""
-        exp_promoted = _make_experience(use_count=5, exp_status="promoted")
-        exp_published = _make_experience(use_count=3, exp_status="published")
+        exp_promoted = _make_experience(recall_count=5, exp_status="promoted")
+        exp_published = _make_experience(recall_count=3, exp_status="published")
 
         janitor = _setup_janitor(JanitorConfig(promotion_use_count_threshold=3))
 
@@ -276,7 +276,7 @@ class TestRunPromotion:
 
         assert exp_promoted.exp_status == "promoted"  # unchanged
         assert exp_published.exp_status == "promoted"  # newly promoted
-        assert result["promoted_by_use_count"] == 1
+        assert result["promoted_by_recall_count"] == 1
         assert result["total"] == 1
 
 
@@ -303,7 +303,7 @@ class TestRunAllPromotion:
         janitor.prune_personal_memory = AsyncMock(return_value={"pruned_count": 0})
         janitor.run_promotion = AsyncMock(
             return_value={
-                "promoted_by_use_count": 2,
+                "promoted_by_recall_count": 2,
                 "promoted_by_group": 3,
                 "total": 5,
             }
@@ -329,7 +329,7 @@ class TestRunAllPromotion:
         janitor.prune_personal_memory = AsyncMock(return_value={"pruned_count": 0})
         janitor.run_promotion = AsyncMock(
             return_value={
-                "promoted_by_use_count": 0,
+                "promoted_by_recall_count": 0,
                 "promoted_by_group": 0,
                 "total": 0,
             }

@@ -56,6 +56,9 @@ class _StubTMSink(TMSink):
     async def context(self, **kwargs) -> dict:
         return {"user": "test", "relevant_experiences": []}
 
+    async def increment_used_count(self, experience_id: str) -> None:
+        pass
+
 
 def _make_config() -> DaemonConfig:
     """Create a DaemonConfig suitable for testing (remote mode, in-memory DB).

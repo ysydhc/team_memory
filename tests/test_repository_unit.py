@@ -47,7 +47,7 @@ def _make_experience(**overrides) -> MagicMock:
     exp.exp_status = overrides.get("exp_status", "published")
     exp.is_deleted = overrides.get("is_deleted", False)
     exp.deleted_at = overrides.get("deleted_at", None)
-    exp.use_count = overrides.get("use_count", 0)
+    exp.recall_count = overrides.get("recall_count", 0)
     exp.created_at = overrides.get("created_at", datetime.now(timezone.utc))
     exp.updated_at = overrides.get("updated_at", datetime.now(timezone.utc))
     exp.children = overrides.get("children", [])
@@ -70,7 +70,7 @@ def _make_experience(**overrides) -> MagicMock:
             "status": exp.exp_status,
             "project": exp.project,
             "is_deleted": exp.is_deleted,
-            "use_count": exp.use_count,
+            "recall_count": exp.recall_count,
             "created_at": exp.created_at.isoformat() if exp.created_at else None,
             "updated_at": exp.updated_at.isoformat() if exp.updated_at else None,
         }
@@ -355,13 +355,13 @@ class TestFeedback:
 
 class TestMetrics:
     @pytest.mark.asyncio
-    async def test_increment_use_count(self):
-        """increment_use_count() executes an UPDATE statement."""
+    async def test_increment_recall_count(self):
+        """increment_recall_count() executes an UPDATE statement."""
         session = _make_mock_session()
         exp_id = uuid.uuid4()
 
         repo = ExperienceRepository(session)
-        await repo.increment_use_count(exp_id)
+        await repo.increment_recall_count(exp_id)
 
         session.execute.assert_awaited_once()
 

@@ -32,7 +32,7 @@ def _make_experience(
     id: str | None = None,
     project: str = "default",
     group_key: str | None = None,
-    use_count: int = 0,
+    recall_count: int = 0,
     exp_status: str = "published",
     title: str = "Test Experience",
     description: str = "A problem description",
@@ -45,7 +45,7 @@ def _make_experience(
     exp.id = uuid.UUID(id) if id else uuid.uuid4()
     exp.project = project
     exp.group_key = group_key
-    exp.use_count = use_count
+    exp.recall_count = recall_count
     exp.exp_status = exp_status
     exp.title = title
     exp.description = description
@@ -62,7 +62,7 @@ def _make_experience(
         "tags": tags or ["test"],
         "group_key": group_key,
         "project": project,
-        "use_count": use_count,
+        "recall_count": recall_count,
         "created_at": "2026-01-15T10:00:00+00:00",
     })
     return exp
@@ -99,11 +99,11 @@ def janitor_with_dirs():
     return MemoryJanitor(db_url="sqlite+aiosqlite://", config=config)
 
 
-def _setup_execute(mock_session, *, use_count_exps=None, qualifying_groups=None, group_exps=None):
+def _setup_execute(mock_session, *, recall_count_exps=None, qualifying_groups=None, group_exps=None):
     """Set up mock_session.execute with side_effect for the three queries."""
-    # use_count query result
+    # recall_count query result
     uc_result = MagicMock()
-    uc_result.scalars.return_value.all.return_value = use_count_exps or []
+    uc_result.scalars.return_value.all.return_value = recall_count_exps or []
 
     # group count query result
     gc_result = MagicMock()
@@ -131,8 +131,8 @@ class TestPromotionMarkdownCompilation:
     @pytest.mark.asyncio
     async def test_compiler_called_for_use_count_promotion(self, janitor_with_dirs, mock_session):
         """PromotionCompiler.compile is called for each use_count-promoted exp."""
-        exp = _make_experience(use_count=5, group_key="g1")
-        _setup_execute(mock_session, use_count_exps=[exp])
+        exp = _make_experience(recall_count=5, group_key="g1")
+        _setup_execute(mock_session, recall_count_exps=[exp])
 
         with (
             _patch_session(mock_session),
@@ -155,8 +155,8 @@ class TestPromotionMarkdownCompilation:
     @pytest.mark.asyncio
     async def test_compiler_called_for_group_key_promotion(self, janitor_with_dirs, mock_session):
         """PromotionCompiler.compile is called for group_key-promoted exps."""
-        exp1 = _make_experience(id="00000000-0000-0000-0000-000000000001", group_key="g1", use_count=0)
-        exp2 = _make_experience(id="00000000-0000-0000-0000-000000000002", group_key="g1", use_count=0)
+        exp1 = _make_experience(id="00000000-0000-0000-0000-000000000001", group_key="g1", recall_count=0)
+        exp2 = _make_experience(id="00000000-0000-0000-0000-000000000002", group_key="g1", recall_count=0)
 
         _setup_execute(
             mock_session,
@@ -193,8 +193,8 @@ class TestPromotionFileWrite:
         )
         janitor = MemoryJanitor(db_url="sqlite+aiosqlite://", config=config)
 
-        exp = _make_experience(use_count=5, group_key="g1")
-        _setup_execute(mock_session, use_count_exps=[exp])
+        exp = _make_experience(recall_count=5, group_key="g1")
+        _setup_execute(mock_session, recall_count_exps=[exp])
 
         with (
             _patch_session(mock_session),
@@ -228,8 +228,8 @@ class TestPromotionFileWrite:
         )
         janitor = MemoryJanitor(db_url="sqlite+aiosqlite://", config=config)
 
-        exp = _make_experience(use_count=5, group_key="g1")
-        _setup_execute(mock_session, use_count_exps=[exp])
+        exp = _make_experience(recall_count=5, group_key="g1")
+        _setup_execute(mock_session, recall_count_exps=[exp])
 
         with (
             _patch_session(mock_session),
@@ -253,8 +253,8 @@ class TestPromotionNoOutputDir:
     @pytest.mark.asyncio
     async def test_no_file_write_without_config(self, janitor_no_config, mock_session, tmp_path):
         """No file is written when promotion_output_dirs is empty."""
-        exp = _make_experience(use_count=5, group_key="g1")
-        _setup_execute(mock_session, use_count_exps=[exp])
+        exp = _make_experience(recall_count=5, group_key="g1")
+        _setup_execute(mock_session, recall_count_exps=[exp])
 
         written_files = []
 
@@ -286,8 +286,8 @@ class TestPromotionNoOutputDir:
         )
         janitor = MemoryJanitor(db_url="sqlite+aiosqlite://", config=config)
 
-        exp = _make_experience(use_count=5, project="unmapped", group_key="g1")
-        _setup_execute(mock_session, use_count_exps=[exp])
+        exp = _make_experience(recall_count=5, project="unmapped", group_key="g1")
+        _setup_execute(mock_session, recall_count_exps=[exp])
 
         written_files = []
 
@@ -324,8 +324,8 @@ class TestPromotionGitCommit:
         )
         janitor = MemoryJanitor(db_url="sqlite+aiosqlite://", config=config)
 
-        exp = _make_experience(use_count=5, group_key="g1")
-        _setup_execute(mock_session, use_count_exps=[exp])
+        exp = _make_experience(recall_count=5, group_key="g1")
+        _setup_execute(mock_session, recall_count_exps=[exp])
 
         with (
             _patch_session(mock_session),
@@ -358,8 +358,8 @@ class TestPromotionGitCommit:
     @pytest.mark.asyncio
     async def test_git_not_called_without_output_dir(self, janitor_no_config, mock_session):
         """git commands are not called when no output directory configured."""
-        exp = _make_experience(use_count=5, group_key="g1")
-        _setup_execute(mock_session, use_count_exps=[exp])
+        exp = _make_experience(recall_count=5, group_key="g1")
+        _setup_execute(mock_session, recall_count_exps=[exp])
 
         with (
             _patch_session(mock_session),
@@ -382,8 +382,8 @@ class TestPromotionStatusUpdate:
     @pytest.mark.asyncio
     async def test_exp_status_set_to_promoted(self, janitor_with_dirs, mock_session):
         """exp_status is set to 'promoted' after Markdown compilation."""
-        exp = _make_experience(use_count=5, group_key="g1")
-        _setup_execute(mock_session, use_count_exps=[exp])
+        exp = _make_experience(recall_count=5, group_key="g1")
+        _setup_execute(mock_session, recall_count_exps=[exp])
 
         with (
             _patch_session(mock_session),
@@ -397,18 +397,18 @@ class TestPromotionStatusUpdate:
             result = await janitor_with_dirs.run_promotion()
 
         assert exp.exp_status == "promoted"
-        assert result["promoted_by_use_count"] == 1
+        assert result["promoted_by_recall_count"] == 1
         assert result["total"] == 1
 
     @pytest.mark.asyncio
     async def test_return_stats_include_total(self, janitor_with_dirs, mock_session):
-        """Return stats include promoted_by_use_count, promoted_by_group, total."""
-        exp1 = _make_experience(id="00000000-0000-0000-0000-000000000001", use_count=5, group_key="g1")
-        exp2 = _make_experience(id="00000000-0000-0000-0000-000000000002", group_key="g1", use_count=0)
+        """Return stats include promoted_by_recall_count, promoted_by_group, total."""
+        exp1 = _make_experience(id="00000000-0000-0000-0000-000000000001", recall_count=5, group_key="g1")
+        exp2 = _make_experience(id="00000000-0000-0000-0000-000000000002", group_key="g1", recall_count=0)
 
         _setup_execute(
             mock_session,
-            use_count_exps=[exp1],
+            recall_count_exps=[exp1],
             qualifying_groups=[("g1",)],
             group_exps=[exp2],
         )
@@ -424,6 +424,6 @@ class TestPromotionStatusUpdate:
 
             result = await janitor_with_dirs.run_promotion()
 
-        assert result["promoted_by_use_count"] == 1
+        assert result["promoted_by_recall_count"] == 1
         assert result["promoted_by_group"] == 1
         assert result["total"] == 2

@@ -592,12 +592,20 @@ class ExperienceRepository:
 
     # ======================== METRICS ========================
 
-    async def increment_use_count(self, experience_id: uuid.UUID) -> None:
-        """Increment use_count (implicit feedback on recall hit)."""
+    async def increment_recall_count(self, experience_id: uuid.UUID) -> None:
+        """Increment recall_count (experience appeared in search results)."""
         await self._session.execute(
             update(Experience)
             .where(Experience.id == experience_id)
-            .values(use_count=Experience.use_count + 1)
+            .values(recall_count=Experience.recall_count + 1)
+        )
+
+    async def increment_used_count(self, experience_id: uuid.UUID) -> None:
+        """Increment used_count (agent actually referenced the experience)."""
+        await self._session.execute(
+            update(Experience)
+            .where(Experience.id == experience_id)
+            .values(used_count=Experience.used_count + 1)
         )
 
     # ======================== PROJECT ========================

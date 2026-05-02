@@ -26,7 +26,7 @@ class TestTMSinkABC:
         from daemon.tm_sink import TMSink
 
         abstracts = set(TMSink.__abstractmethods__)
-        expected = {"draft_save", "draft_publish", "save", "recall", "context", "update_experience"}
+        expected = {"draft_save", "draft_publish", "save", "recall", "context", "update_experience", "increment_used_count"}
         assert expected == abstracts, f"Missing abstract methods: {expected - abstracts}"
 
     def test_is_abc_subclass(self):
@@ -287,7 +287,7 @@ class TestRemoteTMSink:
             )
             mock_client.request.assert_awaited_once_with(
                 "POST",
-                "http://tm:3900/mcp/draft-save",
+                "http://tm:3900/api/v1/mcp/draft-save",
                 json={
                     "title": "远程标题",
                     "content": "远程内容",
@@ -319,7 +319,7 @@ class TestRemoteTMSink:
             )
             mock_client.request.assert_awaited_once_with(
                 "POST",
-                "http://tm:3900/mcp/draft-publish",
+                "http://tm:3900/api/v1/mcp/draft-publish",
                 json={"draft_id": "draft-1", "refined_content": "精炼"},
                 headers=mock_client.request.call_args.kwargs["headers"],
             )
@@ -345,7 +345,7 @@ class TestRemoteTMSink:
             )
             mock_client.request.assert_awaited_once_with(
                 "POST",
-                "http://tm:3900/mcp/save",
+                "http://tm:3900/api/v1/mcp/save",
                 json={
                     "title": "T",
                     "problem": "P",
@@ -414,7 +414,7 @@ class TestRemoteTMSink:
             result = await sink.context(file_paths=["a.py"], task_description="task", project="proj")
             mock_client.request.assert_awaited_once_with(
                 "POST",
-                "http://tm:3900/mcp/context",
+                "http://tm:3900/api/v1/mcp/context",
                 json={
                     "file_paths": ["a.py"],
                     "task_description": "task",

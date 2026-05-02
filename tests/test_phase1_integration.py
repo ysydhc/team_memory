@@ -95,7 +95,7 @@ async def _mock_session_ctx(mock_session):
 def _make_experience(
     *,
     exp_status: str = "published",
-    use_count: int = 0,
+    recall_count: int = 0,
     group_key: str | None = None,
     is_deleted: bool = False,
     exp_id: uuid.UUID | None = None,
@@ -110,7 +110,7 @@ def _make_experience(
     exp = MagicMock()
     exp.id = exp_id or uuid.uuid4()
     exp.exp_status = exp_status
-    exp.use_count = use_count
+    exp.recall_count = recall_count
     exp.group_key = group_key
     exp.is_deleted = is_deleted
     exp.project = project
@@ -362,7 +362,7 @@ class TestPublishedUseCountPromotionFlow:
     @pytest.mark.asyncio
     async def test_use_count_triggers_promotion(self):
         """Published experience with use_count >= threshold gets promoted."""
-        exp = _make_experience(use_count=3, exp_status="published")
+        exp = _make_experience(recall_count=3, exp_status="published")
         janitor = MemoryJanitor(
             db_url="sqlite+aiosqlite://",
             config=JanitorConfig(promotion_use_count_threshold=3),
@@ -383,15 +383,15 @@ class TestPublishedUseCountPromotionFlow:
             result = await janitor.run_promotion()
 
         assert exp.exp_status == "promoted"
-        assert result["promoted_by_use_count"] == 1
+        assert result["promoted_by_recall_count"] == 1
         assert result["promoted_by_group"] == 0
         assert result["total"] == 1
-        assert result["use_count_threshold"] == 3
+        assert result["recall_count_threshold"] == 3
 
     @pytest.mark.asyncio
     async def test_below_threshold_not_promoted(self):
         """Published experience with use_count < threshold stays published."""
-        exp = _make_experience(use_count=2, exp_status="published")
+        exp = _make_experience(recall_count=2, exp_status="published")
         janitor = MemoryJanitor(
             db_url="sqlite+aiosqlite://",
             config=JanitorConfig(promotion_use_count_threshold=3),
@@ -412,7 +412,7 @@ class TestPublishedUseCountPromotionFlow:
             result = await janitor.run_promotion()
 
         assert exp.exp_status == "published"
-        assert result["promoted_by_use_count"] == 0
+        assert result["promoted_by_recall_count"] == 0
         assert result["total"] == 0
 
     @pytest.mark.asyncio
@@ -459,11 +459,11 @@ class TestPublishedUseCountPromotionFlow:
         assert save_data["data"]["title"] == "Redis caching pattern"
 
         # Step 2: Simulate use_count increment (3 uses via recall hits)
-        # In production this happens when search_orchestrator calls increment_use_count.
-        # Here we directly create a mock experience with use_count=3.
+        # In production this happens when search_orchestrator calls increment_recall_count.
+        # Here we directly create a mock experience with recall_count=3.
         promoted_exp = _make_experience(
             exp_id=uuid.UUID(exp_id),
-            use_count=3,
+            recall_count=3,
             exp_status="published",
         )
 
@@ -489,7 +489,7 @@ class TestPublishedUseCountPromotionFlow:
 
         # Verify promotion happened
         assert promoted_exp.exp_status == "promoted"
-        assert result["promoted_by_use_count"] == 1
+        assert result["promoted_by_recall_count"] == 1
         assert result["total"] == 1
 
     @pytest.mark.asyncio
@@ -497,7 +497,7 @@ class TestPublishedUseCountPromotionFlow:
         """Multiple published experiences with same group_key get promoted together."""
         group_key = "auth-patterns"
         exps = [
-            _make_experience(exp_status="published", use_count=0, group_key=group_key)
+            _make_experience(exp_status="published", recall_count=0, group_key=group_key)
             for _ in range(5)
         ]
         janitor = MemoryJanitor(

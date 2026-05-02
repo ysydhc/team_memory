@@ -35,7 +35,7 @@ class TestSearchOrchestratorSearch:
 
         mock_session = AsyncMock()
         mock_repo = MagicMock()
-        mock_repo.increment_use_count = AsyncMock()
+        mock_repo.increment_recall_count = AsyncMock()
 
         with (
             patch(
