@@ -109,7 +109,7 @@ class SearchOrchestrator:
                     duration_ms=duration_ms,
                 )
 
-                # Implicit feedback: increment use_count for top results
+                # Implicit feedback: increment recall_count for top results
                 result_ids: list[uuid.UUID] = []
                 for r in pipeline_result.results:
                     eid = r.get("group_id") or r.get("id")
@@ -121,7 +121,7 @@ class SearchOrchestrator:
                 if result_ids:
                     for rid in result_ids:
                         try:
-                            await repo.increment_use_count(rid)
+                            await repo.increment_recall_count(rid)
                             # Add quality score bonus for recalled experiences
                             await repo.increment_quality_score(rid, 2.0)
                         except Exception:

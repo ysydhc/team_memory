@@ -36,7 +36,7 @@ class TestRemoteMCPClient:
             )
         mock_client.post.assert_awaited_once()
         call_args = mock_client.post.call_args
-        assert call_args.args[0] == "http://tm:9111/mcp/save"
+        assert call_args.args[0] == "http://tm:9111/api/v1/mcp/save"
         body = call_args.kwargs["json"]
         assert body["title"] == "T"
         assert body["problem"] == "P"
@@ -52,7 +52,7 @@ class TestRemoteMCPClient:
             MC.return_value.__aexit__ = AsyncMock(return_value=False)
             result = await client.op_recall("user1", query="search term")
         call_args = mock_client.post.call_args
-        assert call_args.args[0] == "http://tm:9111/mcp/recall"
+        assert call_args.args[0] == "http://tm:9111/api/v1/mcp/recall"
         assert call_args.kwargs["json"]["query"] == "search term"
         assert result == {"results": [{"id": "r1"}]}
 
@@ -65,7 +65,7 @@ class TestRemoteMCPClient:
             MC.return_value.__aexit__ = AsyncMock(return_value=False)
             await client.op_context("user1", file_paths=["a.py"], project="proj")
         call_args = mock_client.post.call_args
-        assert call_args.args[0] == "http://tm:9111/mcp/context"
+        assert call_args.args[0] == "http://tm:9111/api/v1/mcp/context"
         assert call_args.kwargs["json"]["file_paths"] == ["a.py"]
 
     @pytest.mark.asyncio
@@ -78,7 +78,7 @@ class TestRemoteMCPClient:
             result = await client.op_get_archive("user1", archive_id="arch-1")
         mock_client.get.assert_awaited_once()
         call_args = mock_client.get.call_args
-        assert call_args.args[0] == "http://tm:9111/mcp/archive/arch-1"
+        assert call_args.args[0] == "http://tm:9111/api/v1/mcp/archive/arch-1"
         assert result == {"id": "arch-1", "title": "T"}
 
     @pytest.mark.asyncio
@@ -90,7 +90,7 @@ class TestRemoteMCPClient:
             MC.return_value.__aexit__ = AsyncMock(return_value=False)
             await client.op_feedback("user1", experience_id="e1", rating=5)
         call_args = mock_client.post.call_args
-        assert call_args.args[0] == "http://tm:9111/mcp/feedback"
+        assert call_args.args[0] == "http://tm:9111/api/v1/mcp/feedback"
         body = call_args.kwargs["json"]
         assert body["experience_id"] == "e1"
         assert body["rating"] == 5
@@ -106,7 +106,7 @@ class TestRemoteMCPClient:
                 "user1", title="Draft T", content="Draft C", project="proj"
             )
         call_args = mock_client.post.call_args
-        assert call_args.args[0] == "http://tm:9111/mcp/draft-save"
+        assert call_args.args[0] == "http://tm:9111/api/v1/mcp/draft-save"
         body = call_args.kwargs["json"]
         assert body["title"] == "Draft T"
         assert body["project"] == "proj"
@@ -123,7 +123,7 @@ class TestRemoteMCPClient:
                 "user1", draft_id="d1", refined_content="refined"
             )
         call_args = mock_client.post.call_args
-        assert call_args.args[0] == "http://tm:9111/mcp/draft-publish"
+        assert call_args.args[0] == "http://tm:9111/api/v1/mcp/draft-publish"
         body = call_args.kwargs["json"]
         assert body["draft_id"] == "d1"
         assert body["refined_content"] == "refined"

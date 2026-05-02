@@ -237,8 +237,8 @@ export function renderExpList(containerId, experiences) {
             const projectTag = view.project
                 ? `<span class="tag" style="background:var(--bg-input);color:var(--text-muted);font-size:11px">📁 ${esc(view.project)}</span>`
                 : '';
-            const useCount = view.use_count || 0;
-            const metricsHtml = `<div class="card-metrics"><span>📊 ${useCount}</span></div>`;
+            const recallCount = view.recall_count || 0;
+            const metricsHtml = `<div class="card-metrics"><span>📊 ${recallCount} 次召回</span></div>`;
             const tagsStr = (view.tags || []).join(', ');
             const copyId = String(cardId ?? '');
             const copyAttrs = `data-exp-id="${esc(copyId)}" data-exp-title="${esc(view.title || '')}" data-exp-tags="${esc(tagsStr)}" data-exp-created="${esc(view.created_at || '')}" data-exp-created-by="${esc(view.created_by || '')}" data-exp-type="${esc(view.experience_type || 'general')}" data-exp-project="${esc(view.project || '')}"`;
@@ -403,7 +403,7 @@ export async function showDetail(id, opts = {}) {
           <div class="detail-meta" style="align-items:center">
             <span>👤 ${esc(exp.created_by)}</span>
             <span>📅 ${formatDate(exp.created_at)}</span>
-            <span>📊 ${exp.use_count} 次引用</span>
+            <span>📊 ${exp.recall_count || 0} 次召回</span>
             ${exp.quality_score !== undefined ? `<span>⭐ ${Number(exp.quality_score).toFixed(0)} 分</span>` : ''}
             ${getCopyDropdownDetailHtml()}
           </div>
