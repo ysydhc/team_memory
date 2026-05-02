@@ -920,6 +920,7 @@ async def op_draft_save(
     project: str | None = None,
     group_key: str | None = None,
     conversation_id: str | None = None,
+    skip_dedup: bool = False,
 ) -> dict:
     """Pipeline write: save draft. Forces source='pipeline', exp_status='draft'."""
     service = _get_service()
@@ -939,6 +940,7 @@ async def op_draft_save(
             experience_type="general",
             group_key=group_key,
             created_by=user,
+            skip_dedup=skip_dedup,
         )
 
     if result.get("error"):
@@ -946,6 +948,15 @@ async def op_draft_save(
             "error": True,
             "message": result.get("message", "Save failed."),
             "code": "internal_error",
+        }
+
+    # Handle dedup response (has no 'id' key but has 'status' key)
+    if result.get("status") == "duplicate_detected":
+        return {
+            "error": True,
+            "message": result.get("message", "Duplicate detected"),
+            "code": "duplicate_detected",
+            "candidates": result.get("candidates"),
         }
 
     return {
@@ -1001,6 +1012,65 @@ async def op_draft_publish(
     return {
         "id": result.get("id"),
         "status": "published",
+    }
+
+
+async def op_experience_update(
+    user: str,
+    *,
+    experience_id: str,
+    title: str | None = None,
+    problem: str | None = None,
+    solution: str | None = None,
+    tags: list[str] | None = None,
+    experience_type: str | None = None,
+    exp_status: str | None = None,
+) -> dict:
+    """Update an existing experience in-place. Only provided fields are modified.
+
+    Args:
+        user: The user performing the update.
+        experience_id: UUID of the experience to update.
+        title: New title (optional).
+        problem: New problem/description (optional).
+        solution: New solution (optional).
+        tags: New tags list (optional).
+        experience_type: New type (optional).
+        exp_status: New status (optional).
+
+    Returns:
+        Dict with updated experience data or error info.
+    """
+    service = _get_service()
+
+    kwargs: dict = {"experience_id": experience_id, "user": user}
+    if title is not None:
+        kwargs["title"] = title
+    if problem is not None:
+        kwargs["description"] = problem
+    if solution is not None:
+        kwargs["solution"] = solution
+    if tags is not None:
+        kwargs["tags"] = tags
+    if experience_type is not None:
+        kwargs["experience_type"] = experience_type
+    if exp_status is not None:
+        kwargs["exp_status"] = exp_status
+
+    result = await service.update(**kwargs)
+
+    if result is None:
+        return {
+            "error": True,
+            "message": f"Experience {experience_id} not found",
+            "code": "not_found",
+        }
+
+    return {
+        "id": result.get("id"),
+        "title": result.get("title"),
+        "status": result.get("exp_status"),
+        "message": "Experience updated successfully.",
     }
 
 

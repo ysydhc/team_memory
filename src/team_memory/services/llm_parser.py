@@ -282,6 +282,124 @@ class LLMParseError(Exception):
     pass
 
 
+async def call_llm_openai(
+    messages: list[dict[str, str]],
+    *,
+    model: str = "qwen-plus",
+    base_url: str = "http://localhost:4000/v1",
+    api_key: str | None = None,
+    timeout: float = 30.0,
+    temperature: float = 0.3,
+    max_tokens: int = 2048,
+) -> str:
+    """Call an OpenAI-compatible API (e.g. LiteLLM proxy) and return the text content.
+
+    Args:
+        messages: List of {"role": ..., "content": ...} messages.
+        model: Model name.
+        base_url: Base URL for the OpenAI-compatible endpoint.
+        api_key: API key. If None, reads from OPENAI_API_KEY env var.
+        timeout: Request timeout in seconds.
+        temperature: Sampling temperature.
+        max_tokens: Maximum tokens to generate. Reasoning models (GLM-5 etc.)
+            need sufficient max_tokens to output both reasoning and content.
+
+    Returns:
+        The generated text content.
+
+    Raises:
+        LLMParseError: On connection, timeout, or HTTP errors.
+    """
+    api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers=headers,
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.ConnectError as e:
+        raise LLMParseError(f"Cannot connect to LLM API at {base_url}: {e}")
+    except httpx.TimeoutException:
+        raise LLMParseError("LLM API call timed out")
+    except httpx.HTTPStatusError as e:
+        raise LLMParseError(f"LLM API error: {e.response.text[:300]}")
+
+    choice = data.get("choices", [{}])[0]
+    content = choice.get("message", {}).get("content", "")
+    if not content:
+        raise LLMParseError("LLM returned empty response")
+    return content
+
+
+async def parse_content_openai(
+    content: str,
+    *,
+    model: str = "qwen-plus",
+    base_url: str = "http://localhost:4000/v1",
+    api_key: str | None = None,
+    timeout: float = 30.0,
+    max_input_chars: int = 6000,
+) -> dict:
+    """Parse text into structured experience fields using an OpenAI-compatible API.
+
+    Uses the same built-in prompt as parse_content but calls via OpenAI-compatible
+    /chat/completions endpoint (e.g. LiteLLM proxy).
+
+    Args:
+        content: Free-form text to parse.
+        model: Model name.
+        base_url: OpenAI-compatible base URL.
+        api_key: API key (optional).
+        timeout: Request timeout.
+        max_input_chars: Maximum input characters sent to LLM.
+
+    Returns:
+        Normalized dict with title, problem, solution, tags, experience_type.
+
+    Raises:
+        LLMParseError: On connection, parsing, or validation errors.
+    """
+    from team_memory.schemas import EXPERIENCE_TYPES, SEVERITY_LEVELS, CATEGORIES
+
+    system_prompt = _BUILTIN_PARSE_SINGLE.replace(
+        "{{experience_types}}", ", ".join(EXPERIENCE_TYPES)
+    ).replace(
+        "{{severity_levels}}", ", ".join(SEVERITY_LEVELS)
+    ).replace(
+        "{{categories}}", ", ".join(CATEGORIES)
+    )
+
+    user_content = content[:max_input_chars]
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
+
+    llm_text = await call_llm_openai(
+        messages,
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        timeout=timeout,
+        temperature=0.3,
+    )
+
+    parsed = _extract_json(llm_text)
+    return _normalize_single(parsed)
+
+
 async def parse_content(
     content: str,
     llm_config: "LLMConfig | None" = None,
