@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>DraftRefiner ID Bug vs Fix</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", sans-serif; background: #f5f5f5; padding: 20px; }
+  h1 { text-align: center; margin-bottom: 20px; font-size: 22px; }
+  .cols { display: flex; gap: 16px; justify-content: center; }
+  .col { flex: 1; max-width: 440px; background: #fff; border-radius: 12px; padding: 20px;
+         box-shadow: 0 1px 4px rgba(0,0,0,.08); display: flex; flex-direction: column; align-items: center; }
+  .col-title { font-size: 18px; font-weight: 700; padding: 8px 16px; border-radius: 8px; color: #fff; margin-bottom: 16px; width: 100%; text-align: center; }
+  .col.bug .col-title { background: #e03131; }
+  .col.plan-a .col-title { background: #2f9e44; }
+  .col.plan-b .col-title { background: #e67700; }
+  .step { width: 100%; margin: 8px 0; position: relative; }
+  .box { padding: 10px 14px; border-radius: 8px; font-size: 14px; text-align: center; position: relative; }
+  .box.blue { background: #a5d8ff; border: 2px solid #74c0fc; }
+  .box.teal { background: #c3fae8; border: 2px solid #96f2d7; }
+  .box.purple { background: #d0bfff; border: 2px solid #b197fc; }
+  .box.red { background: #ffc9c9; border: 2px solid #ffa8a8; color: #c92a2a; font-weight: 600; }
+  .box.green { background: #b2f2bb; border: 2px solid #8ce99a; color: #2b8a3e; font-weight: 600; }
+  .box.yellow { background: #fff3bf; border: 2px solid #ffe066; font-size: 13px; }
+  .box.orange { background: #ffd8a8; border: 2px solid #ffa94d; }
+  .arrow { text-align: center; font-size: 20px; color: #868e96; margin: 4px 0; line-height: 1; }
+  .arrow.red { color: #e03131; }
+  .arrow.green { color: #2f9e44; }
+  .arrow.orange { color: #e67700; }
+  .arrow-label { font-size: 12px; color: #495057; margin-top: -2px; }
+  .arrow-label.red { color: #e03131; font-weight: 600; }
+  .arrow-label.green { color: #2f9e44; font-weight: 600; }
+  .arrow-label.orange { color: #e67700; font-weight: 600; }
+  .row { display: flex; gap: 10px; width: 100%; }
+  .row > * { flex: 1; }
+  .divider { border-top: 2px dashed #dee2e6; margin: 12px 0; width: 100%; }
+  .highlight { border: 3px solid #e03131; animation: pulse 2s infinite; }
+  .highlight-green { border: 3px solid #2f9e44; }
+  .highlight-orange { border: 3px solid #e67700; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(224,49,49,.3); } 50% { box-shadow: 0 0 8px 4px rgba(224,49,49,.15); } }
+  .tag { display: inline-block; font-size: 11px; padding: 2px 6px; border-radius: 4px; margin-left: 4px; }
+  .tag.red { background: #ffc9c9; color: #c92a2a; }
+  .tag.green { background: #b2f2bb; color: #2b8a3e; }
+  .tag.orange { background: #ffd8a8; color: #e67700; }
+  .step-num { display: inline-block; width: 20px; height: 20px; border-radius: 50%; color: #fff;
+              font-size: 12px; line-height: 20px; text-align: center; margin-right: 6px; }
+  .step-num.s1 { background: #4263eb; }
+  .step-num.s2 { background: #7048e8; }
+  .step-num.s3 { background: #ae3ec9; }
+</style></head><body>
+
+<h1>DraftRefiner ID 断链: Bug vs 修复方案</h1>
+
+<div class="cols">
+
+<!-- Column 1: Bug -->
+<div class="col bug">
+  <div class="col-title">当前 Bug</div>
+
+  <div class="step">
+    <div class="box blue"><span class="step-num s1">1</span>save_draft()</div>
+  </div>
+  <div class="arrow">↓</div>
+
+  <div class="row">
+    <div>
+      <div class="box teal">DraftBuffer<br><small>local_id = abc</small></div>
+    </div>
+    <div>
+      <div class="box teal">PG experiences<br><small>pg_id = xyz</small></div>
+    </div>
+  </div>
+
+  <div class="arrow red">↓ <span class="arrow-label red">pg_id 返回但未保存回 Buffer!</span></div>
+
+  <div class="step">
+    <div class="box teal highlight"><small>Buffer 里只有 local_id</small><br><b>没有 pg_id</b></div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="step">
+    <div class="box blue"><span class="step-num s2">2</span>refine_and_publish()</div>
+  </div>
+  <div class="arrow red">↓ <span class="arrow-label red">读取 Buffer 的 local_id</span></div>
+
+  <div class="step">
+    <div class="box purple">draft_publish(<b style="color:#c92a2a">local_id</b>)</div>
+  </div>
+  <div class="arrow red">↓</div>
+
+  <div class="step">
+    <div class="box red">PG: id NOT FOUND ✗<br><small>local_id 在 PG 里不存在</small></div>
+  </div>
+</div>
+
+<!-- Column 2: Plan A -->
+<div class="col plan-a">
+  <div class="col-title">方案 A: 回写 tm_id</div>
+
+  <div class="step">
+    <div class="box blue"><span class="step-num s1">1</span>save_draft()</div>
+  </div>
+  <div class="arrow">↓</div>
+
+  <div class="row">
+    <div>
+      <div class="box teal">DraftBuffer<br><small>local_id = abc</small></div>
+    </div>
+    <div>
+      <div class="box teal">PG experiences<br><small>pg_id = xyz</small></div>
+    </div>
+  </div>
+
+  <div class="arrow green">↓ <span class="arrow-label green">pg_id 回写为 tm_id → Buffer</span></div>
+
+  <div class="step">
+    <div class="box teal highlight-green"><small>Buffer 里有 local_id + <b>tm_id=xyz</b></small></div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="step">
+    <div class="box blue"><span class="step-num s2">2</span>refine_and_publish()</div>
+  </div>
+  <div class="arrow green">↓ <span class="arrow-label green">读取 Buffer 的 tm_id</span></div>
+
+  <div class="step">
+    <div class="box purple">draft_publish(<b style="color:#2b8a3e">tm_id</b>)</div>
+  </div>
+  <div class="arrow green">↓</div>
+
+  <div class="step">
+    <div class="box green">PG: FOUND ✓<br><small>tm_id 指向正确的 PG 记录</small></div>
+  </div>
+
+  <div class="step" style="margin-top:12px">
+    <div class="box yellow">改动: upsert_draft 增加 tm_id 字段<br><small>改动量 ~15 行</small></div>
+  </div>
+</div>
+
+<!-- Column 3: Plan B -->
+<div class="col plan-b">
+  <div class="col-title">方案 B: 重新 draft_save</div>
+
+  <div class="step">
+    <div class="box blue"><span class="step-num s1">1</span>save_draft()</div>
+  </div>
+  <div class="arrow">↓</div>
+
+  <div class="row">
+    <div>
+      <div class="box teal">DraftBuffer<br><small>local_id = abc</small></div>
+    </div>
+    <div>
+      <div class="box teal">PG experiences<br><small>pg_id = xyz</small></div>
+    </div>
+  </div>
+
+  <div class="arrow red">↓ <span class="arrow-label red">pg_id 仍然没有保存回 Buffer</span></div>
+
+  <div class="step">
+    <div class="box teal highlight"><small>Buffer 里只有 local_id</small><br><b>没有 pg_id</b></div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="step">
+    <div class="box blue"><span class="step-num s2">2</span>refine_and_publish()</div>
+  </div>
+  <div class="arrow orange">↓ <span class="arrow-label orange">跳过 Buffer，直接调 draft_save</span></div>
+
+  <div class="step">
+    <div class="box purple"><span class="step-num s3">2a</span>draft_save(content) → PG<br><small>拿到新的 new_pg_id</small></div>
+  </div>
+  <div class="arrow green">↓</div>
+
+  <div class="step">
+    <div class="box purple"><span class="step-num s3">2b</span>draft_publish(<b style="color:#2b8a3e">new_pg_id</b>)</div>
+  </div>
+  <div class="arrow green">↓</div>
+
+  <div class="step">
+    <div class="box green">PG: FOUND ✓<br><small>但产生了重复记录 (xyz + new_pg_id)</small></div>
+  </div>
+
+  <div class="step" style="margin-top:12px">
+    <div class="box yellow">改动: refine_and_publish 增加 draft_save 调用<br><small>改动量 ~20 行，但有数据重复风险</small></div>
+  </div>
+</div>
+
+</div>
+
+</body></html>
