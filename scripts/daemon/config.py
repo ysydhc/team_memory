@@ -104,6 +104,14 @@ class EvaluationSettings:
 
 
 @dataclass
+class WikiSettings:
+    """Wiki 编译配置。"""
+    enabled: bool = True
+    wiki_root: str = ""  # 默认：项目根目录下的 wiki/
+    db_path: str = ""  # 默认：<项目根>/.wiki/cache.db
+
+
+@dataclass
 class ProjectMapping:
     """项目名 → 路径模式映射。"""
 
@@ -122,6 +130,7 @@ class DaemonConfig:
     retrieval: RetrievalSettings = field(default_factory=RetrievalSettings)
     refinement: RefinementSettings = field(default_factory=RefinementSettings)
     evaluation: EvaluationSettings = field(default_factory=EvaluationSettings)
+    wiki: WikiSettings = field(default_factory=WikiSettings)
     projects: list[ProjectMapping] = field(default_factory=list)
 
 
@@ -139,6 +148,7 @@ _SUBCONFIG_KEYS = {
     "retrieval": (RetrievalSettings, None),
     "refinement": (RefinementSettings, None),
     "evaluation": (EvaluationSettings, None),
+    "wiki": (WikiSettings, None),
 }
 
 
@@ -211,6 +221,12 @@ def load_config(config_path: str | None = None) -> DaemonConfig:
 
     # 展开所有路径中的 ~
     config.draft.db_path = os.path.expanduser(config.draft.db_path) if config.draft.db_path else ""
+    config.wiki.wiki_root = (
+        os.path.expanduser(config.wiki.wiki_root) if config.wiki.wiki_root else ""
+    )
+    config.wiki.db_path = (
+        os.path.expanduser(config.wiki.db_path) if config.wiki.db_path else ""
+    )
     for vault in config.obsidian.vaults:
         vault.path = os.path.expanduser(vault.path) if vault.path else ""
 

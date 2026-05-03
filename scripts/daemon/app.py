@@ -13,6 +13,8 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
+from hooks.convergence_detector import ConvergenceDetector
+from hooks.draft_buffer import DraftBuffer
 from pydantic import BaseModel, Field
 
 from daemon.config import DaemonConfig, load_config
@@ -26,8 +28,7 @@ from daemon.pipeline import (
 )
 from daemon.search_log_writer import SearchLogWriter
 from daemon.tm_sink import TMSink, create_sink
-from hooks.convergence_detector import ConvergenceDetector
-from hooks.draft_buffer import DraftBuffer
+from daemon.wiki_compiler import WikiCompiler
 
 logger = logging.getLogger("daemon.app")
 
@@ -134,7 +135,25 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         detector = ConvergenceDetector()
         application.state.detector = detector
 
-        refiner = DraftRefiner(sink=sink, draft_buffer=buf)
+        # Wiki compiler (must init before DraftRefiner)
+        wiki_compiler: WikiCompiler | None = None
+        if config.wiki.enabled:
+            # Determine wiki_root: explicit config > project root / wiki/
+            wiki_root = config.wiki.wiki_root
+            if not wiki_root:
+                # Default: <project_root>/wiki/
+                # Project root = grandparent of scripts/daemon/
+                project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                wiki_root = os.path.join(project_root, "wiki")
+            wiki_db_path = config.wiki.db_path or None  # None → WikiCompiler default
+            wiki_compiler = WikiCompiler(wiki_root=wiki_root, db_path=wiki_db_path)
+            await wiki_compiler.__aenter__()
+            application.state.wiki_compiler = wiki_compiler
+            logger.info("WikiCompiler initialized (root=%s)", wiki_root)
+        else:
+            application.state.wiki_compiler = None
+
+        refiner = DraftRefiner(sink=sink, draft_buffer=buf, wiki_compiler=wiki_compiler)
         application.state.refiner = refiner
 
         # LLM background refinement worker
@@ -157,6 +176,11 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         yield
 
         # -- Shutdown --
+        wiki_compiler_obj: WikiCompiler | None = getattr(application.state, "wiki_compiler", None)
+        if wiki_compiler_obj is not None:
+            await wiki_compiler_obj.__aexit__(None, None, None)
+            logger.info("WikiCompiler shutdown")
+
         search_log_obj: SearchLogWriter | None = getattr(application.state, "search_log", None)
         if search_log_obj is not None:
             await search_log_obj.close()

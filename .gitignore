@@ -54,3 +54,10 @@ Thumbs.db
 
 # Internal docs (not for public repo)
 pm.md
+
+# Wiki compiled output (regenerate with: make wiki-compile)
+wiki/concepts/
+wiki/queries/
+wiki/index.md
+wiki/log.md
+.wiki/
