@@ -144,40 +144,88 @@ class TestHash:
 
 
 class TestFindRelated:
+    def _make_compiler(self) -> WikiCompiler:
+        """Create a WikiCompiler instance for testing _find_related."""
+        return WikiCompiler(wiki_root="/tmp/test_wiki")
+
     def test_tag_overlap(self):
+        compiler = self._make_compiler()
         exp1 = _make_experience(id="1", title="A", tags=["python", "docker"])
         exp2 = _make_experience(id="2", title="B", tags=["python", "flask"])
         exp3 = _make_experience(id="3", title="C", tags=["java"], project="other_project")
-        related = WikiCompiler._find_related(exp1, [exp2, exp3])
+        related = compiler._find_related(exp1, [exp2, exp3])
         assert len(related) == 1
         assert related[0]["id"] == "2"
 
     def test_same_project_no_tag_overlap(self):
+        compiler = self._make_compiler()
         exp1 = _make_experience(id="1", tags=["python"], project="tm")
         exp2 = _make_experience(id="2", tags=["java"], project="tm")
-        related = WikiCompiler._find_related(exp1, [exp2])
+        related = compiler._find_related(exp1, [exp2])
         assert len(related) == 1  # Same project gives +1 score
 
     def test_no_relation(self):
+        compiler = self._make_compiler()
         exp1 = _make_experience(id="1", tags=["python"], project="tm")
         exp2 = _make_experience(id="2", tags=["java"], project="other")
-        related = WikiCompiler._find_related(exp1, [exp2])
+        related = compiler._find_related(exp1, [exp2])
         assert len(related) == 0
 
     def test_max_related(self):
+        compiler = self._make_compiler()
         exp1 = _make_experience(id="1", tags=["python"])
         others = [_make_experience(id=str(i), tags=["python"]) for i in range(10)]
-        related = WikiCompiler._find_related(exp1, others, max_related=3)
+        related = compiler._find_related(exp1, others, max_related=3)
         assert len(related) == 3
 
     def test_excludes_self(self):
+        compiler = self._make_compiler()
         exp1 = _make_experience(id="1", tags=["python"])
-        related = WikiCompiler._find_related(exp1, [exp1])
+        related = compiler._find_related(exp1, [exp1])
         assert len(related) == 0
 
     def test_empty_list(self):
+        compiler = self._make_compiler()
         exp = _make_experience()
-        assert WikiCompiler._find_related(exp, []) == []
+        assert compiler._find_related(exp, []) == []
+
+    def test_entity_overlap(self):
+        """Entity-graph overlap adds score."""
+        compiler = self._make_compiler()
+        compiler._exp_entity_map = {
+            "1": {"entity-a", "entity-b"},
+            "2": {"entity-a", "entity-c"},
+            "3": {"entity-d"},
+        }
+        exp1 = _make_experience(id="1", tags=[], project="x")
+        exp2 = _make_experience(id="2", tags=[], project="y")
+        exp3 = _make_experience(id="3", tags=[], project="x")
+        related = compiler._find_related(exp1, [exp2, exp3])
+        # exp2 shares entity-a (score=3), exp3 shares project only (score=1)
+        assert len(related) == 2
+        assert related[0]["id"] == "2"  # entity overlap > project only
+
+    def test_embedding_similarity(self):
+        """Embedding cosine similarity > 0.7 adds score."""
+        compiler = self._make_compiler()
+        try:
+            import numpy as np
+        except ImportError:
+            pytest.skip("numpy not available")
+
+        # Two similar vectors (cosine ~0.97)
+        compiler._exp_embeddings = {
+            "1": np.array([1.0, 0.0, 0.0], dtype=np.float32),
+            "2": np.array([0.98, 0.2, 0.0], dtype=np.float32),
+            "3": np.array([0.0, 0.0, 1.0], dtype=np.float32),  # orthogonal
+        }
+        exp1 = _make_experience(id="1", tags=[], project="x")
+        exp2 = _make_experience(id="2", tags=[], project="y")
+        exp3 = _make_experience(id="3", tags=[], project="x")
+        related = compiler._find_related(exp1, [exp2, exp3])
+        # exp2 is embedding-similar (score~1.94), exp3 only shares project (score=1)
+        assert len(related) == 2
+        assert related[0]["id"] == "2"
 
 
 # ---------------------------------------------------------------------------

@@ -129,7 +129,7 @@ async def _call_llm(prompt: str, llm_config: LLMConfig) -> str | None:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 f"{base_url}/chat/completions",
                 json=payload,

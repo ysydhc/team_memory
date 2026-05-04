@@ -81,14 +81,19 @@ async def cmd_compile(full: bool = False, wiki_root: str | None = None) -> None:
 
     print(f"Found {len(experiences)} published experiences.")
 
+    # Get PG URL for entity/embedding data
+    from team_memory.config import load_settings as _load_settings
+    settings = _load_settings()
+    pg_url = str(settings.database.url)
+
     compiler = WikiCompiler(wiki_root=wiki_root)
     async with compiler:
         if full:
             print("Running full rebuild...")
-            result = await compiler.full_rebuild(experiences)
+            result = await compiler.full_rebuild(experiences, pg_url=pg_url)
         else:
             print("Running incremental compile...")
-            result = await compiler.compile_incremental(experiences)
+            result = await compiler.compile_incremental(experiences, pg_url=pg_url)
 
     print("\nCompile result:")
     print(f"  Created:  {result.created}")

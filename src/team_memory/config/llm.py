@@ -16,6 +16,17 @@ class LLMConfig(BaseModel):
     monthly_budget: float = 0.0
 
 
+class EntityExtractionConfig(BaseModel):
+    """Entity extraction LLM configuration (separate from main LLM)."""
+
+    enabled: bool = True
+    model: str = "DeepSeek-V3"
+    base_url: str = "http://localhost:4000/v1"
+    api_key_env: str = "LITELLM_MASTER_KEY"
+    timeout: int = 30
+    max_concurrent: int = 3
+
+
 class ExtractionConfig(BaseModel):
     """Experience extraction quality gate and retry configuration."""
 

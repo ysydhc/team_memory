@@ -160,6 +160,12 @@ class WikiCompiler:
         self._db: aiosqlite.Connection | None = None
         # Cache of all experiences for cross-referencing (populated before compile)
         self._all_experiences: list[dict] = []
+        # Entity graph: experience_id → set of entity_ids
+        self._exp_entity_map: dict[str, set[str]] = {}
+        # Embedding matrix: experience_id → numpy array (or None)
+        self._exp_embeddings: dict[str, Any] = {}
+        # PG connection string for entity/embedding queries
+        self._pg_url: str | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle (same pattern as DraftBuffer)
@@ -176,6 +182,7 @@ class WikiCompiler:
         # Ensure wiki directories exist
         os.makedirs(os.path.join(self._wiki_root, "concepts"), exist_ok=True)
         os.makedirs(os.path.join(self._wiki_root, "queries"), exist_ok=True)
+        os.makedirs(os.path.join(self._wiki_root, "topics"), exist_ok=True)
         return self
 
     async def __aexit__(self, *exc: Any) -> None:
@@ -187,6 +194,76 @@ class WikiCompiler:
         if self._db is None:
             raise RuntimeError("WikiCompiler is not initialized. Use 'async with compiler:'")
         return self._db
+
+    # ------------------------------------------------------------------
+    # Internal: PG data loading for enhanced cross-referencing
+    # ------------------------------------------------------------------
+
+    async def _load_pg_data(self, pg_url: str) -> None:
+        """Load entity-graph and embedding data from PostgreSQL.
+
+        Called once at the start of compile_incremental / full_rebuild.
+        Results are cached in self._exp_entity_map and self._exp_embeddings.
+        """
+        from sqlalchemy import text
+
+        from team_memory.storage.database import get_session
+
+        self._pg_url = pg_url
+
+        # 1. Load experience → entity mapping
+        self._exp_entity_map = {}
+        try:
+            async with get_session(pg_url) as session:
+                result = await session.execute(text("""
+                    SELECT ee.experience_id, ee.entity_id
+                    FROM experience_entities ee
+                    JOIN entities e ON e.id = ee.entity_id
+                """))
+                for row in result.fetchall():
+                    exp_id = str(row[0])
+                    if exp_id not in self._exp_entity_map:
+                        self._exp_entity_map[exp_id] = set()
+                    self._exp_entity_map[exp_id].add(str(row[1]))
+        except Exception:
+            # Non-fatal: entity data is optional enhancement
+            self._exp_entity_map = {}
+
+        # 2. Load embeddings
+        self._exp_embeddings = {}
+        try:
+            import numpy as np  # noqa: F811
+
+            async with get_session(pg_url) as session:
+                result = await session.execute(text("""
+                    SELECT id, embedding FROM experiences
+                    WHERE embedding IS NOT NULL AND exp_status = 'published'
+                """))
+                for row in result.fetchall():
+                    exp_id = str(row[0])
+                    emb = row[1]
+                    if emb is None:
+                        continue
+                    try:
+                        if isinstance(emb, str):
+                            # asyncpg returns pgvector as string: "[0.1,0.2,...]"
+                            import json
+                            vec = json.loads(emb)
+                            self._exp_embeddings[exp_id] = np.array(vec, dtype=np.float32)
+                        elif hasattr(emb, "tolist"):
+                            self._exp_embeddings[exp_id] = np.array(emb.tolist(), dtype=np.float32)
+                        elif isinstance(emb, list):
+                            self._exp_embeddings[exp_id] = np.array(emb, dtype=np.float32)
+                        elif isinstance(emb, bytes):
+                            self._exp_embeddings[exp_id] = np.frombuffer(emb, dtype=np.float32)
+                    except Exception:
+                        continue
+        except ImportError:
+            # numpy not available — skip embedding similarity
+            self._exp_embeddings = {}
+        except Exception:
+            # Non-fatal: embedding data is optional enhancement
+            self._exp_embeddings = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -276,12 +353,13 @@ class WikiCompiler:
         return paths
 
     async def compile_incremental(
-        self, all_experiences: list[dict]
+        self, all_experiences: list[dict], pg_url: str | None = None
     ) -> CompileResult:
         """Incremental compile: only process new/changed experiences.
 
         Args:
             all_experiences: All published experiences from PG.
+            pg_url: PostgreSQL URL for entity/embedding data loading.
 
         Returns:
             CompileResult with statistics.
@@ -289,6 +367,10 @@ class WikiCompiler:
         db = self._require_db()
         self._all_experiences = all_experiences
         result = CompileResult()
+
+        # 0. Load entity-graph + embedding data from PG (for enhanced cross-ref)
+        if pg_url:
+            await self._load_pg_data(pg_url)
 
         # 1. Load all cached records
         cached = await self._get_all_cached()
@@ -329,9 +411,10 @@ class WikiCompiler:
                 result.deleted += 1
         await db.commit()
 
-        # 4. Update index.md + log.md if anything changed
+        # 4. Update index.md + log.md + topics if anything changed
         if result.created + result.updated + result.deleted > 0:
             await self._update_index()
+            await self._update_topics()
             await self._append_log(
                 "incremental",
                 f"created={result.created} updated={result.updated} "
@@ -340,17 +423,24 @@ class WikiCompiler:
 
         return result
 
-    async def full_rebuild(self, all_experiences: list[dict]) -> CompileResult:
+    async def full_rebuild(
+        self, all_experiences: list[dict], pg_url: str | None = None
+    ) -> CompileResult:
         """Full rebuild: clear cache and recompile everything.
 
         Args:
             all_experiences: All published experiences from PG.
+            pg_url: PostgreSQL URL for entity/embedding data loading.
 
         Returns:
             CompileResult with statistics.
         """
         db = self._require_db()
         self._all_experiences = all_experiences
+
+        # 0. Load entity-graph + embedding data from PG (for enhanced cross-ref)
+        if pg_url:
+            await self._load_pg_data(pg_url)
 
         # 1. Clear cache
         await db.execute("DELETE FROM wiki_cache")
@@ -372,8 +462,9 @@ class WikiCompiler:
             except Exception:
                 result.errors += 1
 
-        # 4. Update index + log
+        # 4. Update index + topics + log
         await self._update_index()
+        await self._update_topics()
         await self._append_log(
             "full-rebuild",
             f"created={result.created} errors={result.errors}",
@@ -501,17 +592,19 @@ class WikiCompiler:
     # Internal: cross-referencing
     # ------------------------------------------------------------------
 
-    @staticmethod
     def _find_related(
+        self,
         experience: dict,
         all_experiences: list[dict],
         max_related: int = 5,
     ) -> list[dict]:
-        """Find related experiences based on tag overlap and same project.
+        """Find related experiences using multi-signal scoring.
 
-        Scoring:
+        Signals:
         - tag_overlap * 2
-        - +1 if same project
+        - same_project * 1
+        - entity_overlap * 3 (shared entities via entity-graph)
+        - embedding_similarity * 2 (cosine sim > 0.7, only when embeddings available)
 
         Returns up to max_related experiences sorted by score descending.
         """
@@ -521,21 +614,48 @@ class WikiCompiler:
         exp_id = str(experience.get("id", ""))
         exp_tags = set(experience.get("tags") or [])
         exp_project = experience.get("project", "")
+        exp_entities = self._exp_entity_map.get(exp_id, set())
+        exp_emb = self._exp_embeddings.get(exp_id)
 
-        scored: list[tuple[int, dict]] = []
+        scored: list[tuple[float, dict]] = []
         for other in all_experiences:
             other_id = str(other.get("id", ""))
             if other_id == exp_id:
                 continue
 
             other_tags = set(other.get("tags") or [])
-            tag_overlap = len(exp_tags & other_tags)
-            if tag_overlap == 0 and exp_project != other.get("project", ""):
-                continue
+            other_project = other.get("project", "")
 
-            score = tag_overlap * 2
-            if exp_project and exp_project == other.get("project", ""):
-                score += 1
+            # Signal 1: tag overlap
+            tag_overlap = len(exp_tags & other_tags)
+            score = float(tag_overlap * 2)
+
+            # Signal 2: same project
+            if exp_project and exp_project == other_project:
+                score += 1.0
+
+            # Signal 3: entity-graph overlap (shared entities)
+            other_entities = self._exp_entity_map.get(other_id, set())
+            entity_overlap = len(exp_entities & other_entities)
+            score += float(entity_overlap * 3)
+
+            # Signal 4: embedding cosine similarity
+            other_emb = self._exp_embeddings.get(other_id)
+            if exp_emb is not None and other_emb is not None:
+                try:
+                    import numpy as np
+                    sim = float(np.dot(exp_emb, other_emb) / (
+                        np.linalg.norm(exp_emb) * np.linalg.norm(other_emb) + 1e-8
+                    ))
+                    if sim > 0.7:
+                        score += sim * 2
+                except Exception:
+                    pass
+
+            # Skip if no signal at all (no tags, no project, no entities, no embedding)
+            if score <= 0 and not exp_entities and exp_emb is None:
+                if tag_overlap == 0 and exp_project != other_project:
+                    continue
 
             if score > 0:
                 scored.append((score, other))
@@ -697,3 +817,110 @@ class WikiCompiler:
             return value.strftime("%Y-%m-%d")
         s = str(value)[:10]  # Take first 10 chars (YYYY-MM-DD)
         return s
+
+    # ------------------------------------------------------------------
+    # Internal: topic pages (high-level retrieval)
+    # ------------------------------------------------------------------
+
+    async def _update_topics(self) -> None:
+        """Generate wiki/topics/ pages from discovered topic clusters."""
+        if not self._pg_url or not self._exp_embeddings:
+            return
+
+        try:
+            from team_memory.services.topic_discovery import discover_topics
+        except ImportError:
+            return
+
+        result = await discover_topics(self._pg_url)
+        if not result.topics:
+            return
+
+        # Clear existing topic files
+        topics_dir = os.path.join(self._wiki_root, "topics")
+        if os.path.isdir(topics_dir):
+            for fname in os.listdir(topics_dir):
+                if fname.endswith(".md"):
+                    os.remove(os.path.join(topics_dir, fname))
+
+        # Generate a page for each topic
+        for topic in result.topics:
+            slug = self._slugify(topic.name)
+            topic_path = os.path.join(topics_dir, f"{slug}.md")
+
+            # Build entity list
+            entity_lines = []
+            for ent in topic.entities[:10]:
+                entity_lines.append(f"- {ent}")
+
+            # Build experience list (link to wiki pages)
+            exp_lines = []
+            for exp_id in topic.experience_ids[:20]:
+                # Find wiki_path from cache
+                exp_cache = await self._get_cache_by_experience_id(exp_id)
+                if exp_cache:
+                    r_slug = os.path.splitext(os.path.basename(exp_cache["wiki_path"]))[0]
+                    r_title = exp_cache.get("title", exp_id[:8])
+                    exp_lines.append(f"- [[{r_slug}|{r_title}]]")
+                else:
+                    exp_lines.append(f"- {exp_id[:8]}")
+
+            # Build tag list
+            tag_str = ", ".join(topic.tags[:5])
+
+            content = f"""\
+---
+type: topic
+name: {topic.name}
+tags: [{tag_str}]
+experience_count: {len(topic.experience_ids)}
+---
+
+# {topic.name}
+
+> 自动发现的主题聚类，包含 {len(topic.experience_ids)} 条相关经验。
+
+## 核心实体
+
+{chr(10).join(entity_lines) if entity_lines else "（无）"}
+
+## 关联经验
+
+{chr(10).join(exp_lines) if exp_lines else "（无）"}
+"""
+            async with aiofiles.open(topic_path, "w", encoding="utf-8") as f:
+                await f.write(content)
+
+        # Update index to include topics section
+        await self._update_index_with_topics(result.topics)
+
+    async def _get_cache_by_experience_id(self, experience_id: str) -> dict | None:
+        """Return cache record by experience_id."""
+        db = self._require_db()
+        cursor = await db.execute(
+            "SELECT * FROM wiki_cache WHERE experience_id = ?", (experience_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def _update_index_with_topics(self, topics: list) -> None:
+        """Append topics section to index.md."""
+        index_path = os.path.join(self._wiki_root, "index.md")
+        if not os.path.exists(index_path):
+            return
+
+        async with aiofiles.open(index_path, "r", encoding="utf-8") as f:
+            content = await f.read()
+
+        # Append topics section
+        topic_lines = ["\n## 主题聚类\n"]
+        for topic in topics:
+            slug = self._slugify(topic.name)
+            topic_lines.append(
+                f"- [[topics/{slug}|{topic.name}]] ({len(topic.experience_ids)} 条经验)"
+            )
+
+        content += "\n".join(topic_lines) + "\n"
+        async with aiofiles.open(index_path, "w", encoding="utf-8") as f:
+            await f.write(content)
+

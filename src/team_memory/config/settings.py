@@ -19,7 +19,7 @@ from team_memory.config.database import DatabaseConfig
 from team_memory.config.embedding import EmbeddingConfig
 from team_memory.config.janitor import JanitorConfig
 from team_memory.config.lifecycle import LifecycleConfig
-from team_memory.config.llm import ExtractionConfig, LLMConfig
+from team_memory.config.llm import EntityExtractionConfig, ExtractionConfig, LLMConfig
 from team_memory.config.logging_config import LoggingConfig
 from team_memory.config.mcp import MCPConfig
 from team_memory.config.reranker import RerankerConfig
@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
+    entity_extraction: EntityExtractionConfig = Field(
+        default_factory=EntityExtractionConfig
+    )
     auth: AuthConfig = Field(default_factory=AuthConfig)
     default_project: str = "default"
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)

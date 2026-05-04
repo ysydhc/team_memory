@@ -434,7 +434,10 @@ def bootstrap(
     if enable_background:
         _register_cache_invalidation(event_bus, search_orchestrator)
         _register_pattern_extraction(event_bus, embedding, settings.llm, db_url)
-        entity_extractor = _register_entity_extraction(event_bus, settings.llm, db_url)
+        entity_extractor = _register_entity_extraction(
+            event_bus, settings.llm, db_url,
+            entity_extraction_config=settings.entity_extraction,
+        )
     else:
         entity_extractor = None
 
@@ -577,13 +580,36 @@ def _register_entity_extraction(
     event_bus: EventBus,
     llm_config: object,
     db_url: str,
+    entity_extraction_config: object | None = None,
 ) -> object:
     """Subscribe to EXPERIENCE_CREATED to fire async entity extraction."""
     import asyncio
 
+    from team_memory.config.llm import EntityExtractionConfig
     from team_memory.services.entity_extractor import EntityExtractor
 
-    extractor = EntityExtractor(llm_config=llm_config, db_url=db_url)
+    # Use dedicated entity_extraction config if available, else fall back to main LLMConfig
+    if entity_extraction_config is not None and getattr(
+        entity_extraction_config, "enabled", True
+    ):
+        ee_cfg = entity_extraction_config
+        import os as _os
+
+        api_key = _os.environ.get(
+            getattr(ee_cfg, "api_key_env", ""), ""
+        ) or ""
+        from team_memory.config.llm import LLMConfig
+
+        extract_llm_config = LLMConfig(
+            provider="generic",
+            model=getattr(ee_cfg, "model", "DeepSeek-V3"),
+            base_url=getattr(ee_cfg, "base_url", "http://localhost:4000/v1"),
+            api_key=api_key,
+        )
+    else:
+        extract_llm_config = llm_config
+
+    extractor = EntityExtractor(llm_config=extract_llm_config, db_url=db_url)
 
     async def _on_experience_created(payload: dict) -> None:
         exp_id = payload.get("experience_id", "")

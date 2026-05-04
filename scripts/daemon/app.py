@@ -148,8 +148,18 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             wiki_db_path = config.wiki.db_path or None  # None → WikiCompiler default
             wiki_compiler = WikiCompiler(wiki_root=wiki_root, db_path=wiki_db_path)
             await wiki_compiler.__aenter__()
+            # Pre-load entity/embedding data for enhanced cross-referencing
+            from team_memory.config import load_settings as _load_tm_settings
+            _tm_settings = _load_tm_settings()
+            pg_url = str(_tm_settings.database.url)
+            await wiki_compiler._load_pg_data(pg_url)
             application.state.wiki_compiler = wiki_compiler
-            logger.info("WikiCompiler initialized (root=%s)", wiki_root)
+            logger.info(
+                "WikiCompiler initialized (root=%s, entities=%d, embeddings=%d)",
+                wiki_root,
+                len(wiki_compiler._exp_entity_map),
+                len(wiki_compiler._exp_embeddings),
+            )
         else:
             application.state.wiki_compiler = None
 
@@ -186,7 +196,9 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             await search_log_obj.close()
 
         # Stop refinement worker
-        refinement_worker_obj: RefinementWorker | None = getattr(application.state, "refinement_worker", None)
+        refinement_worker_obj: RefinementWorker | None = getattr(
+            application.state, "refinement_worker", None
+        )
         if refinement_worker_obj is not None:
             refinement_worker_obj.stop()
         refinement_task_obj = getattr(application.state, "refinement_task", None)
