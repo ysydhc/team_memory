@@ -31,7 +31,7 @@ ALEMBIC ?= $(shell \
 	else echo alembic; fi)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp mcp-verify test lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-install daemon-uninstall stats wiki-compile wiki-status entity-backfill entity-dedup
+.PHONY: help setup dev web mcp mcp-verify test lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-install daemon-uninstall stats wiki-compile wiki-status entity-backfill entity-dedup embedding-backfill detect-contradictions
 
 sync-agent-artifacts: ## 由 agents/shared + agents/manifest.yaml 生成 .claude/.cursor 下 agents、prompts、skills
 	python scripts/sync_agent_artifacts.py
@@ -167,9 +167,17 @@ entity-backfill: ## 全量补抽实体（--model 指定模型，--dry-run 预览
 	@set -a && [ -f .env ] && source .env || true && set +a; \
 	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/daemon/entity_backfill.py $(OPTS)
 
-entity-dedup:    ## 实体去重合并
+entity-dedup:	## 实体去重合并
 	@set -a && [ -f .env ] && source .env || true && set +a; \
 	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/daemon/entity_dedup.py $(OPTS)
+
+embedding-backfill:	## 补齐缺失的 experience embedding
+	@set -a && [ -f .env ] && source .env || true && set +a; \
+	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/daemon/embedding_backfill.py $(OPTS)
+
+detect-contradictions:	## 检测矛盾经验对
+	@set -a && [ -f .env ] && source .env || true && set +a; \
+	PYTHONPATH=src:scripts $(PYTHON_BIN) -c "import asyncio; from team_memory.services.contradiction_detector import detect_contradictions; from team_memory.config import load_settings; s=load_settings(); pairs=asyncio.run(detect_contradictions(str(s.database.url))); print(f'Found {len(pairs)} contradiction pairs'); [print(f'  {p.exp_a_title[:50]} vs {p.exp_b_title[:50]} ({p.reason})') for p in pairs]"
 
 migrate:        ## 运行数据库迁移（默认 uv / .venv 内 python -m alembic）
 	@case "$(ALEMBIC)" in \

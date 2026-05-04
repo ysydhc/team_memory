@@ -111,9 +111,13 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         if config.tm.mode == "local":
             from team_memory.bootstrap import bootstrap as _tm_bootstrap  # noqa: PLC0415
             # enable_background=False: Janitor scheduler runs exclusively in
-            # team_memory_service (Docker). Daemon must not start a duplicate.
+            # team_memory_service (Docker). Entity extraction is now always
+            # registered regardless of this flag (see bootstrap.py).
             _tm_bootstrap(enable_background=False)
-            logger.info("TM AppContext bootstrapped for local mode (background=False)")
+            logger.info(
+                "TM AppContext bootstrapped for local mode "
+                "(background=False, entity extraction=always)"
+            )
 
         sink_config = {
             "mode": config.tm.mode,

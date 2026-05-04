@@ -434,12 +434,12 @@ def bootstrap(
     if enable_background:
         _register_cache_invalidation(event_bus, search_orchestrator)
         _register_pattern_extraction(event_bus, embedding, settings.llm, db_url)
-        entity_extractor = _register_entity_extraction(
-            event_bus, settings.llm, db_url,
-            entity_extraction_config=settings.entity_extraction,
-        )
-    else:
-        entity_extractor = None
+
+    # Entity extraction always registered (both Daemon and Docker)
+    entity_extractor = _register_entity_extraction(
+        event_bus, settings.llm, db_url,
+        entity_extraction_config=settings.entity_extraction,
+    )
 
     # Initialize janitor services
     janitor = None
@@ -585,7 +585,6 @@ def _register_entity_extraction(
     """Subscribe to EXPERIENCE_CREATED to fire async entity extraction."""
     import asyncio
 
-    from team_memory.config.llm import EntityExtractionConfig
     from team_memory.services.entity_extractor import EntityExtractor
 
     # Use dedicated entity_extraction config if available, else fall back to main LLMConfig

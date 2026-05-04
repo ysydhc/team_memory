@@ -62,7 +62,7 @@ class McpRecallRequest(BaseModel):
     language: str | None = None
     framework: str | None = None
     tags: list[str] | None = None
-    max_results: int = Field(5, ge=1)
+    max_results: int = Field(10, ge=1)
     project: str | None = None
     include_archives: bool | None = None
     include_user_profile: bool = False

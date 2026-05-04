@@ -618,7 +618,7 @@ async def op_recall(
     language: str | None = None,
     framework: str | None = None,
     tags: list[str] | None = None,
-    max_results: int = 5,
+    max_results: int = 10,
     project: str | None = None,
     include_archives: bool | None = None,
     include_user_profile: bool = False,

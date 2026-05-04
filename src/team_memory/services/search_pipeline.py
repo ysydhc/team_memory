@@ -59,7 +59,7 @@ class SearchRequest:
     """Parameters for a search pipeline execution."""
 
     query: str
-    max_results: int = 5
+    max_results: int = 10
     min_similarity: float = 0.6
     tags: list[str] | None = None
     user_name: str = ""
@@ -462,7 +462,7 @@ class SearchPipeline:
         if mode == "fts":
             return await self._fts_search(repo, q, over_fetch, request)
 
-        # Hybrid mode: parallel vector + FTS
+        # Hybrid mode: parallel vector + FTS + topic
         if query_embedding is None:
             return await self._fts_search(repo, q, over_fetch, request)
 
@@ -470,9 +470,12 @@ class SearchPipeline:
             repo, query_embedding, over_fetch, request, min_similarity=min_sim
         )
         fts_task = self._fts_search(repo, q, over_fetch, request)
+        topic_task = self._topic_search(
+            query_embedding, over_fetch, request
+        )
 
-        vector_results, fts_results = await asyncio.gather(
-            vector_task, fts_task, return_exceptions=True
+        vector_results, fts_results, topic_results = await asyncio.gather(
+            vector_task, fts_task, topic_task, return_exceptions=True
         )
 
         if isinstance(vector_results, Exception):
@@ -481,8 +484,11 @@ class SearchPipeline:
         if isinstance(fts_results, Exception):
             logger.warning("FTS failed in hybrid mode: %s", fts_results, exc_info=True)
             fts_results = []
+        if isinstance(topic_results, Exception):
+            logger.warning("Topic search failed in hybrid mode: %s", topic_results, exc_info=True)
+            topic_results = []
 
-        return self._rrf_fuse(vector_results, fts_results, over_fetch)
+        return self._rrf_fuse3(vector_results, fts_results, topic_results, over_fetch)
 
     async def _vector_search(
         self,
@@ -608,6 +614,147 @@ class SearchPipeline:
 
         fused.sort(key=lambda x: x.score, reverse=True)
         return fused[:limit]
+
+    def _rrf_fuse3(
+        self,
+        vector_results: list[SearchResultItem],
+        fts_results: list[SearchResultItem],
+        topic_results: list[SearchResultItem],
+        limit: int,
+    ) -> list[SearchResultItem]:
+        """Merge vector + FTS + topic results using 3-way RRF.
+
+        Topic results get a lower weight since they are a supplementary signal.
+        """
+        k = self._search_config.rrf_k
+        v_weight = self._search_config.vector_weight
+        f_weight = self._search_config.fts_weight
+        t_weight = v_weight * 0.5  # Topic is supplementary, half of vector weight
+
+        score_map: dict[str, dict] = {}
+
+        for rank, item in enumerate(vector_results):
+            exp_id = item.data.get("id") or item.data.get("group_id", "")
+            rrf_contribution = v_weight / (rank + k)
+            if exp_id not in score_map:
+                score_map[exp_id] = {
+                    "rrf_score": 0.0,
+                    "item": item,
+                    "similarity": item.similarity,
+                }
+            score_map[exp_id]["rrf_score"] += rrf_contribution
+            if item.similarity > score_map[exp_id]["similarity"]:
+                score_map[exp_id]["item"] = item
+                score_map[exp_id]["similarity"] = item.similarity
+
+        for rank, item in enumerate(fts_results):
+            exp_id = item.data.get("id") or item.data.get("group_id", "")
+            rrf_contribution = f_weight / (rank + k)
+            if exp_id not in score_map:
+                score_map[exp_id] = {
+                    "rrf_score": 0.0,
+                    "item": item,
+                    "similarity": item.similarity,
+                }
+            score_map[exp_id]["rrf_score"] += rrf_contribution
+
+        for rank, item in enumerate(topic_results):
+            exp_id = item.data.get("id") or item.data.get("group_id", "")
+            rrf_contribution = t_weight / (rank + k)
+            if exp_id not in score_map:
+                score_map[exp_id] = {
+                    "rrf_score": 0.0,
+                    "item": item,
+                    "similarity": item.similarity,
+                }
+            score_map[exp_id]["rrf_score"] += rrf_contribution
+
+        fused = []
+        for _exp_id, data in score_map.items():
+            item = data["item"]
+            item.rrf_score = data["rrf_score"]
+            item.score = data["rrf_score"]
+            item.source_type = "hybrid"
+            fused.append(item)
+
+        fused.sort(key=lambda x: x.score, reverse=True)
+        return fused[:limit]
+
+    async def _topic_search(
+        self,
+        query_embedding: list[float],
+        limit: int,
+        request: SearchRequest,
+    ) -> list[SearchResultItem]:
+        """Search via topic clusters — returns experiences from relevant topics."""
+        if not self._db_url:
+            return []
+
+        try:
+            from team_memory.services.topic_discovery import find_by_topic
+            topics = await find_by_topic(
+                query_embedding, self._db_url, top_k=3, min_similarity=0.5
+            )
+        except Exception:
+            return []
+
+        if not topics:
+            return []
+
+        # Collect experience IDs from top topics, deduplicated
+        seen: set[str] = set()
+        exp_ids: list[str] = []
+        for topic in topics:
+            for eid in topic.experience_ids:
+                if eid not in seen:
+                    seen.add(eid)
+                    exp_ids.append(eid)
+                if len(exp_ids) >= limit:
+                    break
+
+        if not exp_ids:
+            return []
+
+        # Fetch experience data from PG
+        from sqlalchemy import text as sql_text
+
+        from team_memory.storage.database import get_session
+
+        items: list[SearchResultItem] = []
+        try:
+            async with get_session(self._db_url) as session:
+                result = await session.execute(
+                    sql_text("""
+                        SELECT id, title, description, solution, tags, project,
+                               experience_type, confidence, recall_count, used_count
+                        FROM experiences
+                        WHERE id = ANY(:ids) AND exp_status = 'published'
+                    """),
+                    {"ids": exp_ids},
+                )
+                rows = result.fetchall()
+                for row in rows:
+                    items.append(SearchResultItem(
+                        data={
+                            "id": str(row[0]),
+                            "title": row[1],
+                            "description": row[2],
+                            "solution": row[3],
+                            "tags": row[4],
+                            "project": row[5],
+                            "experience_type": row[6],
+                            "confidence": row[7],
+                            "recall_count": row[8],
+                            "used_count": row[9],
+                        },
+                        score=0.5,  # Will be overridden by RRF
+                        similarity=0.5,
+                        source_type="topic",
+                    ))
+        except Exception:
+            return []
+
+        return items
 
     def _apply_exact_match_boost(
         self, candidates: list[SearchResultItem], query: str
