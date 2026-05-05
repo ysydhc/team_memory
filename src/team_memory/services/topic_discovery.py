@@ -11,12 +11,20 @@ Used by:
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    pass
+
+import httpx
 from sqlalchemy import text
 
 from team_memory.storage.database import get_session
+
+logger = logging.getLogger("team_memory.topic_discovery")
 
 
 @dataclass
@@ -118,11 +126,96 @@ def _simple_kmeans(
     return clusters
 
 
+_TOPIC_NAMING_PROMPT = """You are a topic naming expert. Given a cluster of related experiences, generate a short, descriptive topic name (2-5 words, in English).
+
+Rules:
+- The name should capture the MAIN THEME of the cluster
+- Use technical terms when appropriate (e.g. "SQLite Migration", "WebView Debugging")
+- Do NOT use generic words like "technology", "task", "workflow"
+- Do NOT include project names or ticket IDs
+- Return ONLY the topic name, nothing else
+
+Examples:
+- Entities: [SQLite, asyncpg, PostgreSQL] + Titles: ["Migrate buffer to SQLite", "Fix asyncpg connection pool"] → "Database Migration"
+- Entities: [WKWebView, JavaScript, iOS] + Titles: ["WKWebView cookie sync", "JS bridge timeout"] → "WKWebView Integration"
+- Entities: [Docker, PostgreSQL, team_memory] + Titles: ["Docker compose networking", "PG connection in container"] → "Docker & PostgreSQL Setup"
+"""
+
+
+async def _generate_topic_name(
+    entities: list[str],
+    tags: list[str],
+    sample_titles: list[str],
+    llm_config: object,
+) -> str | None:
+    """Generate a topic name using LLM.
+
+    Args:
+        entities: Top entity names in the cluster
+        tags: Top tags in the cluster
+        sample_titles: Up to 10 sample experience titles
+        llm_config: EntityExtractionConfig with model/base_url/api_key_env
+
+    Returns:
+        Topic name string, or None on failure.
+    """
+    import os
+
+    base_url = getattr(llm_config, "base_url", "http://localhost:4000/v1").rstrip("/")
+    if not base_url.endswith("/v1"):
+        base_url = f"{base_url}/v1"
+    model = getattr(llm_config, "model", "DeepSeek-V3")
+    api_key_env = getattr(llm_config, "api_key_env", "LITELLM_MASTER_KEY")
+    api_key = os.environ.get(api_key_env, "none")
+    timeout = getattr(llm_config, "timeout", 30)
+
+    user_msg = (
+        f"Entities: {entities[:5]}\n"
+        f"Tags: {tags[:5]}\n"
+        f"Sample titles:\n"
+    )
+    for t in sample_titles[:10]:
+        user_msg += f"  - {t}\n"
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": _TOPIC_NAMING_PROMPT},
+            {"role": "user", "content": user_msg},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 50,
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=float(timeout)) as client:
+            resp = await client.post(
+                f"{base_url}/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+            resp.raise_for_status()
+            name = resp.json()["choices"][0]["message"]["content"].strip()
+            # Sanitize: strip quotes, limit length
+            name = name.strip('"\'')
+            if len(name) > 60:
+                name = name[:60]
+            return name if name else None
+    except Exception as exc:
+        logger.warning("LLM topic naming failed: %s", exc)
+        return None
+
+
 async def discover_topics(
     db_url: str,
     k: int = 0,
     min_cluster_size: int = 2,
     max_topics: int = 20,
+    llm_config: object | None = None,
 ) -> TopicResult:
     """Discover topics from experience embeddings.
 
@@ -131,14 +224,16 @@ async def discover_topics(
         k: Number of clusters (0 = auto via sqrt(N)/2)
         min_cluster_size: Minimum experiences per topic
         max_topics: Maximum number of topics
+        llm_config: Optional EntityExtractionConfig for LLM-based topic naming
 
     Returns:
         TopicResult with discovered topics.
     """
-    # 1. Load embeddings
+    # 1. Load embeddings + titles
     embeddings: dict[str, list[float]] = {}
     tags_map: dict[str, list[str]] = {}
     entity_map: dict[str, list[str]] = {}
+    title_map: dict[str, str] = {}
 
     try:
         import numpy as np
@@ -146,9 +241,9 @@ async def discover_topics(
         return TopicResult()
 
     async with get_session(db_url) as session:
-        # Load experience embeddings
+        # Load experience embeddings + titles
         result = await session.execute(text("""
-            SELECT id, embedding, tags FROM experiences
+            SELECT id, embedding, tags, title FROM experiences
             WHERE embedding IS NOT NULL AND exp_status = 'published'
         """))
         import json
@@ -156,6 +251,7 @@ async def discover_topics(
             exp_id = str(row[0])
             emb = row[1]
             t = row[2]
+            title_map[exp_id] = row[3] or ""
             if emb is not None:
                 try:
                     if isinstance(emb, str):
@@ -196,7 +292,7 @@ async def discover_topics(
     # 3. Cluster
     clusters = _simple_kmeans(embeddings, k)
 
-    # 4. Build topics
+    # 4. Build topics — use LLM naming when config provided, else heuristic
     topics: list[Topic] = []
     unclustered = 0
     for ci, exp_ids in clusters.items():
@@ -204,7 +300,7 @@ async def discover_topics(
             unclustered += len(exp_ids)
             continue
 
-        # Derive topic name from most frequent tags + entities
+        # Derive topic metadata from most frequent tags + entities
         all_tags: dict[str, int] = {}
         all_entities: dict[str, int] = {}
         for eid in exp_ids:
@@ -217,13 +313,30 @@ async def discover_topics(
         top_tags = sorted(all_tags, key=all_tags.get, reverse=True)[:5]
         top_entities = sorted(all_entities, key=all_entities.get, reverse=True)[:5]
 
-        # Name: combine top entity + top tag
-        name_parts = []
-        if top_entities:
-            name_parts.append(top_entities[0])
-        if top_tags and top_tags[0] not in name_parts:
-            name_parts.append(top_tags[0])
-        name = " / ".join(name_parts) if name_parts else f"Topic-{ci}"
+        # Collect sample titles for LLM naming
+        sample_titles = [
+            title_map[eid] for eid in exp_ids
+            if title_map.get(eid)
+        ][:10]
+
+        # Name: LLM if available, else fallback to heuristic
+        name: str | None = None
+        if llm_config is not None:
+            name = await _generate_topic_name(
+                entities=top_entities,
+                tags=top_tags,
+                sample_titles=sample_titles,
+                llm_config=llm_config,
+            )
+
+        if not name:
+            # Heuristic fallback: combine top entity + top tag
+            name_parts = []
+            if top_entities:
+                name_parts.append(top_entities[0])
+            if top_tags and top_tags[0] not in name_parts:
+                name_parts.append(top_tags[0])
+            name = " / ".join(name_parts) if name_parts else f"Topic-{ci}"
 
         # Compute centroid
         vecs = [embeddings[eid] for eid in exp_ids if eid in embeddings]

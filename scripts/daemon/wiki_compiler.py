@@ -834,7 +834,18 @@ class WikiCompiler:
         except ImportError:
             return
 
-        result = await discover_topics(self._pg_url)
+        # Load entity_extraction config for LLM-based topic naming
+        llm_config = None
+        try:
+            from team_memory.config import load_settings
+            settings = load_settings()
+            llm_config = getattr(settings, "entity_extraction", None)
+            if llm_config and not getattr(llm_config, "enabled", True):
+                llm_config = None
+        except Exception:
+            pass  # fallback to heuristic naming
+
+        result = await discover_topics(self._pg_url, llm_config=llm_config)
         if not result.topics:
             return
 
