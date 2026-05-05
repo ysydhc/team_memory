@@ -208,6 +208,67 @@ async def run_batch(
         await buffer.close()
 
 
+async def show_recent(dsn: str, limit: int = 10) -> None:
+    """Show recent buffer entries with their faithfulness scores."""
+    import asyncpg
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT id::text, query, agent_response, result_ids,
+                   evaluated, faithfulness_score, judge_reasoning, created_at::text
+            FROM response_buffer
+            ORDER BY created_at DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+
+        if not rows:
+            print("No entries in response_buffer.")
+            return
+
+        print(f"\n{'='*60}")
+        print(f"Recent {len(rows)} Response Buffer Entries")
+        print(f"{'='*60}\n")
+
+        for i, r in enumerate(rows, 1):
+            score = r["faithfulness_score"]
+            evaluated = r["evaluated"]
+            query = r["query"][:80]
+            response = (r["agent_response"] or "")[:150]
+            created = (r["created_at"] or "")[:19]
+
+            # Parse result_ids
+            result_ids = r["result_ids"]
+            if isinstance(result_ids, str):
+                import json
+                result_ids = json.loads(result_ids)
+            n_results = len(result_ids) if result_ids else 0
+
+            # Score display
+            if evaluated and score is not None:
+                if score >= 0.7:
+                    score_str = f"\033[32m{score:.2f} ✓\033[0m"  # green
+                elif score >= 0:
+                    score_str = f"\033[31m{score:.2f} ✗\033[0m"  # red
+                else:
+                    score_str = f"\033[33merror\033[0m"
+            elif evaluated:
+                score_str = "evaluated (no score)"
+            else:
+                score_str = "\033[33mpending\033[0m"
+
+            print(f"  [{i}] {created}  score={score_str}  results={n_results}")
+            print(f"      Query:    {query}")
+            print(f"      Response: {response}...")
+            print()
+
+    finally:
+        await conn.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Faithfulness batch evaluator")
     parser.add_argument("--model", default=None, help="LLM model name")
@@ -216,20 +277,39 @@ def main():
     parser.add_argument("--batch-size", type=int, default=20, help="Max entries per run")
     parser.add_argument("--dry-run", action="store_true", help="Don't write results")
     parser.add_argument("--force", action="store_true", help="Ignore threshold")
+    parser.add_argument("--recent", type=int, default=0, help="Evaluate the N most recent buffer entries immediately")
+    parser.add_argument("--show", type=int, default=0, help="Show the N most recent buffer entries with scores")
     parser.add_argument("--db-url", default=None, help="Database URL")
     args = parser.parse_args()
 
     dsn = args.db_url or "postgresql://developer:devpass@localhost:5433/team_memory"
 
-    result = asyncio.run(run_batch(
-        dsn=dsn,
-        model=args.model,
-        base_url=args.base_url,
-        api_key=args.api_key,
-        batch_size=args.batch_size,
-        dry_run=args.dry_run,
-        force=args.force,
-    ))
+    # Show mode: display recent entries
+    if args.show > 0:
+        asyncio.run(show_recent(dsn=dsn, limit=args.show))
+        return
+
+    # Recent mode: evaluate N most recent entries immediately
+    if args.recent > 0:
+        result = asyncio.run(run_batch(
+            dsn=dsn,
+            model=args.model,
+            base_url=args.base_url,
+            api_key=args.api_key,
+            batch_size=args.recent,
+            dry_run=args.dry_run,
+            force=True,  # Always force when --recent is specified
+        ))
+    else:
+        result = asyncio.run(run_batch(
+            dsn=dsn,
+            model=args.model,
+            base_url=args.base_url,
+            api_key=args.api_key,
+            batch_size=args.batch_size,
+            dry_run=args.dry_run,
+            force=args.force,
+        ))
 
     if result.get("skipped"):
         sys.exit(0)

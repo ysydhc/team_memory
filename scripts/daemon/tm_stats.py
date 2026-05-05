@@ -67,6 +67,41 @@ def _resolve_dsn() -> str:
     return "postgresql://developer:devpass@localhost:5433/team_memory"
 
 
+async def _faithfulness_breakdown(dsn: str, days: int, threshold: float = 0.7, above: bool = True) -> int:
+    """Count faithfulness entries above/below threshold."""
+    import asyncpg
+    conn = await asyncpg.connect(dsn)
+    try:
+        op = ">=" if above else "<"
+        count = await conn.fetchval(
+            f"SELECT count(*) FROM response_buffer "
+            f"WHERE evaluated = TRUE AND faithfulness_score {op} $1 "
+            f"AND created_at > NOW() - make_interval(days => $2)",
+            threshold, days,
+        )
+        return count or 0
+    finally:
+        await conn.close()
+
+
+async def _get_low_faithfulness_entries(dsn: str, days: int, limit: int = 5) -> list[dict]:
+    """Get entries with low faithfulness scores."""
+    import asyncpg
+    conn = await asyncpg.connect(dsn)
+    try:
+        rows = await conn.fetch(
+            "SELECT query, faithfulness_score, created_at::text "
+            "FROM response_buffer "
+            "WHERE evaluated = TRUE AND faithfulness_score < 0.7 AND faithfulness_score >= 0 "
+            "AND created_at > NOW() - make_interval(days => $1) "
+            "ORDER BY faithfulness_score ASC LIMIT $2",
+            days, limit,
+        )
+        return [{"query": r["query"], "score": r["faithfulness_score"], "created_at": r["created_at"]} for r in rows]
+    finally:
+        await conn.close()
+
+
 async def run_stats(days: int, granularity: str) -> None:
     from daemon.search_log_writer import SearchLogWriter
 
@@ -184,6 +219,41 @@ async def run_stats(days: int, granularity: str) -> None:
 
             console.print(proj_table)
 
+        # --- Faithfulness ---
+        from daemon.response_buffer import ResponseBuffer
+        buffer = ResponseBuffer(dsn=dsn)
+        try:
+            f_stats = await buffer.get_stats(days=days)
+            if f_stats["total"] > 0:
+                f_text = Text()
+                f_text.append(f"  Evaluated:    {f_stats['evaluated']}\n", style="bold")
+                f_text.append(f"  Pending:      {f_stats['pending']}\n", style="yellow")
+                avg = f_stats["avg_faithfulness"]
+                if avg is not None:
+                    style = "green" if avg >= 0.7 else "red"
+                    f_text.append(f"  Avg score:    {avg:.3f}\n", style=style)
+                    high = await _faithfulness_breakdown(dsn, days, threshold=0.7, above=True)
+                    low = await _faithfulness_breakdown(dsn, days, threshold=0.7, above=False)
+                    f_text.append(f"  High (≥0.7):  {high}\n", style="green")
+                    f_text.append(f"  Low  (<0.7):  {low}\n", style="red")
+                else:
+                    f_text.append("  No evaluated entries yet.\n", style="dim")
+                console.print(Panel(f_text, title=f"Faithfulness ({days}d)", border_style="magenta"))
+
+                # Low faithfulness entries
+                low_entries = await _get_low_faithfulness_entries(dsn, days, limit=5)
+                if low_entries:
+                    low_table = Table(title="Low Faithfulness Entries", show_lines=False)
+                    low_table.add_column("Score", justify="right", style="red")
+                    low_table.add_column("Query", style="yellow")
+                    low_table.add_column("Evaluated", style="dim")
+                    for entry in low_entries:
+                        score_str = f"{entry['score']:.2f}" if entry['score'] >= 0 else "error"
+                        low_table.add_row(score_str, entry['query'][:50], entry['created_at'][:10])
+                    console.print(low_table)
+        finally:
+            await buffer.close()
+
     finally:
         await writer.close()
 
@@ -218,6 +288,22 @@ def _render_plain(stats, trends, miss_queries, low_use_queries, days, granularit
         print(f"\n  Low Use Queries:")
         for q in low_use_queries[:5]:
             print(f"    {q['query'][:50]:50s}  x{q['count']} searches, 0 used")
+
+    # Faithfulness
+    from daemon.response_buffer import ResponseBuffer
+    dsn = _resolve_dsn()
+    buffer = ResponseBuffer(dsn=dsn)
+    try:
+        f_stats = asyncio.run(buffer.get_stats(days=days))
+        if f_stats["total"] > 0:
+            print(f"\n  Faithfulness:")
+            print(f"    Evaluated: {f_stats['evaluated']}  Pending: {f_stats['pending']}")
+            if f_stats["avg_faithfulness"] is not None:
+                print(f"    Avg score: {f_stats['avg_faithfulness']:.3f}")
+    except Exception:
+        pass
+    finally:
+        asyncio.run(buffer.close())
 
 
 def main() -> None:

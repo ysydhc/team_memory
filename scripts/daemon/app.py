@@ -254,6 +254,48 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             "tm_mode": getattr(app.state, "tm_mode", "unknown"),
         }
 
+    @app.get("/status/faithfulness")
+    async def get_faithfulness_status(limit: int = 10) -> dict[str, Any]:
+        """Return recent faithfulness buffer entries with scores."""
+        response_buffer = getattr(app.state, "response_buffer", None)
+        if response_buffer is None:
+            return {"error": "response_buffer not initialized"}
+
+        stats = await response_buffer.get_stats(days=7)
+        entries = await response_buffer.fetch_pending(limit=0)  # don't fetch pending
+
+        # Get recent entries (all, not just pending)
+        import asyncpg
+        try:
+            pool = await response_buffer._ensure_pool()
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT id::text, query, evaluated, faithfulness_score, created_at::text
+                    FROM response_buffer
+                    ORDER BY created_at DESC
+                    LIMIT $1
+                    """,
+                    limit,
+                )
+            recent = [
+                {
+                    "id": str(r["id"]),
+                    "query": r["query"][:100],
+                    "evaluated": r["evaluated"],
+                    "score": r["faithfulness_score"],
+                    "created_at": r["created_at"],
+                }
+                for r in rows
+            ]
+        except Exception:
+            recent = []
+
+        return {
+            "stats": stats,
+            "recent": recent,
+        }
+
     @app.post("/hooks/after_response")
     async def hook_after_response(payload: HookPayload) -> dict[str, Any]:
         """Process agent response (draft pipeline)."""
