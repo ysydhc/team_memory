@@ -31,7 +31,7 @@ ALEMBIC ?= $(shell \
 	else echo alembic; fi)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp mcp-verify test lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-install daemon-uninstall stats wiki-compile wiki-status entity-backfill entity-dedup embedding-backfill detect-contradictions search-eval
+.PHONY: help setup dev web mcp mcp-verify test lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-install daemon-uninstall stats wiki-compile wiki-status entity-backfill entity-dedup embedding-backfill detect-contradictions search-eval solution-backfill
 
 sync-agent-artifacts: ## 由 agents/shared + agents/manifest.yaml 生成 .claude/.cursor 下 agents、prompts、skills
 	python scripts/sync_agent_artifacts.py
@@ -182,6 +182,10 @@ detect-contradictions:	## 检测矛盾经验对（含 LLM 验证）
 search-eval:		## 搜索质量评估（precision/recall）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
 	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/daemon/search_eval.py $(OPTS)
+
+solution-backfill:	## 补跑无 solution 的 experience（LLM 提取）
+	@set -a && [ -f .env ] && source .env || true && set +a; \
+	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/daemon/solution_backfill.py $(OPTS)
 
 migrate:        ## 运行数据库迁移（默认 uv / .venv 内 python -m alembic）
 	@case "$(ALEMBIC)" in \
