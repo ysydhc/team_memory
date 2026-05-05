@@ -1,7 +1,7 @@
 ---
 id: TASK-7
 title: RefinementWorker LLM精炼
-status: Agent Done
+status: Done
 assignee: [hermes]
 created_date: '2026-04-27 15:36'
 labels: [pipeline, llm]
