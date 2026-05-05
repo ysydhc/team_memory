@@ -1,7 +1,8 @@
 """MCP Server — 8 tools for persistent team memory across coding sessions.
 
 Registers memory_save, memory_recall, memory_get_archive, memory_archive_upsert,
-memory_context, memory_feedback, memory_draft_save, memory_draft_publish.
+memory_context, memory_feedback, memory_draft_save, memory_draft_publish,
+memory_submit_response.
 Delegates to the shared service layer via AppContext singleton.
 
 Usage:
@@ -504,6 +505,69 @@ async def memory_draft_publish(
         refined_content=refined_content,
     )
     return _guard_output(json.dumps(result, ensure_ascii=False))
+
+
+# ============================================================
+# Tool 9: memory_submit_response (faithfulness buffer)
+# ============================================================
+
+
+@mcp.tool(
+    name="memory_submit_response",
+    description=(
+        "Submit your response text after using memory_recall results. "
+        "This enables faithfulness evaluation — measuring whether your response "
+        "was based on the retrieved knowledge. "
+        "Call this AFTER you've used memory_recall results to answer a question."
+    ),
+)
+@track_usage
+async def memory_submit_response(
+    query: str,
+    response: str,
+    result_ids: list[str] | None = None,
+) -> str:
+    """Submit agent response for faithfulness evaluation.
+
+    Args:
+        query: The original search query used in memory_recall
+        response: Your response text that used the search results
+        result_ids: Optional list of experience IDs from the search results
+    """
+    try:
+        import asyncpg
+        import uuid as _uuid
+        from datetime import datetime, timezone
+
+        dsn = os.environ.get(
+            "TEAM_MEMORY_DB_URL",
+            "postgresql://developer:devpass@localhost:5433/team_memory",
+        )
+        conn = await asyncpg.connect(dsn)
+        try:
+            entry_id = _uuid.uuid4()
+            parsed_ids = [{"": rid} for rid in (result_ids or [])]
+            await conn.execute(
+                """
+                INSERT INTO response_buffer
+                    (id, query, agent_response, result_ids, created_at)
+                VALUES ($1, $2, $3, $4, $5)
+                """,
+                entry_id,
+                query[:2000],
+                response[:10000],
+                json.dumps(parsed_ids) if parsed_ids else None,
+                datetime.now(timezone.utc),
+            )
+            return json.dumps({
+                "status": "buffered",
+                "entry_id": str(entry_id),
+                "message": "Response submitted for faithfulness evaluation.",
+            })
+        finally:
+            await conn.close()
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)})
 
 
 # ============================================================

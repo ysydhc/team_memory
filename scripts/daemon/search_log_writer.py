@@ -141,6 +141,44 @@ class SearchLogWriter:
             logger.debug("mark_used_from_response failed: %s", e)
             return 0
 
+    async def get_recent_with_results(
+        self,
+        *,
+        project: str | None = None,
+        hours_window: int = 1,
+    ) -> dict | None:
+        """Find the most recent search_log with results.
+
+        Returns dict with keys: id, query, result_ids, or None.
+        """
+        try:
+            pool = await self._ensure_pool()
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT id::text, query, result_ids
+                    FROM search_logs
+                    WHERE result_ids IS NOT NULL
+                      AND result_ids::text NOT IN ('[]', 'null')
+                      AND created_at > NOW() - make_interval(hours => $1)
+                      AND ($2::text IS NULL OR project = $2)
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    hours_window,
+                    project,
+                )
+            if row:
+                return {
+                    "id": row["id"],
+                    "query": row["query"],
+                    "result_ids": json.loads(row["result_ids"]) if isinstance(row["result_ids"], str) else row["result_ids"],
+                }
+            return None
+        except Exception as e:
+            logger.debug("get_recent_with_results failed: %s", e)
+            return None
+
     async def mark_used_fuzzy(
         self,
         agent_response: str,

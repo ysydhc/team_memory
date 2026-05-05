@@ -181,6 +181,14 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         search_log = SearchLogWriter()
         application.state.search_log = search_log
 
+        # Response buffer for faithfulness evaluation
+        from daemon.response_buffer import ResponseBuffer
+        eval_config = config.evaluation
+        response_buffer = ResponseBuffer(
+            batch_threshold=getattr(eval_config, "faithfulness_batch_threshold", 5),
+        )
+        application.state.response_buffer = response_buffer
+
         # Start Obsidian vault watcher as background task
         from daemon.watcher import start_watcher
         watcher_task = asyncio.create_task(start_watcher(config, sink, buf))
@@ -198,6 +206,11 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         search_log_obj: SearchLogWriter | None = getattr(application.state, "search_log", None)
         if search_log_obj is not None:
             await search_log_obj.close()
+
+        # Shutdown response buffer
+        response_buffer_obj = getattr(application.state, "response_buffer", None)
+        if response_buffer_obj is not None:
+            await response_buffer_obj.close()
 
         # Stop refinement worker
         refinement_worker_obj: RefinementWorker | None = getattr(
@@ -282,6 +295,35 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                 )
                 if fuzzy_marked > 0:
                     logger.info("[EVAL]  marked %d search_log(s) as was_used (fuzzy)", fuzzy_marked)
+
+            # Auto-buffer response for faithfulness evaluation
+            try:
+                response_buffer = getattr(app.state, "response_buffer", None)
+                if response_buffer is not None:
+                    # Find the most recent search_log with results for this conversation
+                    recent_log = await search_log.get_recent_with_results(
+                        project=resolved_project or None,
+                        hours_window=1,
+                    )
+                    if recent_log:
+                        await response_buffer.add(
+                            query=recent_log["query"],
+                            agent_response=response_text[:10000],
+                            result_ids=recent_log["result_ids"],
+                            search_log_id=recent_log["id"],
+                        )
+                        # Check if batch threshold reached
+                        if await response_buffer.should_batch():
+                            logger.info("[EVAL]  faithfulness batch threshold reached, triggering evaluation")
+                            import subprocess, sys as _sys
+                            subprocess.Popen(
+                                [_sys.executable, "scripts/daemon/faithfulness_batch.py", "--force"],
+                                cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                            )
+            except Exception as e:
+                logger.debug("Faithfulness buffer capture failed: %s", e)
         return result
 
     @app.post("/hooks/session_start")
