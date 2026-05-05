@@ -31,7 +31,7 @@ ALEMBIC ?= $(shell \
 	else echo alembic; fi)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp mcp-verify test lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-install daemon-uninstall stats wiki-compile wiki-status entity-backfill entity-dedup embedding-backfill detect-contradictions
+.PHONY: help setup dev web mcp mcp-verify test lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-install daemon-uninstall stats wiki-compile wiki-status entity-backfill entity-dedup embedding-backfill detect-contradictions search-eval
 
 sync-agent-artifacts: ## 由 agents/shared + agents/manifest.yaml 生成 .claude/.cursor 下 agents、prompts、skills
 	python scripts/sync_agent_artifacts.py
@@ -178,6 +178,10 @@ embedding-backfill:	## 补齐缺失的 experience embedding
 detect-contradictions:	## 检测矛盾经验对（含 LLM 验证）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
 	PYTHONPATH=src:scripts $(PYTHON_BIN) -c "import asyncio; from team_memory.services.contradiction_detector import detect_contradictions; from team_memory.config import load_settings; s=load_settings(); llm=getattr(s,'entity_extraction',None); pairs=asyncio.run(detect_contradictions(str(s.database.url), llm_config=llm)); print(f'Found {len(pairs)} contradiction pairs'); [print(f'  {p.exp_a_title[:50]} vs {p.exp_b_title[:50]} ({p.reason}) [LLM:{p.llm_confirmed}]') for p in pairs]"
+
+search-eval:		## 搜索质量评估（precision/recall）
+	@set -a && [ -f .env ] && source .env || true && set +a; \
+	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/daemon/search_eval.py $(OPTS)
 
 migrate:        ## 运行数据库迁移（默认 uv / .venv 内 python -m alembic）
 	@case "$(ALEMBIC)" in \

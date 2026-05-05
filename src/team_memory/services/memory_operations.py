@@ -318,6 +318,7 @@ async def _recall_solve(
         "reranked": osearch.reranked,
         "intent_type": osearch.intent_type,
         "feedback_hint": (f"If helpful, call memory_feedback(experience_id='{best_id}', rating=5)"),
+        "usage_hint": "When referencing results, include [mem:xxxx] (first 8 chars of id) in your response to track usage.",
     }
 
 
@@ -361,6 +362,7 @@ async def _recall_search(
         "reranked": osearch.reranked,
         "intent_type": osearch.intent_type,
         "feedback_hint": (f"If helpful, call memory_feedback(experience_id='{best_id}', rating=5)"),
+        "usage_hint": "When referencing results, include [mem:xxxx] (first 8 chars of id) in your response to track usage.",
     }
 
 
@@ -453,6 +455,7 @@ async def _recall_suggest(
         "results": suggestions,
         "reranked": osearch.reranked,
         "intent_type": osearch.intent_type,
+        "usage_hint": "When referencing results, include [mem:xxxx] (first 8 chars of id) in your response to track usage.",
     }
 
 
