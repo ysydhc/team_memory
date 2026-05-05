@@ -90,9 +90,17 @@ class DraftRefiner:
 
         # Write PG experience id back to buffer so refine_and_publish
         # can use the correct id instead of the local buffer id.
-        pg_id = tm_response.get("id") if not tm_response.get("error") else None
+        # Even on error, op_draft_save may return an id if the record was
+        # partially saved (e.g. embedding degraded but DB row created).
+        pg_id = tm_response.get("id")
         if pg_id and local_id:
             await self._buf.set_tm_id(local_id, pg_id)
+        elif not pg_id:
+            logger.warning(
+                "draft_save returned no id for session=%s title=%s — "
+                "response=%s",
+                session_id, title, tm_response,
+            )
 
         return tm_response
 

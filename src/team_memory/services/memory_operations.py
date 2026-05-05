@@ -948,6 +948,7 @@ async def op_draft_save(
             "error": True,
             "message": result.get("message", "Save failed."),
             "code": "internal_error",
+            "id": result.get("id"),  # propagate id if save partially succeeded
         }
 
     # Handle dedup response (has no 'id' key but has 'status' key)

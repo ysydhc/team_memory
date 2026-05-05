@@ -150,18 +150,26 @@ class ExperienceService:
                 embed_text += f"\n{' '.join(tags)}"
             embed_text = embed_text[:4000]
 
-            # Generate embedding synchronously
+            # Generate embedding with one retry on failure.
+            # If embedding still fails after retry, save with embedding=None
+            # so the experience is not silently lost.
+            import asyncio as _asyncio
+
             embedding = None
-            try:
-                embedding = await self._embedding.encode_single(embed_text)
-            except Exception as e:
-                logger.warning("Failed to generate embedding: %s", e)
+            for _attempt in range(2):
+                try:
+                    embedding = await self._embedding.encode_single(embed_text)
+                    break
+                except Exception as e:
+                    logger.warning("Failed to generate embedding (attempt %d): %s", _attempt + 1, e)
+                    if _attempt == 0:
+                        await _asyncio.sleep(1.0)
 
             if embedding is None:
-                return {
-                    "error": True,
-                    "message": "Embedding generation failed. Save aborted.",
-                }
+                logger.warning(
+                    "Embedding failed after retry — saving experience without embedding. "
+                    "The record will lack vector search until backfill runs."
+                )
 
             # Dedup-on-save check
             if (
