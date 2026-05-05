@@ -48,10 +48,19 @@ _SEARCH_DEBUG = os.environ.get("TEAM_MEMORY_SEARCH_DEBUG", "").lower() in ("1", 
 _expansion_cache: dict[str, tuple[str, float]] = {}
 _EXPANSION_CACHE_TTL = 600  # 10 minutes
 
+# Topic discovery cache: db_url -> (TopicResult, monotonic_timestamp)
+_topic_cache: dict[str, tuple] = {}
+_TOPIC_CACHE_TTL = 3600  # 1 hour
+
 
 def _expansion_cache_clear() -> None:
-    """Clear the LLM expansion cache. Useful for testing and cache invalidation."""
+    """Clear the LLM query expansion cache."""
     _expansion_cache.clear()
+
+
+def _topic_cache_clear() -> None:
+    """Clear the topic discovery cache."""
+    _topic_cache.clear()
 
 
 @dataclass
@@ -687,37 +696,65 @@ class SearchPipeline:
         request: SearchRequest,
     ) -> list[SearchResultItem]:
         """Search via topic clusters — returns experiences from relevant topics."""
+        global _topic_cache
+
         if not self._db_url:
             return []
 
-        try:
-            from team_memory.services.topic_discovery import find_by_topic
-            topics = await find_by_topic(
-                query_embedding, self._db_url, top_k=3, min_similarity=0.5
-            )
-        except Exception:
-            return []
+        # Step 1: Get or cache discover_topics result
+        cache_key = self._db_url
+        cached = _topic_cache.get(cache_key)
+        if cached and (time.monotonic() - cached[1]) < _TOPIC_CACHE_TTL:
+            topics = cached[0]
+        else:
+            try:
+                from team_memory.services.topic_discovery import discover_topics
+                result = await discover_topics(self._db_url)
+                topics = result.topics
+                _topic_cache[cache_key] = (topics, time.monotonic())
+            except Exception:
+                return []
 
         if not topics:
             return []
 
-        # Collect experience IDs from top topics, deduplicated
+        # Step 2: Compute cosine similarity to each topic center
+        import numpy as np
+        q_vec = np.array(query_embedding, dtype=np.float32)
+        q_norm = np.linalg.norm(q_vec)
+        if q_norm < 1e-8:
+            return []
+
+        scored: list[tuple[float, str]] = []
+        for topic in topics:
+            if not topic.center:
+                continue
+            c_vec = np.array(topic.center, dtype=np.float32)
+            sim = float(
+                np.dot(q_vec, c_vec) / (q_norm * np.linalg.norm(c_vec) + 1e-8)
+            )
+            if sim >= 0.5:
+                for eid in topic.experience_ids:
+                    scored.append((sim, eid))
+
+        if not scored:
+            return []
+
+        scored.sort(key=lambda x: x[0], reverse=True)
         seen: set[str] = set()
         exp_ids: list[str] = []
-        for topic in topics:
-            for eid in topic.experience_ids:
-                if eid not in seen:
-                    seen.add(eid)
-                    exp_ids.append(eid)
-                if len(exp_ids) >= limit:
-                    break
+        for _, eid in scored:
+            if eid not in seen:
+                seen.add(eid)
+                exp_ids.append(eid)
+            if len(exp_ids) >= limit:
+                break
 
         if not exp_ids:
             return []
 
         # Fetch experience data from PG
         from sqlalchemy import text as sql_text
-
         from team_memory.storage.database import get_session
 
         items: list[SearchResultItem] = []

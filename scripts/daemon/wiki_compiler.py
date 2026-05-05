@@ -415,6 +415,7 @@ class WikiCompiler:
         if result.created + result.updated + result.deleted > 0:
             await self._update_index()
             await self._update_topics()
+            await self._generate_contradictions()
             await self._append_log(
                 "incremental",
                 f"created={result.created} updated={result.updated} "
@@ -462,9 +463,10 @@ class WikiCompiler:
             except Exception:
                 result.errors += 1
 
-        # 4. Update index + topics + log
+        # 4. Update index + topics + contradictions + log
         await self._update_index()
         await self._update_topics()
+        await self._generate_contradictions()
         await self._append_log(
             "full-rebuild",
             f"created={result.created} errors={result.errors}",
@@ -923,4 +925,48 @@ experience_count: {len(topic.experience_ids)}
         content += "\n".join(topic_lines) + "\n"
         async with aiofiles.open(index_path, "w", encoding="utf-8") as f:
             await f.write(content)
+
+    # ------------------------------------------------------------------
+    # Internal: contradictions report
+    # ------------------------------------------------------------------
+
+    async def _generate_contradictions(self) -> None:
+        """Generate wiki/contradictions.md from contradiction detection."""
+        if not self._pg_url:
+            return
+
+        try:
+            from team_memory.services.contradiction_detector import (
+                detect_contradictions,
+            )
+        except ImportError:
+            return
+
+        pairs = await detect_contradictions(self._pg_url, max_pairs=20)
+        if not pairs:
+            return
+
+        # Build the content
+        lines = [
+            "# 矛盾经验检测报告\n",
+            f"> 自动生成，共检测到 {len(pairs)} 对潜在矛盾经验。\n",
+            "",
+        ]
+
+        for i, pair in enumerate(pairs, 1):
+            lines.append(f"## {i}. {pair.exp_a_title[:60]}\n")
+            lines.append(f"**经验 A:** {pair.exp_a_title}")
+            lines.append(f"- ID: `{pair.exp_a_id}`\n")
+            lines.append(f"**经验 B:** {pair.exp_b_title}")
+            lines.append(f"- ID: `{pair.exp_b_id}`\n")
+            lines.append(f"**共享实体:** {', '.join(pair.shared_entities)}")
+            lines.append(f"**矛盾原因:** {pair.reason}\n")
+
+        contradictions_path = os.path.join(
+            self._wiki_root, "contradictions.md"
+        )
+        async with aiofiles.open(
+            contradictions_path, "w", encoding="utf-8"
+        ) as f:
+            await f.write("\n".join(lines))
 
