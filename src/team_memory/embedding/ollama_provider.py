@@ -1,7 +1,7 @@
 """Ollama embedding provider implementation.
 
 Uses Ollama's local API for text embedding. Zero cost, zero network dependency
-(once the model is downloaded). Default model: nomic-embed-text:latest (768 dimensions).
+(once the model is downloaded). Default model: qwen3-embedding:0.6b (1024 dimensions).
 
 Requires Ollama running locally: https://ollama.com
 """
@@ -16,13 +16,13 @@ from team_memory.embedding.base import EmbeddingProvider
 class OllamaEmbedding(EmbeddingProvider):
     """Embedding provider using Ollama's local embedding API.
 
-    Default model: nomic-embed-text:latest (768 dimensions).
+    Default model: qwen3-embedding:0.6b (1024 dimensions).
     """
 
     def __init__(
         self,
-        model: str = "nomic-embed-text:latest",
-        dim: int = 768,
+        model: str = "qwen3-embedding:0.6b",
+        dim: int = 1024,
         base_url: str = "http://localhost:11434",
     ):
         self._model = model

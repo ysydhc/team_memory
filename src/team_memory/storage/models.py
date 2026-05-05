@@ -26,8 +26,8 @@ def _utcnow() -> datetime:
 
 
 # Embedding vector dimension — matches the database schema.
-# To change: create a migration, update this constant, re-embed all records.
-DB_VECTOR_DIM: int = 768
+# Updated from 768 (nomic-embed-text) to 1024 (qwen3-embedding:0.6b).
+DB_VECTOR_DIM: int = 1024
 
 
 class Base(DeclarativeBase):
@@ -67,7 +67,7 @@ class Experience(Base):
         String(30), default="general", nullable=False, server_default="general"
     )
 
-    # Vector embedding (DB_VECTOR_DIM dims, matches Ollama nomic-embed-text default)
+    # Vector embedding (DB_VECTOR_DIM dims, matches qwen3-embedding:0.6b)
     embedding = mapped_column(Vector(DB_VECTOR_DIM), nullable=True)
 
     # Full-text search (populated via trigger in DB migration)

@@ -143,7 +143,7 @@ class ExperienceService:
             repo = ExperienceRepository(session)
 
             # Build text for embedding
-            # Truncate to 4000 chars to stay within nomic-embed-text's
+            # Truncate to 4000 chars to stay within embedding model's
             # 8192-token context limit (Chinese text ~1 char/token).
             embed_text = f"{title}\n{problem}\n{solution or ''}"
             if tags:

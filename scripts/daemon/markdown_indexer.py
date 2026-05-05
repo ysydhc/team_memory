@@ -154,7 +154,7 @@ class MarkdownIndexer:
         description = body.strip()[:500]
 
         # solution: body text truncated to 4000 chars to stay within
-        # nomic-embed-text's 8192-token context limit (Chinese ~1 char/token)
+        # qwen3-embedding:0.6b's context limit (Chinese ~1.5 char/token)
         solution = body.strip()[:4000]
 
         return {

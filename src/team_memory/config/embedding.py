@@ -19,9 +19,9 @@ class OllamaEmbeddingConfig(BaseModel):
     """Ollama embedding configuration."""
 
     # Explicit :latest avoids ambiguity with Ollama tags (name is always tagged in /api/tags).
-    model: str = "nomic-embed-text:latest"
+    model: str = "qwen3-embedding:0.6b"
     base_url: str = "http://localhost:11434"
-    dimension: int = 768
+    dimension: int = 1024
 
 
 class LocalEmbeddingConfig(BaseModel):
