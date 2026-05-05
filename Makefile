@@ -175,9 +175,9 @@ embedding-backfill:	## 补齐缺失的 experience embedding
 	@set -a && [ -f .env ] && source .env || true && set +a; \
 	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/daemon/embedding_backfill.py $(OPTS)
 
-detect-contradictions:	## 检测矛盾经验对
+detect-contradictions:	## 检测矛盾经验对（含 LLM 验证）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	PYTHONPATH=src:scripts $(PYTHON_BIN) -c "import asyncio; from team_memory.services.contradiction_detector import detect_contradictions; from team_memory.config import load_settings; s=load_settings(); pairs=asyncio.run(detect_contradictions(str(s.database.url))); print(f'Found {len(pairs)} contradiction pairs'); [print(f'  {p.exp_a_title[:50]} vs {p.exp_b_title[:50]} ({p.reason})') for p in pairs]"
+	PYTHONPATH=src:scripts $(PYTHON_BIN) -c "import asyncio; from team_memory.services.contradiction_detector import detect_contradictions; from team_memory.config import load_settings; s=load_settings(); llm=getattr(s,'entity_extraction',None); pairs=asyncio.run(detect_contradictions(str(s.database.url), llm_config=llm)); print(f'Found {len(pairs)} contradiction pairs'); [print(f'  {p.exp_a_title[:50]} vs {p.exp_b_title[:50]} ({p.reason}) [LLM:{p.llm_confirmed}]') for p in pairs]"
 
 migrate:        ## 运行数据库迁移（默认 uv / .venv 内 python -m alembic）
 	@case "$(ALEMBIC)" in \

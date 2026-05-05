@@ -1,20 +1,22 @@
 """Contradiction Detector — detect conflicting experiences.
 
-Simple approach:
-1. Find experiences that share entities but have conflicting solutions
-2. Use embedding reverse-similarity as a heuristic for contradiction
-3. Output pairs of potentially conflicting experiences
+Two-stage approach:
+1. Rule-based: find experience pairs sharing entities with contradictory signals
+2. LLM validation (Stage 2): confirm if pairs are truly contradictory
 
-This is a best-effort, rule-based detector. No LLM is used on the detection
-path (keeping latency low). LLM validation can be added as Stage 2.
+Stage 1 is fast and cheap (no LLM). Stage 2 filters false positives.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
+import httpx
 from sqlalchemy import text
 
 from team_memory.storage.database import get_session
+
+logger = logging.getLogger("team_memory.contradiction_detector")
 
 
 @dataclass
@@ -27,24 +29,143 @@ class ContradictionPair:
     exp_b_title: str
     shared_entities: list[str] = field(default_factory=list)
     reason: str = ""
+    llm_confirmed: bool = False  # True if LLM validated this as a real contradiction
+
+
+_CONTRADICTION_PROMPT = """You are a technical knowledge curator. Given two experiences that share entities, determine if they contain genuinely contradictory advice.
+
+Rules:
+- TRUE contradiction: One says "always do X" and the other says "never do X" about the SAME aspect
+- FALSE contradiction: They discuss different aspects, different contexts, or are complementary
+- Consider that one may be outdated and the other is a correction — this IS a contradiction worth flagging
+
+Respond with ONLY a JSON object:
+{"contradiction": true/false, "reason": "brief explanation"}"""
+
+
+async def _validate_with_llm(
+    pairs: list[ContradictionPair],
+    exp_data: dict[str, dict],
+    llm_config: object,
+) -> list[ContradictionPair]:
+    """Validate contradiction candidates using LLM.
+
+    Sends pairs in a single batch prompt to minimize LLM calls.
+
+    Args:
+        pairs: Candidate pairs from rule-based detection
+        exp_data: Experience data dict (id -> {title, description, solution})
+        llm_config: EntityExtractionConfig with model/base_url/api_key_env
+
+    Returns:
+        Filtered list of pairs that LLM confirms as contradictions.
+    """
+    import json
+    import os
+
+    if not pairs:
+        return []
+
+    base_url = getattr(llm_config, "base_url", "http://localhost:4000/v1").rstrip("/")
+    if not base_url.endswith("/v1"):
+        base_url = f"{base_url}/v1"
+    model = getattr(llm_config, "model", "DeepSeek-V3")
+    api_key_env = getattr(llm_config, "api_key_env", "LITELLM_MASTER_KEY")
+    api_key = os.environ.get(api_key_env, "none")
+    timeout = getattr(llm_config, "timeout", 30)
+
+    # Build batch prompt — all pairs in one call
+    user_msg = "Evaluate each pair:\n\n"
+    for i, pair in enumerate(pairs):
+        a = exp_data.get(pair.exp_a_id, {})
+        b = exp_data.get(pair.exp_b_id, {})
+        user_msg += f"--- Pair {i + 1} ---\n"
+        user_msg += f"A: {pair.exp_a_title}\n"
+        user_msg += f"  Problem: {(a.get('description') or '')[:300]}\n"
+        user_msg += f"  Solution: {(a.get('solution') or '')[:300]}\n"
+        user_msg += f"B: {pair.exp_b_title}\n"
+        user_msg += f"  Problem: {(b.get('description') or '')[:300]}\n"
+        user_msg += f"  Solution: {(b.get('solution') or '')[:300]}\n"
+        user_msg += f"  Shared entities: {pair.shared_entities}\n\n"
+
+    user_msg += (
+        "Return a JSON array with one object per pair: "
+        '[{"contradiction": true/false, "reason": "..."}, ...]'
+    )
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": _CONTRADICTION_PROMPT},
+            {"role": "user", "content": user_msg},
+        ],
+        "temperature": 0.1,
+        "max_tokens": 1024,
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=float(timeout)) as client:
+            resp = await client.post(
+                f"{base_url}/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+            resp.raise_for_status()
+            raw = resp.json()["choices"][0]["message"]["content"].strip()
+
+            # Extract JSON array from response
+            # Handle cases where LLM wraps in markdown code block
+            if "```" in raw:
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+                raw = raw.strip()
+
+            results = json.loads(raw)
+            if not isinstance(results, list):
+                results = [results]
+
+            confirmed = []
+            for i, pair in enumerate(pairs):
+                if i < len(results) and isinstance(results[i], dict):
+                    if results[i].get("contradiction", False):
+                        pair.llm_confirmed = True
+                        pair.reason = results[i].get("reason", pair.reason)
+                        confirmed.append(pair)
+                else:
+                    # If LLM response is malformed, keep the pair (conservative)
+                    confirmed.append(pair)
+
+            logger.info(
+                "LLM contradiction validation: %d/%d confirmed",
+                len(confirmed), len(pairs),
+            )
+            return confirmed
+
+    except Exception as exc:
+        logger.warning("LLM contradiction validation failed: %s — keeping all candidates", exc)
+        return pairs  # On failure, keep all candidates (conservative)
 
 
 async def detect_contradictions(
     db_url: str,
     max_pairs: int = 20,
+    llm_config: object | None = None,
 ) -> list[ContradictionPair]:
     """Detect potentially conflicting experiences.
 
-    Strategy:
-    1. Find pairs of experiences that share 2+ entities
-    2. Check if their solutions mention opposite signals
-       (e.g., "don't" vs "must", "avoid" vs "use", "broken" vs "works")
-    3. Use embedding cosine similarity: high similarity + different solution
-       words = likely contradiction
+    Two-stage approach:
+    1. Rule-based: find pairs sharing entities with contradictory signals
+    2. LLM validation: confirm if pairs are truly contradictory (when llm_config provided)
 
     Args:
         db_url: PostgreSQL connection string
         max_pairs: Maximum pairs to return
+        llm_config: Optional EntityExtractionConfig for LLM validation
 
     Returns:
         List of ContradictionPair objects.
@@ -162,5 +283,9 @@ async def detect_contradictions(
 
         if len(pairs) >= max_pairs:
             break
+
+    # Stage 2: LLM validation (when config provided)
+    if pairs and llm_config is not None:
+        pairs = await _validate_with_llm(pairs, exp_data, llm_config)
 
     return pairs

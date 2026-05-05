@@ -953,7 +953,18 @@ experience_count: {len(topic.experience_ids)}
         except ImportError:
             return
 
-        pairs = await detect_contradictions(self._pg_url, max_pairs=20)
+        # Load entity_extraction config for LLM validation
+        llm_config = None
+        try:
+            from team_memory.config import load_settings
+            settings = load_settings()
+            llm_config = getattr(settings, "entity_extraction", None)
+            if llm_config and not getattr(llm_config, "enabled", True):
+                llm_config = None
+        except Exception:
+            pass
+
+        pairs = await detect_contradictions(self._pg_url, max_pairs=20, llm_config=llm_config)
         if not pairs:
             return
 
