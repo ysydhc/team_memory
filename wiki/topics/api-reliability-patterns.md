@@ -1,11 +1,11 @@
 ---
 type: topic
-name: Promise.allSettled / reliability
+name: API Reliability Patterns
 tags: [reliability, team_memory]
 experience_count: 8
 ---
 
-# Promise.allSettled / reliability
+# API Reliability Patterns
 
 > 自动发现的主题聚类，包含 8 条相关经验。
 
