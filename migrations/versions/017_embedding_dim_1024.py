@@ -35,16 +35,20 @@ INDEXES = {
 
 
 def upgrade() -> None:
-    # 1. Drop all embedding indexes
+    # 1. Clear existing embeddings (must happen before ALTER TYPE)
+    for table in TABLES:
+        op.execute(f"UPDATE {table} SET embedding = NULL")
+
+    # 2. Drop all embedding indexes
     for table, indexes in INDEXES.items():
         for idx_name, _, _ in indexes:
             op.execute(f"DROP INDEX IF EXISTS {idx_name}")
 
-    # 2. Alter column type for each table
+    # 3. Alter column type for each table
     for table in TABLES:
         op.execute(f"ALTER TABLE {table} ALTER COLUMN embedding TYPE vector(1024)")
 
-    # 3. Recreate indexes
+    # 4. Recreate indexes
     for table, indexes in INDEXES.items():
         for idx_name, method, params in indexes:
             op.execute(
@@ -52,12 +56,12 @@ def upgrade() -> None:
                 f"(embedding vector_cosine_ops) {params}"
             )
 
-    # 4. Clear existing embeddings so they get regenerated
+
+def downgrade() -> None:
+    # Clear embeddings before altering type
     for table in TABLES:
         op.execute(f"UPDATE {table} SET embedding = NULL")
 
-
-def downgrade() -> None:
     # Drop indexes
     for table, indexes in INDEXES.items():
         for idx_name, _, _ in indexes:
