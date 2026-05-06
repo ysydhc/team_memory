@@ -102,6 +102,31 @@ def build_vector_search(
     return stmt
 
 
+def _build_hybrid_tsquery(tokenized_query: str):
+    """Build a hybrid AND/OR tsquery.
+
+    Strategy: first 2 terms AND (precision), remaining terms OR (recall).
+    - ≤2 terms: all AND (plainto_tsquery, exact as before)
+    - >2 terms: first 2 AND, rest OR
+
+    Examples:
+        "Docker PostgreSQL"             → Docker & PostgreSQL
+        "Docker PostgreSQL connection"  → Docker & PostgreSQL | connection
+        "embedding model configuration" → embedding & model | configuration
+    """
+    terms = tokenized_query.split()
+    if len(terms) <= 2:
+        # Short query: keep strict AND
+        return func.plainto_tsquery("simple", tokenized_query)
+
+    # Long query: first 2 AND, rest OR
+    # Build: "term1 & term2 | term3 | term4 ..."
+    and_part = " & ".join(f"'{t}'" for t in terms[:2])
+    or_part = " | ".join(f"'{t}'" for t in terms[2:])
+    hybrid = f"{and_part} | {or_part}"
+    return func.to_tsquery("simple", hybrid)
+
+
 def build_fts_search(
     tokenized_query: str,
     *,
@@ -114,8 +139,9 @@ def build_fts_search(
     """Build full-text search statement. Returns SQLAlchemy Select.
 
     Expects pre-tokenized query text (jieba tokenization applied by caller).
+    Uses hybrid AND/OR strategy: first 2 terms AND (precision), rest OR (recall).
     """
-    ts_query = func.plainto_tsquery("simple", tokenized_query)
+    ts_query = _build_hybrid_tsquery(tokenized_query)
     rank_expr = func.ts_rank_cd(Experience.fts, ts_query).label("rank")
 
     stmt = (
