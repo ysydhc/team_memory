@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hermes Memory System Architecture</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      background: #020617;
+      min-height: 100vh;
+      padding: 2rem;
+      color: white;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    .header { margin-bottom: 2rem; }
+    .header-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; }
+    .pulse-dot { width: 12px; height: 12px; background: #34d399; border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; }
+    .subtitle { color: #94a3b8; font-size: 0.875rem; margin-left: 1.75rem; }
+    .diagram-container {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 1rem;
+      border: 1px solid #1e293b;
+      padding: 1.5rem;
+      overflow-x: auto;
+    }
+    svg { width: 100%; min-width: 900px; display: block; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+    .card {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 0.75rem;
+      border: 1px solid #1e293b;
+      padding: 1.25rem;
+    }
+    .card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .card-dot.cyan { background: #22d3ee; }
+    .card-dot.emerald { background: #34d399; }
+    .card-dot.violet { background: #a78bfa; }
+    .card-dot.amber { background: #fbbf24; }
+    .card-dot.rose { background: #fb7185; }
+    .card h3 { font-size: 0.875rem; font-weight: 600; }
+    .card ul { list-style: none; color: #94a3b8; font-size: 0.75rem; }
+    .card li { margin-bottom: 0.375rem; }
+    .phase-section { margin-top: 2rem; }
+    .phase-title { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; color: #e2e8f0; }
+    .phase-timeline {
+      display: flex;
+      gap: 1rem;
+      overflow-x: auto;
+      padding-bottom: 0.5rem;
+    }
+    .phase-card {
+      min-width: 260px;
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 0.75rem;
+      border: 1px solid #1e293b;
+      padding: 1rem;
+      position: relative;
+    }
+    .phase-card.active { border-color: #34d399; }
+    .phase-card.next { border-color: #22d3ee; }
+    .phase-card.future { border-color: #fbbf24; }
+    .phase-badge {
+      font-size: 0.65rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+      display: inline-block;
+      margin-bottom: 0.5rem;
+    }
+    .phase-badge.current { background: rgba(52, 211, 153, 0.2); color: #34d399; }
+    .phase-badge.next { background: rgba(34, 211, 238, 0.2); color: #22d3ee; }
+    .phase-badge.planned { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+    .phase-card h4 { font-size: 0.8rem; font-weight: 600; margin-bottom: 0.4rem; }
+    .phase-card p { font-size: 0.7rem; color: #94a3b8; line-height: 1.5; }
+    .phase-card .cost { font-size: 0.65rem; color: #64748b; margin-top: 0.4rem; }
+    .footer { text-align: center; margin-top: 1.5rem; color: #475569; font-size: 0.75rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>Hermes 记忆体系架构</h1>
+      </div>
+      <p class="subtitle">v10 — 三端接入 + LLM精炼 + 分层演进路线 | 2026-04-28</p>
+    </div>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1100 880">
+        <defs>
+          <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+          <marker id="arrow-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#34d399" />
+          </marker>
+          <marker id="arrow-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee" />
+          </marker>
+          <marker id="arrow-amber" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fbbf24" />
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <!-- ===================== LAYER LABELS (left side) ===================== -->
+        <text x="18" y="75" fill="#475569" font-size="9" font-weight="600" transform="rotate(-90, 18, 75)">L0 Agent</text>
+        <text x="18" y="215" fill="#475569" font-size="9" font-weight="600" transform="rotate(-90, 18, 215)">L1 Pipeline</text>
+        <text x="18" y="380" fill="#475569" font-size="9" font-weight="600" transform="rotate(-90, 18, 380)">L2 Short-term</text>
+        <text x="18" y="555" fill="#475569" font-size="9" font-weight="600" transform="rotate(-90, 18, 555)">L3 Long-term</text>
+        <text x="18" y="720" fill="#475569" font-size="9" font-weight="600" transform="rotate(-90, 18, 720)">L2.5 Entity</text>
+
+        <!-- Layer separator lines -->
+        <line x1="40" y1="130" x2="1080" y2="130" stroke="#1e293b" stroke-width="1" stroke-dasharray="4,4" />
+        <line x1="40" y1="270" x2="1080" y2="270" stroke="#1e293b" stroke-width="1" stroke-dasharray="4,4" />
+        <line x1="40" y1="460" x2="1080" y2="460" stroke="#1e293b" stroke-width="1" stroke-dasharray="4,4" />
+        <line x1="40" y1="630" x2="1080" y2="630" stroke="#1e293b" stroke-width="1" stroke-dasharray="4,4" />
+
+        <!-- ===================== L0: AGENT LAYER ===================== -->
+        <!-- Cursor -->
+        <rect x="60" y="45" width="160" height="70" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="140" y="70" fill="white" font-size="11" font-weight="600" text-anchor="middle">Cursor IDE</text>
+        <text x="140" y="86" fill="#94a3b8" font-size="8" text-anchor="middle">hooks.json (sessionStart/</text>
+        <text x="140" y="98" fill="#94a3b8" font-size="8" text-anchor="middle">beforePrompt/afterResponse)</text>
+
+        <!-- Hermes -->
+        <rect x="270" y="45" width="160" height="70" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="350" y="70" fill="white" font-size="11" font-weight="600" text-anchor="middle">Hermes Agent</text>
+        <text x="350" y="86" fill="#94a3b8" font-size="8" text-anchor="middle">tm-memory skill</text>
+        <text x="350" y="98" fill="#94a3b8" font-size="8" text-anchor="middle">tm_hook.py CLI</text>
+
+        <!-- Claude Code -->
+        <rect x="480" y="45" width="160" height="70" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="560" y="70" fill="white" font-size="11" font-weight="600" text-anchor="middle">Claude Code</text>
+        <text x="560" y="86" fill="#94a3b8" font-size="8" text-anchor="middle">~/.claude/settings.json</text>
+        <text x="560" y="100" fill="#34d399" font-size="8" text-anchor="middle">✅ 已接入</text>
+
+        <!-- ===================== L1: PIPELINE LAYER ===================== -->
+        <!-- TM Daemon -->
+        <rect x="60" y="150" width="280" height="105" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="2"/>
+        <text x="200" y="175" fill="white" font-size="12" font-weight="600" text-anchor="middle">TM Daemon (FastAPI)</text>
+        <text x="200" y="191" fill="#94a3b8" font-size="8" text-anchor="middle">localhost:3901 | session_start / before_prompt / after_response</text>
+        <text x="200" y="205" fill="#94a3b8" font-size="8" text-anchor="middle">收敛检测 + 草稿缓冲 + SearchLog写入</text>
+        <text x="200" y="219" fill="#94a3b8" font-size="8" text-anchor="middle">RefinementWorker (qwen-plus 后台精炼)</text>
+        <text x="200" y="243" fill="#34d399" font-size="8" text-anchor="middle">✅ 已完成 (精炼 worker 有 id=None bug 待修)</text>
+
+        <!-- SearchLogWriter -->
+        <rect x="390" y="150" width="200" height="80" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="2"/>
+        <text x="490" y="175" fill="white" font-size="11" font-weight="600" text-anchor="middle">SearchLogWriter</text>
+        <text x="490" y="191" fill="#94a3b8" font-size="8" text-anchor="middle">query + result_ids 写入</text>
+        <text x="490" y="205" fill="#94a3b8" font-size="8" text-anchor="middle">[mem:xxx] → was_used 回填</text>
+        <text x="490" y="219" fill="#34d399" font-size="8" text-anchor="middle">✅ 已完成</text>
+
+        <!-- /stats endpoint -->
+        <rect x="640" y="150" width="180" height="80" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="2"/>
+        <text x="730" y="175" fill="white" font-size="11" font-weight="600" text-anchor="middle">/stats 评估端点</text>
+        <text x="730" y="191" fill="#94a3b8" font-size="8" text-anchor="middle">use_rate / hit / unjudged</text>
+        <text x="730" y="205" fill="#94a3b8" font-size="8" text-anchor="middle">tm_hook.py stats --days 7</text>
+        <text x="730" y="219" fill="#34d399" font-size="8" text-anchor="middle">✅ 已完成</text>
+
+        <!-- Refinement Worker -->
+        <rect x="870" y="150" width="180" height="105" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="960" y="175" fill="white" font-size="11" font-weight="600" text-anchor="middle">RefinementWorker</text>
+        <text x="960" y="191" fill="#94a3b8" font-size="8" text-anchor="middle">后台轮询 needs_refinement</text>
+        <text x="960" y="205" fill="#94a3b8" font-size="8" text-anchor="middle">qwen-plus via LiteLLM</text>
+        <text x="960" y="219" fill="#94a3b8" font-size="8" text-anchor="middle">→ 抽取 title/problem/solution</text>
+        <text x="960" y="233" fill="#94a3b8" font-size="8" text-anchor="middle">→ update_experience 更新</text>
+        <text x="960" y="247" fill="#fbbf24" font-size="8" text-anchor="middle">⚠️ 代码完成, id=None bug</text>
+
+        <!-- ===================== L2: SHORT-TERM (Draft + Recall) ===================== -->
+        <!-- Draft Buffer -->
+        <rect x="60" y="295" width="200" height="70" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="160" y="320" fill="white" font-size="11" font-weight="600" text-anchor="middle">草稿缓冲区</text>
+        <text x="160" y="336" fill="#94a3b8" font-size="8" text-anchor="middle">DraftBuffer (内存)</text>
+        <text x="160" y="350" fill="#34d399" font-size="8" text-anchor="middle">✅ 收敛→精炼发布 非收敛→累积</text>
+
+        <!-- ConvergenceDetector -->
+        <rect x="310" y="295" width="200" height="70" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="410" y="320" fill="white" font-size="11" font-weight="600" text-anchor="middle">收敛检测器</text>
+        <text x="410" y="336" fill="#94a3b8" font-size="8" text-anchor="middle">关键词 + git commit</text>
+        <text x="410" y="350" fill="#34d399" font-size="8" text-anchor="middle">✅ 三级检测 → needs_refinement</text>
+
+        <!-- pgvector Recall -->
+        <rect x="560" y="295" width="220" height="70" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="670" y="320" fill="white" font-size="11" font-weight="600" text-anchor="middle">语义检索 (pgvector)</text>
+        <text x="670" y="336" fill="#94a3b8" font-size="8" text-anchor="middle">embedding + cosine similarity</text>
+        <text x="670" y="350" fill="#34d399" font-size="8" text-anchor="middle">✅ before_prompt 自动触发</text>
+
+        <!-- Obsidian Watcher -->
+        <rect x="830" y="295" width="180" height="70" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="920" y="320" fill="white" font-size="11" font-weight="600" text-anchor="middle">Obsidian 监听</text>
+        <text x="920" y="336" fill="#94a3b8" font-size="8" text-anchor="middle">vault 文件变更</text>
+        <text x="920" y="350" fill="#fbbf24" font-size="8" text-anchor="middle">⚠️ 未验证</text>
+
+        <!-- ===================== L3: LONG-TERM STORAGE ===================== -->
+        <!-- PostgreSQL -->
+        <rect x="60" y="480" width="200" height="70" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="160" y="505" fill="white" font-size="11" font-weight="600" text-anchor="middle">PostgreSQL</text>
+        <text x="160" y="521" fill="#94a3b8" font-size="8" text-anchor="middle">experiences / drafts /</text>
+        <text x="160" y="535" fill="#94a3b8" font-size="8" text-anchor="middle">search_logs / projects</text>
+
+        <!-- pgvector -->
+        <rect x="310" y="480" width="200" height="70" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="410" y="505" fill="white" font-size="11" font-weight="600" text-anchor="middle">pgvector 索引</text>
+        <text x="410" y="521" fill="#94a3b8" font-size="8" text-anchor="middle">experience_embeddings</text>
+        <text x="410" y="535" fill="#a78bfa" font-size="8" text-anchor="middle">✅ 已建索引</text>
+
+        <!-- Obsidian Vault -->
+        <rect x="560" y="480" width="220" height="70" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="670" y="505" fill="white" font-size="11" font-weight="600" text-anchor="middle">Obsidian Vault (Markdown)</text>
+        <text x="670" y="521" fill="#94a3b8" font-size="8" text-anchor="middle">人类可读的长期知识库</text>
+        <text x="670" y="535" fill="#a78bfa" font-size="8" text-anchor="middle">✅ L3 知识存储</text>
+
+        <!-- llm-wiki -->
+        <rect x="830" y="480" width="180" height="70" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="920" y="505" fill="white" font-size="11" font-weight="600" text-anchor="middle">llm-wiki 编译层</text>
+        <text x="920" y="521" fill="#94a3b8" font-size="8" text-anchor="middle">经验→实体页+交叉引用</text>
+        <text x="920" y="535" fill="#22d3ee" font-size="8" text-anchor="middle">🔵 Phase 1 待开发</text>
+
+        <!-- ===================== L2.5: ENTITY GRAPH ===================== -->
+        <rect x="60" y="660" width="340" height="70" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="230" y="685" fill="white" font-size="11" font-weight="600" text-anchor="middle">实体关系层 (LightRAG 风格)</text>
+        <text x="230" y="701" fill="#94a3b8" font-size="8" text-anchor="middle">entities + relationships 表 | qwen-plus 顺带抽取</text>
+        <text x="230" y="715" fill="#22d3ee" font-size="8" text-anchor="middle">🔵 Phase 2 — 成本 10-100x 低于微软 GraphRAG</text>
+
+        <rect x="450" y="660" width="280" height="70" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="590" y="685" fill="white" font-size="11" font-weight="600" text-anchor="middle">微软 GraphRAG</text>
+        <text x="590" y="701" fill="#94a3b8" font-size="8" text-anchor="middle">索引成本 $50-500/1K文档 GPT-4</text>
+        <text x="590" y="715" fill="#fb7185" font-size="8" text-anchor="middle">❌ 不采用 — 借鉴实体抽取+社区摘要思想</text>
+
+        <rect x="780" y="660" width="230" height="70" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="895" y="685" fill="white" font-size="11" font-weight="600" text-anchor="middle">Janitor 清理器</text>
+        <text x="895" y="701" fill="#94a3b8" font-size="8" text-anchor="middle">L2草稿→L3经验 自动提升</text>
+        <text x="895" y="715" fill="#fbbf24" font-size="8" text-anchor="middle">⚠️ 收敛检测已有，清理流程未独立</text>
+
+        <!-- ===================== ARROWS ===================== -->
+        <!-- Cursor → TM Daemon -->
+        <line x1="140" y1="115" x2="170" y2="148" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+        <!-- Hermes → TM Daemon -->
+        <line x1="350" y1="115" x2="280" y2="148" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+        <!-- Claude Code → TM Daemon -->
+        <line x1="530" y1="115" x2="340" y2="148" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+
+        <!-- TM Daemon → SearchLogWriter -->
+        <line x1="340" y1="195" x2="388" y2="195" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+        <!-- TM Daemon → /stats -->
+        <line x1="590" y1="195" x2="638" y2="195" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+        <!-- TM Daemon → RefinementWorker -->
+        <line x1="340" y1="230" x2="868" y2="195" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-green)" opacity="0.5"/>
+
+        <!-- TM Daemon → Draft Buffer -->
+        <line x1="180" y1="255" x2="170" y2="293" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+        <!-- TM Daemon → ConvergenceDetector -->
+        <line x1="250" y1="255" x2="380" y2="293" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+        <!-- TM Daemon → pgvector Recall -->
+        <line x1="340" y1="255" x2="610" y2="293" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+        <!-- Draft Buffer → PostgreSQL (publish) -->
+        <line x1="160" y1="365" x2="160" y2="478" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <text x="172" y="425" fill="#94a3b8" font-size="8">发布</text>
+
+        <!-- RefinementWorker → PostgreSQL (update) -->
+        <path d="M 960 255 L 960 430 Q 960 450 940 450 L 280 450 Q 260 450 260 470 L 260 478" fill="none" stroke="#34d399" stroke-width="1.5" stroke-dasharray="5,5" marker-end="url(#arrow-green)"/>
+        <text x="620" y="445" fill="#34d399" font-size="7">精炼更新</text>
+
+        <!-- pgvector Recall → PostgreSQL -->
+        <line x1="670" y1="365" x2="410" y2="478" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <text x="555" y="425" fill="#94a3b8" font-size="8">检索</text>
+
+        <!-- PostgreSQL → pgvector -->
+        <line x1="260" y1="515" x2="308" y2="515" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+        <!-- PostgreSQL → Obsidian -->
+        <line x1="260" y1="525" x2="558" y2="515" stroke="#a78bfa" stroke-width="1" stroke-dasharray="5,5" marker-end="url(#arrow)"/>
+        <text x="400" y="513" fill="#94a3b8" font-size="7">同步</text>
+
+        <!-- SearchLog → PostgreSQL -->
+        <path d="M 490 230 L 490 430 Q 490 445 470 445 L 260 445 Q 240 445 240 465 L 240 478" fill="none" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <text x="380" y="440" fill="#94a3b8" font-size="7">评估日志</text>
+
+        <!-- L2.5 dashed arrows (future) -->
+        <line x1="230" y1="660" x2="230" y2="552" stroke="#22d3ee" stroke-width="1" stroke-dasharray="5,5" marker-end="url(#arrow-cyan)"/>
+        <text x="240" y="610" fill="#22d3ee" font-size="7">Phase 2</text>
+
+        <!-- ===================== LEGEND ===================== -->
+        <rect x="60" y="775" width="990" height="80" rx="6" fill="rgba(15, 23, 42, 0.5)" stroke="#1e293b" stroke-width="1"/>
+        <text x="80" y="800" fill="white" font-size="10" font-weight="600">图例</text>
+
+        <rect x="130" y="788" width="14" height="10" rx="2" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="150" y="797" fill="#34d399" font-size="8">已完成</text>
+
+        <rect x="210" y="788" width="14" height="10" rx="2" fill="rgba(30, 41, 59, 0.5)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="230" y="797" fill="#22d3ee" font-size="8">下一步/已规划</text>
+
+        <rect x="330" y="788" width="14" height="10" rx="2" fill="rgba(30, 41, 59, 0.5)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="350" y="797" fill="#fbbf24" font-size="8">待验证/开发中</text>
+
+        <rect x="460" y="788" width="14" height="10" rx="2" fill="rgba(30, 41, 59, 0.5)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="480" y="797" fill="#fb7185" font-size="8">不采用</text>
+
+        <rect x="560" y="788" width="14" height="10" rx="2" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="580" y="797" fill="#a78bfa" font-size="8">数据层</text>
+
+        <line x1="660" y1="793" x2="686" y2="793" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+        <text x="692" y="797" fill="#94a3b8" font-size="8">数据流</text>
+
+        <line x1="760" y1="793" x2="786" y2="793" stroke="#fbbf24" stroke-width="1" stroke-dasharray="5,5"/>
+        <text x="792" y="797" fill="#94a3b8" font-size="8">未来/可选</text>
+
+        <text x="80" y="830" fill="#94a3b8" font-size="8">调研结论: LLM Wiki=Phase1编译层 | LightRAG=Phase2轻量图(10-100x低于微软) | 微软GraphRAG=❌成本过高 | Mem0/Zep=行业对标但自建更灵活</text>
+      </svg>
+    </div>
+
+    <!-- Info Cards -->
+    <div class="cards">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot emerald"></div>
+          <h3>已完成 (7/11)</h3>
+        </div>
+        <ul>
+          <li>• TM Daemon 运行 + 日志增强</li>
+          <li>• Cursor hooks 接入 (3 hook)</li>
+          <li>• Claude Code hooks 接入 (settings.json)</li>
+          <li>• 收敛检测 + 草稿→精炼→发布</li>
+          <li>• 评估闭环 (SearchLog + was_used + /stats)</li>
+          <li>• Hermes tm-memory skill + tm_hook.py CLI</li>
+          <li>• RefinementWorker 代码 (qwen-plus 精炼)</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot amber"></div>
+          <h3>待修复/验证 (2/11)</h3>
+        </div>
+        <ul>
+          <li>• RefinementWorker id=None bug (daemon 上下文 draft_save 返回空 id)</li>
+          <li>• Obsidian vault 监听 (代码有，未验证)</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot cyan"></div>
+          <h3>下一步 (2/11)</h3>
+        </div>
+        <ul>
+          <li>• Phase 1: llm-wiki 编译层 (经验→实体页+交叉引用)</li>
+          <li>• Phase 2: LightRAG 轻量实体关系 (精炼时顺带抽取)</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot rose"></div>
+          <h3>不采用 (1/11)</h3>
+        </div>
+        <ul>
+          <li>• 微软 GraphRAG ($50-500/1K文档, 增量更新难)</li>
+          <li>• 借鉴：实体抽取+社区摘要+层次化检索</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Phase Evolution Roadmap -->
+    <div class="phase-section">
+      <div class="phase-title">分层演进路线</div>
+      <div class="phase-timeline">
+        <div class="phase-card active">
+          <span class="phase-badge current">Phase 0 — 当前</span>
+          <h4>向量 RAG + LLM 精炼</h4>
+          <p>
+            PostgreSQL + Ollama embedding + pgvector<br>
+            收敛检测 → needs_refinement<br>
+            qwen-plus 后台精炼 → update_experience<br>
+            评估闭环: SearchLog + /stats
+          </p>
+          <div class="cost">成本: ~0 (Ollama本地) + qwen-plus API</div>
+        </div>
+
+        <div class="phase-card next">
+          <span class="phase-badge next">Phase 1 — 下一步</span>
+          <h4>LLM Wiki 编译层</h4>
+          <p>
+            Published 经验存为 Obsidian markdown<br>
+            新经验 ingest 时自动交叉引用 [[wiki-links]]<br>
+            矛盾标记 + 依赖追踪<br>
+            三级学习: 观察日结 → 模式周结 → 规则固化
+          </p>
+          <div class="cost">成本: 低, 复用 qwen-plus, 无新基础设施</div>
+        </div>
+
+        <div class="phase-card future">
+          <span class="phase-badge planned">Phase 2 — 轻量图</span>
+          <h4>LightRAG 实体关系</h4>
+          <p>
+            PostgreSQL 内建 entities + relationships 表<br>
+            LLM 精炼时顺带抽取实体/关系<br>
+            不用 Microsoft GraphRAG (太重)<br>
+            双层检索: 实体级 + 主题级
+          </p>
+          <div class="cost">成本: 中, 加表 + 修改 refinement prompt</div>
+        </div>
+
+        <div class="phase-card future">
+          <span class="phase-badge planned">Phase 3 — 多层记忆</span>
+          <h4>四类记忆区分</h4>
+          <p>
+            工作记忆: 现有 draft buffer<br>
+            情景记忆: 时间线 + 事件链<br>
+            语义记忆: Phase 2 知识图谱<br>
+            程序记忆: skill 文档 + 解决方案模板
+          </p>
+          <div class="cost">成本: 高, 需重新设计 schema</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="footer">
+      Hermes Memory System v10 • 调研完成 2026-04-28 • ad_learning/docs/2026/04-25-hermes-memory-architecture.html
+    </p>
+  </div>
+</body>
+</html>

@@ -101,6 +101,16 @@ class RefinementWorker:
     # Per-tick logic
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _is_learning_card(title: str) -> bool:
+        """Check if a draft is a learning card that doesn't need solution extraction.
+
+        Learning cards are identified by title prefixes commonly used in
+        Obsidian vaults for educational content (not problem/solution pairs).
+        """
+        skip_prefixes = ("卡片-", "主题-", "Layer ", "学习计划")
+        return any(title.startswith(p) for p in skip_prefixes)
+
     async def _tick(self) -> None:
         """Process all drafts needing refinement."""
         drafts = await self._buf.get_needs_refinement()
@@ -110,6 +120,13 @@ class RefinementWorker:
         logger.info("RefinementWorker: %d draft(s) need refinement", len(drafts))
         for draft in drafts:
             draft_id: str = draft["id"]
+            title: str = draft.get("title", "")
+
+            # Skip learning cards — they don't need solution extraction
+            if self._is_learning_card(title):
+                logger.info("Skipping learning card: %s", title[:50])
+                await self._buf.mark_published(draft_id)
+                continue
 
             # Check retry limit
             attempts = self._retry_counts.get(draft_id, 0)
