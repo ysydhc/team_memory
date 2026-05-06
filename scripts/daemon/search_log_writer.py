@@ -150,10 +150,35 @@ class SearchLogWriter:
         """Find the most recent search_log with results.
 
         Returns dict with keys: id, query, result_ids, or None.
+        Tries project-specific first, falls back to any project.
         """
         try:
             pool = await self._ensure_pool()
             async with pool.acquire() as conn:
+                # Try project-specific first
+                if project:
+                    row = await conn.fetchrow(
+                        """
+                        SELECT id::text, query, result_ids
+                        FROM search_logs
+                        WHERE result_ids IS NOT NULL
+                          AND result_ids::text NOT IN ('[]', 'null')
+                          AND created_at > NOW() - make_interval(hours => $1)
+                          AND project = $2
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """,
+                        hours_window,
+                        project,
+                    )
+                    if row:
+                        return {
+                            "id": row["id"],
+                            "query": row["query"],
+                            "result_ids": json.loads(row["result_ids"]) if isinstance(row["result_ids"], str) else row["result_ids"],
+                        }
+
+                # Fallback: any project
                 row = await conn.fetchrow(
                     """
                     SELECT id::text, query, result_ids
@@ -161,12 +186,10 @@ class SearchLogWriter:
                     WHERE result_ids IS NOT NULL
                       AND result_ids::text NOT IN ('[]', 'null')
                       AND created_at > NOW() - make_interval(hours => $1)
-                      AND ($2::text IS NULL OR project = $2)
                     ORDER BY created_at DESC
                     LIMIT 1
                     """,
                     hours_window,
-                    project,
                 )
             if row:
                 return {

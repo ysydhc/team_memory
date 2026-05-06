@@ -178,16 +178,21 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         application.state.refinement_task = refinement_task
 
         # Search log writer for evaluation
-        search_log = SearchLogWriter()
+        from team_memory.config import load_settings as _load_tm_settings
+        _tm_settings = _load_tm_settings()
+        _db_url = str(_tm_settings.database.url).replace("+asyncpg", "")
+        search_log = SearchLogWriter(dsn=_db_url)
         application.state.search_log = search_log
 
         # Response buffer for faithfulness evaluation
         from daemon.response_buffer import ResponseBuffer
         eval_config = config.evaluation
         response_buffer = ResponseBuffer(
+            dsn=_db_url,
             batch_threshold=getattr(eval_config, "faithfulness_batch_threshold", 5),
         )
         application.state.response_buffer = response_buffer
+        logger.info("[INIT] response_buffer initialized (threshold=%d)", response_buffer._batch_threshold)
 
         # Start Obsidian vault watcher as background task
         from daemon.watcher import start_watcher
@@ -365,7 +370,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                                 stderr=subprocess.DEVNULL,
                             )
             except Exception as e:
-                logger.debug("Faithfulness buffer capture failed: %s", e)
+                logger.info("Faithfulness buffer capture failed: %s", e, exc_info=True)
         return result
 
     @app.post("/hooks/session_start")
