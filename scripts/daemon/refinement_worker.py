@@ -102,14 +102,28 @@ class RefinementWorker:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _is_learning_card(title: str) -> bool:
+    def _is_learning_card(title: str, description: str = "") -> bool:
         """Check if a draft is a learning card that doesn't need solution extraction.
 
-        Learning cards are identified by title prefixes commonly used in
-        Obsidian vaults for educational content (not problem/solution pairs).
+        Detects learning content by:
+        1. Title prefixes (卡片-, 主题-, Layer, 学习计划, 客户端 -)
+        2. Content patterns (学习目标, 背景, 前置知识, Layer N, 扫盲)
+        3. Absence of problem/solution structure
         """
-        skip_prefixes = ("卡片-", "主题-", "Layer ", "学习计划")
-        return any(title.startswith(p) for p in skip_prefixes)
+        # Title-based detection
+        skip_prefixes = ("卡片-", "主题-", "Layer ", "学习计划", "客户端 -", "Client -")
+        if any(title.startswith(p) for p in skip_prefixes):
+            return True
+
+        # Content-based detection
+        text = f"{title} {description}"[:500]
+        learning_signals = ("学习目标", "Learning Goal", "前置知识", "学习路径",
+                          "Layer 0", "Layer 1", "Layer 2", "Layer 3", "Layer 4",
+                          "扫盲", "知识地图", "学习计划", "学习进度")
+        if any(s in text for s in learning_signals):
+            return True
+
+        return False
 
     async def _tick(self) -> None:
         """Process all drafts needing refinement."""
@@ -121,9 +135,10 @@ class RefinementWorker:
         for draft in drafts:
             draft_id: str = draft["id"]
             title: str = draft.get("title", "")
+            description: str = draft.get("description", "")
 
             # Skip learning cards — they don't need solution extraction
-            if self._is_learning_card(title):
+            if self._is_learning_card(title, description):
                 logger.info("Skipping learning card: %s", title[:50])
                 await self._buf.mark_published(draft_id)
                 continue
