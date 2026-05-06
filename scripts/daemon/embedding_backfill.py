@@ -101,7 +101,7 @@ async def run_backfill(dry_run: bool = False, limit: int = 0) -> None:
             succeeded += 1
         except Exception as e:
             failed += 1
-            print(f"  Failed {exp_id[:8]}: {e}")
+            print(f"  Failed {str(exp_id)[:8]}: {e}")
 
         # Progress
         if (i + 1) % 10 == 0 or i + 1 == len(rows):

@@ -17,9 +17,9 @@ database:
 embedding:
   provider: ollama
   ollama:
-    model: nomic-embed-text:latest
+    model: qwen3-embedding:0.6b
     base_url: "${OLLAMA_BASE_URL}"
-    dimension: 768
+    dimension: 1024
 
 llm:
   model: gpt-oss:120b-cloud

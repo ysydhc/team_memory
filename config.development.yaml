@@ -20,7 +20,7 @@
 #
 # 【与数据库一致】
 #   - embedding.*.dimension 须与迁移里 experiences.embedding / archives.embedding 维度一致
-#     （本仓库 MVP 默认 768，对应 Ollama nomic-embed-text）
+#     （本仓库默认 1024，对应 Ollama qwen3-embedding:0.6b）
 #   - 改维度必须先改库迁移或接受重建向量列（本配置不负责迁移，仅说明风险）
 #
 # =============================================================================
@@ -52,10 +52,10 @@ embedding:
   provider: ollama
   ollama:
     # 与 ollama list /api/tags 中 name 一致（含 :latest）；勿只写无前缀名以免脚本误判未安装
-    model: nomic-embed-text:latest
+    model: qwen3-embedding:0.6b
     # TM 跑在宿主机用 localhost；TM 跑在 Docker 内而 Ollama 在宿主机时用 host.docker.internal（见 docker-compose）
     base_url: http://localhost:11434
-    dimension: 768
+    dimension: 1024
 
 # -----------------------------------------------------------------------------
 # llm — 文档解析、经验提取、个人记忆抽取等（调用 Ollama 的 /api/chat）
