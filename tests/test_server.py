@@ -32,7 +32,7 @@ class TestLiteToolRegistration:
     @pytest.mark.asyncio
     async def test_exactly_six_tools(self):
         tools = {t.name: t for t in await mcp.list_tools()}
-        assert len(tools) == 8, f"Expected 8 tools, got {len(tools)}: {list(tools.keys())}"
+        assert len(tools) == 9, f"Expected 9 tools, got {len(tools)}: {list(tools.keys())}"
 
     @pytest.mark.asyncio
     async def test_tool_names(self):
@@ -46,6 +46,7 @@ class TestLiteToolRegistration:
             "memory_feedback",
             "memory_draft_save",
             "memory_draft_publish",
+            "memory_submit_response",
         }
         assert set(tools.keys()) == expected
 

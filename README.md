@@ -33,7 +33,7 @@ export TEAM_MEMORY_API_KEY=$(openssl rand -hex 32)
 echo "API Key: $TEAM_MEMORY_API_KEY"
 
 # 3. 拉取 Embedding 模型（仅首次需要）
-ollama pull nomic-embed-text
+ollama pull qwen3-embedding:0.6b
 
 # 4. 启动
 make web
@@ -82,7 +82,7 @@ tm-cli --help
 }
 ```
 
-（MCP 仅 **`memory_*` 六工具**：`memory_save`、`memory_recall`、`memory_context`、`memory_get_archive`、`memory_archive_upsert`、`memory_feedback`。未注册 **Resources / Prompts**；详情见下文 [MCP 工具列表（当前）](#mcp-工具列表当前) 与 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)。）
+（MCP 未注册 **Resources / Prompts**；**`memory_*` 七工具**：`memory_save`、`memory_recall`、`memory_context`、`memory_get_archive`、`memory_archive_upsert`、`memory_feedback`、`memory_submit_response`。详情见下文 [MCP 工具列表（当前）](#mcp-工具列表当前) 与 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)。）
 
 本机直连数据库时需要配 `TEAM_MEMORY_DB_URL`（或通过 config）；从源码跑且项目里已有 config 的，可不单独设 DB_URL。
 
@@ -173,7 +173,7 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 
 - **语义搜索**：基于向量嵌入（Ollama / OpenAI / 本地模型），理解查询意图
 - **混合检索**：向量搜索 + 全文检索 + RRF 融合排序
-- **查询优化**：同义词扩展（`config.tag_synonyms`）、短查询自动降低 min_similarity（0.45）；FTS 使用 simple 分词器并支持 jieba 中文分词
+- **查询优化**：同义词扩展（`config.tag_synonyms`）、短查询自动降低 min_similarity（0.45）；FTS 使用 simple 分词器 + jieba 中文分词 + **hybrid AND/OR 策略**（前 2 词 AND 保证精度，其余 OR 提升召回）
 - **Reranker**：支持服务端 LLM 精排，或客户端 AI 自行判断结果相关性
 - **Token 预算控制**：自动裁剪输出长度，避免经验库增大后撑爆 AI 上下文
 - **记忆压缩与摘要**：经验支持 `summary` 字段，LLM 可生成简短摘要；单条（POST `/experiences/{id}/summarize`）与批量（POST `/experiences/batch-summarize`）生成；MCP 搜索结果中每条经验可包含 `summary`，便于节省 Token
@@ -227,11 +227,41 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 
 原生 MCP 协议支持，AI 助手通过 stdio 接入：
 
-- **MCP 工具（6 个）**：`memory_context`、`memory_recall`、`memory_get_archive`、`memory_archive_upsert`、`memory_save`、`memory_feedback`（见 [MCP 工具列表](#mcp-工具列表当前)）
+- **MCP 工具（7 个）**：`memory_context`、`memory_recall`、`memory_get_archive`、`memory_archive_upsert`、`memory_save`、`memory_feedback`、`memory_submit_response`（见 [MCP 工具列表](#mcp-工具列表当前)）
 - **当前 MCP 未注册** Resources / Prompts；补齐体验以 Web、`/docs` HTTP API 为准
 - **Web 管理界面**：浏览、搜索、审核、档案馆、配置等
 
 旧文若仍写 **`tm_*`** MCP 或任务看板等已下线能力，以 **本文**、[AGENTS.md](AGENTS.md) 与 [src/team_memory/server.py](src/team_memory/server.py) 为准。
+
+### TM Daemon（自动采集与精炼）
+
+后台守护进程，自动从 Obsidian vault 和 Agent 对话中采集经验：
+
+- **Obsidian Watcher**：监听 vault 文件变更，自动创建 draft（同文件去重，更新而非重复创建）
+- **RefinementWorker**：每 30 秒扫描 pending draft，调用 LLM（GLM-5-Turbo）提取结构化字段（title/problem/solution/tags），自动发布
+- **学习卡片跳过**：识别学习类内容（卡片-、主题-、Layer 等），直接发布不走 LLM 抽取
+- **launchd 托管**：`make daemon-start` / `make daemon-stop`，日志 `/tmp/tm-daemon.log`
+
+### Faithfulness 评估系统
+
+基于 RAGAS 思路，用 LLM Judge 评估搜索结果是否被 Agent 真实使用：
+
+- **自动捕获**：Daemon 的 after_response hook 自动缓存 (query, response, result_ids) 到 response_buffer
+- **批量评估**：buffer 积累到阈值（默认 5 条）后自动触发 LLM Judge（glm-4-flash）
+- **评估逻辑**：拆解 Agent 回复为 claims → 逐条检查是否能从检索结果推断 → 输出 faithfulness score
+- **结果回流**：score ≥ 0.5 自动标记 search_log 为 was_used，影响 use_rate 统计
+- **查看方式**：`make stats`（Faithfulness 面板）、`make faithfulness-eval --show 10`、`curl localhost:3901/status/faithfulness`
+- **模型可配**：`--model glm-4-flash --base-url http://localhost:4000/v1`
+
+### Wiki 编译与实体关系
+
+从经验库自动编译知识 Wiki：
+
+- **实体提取**：LLM 从经验中提取工具、概念、人物等实体（L2.5 层）
+- **关系发现**：建立实体间的 uses/depends/conflicts 关系
+- **主题发现**：自动聚类经验为主题，LLM 生成主题名
+- **矛盾检测**：规则 + LLM 双重验证，发现相互矛盾的经验对
+- **命令**：`make wiki-compile`、`make entity-backfill`、`make detect-contradictions`
 
 ### 一键部署
 
@@ -329,7 +359,7 @@ auth:
 `make setup` 会启动 Ollama 容器，首次 `make web` 前需执行：
 
 ```bash
-ollama pull nomic-embed-text
+ollama pull qwen3-embedding:0.6b
 ```
 
 **4. 启动 Web**
@@ -507,6 +537,7 @@ AI 可调用 memory_recall(file_path="k8s/deployment.yaml", framework="kubernete
 | `memory_archive_upsert` | 创建/更新档案馆（与 `POST /api/v1/archives` 一致） | `title`、`solution_doc` 等；大文件见 [mcp-server 档案馆流程](docs/guide/mcp-server.md)（HTTP / `tm-cli upload`） |
 | `memory_save` | 保存或长文解析保存 | `title`+`problem` 或 `content`；**勿**使用已移除的 `scope=archive` |
 | `memory_feedback` | 对结果评分 | `experience_id`、`rating` 等 |
+| `memory_submit_response` | 提交回复用于 Faithfulness 评估 | `query`、`response`、`result_ids`（可选） |
 
 更多管理员操作（审核、去重、配置）请用 **Web** 或 **`GET/POST /api/v1/...`**（见 `/docs`）。历史 **`tm_*`** 已不在 MCP 中暴露。
 
@@ -573,9 +604,12 @@ TEAM_MEMORY_ENV=production
 ```yaml
 embedding:
   provider: ollama  # ollama / openai / local / generic
+  ollama:
+    model: qwen3-embedding:0.6b
+    dimension: 1024
 ```
 
-支持 Ollama（默认，本地运行，无需 API Key）、OpenAI API、本地 sentence-transformers 模型、generic 自定义端点。
+支持 Ollama（默认，本地运行，无需 API Key）、OpenAI API、本地 sentence-transformers 模型、generic 自定义端点。当前默认使用 `qwen3-embedding:0.6b`（1024 维），中文支持优秀。切换模型后需执行 `make embedding-backfill` 重新生成向量。
 
 ## 运维
 
@@ -591,6 +625,16 @@ make verify        # 标准验收：lint + 全量测试
 make verify-web    # Web 验收：lint + web 测试 + health/stats smoke
 make test          # 运行测试
 make lint          # 代码检查（ruff）
+make stats         # 搜索质量统计（hit rate / use rate / faithfulness）
+make search-eval   # 搜索质量评估（precision / recall）
+make faithfulness-eval  # Faithfulness 批量评估（RAGAS LLM Judge）
+make wiki-compile  # Wiki 编译（实体/主题/矛盾检测）
+make detect-contradictions  # 矛盾经验检测
+make solution-backfill  # 补跑无 solution 的经验（LLM 提取）
+make embedding-backfill # 重新生成 embedding（切换模型后用）
+make entity-backfill    # 实体提取回填
+make daemon-start # 启动 TM Daemon（launchd）
+make daemon-stop  # 停止 TM Daemon
 ```
 
 ### Make 命令说明（等价手动命令）
@@ -667,11 +711,13 @@ docker compose up -d
 | Web | FastAPI + Uvicorn |
 | 数据库 | PostgreSQL + pgvector |
 | ORM | SQLAlchemy 2.0 (async) |
-| 嵌入 | Ollama / OpenAI / 本地模型 |
-| 搜索 | 向量 + 全文检索 + RRF 混合 + Reranker |
+| 嵌入 | qwen3-embedding:0.6b (Ollama) / OpenAI / 本地模型 |
+| 搜索 | 向量 + 全文检索(jieba+hybrid AND/OR) + RRF 融合 + Reranker |
 | 缓存 | 内存 LRU / Redis |
 | 配置 | Pydantic Settings + YAML 分层 |
 | 迁移 | Alembic |
+| Daemon | TM Daemon (launchd) — Obsidian watcher + RefinementWorker |
+| 评估 | Faithfulness (RAGAS LLM Judge) + search_eval |
 
 ## FAQ
 
@@ -689,7 +735,7 @@ A: 这正是 TeamMemory 的设计重点。让 AI 在适当时机调用 **`memory
 
 **Q: 切换 Embedding 模型后需要做什么？**
 
-A: 需要重新生成所有 embedding。使用 `scripts/migrate_embeddings.py`。
+A: 需要重新生成所有 embedding。步骤：1) 更新 `config.development.yaml` 中 `embedding.ollama.model` 和 `dimension`；2) 执行 `alembic upgrade head`（如有维度迁移）；3) 执行 `make embedding-backfill` 重新生成向量。
 
 **Q: 存量数据如何支持全文检索（FTS）？**
 
