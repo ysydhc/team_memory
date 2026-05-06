@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -184,6 +185,9 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         search_log = SearchLogWriter(dsn=_db_url)
         application.state.search_log = search_log
 
+        # Recent searches cache for before_prompt → after_response correlation
+        application.state.recent_searches = {}
+
         # Response buffer for faithfulness evaluation
         from daemon.response_buffer import ResponseBuffer
         eval_config = config.evaluation
@@ -332,6 +336,11 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             if marked > 0:
                 logger.info("[EVAL]  marked %d search_log(s) as was_used (marker)", marked)
 
+            # Look up cached search from before_prompt
+            recent_searches: dict = app.state.recent_searches
+            key = payload.conversation_id or resolved_project or "default"
+            cached_search = recent_searches.pop(key, None)
+
             # Fuzzy match: check unjudged logs for keyword overlap
             eval_config = app.state.config.evaluation
             if eval_config.fuzzy_match_enabled:
@@ -347,11 +356,19 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             try:
                 response_buffer = getattr(app.state, "response_buffer", None)
                 if response_buffer is not None:
-                    # Find the most recent search_log with results for this conversation
-                    recent_log = await search_log.get_recent_with_results(
-                        project=resolved_project or None,
-                        hours_window=1,
-                    )
+                    # Use cached search_log_id from before_prompt (precise correlation)
+                    if cached_search:
+                        recent_log = {
+                            "id": cached_search["log_id"],
+                            "query": cached_search["query"],
+                            "result_ids": cached_search["result_ids"],
+                        }
+                    else:
+                        # Fallback: find most recent search_log with results
+                        recent_log = await search_log.get_recent_with_results(
+                            project=resolved_project or None,
+                            hours_window=1,
+                        )
                     if recent_log:
                         await response_buffer.add(
                             query=recent_log["query"],
@@ -419,12 +436,24 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                 {"id": r.get("id", ""), "score": r.get("score", 0)}
                 for r in all_results[:5]
             ]
-            await search_log.log_search(
+            log_id = await search_log.log_search(
                 query=query_preview,
                 project=project or "default",
                 source="daemon",
                 result_ids=log_result_ids if log_result_ids else None,
             )
+            # Cache for after_response correlation
+            if log_id:
+                recent_searches: dict = app.state.recent_searches
+                # Key: conversation_id if available, else project
+                key = payload.conversation_id or project or "default"
+                recent_searches[key] = {
+                    "log_id": log_id,
+                    "query": query_preview,
+                    "result_ids": log_result_ids,
+                    "project": project,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
         return result
 
     @app.post("/hooks/session_end")
