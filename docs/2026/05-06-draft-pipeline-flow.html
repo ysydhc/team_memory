@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Draft Pipeline Flow</title>
+<style>
+body { background: #1a1a2e; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; padding: 40px; }
+h1 { color: #00d4ff; text-align: center; margin-bottom: 40px; }
+.flow { display: flex; flex-direction: column; align-items: center; gap: 0; max-width: 900px; margin: 0 auto; }
+.step { background: #16213e; border: 2px solid #0f3460; border-radius: 12px; padding: 20px 30px; width: 100%; box-sizing: border-box; }
+.step-title { font-size: 16px; font-weight: bold; color: #00d4ff; margin-bottom: 8px; }
+.step-desc { font-size: 14px; color: #b0b0b0; line-height: 1.6; }
+.step-code { background: #0d1117; border-radius: 6px; padding: 10px 14px; margin-top: 8px; font-family: 'Fira Code', monospace; font-size: 13px; color: #7ee787; overflow-x: auto; }
+.arrow { display: flex; flex-direction: column; align-items: center; padding: 8px 0; }
+.arrow-line { width: 2px; height: 30px; background: #0f3460; }
+.arrow-head { width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 10px solid #0f3460; }
+.arrow-label { font-size: 12px; color: #8b949e; margin: 4px 0; }
+.decision { background: #1a1a2e; border: 2px solid #f0883e; border-radius: 12px; padding: 16px 24px; width: 100%; box-sizing: border-box; text-align: center; }
+.decision-title { font-size: 15px; font-weight: bold; color: #f0883e; }
+.branch { display: flex; gap: 20px; width: 100%; }
+.branch-left, .branch-right { flex: 1; }
+.branch-label { font-size: 13px; color: #8b949e; text-align: center; padding: 8px; background: #0d1117; border-radius: 6px; margin-bottom: 8px; }
+.highlight { border-color: #7ee787; }
+.highlight .step-title { color: #7ee787; }
+.warning { border-color: #f85149; }
+.warning .step-title { color: #f85149; }
+.tag { display: inline-block; background: #0f3460; color: #00d4ff; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-right: 6px; }
+</style>
+</head>
+<body>
+<h1>📋 Draft 输入 → 过滤 → 处理 → 生成经验 流程图</h1>
+
+<div class="flow">
+
+  <!-- Input Sources -->
+  <div class="step">
+    <div class="step-title">📥 输入源</div>
+    <div class="step-desc">
+      <span class="tag">Obsidian Watcher</span> 监听 vault 文件变更，触发 <code>/hooks/after_response</code><br>
+      <span class="tag">Agent Hook</span> <code>tm_hook.py after-response</code> 发送 response_text<br>
+      <span class="tag">MCP Tool</span> <code>memory_draft_save</code> 直接保存草稿
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div><div class="arrow-head"></div></div>
+
+  <!-- DraftBuffer Write -->
+  <div class="step">
+    <div class="step-title">💾 DraftBuffer 写入 (SQLite)</div>
+    <div class="step-desc">
+      <code>scripts/daemon/draft_buffer.py</code> — <code>~/.cache/tm-pipeline/drafts.db</code><br>
+      状态: <code>pending</code> → 等待 RefinementWorker 处理
+    </div>
+    <div class="step-code">INSERT INTO drafts (id, title, content, project, status='pending')</div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div><div class="arrow-head"></div><div class="arrow-label">每 30 秒扫描一次</div></div>
+
+  <!-- RefinementWorker -->
+  <div class="step highlight">
+    <div class="step-title">⚙️ RefinementWorker 扫描 (scripts/daemon/refinement_worker.py)</div>
+    <div class="step-desc">
+      <code>get_needs_refinement()</code> 获取所有 <code>status='pending'</code> 的 draft
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div><div class="arrow-head"></div></div>
+
+  <!-- Decision: Learning Card? -->
+  <div class="decision">
+    <div class="decision-title">🔍 判断：是否学习卡片？</div>
+    <div style="margin-top:10px; font-size:13px; color:#b0b0b0;">
+      <strong>标题匹配：</strong><code>卡片-*</code> <code>主题-*</code> <code>Layer *</code> <code>学习计划*</code> <code>客户端 -*</code><br>
+      <strong>内容匹配：</strong><code>学习目标</code> <code>前置知识</code> <code>学习路径</code> <code>Layer 0-4</code> <code>扫盲</code> <code>知识地图</code>
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div></div>
+
+  <div class="branch">
+    <!-- Yes: Learning Card -->
+    <div class="branch-left">
+      <div class="branch-label">✅ 是学习卡片</div>
+      <div class="step" style="border-color:#7ee787;">
+        <div class="step-title" style="color:#7ee787;">直接发布</div>
+        <div class="step-desc">
+          <code>mark_published(draft_id)</code><br>
+          跳过 LLM 抽取，不提取 solution<br>
+          DraftBuffer 状态 → <code>published</code>
+        </div>
+      </div>
+    </div>
+
+    <!-- No: Real Experience -->
+    <div class="branch-right">
+      <div class="branch-label">❌ 不是学习卡片</div>
+      <div class="step">
+        <div class="step-title">🤖 LLM 精炼</div>
+        <div class="step-desc">
+          调用 <code>parse_content_openai()</code><br>
+          模型: <code>GLM-5-Turbo</code> (via LiteLLM)<br>
+          提取: title, problem, solution, tags
+        </div>
+        <div class="step-code">POST http://localhost:4000/v1/chat/completions</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div><div class="arrow-head"></div></div>
+
+  <!-- Draft Save -->
+  <div class="step">
+    <div class="step-title">📝 TM Sink 保存 (scripts/daemon/tm_sink.py)</div>
+    <div class="step-desc">
+      <code>op_draft_save()</code> → 写入 PostgreSQL <code>experiences</code> 表<br>
+      状态: <code>draft</code> → <code>published</code>（如果 convergence 检测通过）
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div><div class="arrow-head"></div></div>
+
+  <!-- Embedding + FTS -->
+  <div class="step">
+    <div class="step-title">🔢 Embedding + FTS 索引</div>
+    <div class="step-desc">
+      <span class="tag">Embedding</span> <code>qwen3-embedding:0.6b</code> (1024d) via Ollama<br>
+      <span class="tag">FTS</span> jieba 分词 → <code>to_tsvector('zhcfg', ...)</code><br>
+      <span class="tag">向量</span> 存入 <code>experiences.embedding</code> (vector(1024))
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div><div class="arrow-head"></div></div>
+
+  <!-- Final: Published Experience -->
+  <div class="step highlight">
+    <div class="step-title">✅ Published Experience</div>
+    <div class="step-desc">
+      完整记录: title + problem + solution + tags + embedding + fts<br>
+      可被 <code>memory_recall</code> 搜索到<br>
+      可被 Faithfulness 系统评估使用率
+    </div>
+  </div>
+
+</div>
+
+<div style="max-width:900px; margin:40px auto 0; padding:20px; background:#16213e; border-radius:12px; border:1px solid #0f3460;">
+  <h3 style="color:#f0883e; margin-top:0;">⚠️ 已知问题</h3>
+  <ul style="color:#b0b0b0; font-size:14px; line-height:1.8;">
+    <li><strong>学习卡片重复：</strong>同一文件多次修改会创建多条 draft（watcher 去重不够）</li>
+    <li><strong>LLM 抽取失败：</strong>超时或格式错误时 fallback 发布原始内容</li>
+    <li><strong>收敛检测：</strong>需要多次修改才触发 published（convergence detector）</li>
+  </ul>
+</div>
+
+</body>
+</html>

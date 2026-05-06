@@ -101,19 +101,31 @@ async def _process_changes(
                     # + sink.draft_publish.  We store title in the content
                     # preamble so the worker can extract it later.
                     full_content = f"# {title}\n\n{content}"
-                    local_id = await buf.create_draft(
-                        project=vault.project,
-                        conversation_id=None,
-                        content=full_content,
-                        title=title,
-                        source="obsidian",
-                    )
-                    # Immediately mark for refinement so RefinementWorker picks it up
-                    await buf.mark_needs_refinement(local_id)
-                    logger.info(
-                        "[WATCH] obsidian → file=%s action=%s project=%s local_draft_id=%s",
-                        path.name, change_type.name, vault.project, local_id,
-                    )
+
+                    # Dedup: if a pending draft with same title+project exists,
+                    # update it instead of creating a new one.
+                    existing_id = await buf.find_pending_by_title(title, vault.project)
+                    if existing_id:
+                        await buf.update_draft(existing_id, full_content)
+                        local_id = existing_id
+                        logger.info(
+                            "[WATCH] obsidian → file=%s action=%s project=%s updated existing=%s",
+                            path.name, change_type.name, vault.project, local_id[:8],
+                        )
+                    else:
+                        local_id = await buf.create_draft(
+                            project=vault.project,
+                            conversation_id=None,
+                            content=full_content,
+                            title=title,
+                            source="obsidian",
+                        )
+                        # Immediately mark for refinement so RefinementWorker picks it up
+                        await buf.mark_needs_refinement(local_id)
+                        logger.info(
+                            "[WATCH] obsidian → file=%s action=%s project=%s local_draft_id=%s",
+                            path.name, change_type.name, vault.project, local_id,
+                        )
                 else:
                     # Fallback: save directly (no LLM refinement)
                     result = await sink.draft_save(

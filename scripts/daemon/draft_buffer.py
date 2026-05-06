@@ -139,6 +139,20 @@ class DraftBuffer:
         if cursor.rowcount == 0:
             raise ValueError(f"Draft '{draft_id}' not found")
 
+    async def find_pending_by_title(self, title: str, project: str) -> str | None:
+        """Find a pending draft by title and project. Returns draft_id or None.
+
+        Used for deduplication: before creating a new draft, check if one
+        with the same title/project already exists and is still pending.
+        """
+        db = self._require_db()
+        row = await db.execute(
+            "SELECT id FROM drafts WHERE title = ? AND project = ? AND status = 'pending' LIMIT 1",
+            (title, project),
+        )
+        result = await row.fetchone()
+        return result[0] if result else None
+
     async def get_pending_drafts(self, project: str | None = None) -> list[dict[str, Any]]:
         """Return all drafts with status='pending'.
 
