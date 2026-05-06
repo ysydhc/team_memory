@@ -236,6 +236,10 @@ daemon-stop:     ## Stop TM Daemon (launchd)
 daemon-run:      ## Run TM Daemon in foreground (for testing)
 	PYTHONPATH=src:scripts $(PYTHON_BIN) -m daemon
 
+daemon-reload:   ## Watch daemon code and auto-restart on change
+	@set -a && [ -f .env ] && source .env || true && set +a; \
+	PYTHONPATH=scripts $(PYTHON_BIN) scripts/daemon/reloader.py $(OPTS)
+
 daemon-install:  ## Install launchd plist (auto-start on login + crash restart)
 	@PLIST_SRC=scripts/daemon/com.teammemory.daemon.plist; \
 	PLIST_DST=$(HOME)/Library/LaunchAgents/com.teammemory.daemon.plist; \
