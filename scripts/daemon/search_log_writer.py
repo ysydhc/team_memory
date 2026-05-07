@@ -17,6 +17,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+import asyncpg
+
 
 
 logger = logging.getLogger(__name__)
