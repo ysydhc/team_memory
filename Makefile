@@ -127,9 +127,13 @@ harness-check:  ## Harness 门禁：import 方向检查 + ruff + lint-js + doc-h
 	$(MAKE) lint-js
 	$(MAKE) doc-harness-config-check
 
-verify:         ## 标准验收：lint + 全量测试
+verify:         ## 标准验收：import 检查 + lint + 全量测试
+	@$(MAKE) import-check
 	@$(MAKE) lint
 	@$(MAKE) test
+
+import-check:   ## 检查所有 daemon 模块可正常 import
+	@PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/import_check.py
 
 verify-web:     ## Web 验收：lint + lint-js + web测试 + health/stats smoke
 	@$(MAKE) -s release-9111 || true
