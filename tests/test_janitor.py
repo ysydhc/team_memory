@@ -64,36 +64,33 @@ class TestMemoryJanitor:
         assert janitor_no_config._get_config("any_key", "default") == "default"
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_run_score_decay_no_experiences(self, janitor):
-        """Test score decay with no experiences."""
-        with pytest.raises(Exception):
-            # This will fail because we don't have a real database session
-            # In a real test, we'd set up a test database with fixtures
-            await janitor.run_score_decay()
+        """Test score decay with no experiences returns zero updates / 无经验时分数衰减应返回零更新"""
+        result = await janitor.run_score_decay()
+        assert result["updated_count"] == 0
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_sweep_outdated_no_experiences(self, janitor):
-        """Test outdated sweep with no experiences."""
-        with pytest.raises(Exception):
-            # This will fail because we don't have a real database session
-            # In a real test, we'd set up a test database with fixtures
-            await janitor.sweep_outdated()
+        """Test outdated sweep with no experiences returns empty result / 无经验时过时清理应返回空结果"""
+        result = await janitor.sweep_outdated()
+        assert result["found_count"] == 0
+        assert result["deleted_count"] == 0
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_purge_soft_deleted_no_experiences(self, janitor):
-        """Test soft-deleted purge with no experiences."""
-        with pytest.raises(Exception):
-            # This will fail because we don't have a real database session
-            # In a real test, we'd set up a test database with fixtures
-            await janitor.purge_soft_deleted()
+        """Test soft-deleted purge with no experiences returns empty result / 无经验时软删除清理应返回空结果"""
+        result = await janitor.purge_soft_deleted()
+        assert result["purged_count"] == 0
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_expire_drafts_no_experiences(self, janitor):
-        """Test draft expiration with no experiences."""
-        with pytest.raises(Exception):
-            # This will fail because we don't have a real database session
-            # In a real test, we'd set up a test database with fixtures
-            await janitor.expire_drafts()
+        """Test draft expiration with no experiences returns empty result / 无经验时草稿过期应返回空结果"""
+        result = await janitor.expire_drafts()
+        assert result["expired_count"] == 0
 
     @pytest.mark.asyncio
     async def test_prune_personal_memory_no_memories(self, janitor):
