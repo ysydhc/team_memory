@@ -35,12 +35,7 @@ class ServiceWatchdog:
 
     def __post_init__(self):
         if self.alert_manager is None:
-            self.alert_manager = AlertManager(
-                webhook_url=self.config.admin_webhook,
-                email=self.config.admin_email,
-                log_file=self.config.watchdog_log_file,
-                alert_cooldown=self.config.watchdog_alert_cooldown,
-            )
+            self.alert_manager = AlertManager.from_config(self.config)
         self._services["web"] = ServiceState(
             name="team-memory-web",
             url=self.config.web_url,

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 def _find_monitoring_yaml() -> Path:
@@ -19,10 +19,17 @@ def _find_monitoring_yaml() -> Path:
 
 
 @dataclass
+class ChannelConfig:
+    """Single alert channel configuration / 单个告警渠道配置"""
+    type: str = ""           # feishu | wecom | webhook
+    webhook: str = ""        # full webhook URL
+    secret: str = ""         # signing secret (feishu only, optional)
+
+
+@dataclass
 class MonitoringConfig:
     # Admin
-    admin_webhook: str = ""
-    admin_email: str = ""
+    channels: list[ChannelConfig] = field(default_factory=list)
     restart_allowed: bool = True
 
     # Health check targets
@@ -62,9 +69,24 @@ def load_monitoring_config(config_path: str | None = None) -> MonitoringConfig:
     daemon_cfg = hc.get("daemon", {})
     wd = raw.get("watchdog", {})
 
+    # Parse channels
+    channels: list[ChannelConfig] = []
+    for ch in admin.get("channels", []):
+        if not ch:
+            continue
+        channels.append(ChannelConfig(
+            type=ch.get("type", "webhook"),
+            webhook=ch.get("webhook", ch.get("url", "")),
+            secret=ch.get("secret", ""),
+        ))
+
+    # Backward compat: if old-style webhook field exists, add as generic channel
+    legacy_webhook = admin.get("webhook", "")
+    if legacy_webhook and not any(c.webhook == legacy_webhook for c in channels):
+        channels.append(ChannelConfig(type="webhook", webhook=legacy_webhook))
+
     return MonitoringConfig(
-        admin_webhook=admin.get("webhook", ""),
-        admin_email=admin.get("email", ""),
+        channels=channels,
         restart_allowed=admin.get("restart_allowed", True),
         web_url=web_cfg.get("url", "http://localhost:9111/health"),
         web_timeout=web_cfg.get("timeout", 10),

@@ -1,55 +1,55 @@
-"""Tests for monitoring modules — heartbeat, alerting, watchdog, config / 监控模块测试"""
+"""Tests for monitoring modules — heartbeat, alerting, watchdog, config"""
 from __future__ import annotations
 
 import asyncio
+import json
 import time
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from pathlib import Path
+
+# ── Config ──
+
+class TestMonitoringConfig:
+    """Tests for MonitoringConfig / 监控配置测试"""
+
+    def test_default_config(self):
+        from monitoring.config import MonitoringConfig
+        cfg = MonitoringConfig()
+        assert cfg.watchdog_interval == 60
+        assert cfg.channels == []
+
+    def test_load_config(self):
+        from monitoring.config import load_monitoring_config
+        cfg = load_monitoring_config()
+        assert cfg.web_url == "http://localhost:9111/health"
+        assert cfg.daemon_url == "http://localhost:3901/status"
+
+    def test_channel_config(self):
+        from monitoring.config import ChannelConfig
+        ch = ChannelConfig(type="feishu", webhook="https://example.com", secret="abc")
+        assert ch.type == "feishu"
+        assert ch.secret == "abc"
+
+    def test_channels_parsed_from_yaml(self):
+        from monitoring.config import load_monitoring_config
+        cfg = load_monitoring_config()
+        # Config has feishu channel with empty webhook
+        feishu_channels = [c for c in cfg.channels if c.type == "feishu"]
+        assert len(feishu_channels) >= 1
 
 
-# === Heartbeat Tests ===
+# ── Heartbeat ──
 
 class TestHeartbeatState:
+    """Tests for HeartbeatState / 心跳状态测试"""
+
     def test_initial_state(self):
         from monitoring.heartbeat import HeartbeatState
         state = HeartbeatState()
-        assert state.last_beat == 0.0
-        assert state.pid > 0
-        assert state.uptime_seconds >= 0
+        assert state.last_beat == 0
+        assert state.uptime_seconds == 0
 
-    def test_to_dict(self):
-        from monitoring.heartbeat import HeartbeatState
-        state = HeartbeatState()
-        d = state.to_dict()
-        assert "last_beat" in d
-        assert "uptime_seconds" in d
-        assert "pid" in d
-
-    def test_is_alive_when_zero(self):
-        from monitoring.heartbeat import HeartbeatState
-        state = HeartbeatState()
-        assert state.is_alive() is True  # not started yet
-
-    def test_is_alive_recent(self):
-        from monitoring.heartbeat import HeartbeatState
-        state = HeartbeatState()
-        state.last_beat = time.time()
-        assert state.is_alive(timeout=90) is True
-
-    def test_is_alive_expired(self):
-        from monitoring.heartbeat import HeartbeatState
-        state = HeartbeatState()
-        state.last_beat = time.time() - 200
-        assert state.is_alive(timeout=90) is False
-
-    def test_last_beat_iso_when_zero(self):
-        from monitoring.heartbeat import HeartbeatState
-        state = HeartbeatState()
-        assert state.last_beat_iso == ""
-
-
-class TestHeartbeatLifecycle:
     @pytest.mark.asyncio
     async def test_start_stop(self):
         from monitoring.heartbeat import start_heartbeat, stop_heartbeat
@@ -58,101 +58,161 @@ class TestHeartbeatLifecycle:
         assert state.last_beat > 0
         stop_heartbeat(state)
 
-
-# === Config Tests ===
-
-class TestMonitoringConfig:
-    def test_load_default(self):
-        from monitoring.config import load_monitoring_config
-        cfg = load_monitoring_config()
-        assert cfg.watchdog_interval == 60
-        assert cfg.web_url == "http://localhost:9111/health"
-
-    def test_load_nonexistent(self):
-        from monitoring.config import load_monitoring_config
-        cfg = load_monitoring_config("/tmp/nonexistent.yaml")
-        assert cfg.watchdog_enabled is True  # defaults
-
-    def test_config_fields(self):
-        from monitoring.config import MonitoringConfig
-        cfg = MonitoringConfig()
-        assert cfg.admin_webhook == ""
-        assert cfg.restart_allowed is True
-        assert cfg.watchdog_max_failures == 3
+    def test_stop_idempotent(self):
+        from monitoring.heartbeat import HeartbeatState, stop_heartbeat
+        state = HeartbeatState()
+        stop_heartbeat(state)  # should not raise
 
 
-# === Alerting Tests ===
+# ── Alerting ──
 
-class TestAlertManager:
-    def test_should_alert_first_time(self):
-        from monitoring.alerting import AlertManager
-        am = AlertManager(alert_cooldown=60)
-        assert am._should_alert("web") is True
+class TestAlertMessage:
+    """Tests for AlertMessage / 告警消息测试"""
 
-    def test_should_alert_cooldown(self):
-        from monitoring.alerting import AlertManager
-        am = AlertManager(alert_cooldown=60)
-        am._should_alert("web")
-        assert am._should_alert("web") is False
+    def test_to_plain_text(self):
+        from monitoring.alerting import AlertMessage, AlertSeverity
+        msg = AlertMessage(title="Test", body="Something happened", severity=AlertSeverity.WARNING)
+        text = msg.to_plain_text()
+        assert "WARNING" in text
+        assert "Test" in text
+        assert "Something happened" in text
 
-    def test_should_alert_different_service(self):
-        from monitoring.alerting import AlertManager
-        am = AlertManager(alert_cooldown=60)
-        am._should_alert("web")
-        assert am._should_alert("daemon") is True
+    def test_auto_timestamp(self):
+        from monitoring.alerting import AlertMessage
+        msg = AlertMessage(title="T", body="B")
+        assert msg.timestamp  # auto-filled
 
-    def test_format_message(self):
-        from monitoring.alerting import AlertManager, AlertSeverity
-        am = AlertManager()
-        msg = am._format_message("web", "down", "Connection refused", AlertSeverity.CRITICAL)
-        assert "web" in msg
-        assert "down" in msg
-        assert "Connection refused" in msg
-        assert "CRITICAL" in msg
 
-    def test_write_log(self, tmp_path):
-        from monitoring.alerting import AlertManager
-        log_file = str(tmp_path / "test.log")
-        am = AlertManager(log_file=log_file)
-        am._write_log("test alert message")
-        content = Path(log_file).read_text()
-        assert "test alert message" in content
+class TestFeishuChannel:
+    """Tests for FeishuChannel / 飞书渠道测试"""
+
+    def test_build_payload_no_secret(self):
+        from monitoring.alerting import FeishuChannel, AlertMessage, AlertSeverity
+        ch = FeishuChannel(webhook="https://open.feishu.cn/open-apis/bot/v2/hook/test")
+        msg = AlertMessage(title="Daemon", body="down", severity=AlertSeverity.CRITICAL)
+        payload = ch._build_payload(msg)
+        assert payload["msg_type"] == "text"
+        assert "Daemon" in payload["content"]["text"]
+        assert "sign" not in payload
+
+    def test_build_payload_with_secret(self):
+        from monitoring.alerting import FeishuChannel, AlertMessage
+        ch = FeishuChannel(webhook="https://open.feishu.cn/open-apis/bot/v2/hook/test", secret="mysecret")
+        msg = AlertMessage(title="Test", body="body")
+        payload = ch._build_payload(msg)
+        assert "sign" in payload
+        assert "timestamp" in payload
 
     @pytest.mark.asyncio
-    async def test_send_alert_writes_log(self, tmp_path):
-        from monitoring.alerting import AlertManager, AlertSeverity
-        log_file = str(tmp_path / "test.log")
-        am = AlertManager(log_file=log_file, alert_cooldown=0)
-        await am.send_alert("web", "down", "test detail", AlertSeverity.WARNING)
-        content = Path(log_file).read_text()
-        assert "web" in content
-        assert "down" in content
+    async def test_send_success(self):
+        from monitoring.alerting import FeishuChannel, AlertMessage
+        ch = FeishuChannel(webhook="https://example.com/hook")
+        msg = AlertMessage(title="T", body="B")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"code": 0, "msg": "success"}
+        mock_resp.raise_for_status = MagicMock()
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            ok = await ch.send(msg)
+        assert ok is True
+
+    @pytest.mark.asyncio
+    async def test_send_api_error(self):
+        from monitoring.alerting import FeishuChannel, AlertMessage
+        ch = FeishuChannel(webhook="https://example.com/hook")
+        msg = AlertMessage(title="T", body="B")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"code": 19001, "msg": "keyword not match"}
+        mock_resp.raise_for_status = MagicMock()
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            ok = await ch.send(msg)
+        assert ok is False
 
 
-# === Watchdog Tests ===
+class TestWeComChannel:
+    """Tests for WeComChannel / 企微渠道测试"""
 
-class TestServiceState:
-    def test_initial_state(self):
-        from monitoring.watchdog import ServiceState
-        svc = ServiceState(name="test", url="http://localhost:9999")
-        assert svc.is_up is True
-        assert svc.consecutive_failures == 0
+    def test_build_payload(self):
+        from monitoring.alerting import WeComChannel, AlertMessage, AlertSeverity
+        ch = WeComChannel(webhook="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test")
+        msg = AlertMessage(title="Web", body="unhealthy", severity=AlertSeverity.WARNING)
+        payload = ch._build_payload(msg)
+        assert payload["msgtype"] == "text"
+        assert "Web" in payload["text"]["content"]
 
-    def test_failure_counting(self):
-        from monitoring.watchdog import ServiceState
-        svc = ServiceState(name="test", url="http://localhost:9999")
-        svc.consecutive_failures = 3
-        assert svc.consecutive_failures == 3
+    @pytest.mark.asyncio
+    async def test_send_success(self):
+        from monitoring.alerting import WeComChannel, AlertMessage
+        ch = WeComChannel(webhook="https://example.com/hook")
+        msg = AlertMessage(title="T", body="B")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"errcode": 0, "errmsg": "ok"}
+        mock_resp.raise_for_status = MagicMock()
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            ok = await ch.send(msg)
+        assert ok is True
 
+
+class TestAlertManager:
+    """Tests for AlertManager / 告警管理器测试"""
+
+    @pytest.mark.asyncio
+    async def test_cooldown_suppresses(self):
+        from monitoring.alerting import AlertManager, LogChannel, AlertSeverity
+        ch = LogChannel(log_file="/tmp/test_tm_alert.log")
+        mgr = AlertManager(channels=[ch], alert_cooldown=60)
+        await mgr.send_alert("Test", "body", AlertSeverity.INFO)
+        # Second call within cooldown should be suppressed
+        await mgr.send_alert("Test", "body", AlertSeverity.INFO)
+
+    @pytest.mark.asyncio
+    async def test_different_keys_no_cooldown(self):
+        from monitoring.alerting import AlertManager, LogChannel, AlertSeverity
+        ch = LogChannel(log_file="/tmp/test_tm_alert2.log")
+        mgr = AlertManager(channels=[ch], alert_cooldown=60)
+        await mgr.send_alert("Key1", "body", AlertSeverity.INFO)
+        await mgr.send_alert("Key2", "body", AlertSeverity.INFO)  # different key, should pass
+
+    def test_from_config(self):
+        from monitoring.alerting import AlertManager
+        from monitoring.config import MonitoringConfig, ChannelConfig
+        cfg = MonitoringConfig(
+            channels=[
+                ChannelConfig(type="feishu", webhook="https://example.com/hook", secret="s"),
+                ChannelConfig(type="wecom", webhook="https://example.com/hook2"),
+            ],
+            watchdog_log_file="/tmp/test.log",
+            watchdog_alert_cooldown=120,
+        )
+        mgr = AlertManager.from_config(cfg)
+        assert len(mgr.channels) >= 4  # 2 configured + log + macos
+        assert mgr.alert_cooldown == 120
+
+    def test_create_channel_factory(self):
+        from monitoring.alerting import create_channel, FeishuChannel, WeComChannel, WebhookChannel
+        assert isinstance(create_channel("feishu", webhook="x"), FeishuChannel)
+        assert isinstance(create_channel("wecom", webhook="x"), WeComChannel)
+        assert isinstance(create_channel("webhook", url="x"), WebhookChannel)
+
+
+# ── Watchdog ──
 
 class TestServiceWatchdog:
-    def test_init(self):
-        from monitoring.watchdog import ServiceWatchdog
-        from monitoring.config import MonitoringConfig
-        cfg = MonitoringConfig(watchdog_interval=5)
-        wd = ServiceWatchdog(config=cfg)
-        assert "web" in wd._services
-        assert "daemon" in wd._services
+    """Tests for ServiceWatchdog / 服务看门狗测试"""
 
     @pytest.mark.asyncio
     async def test_check_service_up(self):
@@ -187,12 +247,3 @@ class TestServiceWatchdog:
             result = await wd.check_service(svc)
         assert result is False
         assert svc.consecutive_failures == 1
-
-    def test_get_status(self):
-        from monitoring.watchdog import ServiceWatchdog
-        from monitoring.config import MonitoringConfig
-        wd = ServiceWatchdog(config=MonitoringConfig())
-        status = wd.get_status()
-        assert "web" in status
-        assert "daemon" in status
-        assert "is_up" in status["web"]

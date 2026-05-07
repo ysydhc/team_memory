@@ -2,15 +2,27 @@
 # 管理员专属配置，控制 watchdog 和告警行为
 
 admin:
-  # 告警接收渠道（至少配置一个）
-  webhook: ""                    # Slack/飞书/企业微信 webhook URL
-  email: ""                      # 备用邮件告警
   restart_allowed: true          # 允许 watchdog 自动重启服务
+
+  # 告警渠道（可配多个，全部发送）
+  channels:
+    # 飞书机器人
+    - type: feishu
+      webhook: ""                # https://open.feishu.cn/open-apis/bot/v2/hook/xxx
+      secret: ""                 # 签名密钥（可选，飞书机器人设置中获取）
+
+    # 企业微信机器人
+    # - type: wecom
+    #   webhook: ""              # https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
+
+    # 通用 Webhook（Slack/钉钉/自定义）
+    # - type: webhook
+    #   url: ""
 
 health_check:
   web:
     url: "http://localhost:9111/health"
-    timeout: 10                  # 请求超时（秒）
+    timeout: 10
     expected_status: 200
   daemon:
     url: "http://localhost:3901/status"
@@ -19,13 +31,11 @@ health_check:
 
 watchdog:
   enabled: true
-  interval: 60                   # 检查间隔（秒）
-  max_failures: 3                # 连续失败 N 次后触发重启
-  restart_cooldown: 60           # 重启后冷却（秒），等待服务启动
-  alert_cooldown: 300            # 告警冷却（秒），避免刷屏
+  interval: 60
+  max_failures: 3
+  restart_cooldown: 60
+  alert_cooldown: 300
   log_file: "/tmp/tm-watchdog.log"
-  # 重启命令（按环境配置）
-  # macOS:
   restart_web: "cd {workspace} && make web-restart"
   restart_daemon: "cd {workspace} && make daemon-stop && make daemon-install"
   workspace: "/Users/yeshouyou/Work/agent/team_doc"
