@@ -273,12 +273,33 @@ class SearchLogWriter:
                         if not text:
                             continue
 
-                        # Tokenize: split by spaces and punctuation, keep tokens with length > 2
-                        keywords = [
-                            tok.lower()
-                            for tok in re.split(r"[^\w]+", text)
-                            if len(tok) > 2
-                        ]
+                        # Tokenize: for Chinese/Japanese text, use character bigrams;
+                        # for alphabetic text, split by non-word chars.
+                        if re.search(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]", text):
+                            # CJK text: extract individual CJK chars and bigrams,
+                            # plus any alphabetic tokens
+                            cjk_chars = re.findall(r"[\u4e00-\u9fff]+", text)
+                            keywords = []
+                            for segment in cjk_chars:
+                                if len(segment) >= 2:
+                                    keywords.extend(
+                                        segment[i:i+2] for i in range(len(segment) - 1)
+                                    )
+                                else:
+                                    keywords.append(segment)
+                            # Also include alphabetic tokens
+                            alpha_tokens = [
+                                tok.lower()
+                                for tok in re.split(r"[^\w]+", text)
+                                if len(tok) > 2 and not re.match(r"^[\u4e00-\u9fff]+$", tok)
+                            ]
+                            keywords.extend(alpha_tokens)
+                        else:
+                            keywords = [
+                                tok.lower()
+                                for tok in re.split(r"[^\w]+", text)
+                                if len(tok) > 2
+                            ]
                         if not keywords:
                             continue
 

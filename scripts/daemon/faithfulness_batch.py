@@ -56,7 +56,7 @@ async def load_experience_contexts(
     try:
         rows = await conn.fetch(
             """
-            SELECT id, title, problem, solution
+            SELECT id, title, description, solution
             FROM experiences
             WHERE id = ANY($1)
             """,
@@ -67,8 +67,8 @@ async def load_experience_contexts(
             parts = []
             if r["title"]:
                 parts.append(f"标题: {r['title']}")
-            if r["problem"]:
-                parts.append(f"问题: {r['problem'][:200]}")
+            if r["description"]:
+                parts.append(f"问题: {r['description'][:200]}")
             if r["solution"]:
                 parts.append(f"方案: {r['solution'][:300]}")
             contexts.append(" | ".join(parts))
