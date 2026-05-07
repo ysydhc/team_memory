@@ -13,6 +13,8 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+pytestmark = pytest.mark.unit
+
 from team_memory.services.janitor import MemoryJanitor
 from team_memory.storage.models import Experience, PersonalMemory
 from team_memory.config.janitor import JanitorConfig

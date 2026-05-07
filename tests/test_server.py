@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 from team_memory.server import mcp
 from team_memory.services.search_orchestrator import OrchestratedSearchResult
 from tests.conftest import (
@@ -26,8 +28,9 @@ from tests.conftest import (
 # ============================================================
 
 
+@pytest.mark.unit
 class TestLiteToolRegistration:
-    """Verify lite server registers exactly 8 memory_* tools."""
+    """Verify lite server registers exactly 9 memory_* tools."""
 
     @pytest.mark.asyncio
     async def test_exactly_six_tools(self):
@@ -794,6 +797,7 @@ class TestMemoryFeedback:
 # ============================================================
 
 
+@pytest.mark.unit
 class TestGuardOutput:
     """Test the _guard_output token budget enforcement."""
 
@@ -847,6 +851,7 @@ class TestGuardOutput:
 # ============================================================
 
 
+@pytest.mark.unit
 class TestMemorySaveContentLimit:
     """Test memory_save rejects content that exceeds max_content_chars."""
 
@@ -933,6 +938,7 @@ class TestMemorySaveContentLimit:
 # ============================================================
 
 
+@pytest.mark.unit
 class TestMemorySaveTagsValidation:
     """Test memory_save rejects invalid tags."""
 

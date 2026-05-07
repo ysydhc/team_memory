@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+pytestmark = pytest.mark.integration
+
 from team_memory.auth.provider import ApiKeyAuth
 from team_memory.config import UploadsConfig, WebConfig
 from team_memory.services.archive import ArchiveUploadError

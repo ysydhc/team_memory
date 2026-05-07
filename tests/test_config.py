@@ -28,9 +28,9 @@ class TestSettings:
         assert settings.embedding.provider == "ollama"
 
     def test_embedding_dimension_ollama(self):
-        """Default provider is Ollama with 768 dimensions."""
-        settings = Settings()
-        assert settings.embedding.dimension == 768
+        """Default provider is Ollama with 1024 dimensions (qwen3-embedding:0.6b)."""
+        settings = load_settings()
+        assert settings.embedding.dimension == 1024
 
     def test_embedding_dimension_openai(self):
         settings = Settings(embedding={"provider": "openai", "openai": {"dimension": 1536}})
@@ -43,9 +43,9 @@ class TestSettings:
     def test_ollama_config_defaults(self):
         """Ollama config has sensible defaults."""
         settings = Settings()
-        assert settings.embedding.ollama.model == "nomic-embed-text:latest"
+        assert settings.embedding.ollama.model == "qwen3-embedding:0.6b"
         assert settings.embedding.ollama.base_url == "http://localhost:11434"
-        assert settings.embedding.ollama.dimension == 768
+        assert settings.embedding.ollama.dimension == 1024
 
     def test_default_auth_type(self):
         settings = Settings()

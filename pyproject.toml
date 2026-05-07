@@ -76,6 +76,10 @@ packages = ["src/team_memory"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["src", "scripts"]
+markers = [
+    "unit: Unit tests — no external dependencies, mock DB/LLM (单元测试)",
+    "integration: Integration tests — require PostgreSQL, Ollama, or web server (集成测试)",
+]
 
 [tool.ruff]
 target-version = "py311"

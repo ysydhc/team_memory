@@ -12,16 +12,16 @@ class TestOllamaEmbedding:
     """Test Ollama embedding provider."""
 
     def test_dimension(self):
-        provider = OllamaEmbedding(dim=768)
-        assert provider.dimension == 768
-
-    def test_custom_dimension(self):
         provider = OllamaEmbedding(dim=1024)
         assert provider.dimension == 1024
 
+    def test_custom_dimension(self):
+        provider = OllamaEmbedding(dim=768)
+        assert provider.dimension == 768
+
     def test_default_model(self):
         provider = OllamaEmbedding()
-        assert provider._model == "nomic-embed-text:latest"
+        assert provider._model == "qwen3-embedding:0.6b"
 
     def test_custom_model(self):
         provider = OllamaEmbedding(model="mxbai-embed-large")
@@ -39,7 +39,7 @@ class TestOllamaEmbedding:
     async def test_encode_calls_api(self):
         """Test that encode calls the Ollama API correctly."""
         mock_response = {
-            "model": "nomic-embed-text",
+            "model": "qwen3-embedding:0.6b",
             "embeddings": [
                 [0.1, 0.2, 0.3],
                 [0.4, 0.5, 0.6],
@@ -54,7 +54,7 @@ class TestOllamaEmbedding:
             return httpx.Response(200, json=mock_response)
 
         provider = OllamaEmbedding(
-            model="nomic-embed-text",
+            model="qwen3-embedding:0.6b",
             dim=3,
             base_url="http://localhost:11434",
         )
@@ -75,7 +75,7 @@ class TestOllamaEmbedding:
 
             # Verify the request was correct
             assert captured_request["url"] == "http://localhost:11434/api/embed"
-            assert captured_request["body"]["model"] == "nomic-embed-text"
+            assert captured_request["body"]["model"] == "qwen3-embedding:0.6b"
             assert captured_request["body"]["input"] == ["hello", "world"]
         finally:
             httpx.AsyncClient.__init__ = original_init
@@ -84,7 +84,7 @@ class TestOllamaEmbedding:
     async def test_encode_single_text(self):
         """Test encoding a single text."""
         mock_response = {
-            "model": "nomic-embed-text",
+            "model": "qwen3-embedding:0.6b",
             "embeddings": [[0.1, 0.2, 0.3]],
         }
 
