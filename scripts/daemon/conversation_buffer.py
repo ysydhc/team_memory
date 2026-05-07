@@ -10,7 +10,7 @@ Tables:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import aiosqlite
@@ -281,6 +281,39 @@ class ConversationBuffer:
     async def mark_published_by_session(self, session_id: str) -> None:
         """Backward compat: close session."""
         await self.close_session(session_id, "published")
+
+    async def mark_idle_sessions_for_refinement(self, idle_minutes: int = 30) -> int:
+        """Mark active sessions with no new messages for idle_minutes as needs_refinement.
+
+        Returns the number of sessions marked.
+        """
+        cutoff = datetime.utcnow() - timedelta(minutes=idle_minutes)
+        cutoff_str = cutoff.isoformat()
+        async with self._lock:
+            # Find active sessions whose last message is older than cutoff
+            # and which have at least one assistant message (worth refining)
+            rows = await self._conn.execute_fetchall(
+                """
+                SELECT s.id FROM sessions s
+                WHERE s.status = 'active'
+                  AND s.updated_at < ?
+                  AND EXISTS (
+                    SELECT 1 FROM messages m
+                    WHERE m.session_id = s.id AND m.role = 'assistant'
+                  )
+                """,
+                (cutoff_str,),
+            )
+            if not rows:
+                return 0
+            now = datetime.utcnow().isoformat()
+            for row in rows:
+                await self._conn.execute(
+                    "UPDATE sessions SET status='needs_refinement', updated_at=? WHERE id=?",
+                    (now, row[0]),
+                )
+            await self._conn.commit()
+            return len(rows)
 
     async def get_needs_refinement(self) -> list[dict[str, Any]]:
         """Backward compat: return sessions needing refinement as draft-like dicts."""

@@ -91,6 +91,7 @@ class RefinementSettings:
     api_key_env: str = "LITELLM_MASTER_KEY"
     timeout: int = 30
     scan_interval_seconds: int = 30
+    idle_timeout_minutes: int = 30  # sessions idle longer than this are auto-refined
     max_input_chars: int = 6000
     max_retries: int = 1
     fallback_on_failure: bool = True

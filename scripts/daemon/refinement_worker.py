@@ -125,8 +125,27 @@ class RefinementWorker:
 
         return False
 
+    async def _mark_idle_sessions(self) -> None:
+        """Auto-mark active sessions that have been idle too long as needs_refinement."""
+        idle_minutes = getattr(self._cfg, "idle_timeout_minutes", 30)
+        marked = await self._buf.mark_idle_sessions_for_refinement(idle_minutes)
+        if marked:
+            logger.info(
+                "RefinementWorker: marked %d idle session(s) for refinement (idle>%dm)",
+                marked, idle_minutes,
+            )
+
     async def _tick(self) -> None:
-        """Process all drafts needing refinement."""
+        """Process all drafts needing refinement.
+
+        Also auto-marks idle active sessions as needs_refinement.
+        A session is considered idle if it has had no new messages
+        for idle_timeout_minutes (default 30).
+        """
+        # Step 1: auto-mark idle active sessions
+        await self._mark_idle_sessions()
+
+        # Step 2: process sessions marked needs_refinement
         drafts = await self._buf.get_needs_refinement()
         if not drafts:
             return

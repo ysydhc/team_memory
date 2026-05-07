@@ -111,10 +111,13 @@ class TestResolveProject:
 class TestProcessAfterResponse:
     @pytest.mark.asyncio
     async def test_no_project_returns_ok(self):
+        """When workspace is unknown AND no session record, action=ok (no-op)."""
         config = _make_config()
+        buf = _make_buf()
+        buf.get_session = AsyncMock(return_value=None)  # no session record either
         result = await process_after_response(
             {"conversation_id": "123", "prompt": "hello", "workspace_roots": ["/unknown"]},
-            config, _make_sink(), _make_buf(), _make_detector(), _make_refiner(),
+            config, _make_sink(), buf, _make_detector(), _make_refiner(),
         )
         assert result["action"] == "ok"
         assert result["convergence"] is False

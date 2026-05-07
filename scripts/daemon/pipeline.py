@@ -53,14 +53,18 @@ async def process_session_start(
     input_data: dict,
     config: DaemonConfig,
     sink: TMSink,
+    buf: Any = None,  # ConversationBuffer
 ) -> dict[str, Any]:
-    """Process session start: resolve project and return context.
-
-    Returns:
-        Dict with project and optional additional_context.
-    """
+    """Process session start: resolve project, persist to buffer, return context."""
     workspace_roots = input_data.get("workspace_roots", [])
+    conversation_id = input_data.get("conversation_id", "")
     project = _resolve_project(workspace_roots, config)
+
+    # Persist project mapping so later hooks (which may lack workspace) can look it up
+    if buf is not None and conversation_id and project:
+        await buf.ensure_session(conversation_id, project)
+        logger.info("[READ]  session_start → project=%s conversation=%s", project, conversation_id[:8])
+
     return {"project": project or "", "additional_context": ""}
 
 
@@ -86,9 +90,15 @@ async def process_before_prompt(
     session_id = input_data.get("conversation_id", "") or "unknown"
     project = _resolve_project(workspace_roots, config)
 
-    # Store user message in conversation buffer
-    if buf and prompt.strip() and project:
-        await buf.add_message(session_id, "user", prompt, project=project)
+    # Fallback: if no workspace provided, look up project from existing session record
+    if project is None and buf and session_id != "unknown":
+        session = await buf.get_session(session_id)
+        if session:
+            project = session.get("project")
+
+    # Store user message in conversation buffer (always, not just on trigger keywords)
+    if buf and prompt.strip():
+        await buf.add_message(session_id, "user", prompt, project=project or "default")
 
     # Retrieve memories (existing logic)
     if not prompt.strip():
@@ -125,11 +135,15 @@ async def process_after_response(
         Dict with action, convergence flag, and draft_id.
     """
     session_id = input_data.get("conversation_id", "") or "unknown"
-    # Accept both "response_text" (Claude Code / claude_stop.py) and "prompt"
-    # (Hermes / tm_hook.py) so the pipeline stays platform-agnostic.
     response_text = input_data.get("response_text") or input_data.get("prompt", "") or ""
     workspace_roots = input_data.get("workspace_roots", [])
     project = _resolve_project(workspace_roots, config)
+
+    # Fallback: look up project from session record if workspace not provided
+    if project is None and session_id != "unknown":
+        session = await buf.get_session(session_id)
+        if session:
+            project = session.get("project")
 
     if project is None:
         logger.debug("No project resolved for workspace: %s", workspace_roots)

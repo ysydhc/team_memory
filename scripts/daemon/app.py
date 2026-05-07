@@ -399,6 +399,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             input_data=payload.model_dump(),
             config=app.state.config,
             sink=app.state.sink,
+            buf=app.state.buf,
         )
         project = result.get("project", "")
         has_ctx = bool(result.get("additional_context", ""))
