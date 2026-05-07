@@ -27,6 +27,8 @@ MODULES = [
     "daemon.faithfulness_batch",
     "daemon.entity_dedup",
     "daemon.reloader",
+    "daemon.conversation_buffer",
+    "daemon.personal_memory_extractor",
 ]
 
 failed = []

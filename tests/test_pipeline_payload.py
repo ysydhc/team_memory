@@ -19,16 +19,15 @@ def _make_mocks(converged: bool = False):
 
     sink = MagicMock()
 
-    buf = MagicMock()
+    buf = AsyncMock()
+    buf.add_message = AsyncMock(return_value=1)
+    buf.ensure_session = AsyncMock(return_value="sess-1")
     buf.get_pending = AsyncMock(return_value=[])
-    buf.create_draft = AsyncMock(return_value=None)
-    buf.update_draft = AsyncMock(return_value=None)
 
     detector = MagicMock()
     detector.detect_convergence = MagicMock(return_value=converged)
 
-    refiner = MagicMock()
-    refiner.save_draft = AsyncMock(return_value={"id": "draft-123", "status": "draft"})
+    refiner = AsyncMock()
     refiner.mark_for_refinement = AsyncMock(return_value=None)
 
     return config, sink, buf, detector, refiner
@@ -48,11 +47,9 @@ async def test_response_text_field_is_used():
 
     await process_after_response(payload, config, sink, buf, detector, refiner)
 
-    # save_draft was called — capture the content argument
-    refiner.save_draft.assert_called_once()
-    args, kwargs = refiner.save_draft.call_args
-    content_arg = args[2] if len(args) > 2 else kwargs.get("content", "")
-    assert "Here is what I learned today" in content_arg
+    buf.add_message.assert_called_once_with(
+        "sess-1", "assistant", "Here is what I learned today", project="proj"
+    )
 
 
 @pytest.mark.asyncio
@@ -68,10 +65,9 @@ async def test_prompt_field_fallback():
 
     await process_after_response(payload, config, sink, buf, detector, refiner)
 
-    refiner.save_draft.assert_called_once()
-    args, kwargs = refiner.save_draft.call_args
-    content_arg = args[2] if len(args) > 2 else kwargs.get("content", "")
-    assert "Agent replied with this text" in content_arg
+    buf.add_message.assert_called_once_with(
+        "sess-2", "assistant", "Agent replied with this text", project="proj"
+    )
 
 
 @pytest.mark.asyncio
@@ -88,11 +84,9 @@ async def test_response_text_takes_precedence_over_prompt():
 
     await process_after_response(payload, config, sink, buf, detector, refiner)
 
-    refiner.save_draft.assert_called_once()
-    args, kwargs = refiner.save_draft.call_args
-    content_arg = args[2] if len(args) > 2 else kwargs.get("content", "")
-    assert "correct content" in content_arg
-    assert "wrong content" not in content_arg
+    buf.add_message.assert_called_once()
+    args = buf.add_message.call_args
+    assert args[0][2] == "correct content"  # content argument
 
 
 @pytest.mark.asyncio
@@ -104,7 +98,7 @@ async def test_empty_content_skips_save():
         {"conversation_id": "sess-4", "response_text": "", "prompt": "", "workspace_roots": ["/repo"]},
         {"conversation_id": "sess-5", "response_text": "\n\n", "prompt": "\n", "workspace_roots": ["/repo"]},
     ]:
-        refiner.save_draft.reset_mock()
+        buf.add_message.reset_mock()
         result = await process_after_response(payload, config, sink, buf, detector, refiner)
         assert isinstance(result, dict)
-        refiner.save_draft.assert_not_called()
+        buf.add_message.assert_not_called()

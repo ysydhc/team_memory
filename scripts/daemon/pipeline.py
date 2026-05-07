@@ -1,7 +1,7 @@
 """Pipeline logic — extracted from hook scripts, runs inside TM Daemon.
 
 Each function corresponds to a hook event and orchestrates the
-draft buffer, convergence detection, refinement, and TMSink calls.
+conversation buffer, convergence detection, refinement, and TMSink calls.
 """
 from __future__ import annotations
 
@@ -25,21 +25,99 @@ def _resolve_project(workspace_roots: list[str], config: DaemonConfig) -> str | 
     return None
 
 
+async def _try_extract_personal_memory(
+    session_id: str, buf: Any, config: DaemonConfig
+) -> None:
+    """Extract personal memory from user messages in a session.
+
+    Non-blocking: logs errors but does not raise.
+    """
+    try:
+        user_messages = await buf.get_user_messages(session_id)
+        if not user_messages:
+            logger.debug("No user messages for session=%s, skipping personal memory", session_id[:8])
+            return
+
+        from daemon.personal_memory_extractor import PersonalMemoryExtractor
+        extractor = PersonalMemoryExtractor(config)
+        saved = await extractor.extract_and_save(session_id, user_messages)
+        if saved:
+            logger.info("[PROFILE] Saved %d personal memories from session=%s", saved, session_id[:8])
+        else:
+            logger.debug("[PROFILE] No personal memories extracted from session=%s", session_id[:8])
+    except Exception:
+        logger.exception("Personal memory extraction failed for session=%s", session_id[:8])
+
+
+async def process_session_start(
+    input_data: dict,
+    config: DaemonConfig,
+    sink: TMSink,
+) -> dict[str, Any]:
+    """Process session start: resolve project and return context.
+
+    Returns:
+        Dict with project and optional additional_context.
+    """
+    workspace_roots = input_data.get("workspace_roots", [])
+    project = _resolve_project(workspace_roots, config)
+    return {"project": project or "", "additional_context": ""}
+
+
+async def process_before_prompt(
+    input_data: dict,
+    config: DaemonConfig,
+    sink: TMSink,
+    buf: Any = None,  # ConversationBuffer
+) -> dict[str, Any]:
+    """Process before-prompt: retrieve memories and store user message.
+
+    Args:
+        input_data: Parsed hook payload with prompt, workspace_roots.
+        config: DaemonConfig.
+        sink: TMSink for retrieval.
+        buf: ConversationBuffer instance (optional, for storing user prompt).
+
+    Returns:
+        Dict with results and project.
+    """
+    prompt = input_data.get("prompt", "")
+    workspace_roots = input_data.get("workspace_roots", [])
+    session_id = input_data.get("conversation_id", "") or "unknown"
+    project = _resolve_project(workspace_roots, config)
+
+    # Store user message in conversation buffer
+    if buf and prompt.strip() and project:
+        await buf.add_message(session_id, "user", prompt, project=project)
+
+    # Retrieve memories (existing logic)
+    if not prompt.strip():
+        return {"results": [], "project": project}
+
+    results = await sink.recall(
+        query=prompt,
+        project=project,
+        max_results=getattr(config, "max_results", 5),
+    )
+
+    return {"results": results, "project": project or ""}
+
+
 async def process_after_response(
     input_data: dict,
     config: DaemonConfig,
     sink: TMSink,
-    buf: Any,  # DraftBuffer
+    buf: Any,  # ConversationBuffer
     detector: Any,  # ConvergenceDetector
     refiner: Any,  # DraftRefiner
 ) -> dict[str, Any]:
-    """Process agent response: accumulate draft, detect convergence, publish.
+    """Process agent response: store message, detect convergence, publish.
 
     Args:
-        input_data: Parsed hook payload with conversation_id, prompt, workspace_roots.
+        input_data: Parsed hook payload with conversation_id, response_text/prompt, workspace_roots.
         config: DaemonConfig.
         sink: TMSink for TM storage.
-        buf: DraftBuffer instance.
+        buf: ConversationBuffer instance.
         detector: ConvergenceDetector instance.
         refiner: DraftRefiner instance.
 
@@ -61,14 +139,8 @@ async def process_after_response(
         logger.debug("Empty response_text, skipping draft pipeline for session=%s", session_id)
         return {"action": "ok", "convergence": False, "draft_id": ""}
 
-    # Get existing pending draft for this session
-    existing = await buf.get_pending(session_id)
-
-    # Accumulate text
-    if existing:
-        accumulated = existing[0].get("content", "") + "\n" + response_text
-    else:
-        accumulated = response_text
+    # Store assistant message in conversation buffer
+    await buf.add_message(session_id, "assistant", response_text, project=project)
 
     # Detect convergence
     converged = detector.detect_convergence(
@@ -78,112 +150,20 @@ async def process_after_response(
         previous_path=None,
     )
 
-    if converged and existing:
-        # Converged with existing draft → update buffer + mark for LLM refinement
-        draft_id = existing[0].get("id", "")
-        await buf.update_draft(draft_id, accumulated)
-
+    if converged:
+        # Mark session for LLM refinement
         result = await refiner.mark_for_refinement(session_id)
+        # Extract personal memory from user messages
+        await _try_extract_personal_memory(session_id, buf, config)
         if result is not None:
             return {
                 "action": "needs_refinement",
                 "convergence": True,
-                "draft_id": result.get("draft_id", draft_id),
+                "draft_id": result.get("draft_id", session_id),
             }
-        return {"action": "ok", "convergence": True, "draft_id": draft_id}
+        return {"action": "ok", "convergence": True, "draft_id": session_id}
 
-    elif converged and not existing:
-        # Converged on first response — save draft then mark for refinement
-        title = f"Session {session_id[:8]} draft"
-        tm_resp = await refiner.save_draft(
-            session_id, title, accumulated, project=project,
-        )
-        result = await refiner.mark_for_refinement(session_id)
-        if result is not None:
-            return {
-                "action": "needs_refinement",
-                "convergence": True,
-                "draft_id": result.get("draft_id", tm_resp.get("id", "")),
-            }
-        return {
-            "action": "draft_saved",
-            "convergence": True,
-            "draft_id": tm_resp.get("id", ""),
-        }
-
-    else:
-        # Not converged → save/update draft
-        if existing:
-            # Session already has a pending draft in Buffer — just update
-            # the content.  No need to write another PG experience.
-            draft_id = existing[0].get("id", "")
-            await buf.update_draft(draft_id, accumulated)
-            return {"action": "draft_updated", "convergence": False, "draft_id": draft_id}
-
-        # First response for this session — create a new draft in both
-        # Buffer and PG so we get a tm_id for later publishing.
-        title = f"Session {session_id[:8]} draft"
-        tm_resp = await refiner.save_draft(
-            session_id, title, accumulated, project=project,
-        )
-        return {
-            "action": "draft_saved",
-            "convergence": False,
-            "draft_id": tm_resp.get("id", ""),
-        }
-
-
-async def process_session_start(
-    input_data: dict,
-    config: DaemonConfig,
-    sink: TMSink,
-) -> dict[str, Any]:
-    """Inject project context for new session.
-
-    Retrieves relevant memories from TM and returns them as additional_context.
-    """
-    workspace_roots = input_data.get("workspace_roots", [])
-    project = _resolve_project(workspace_roots, config)
-
-    if project is None:
-        return {"additional_context": "", "project": None}
-
-    try:
-        result = await sink.context(project=project)
-        return {"additional_context": result, "project": project}
-    except Exception:
-        logger.exception("Failed to get context for project=%s", project)
-        return {"additional_context": "", "project": project}
-
-
-async def process_before_prompt(
-    input_data: dict,
-    config: DaemonConfig,
-    sink: TMSink,
-) -> dict[str, Any]:
-    """Retrieve relevant memories for user prompt.
-
-    Checks for keyword triggers in the prompt and recalls matching experiences.
-    """
-    query = input_data.get("prompt", "")
-    workspace_roots = input_data.get("workspace_roots", [])
-    project = _resolve_project(workspace_roots, config)
-
-    # Check keyword triggers
-    has_trigger = any(kw in query for kw in config.retrieval.keyword_triggers)
-    if not has_trigger and not query:
-        return {"results": [], "project": project}
-
-    try:
-        results = await sink.recall(
-            query=query,
-            project=project,
-            max_results=config.retrieval.session_start_top_k,
-        )
-        return {"results": results, "project": project}
-    except Exception:
-        logger.exception("Failed to recall for query=%s", query[:50])
-        return {"results": [], "project": project}
+    return {"action": "draft_updated", "convergence": False, "draft_id": session_id}
 
 
 async def process_session_end(
@@ -193,14 +173,23 @@ async def process_session_end(
     buf: Any,
     refiner: Any,
 ) -> dict[str, Any]:
-    """Flush remaining drafts on session end.
+    """Flush remaining conversation on session end.
 
-    If there's a pending draft for this session, refine and publish it.
+    If there's an active session with messages, refine and publish it.
+    Also extract personal memory from user messages.
     """
     session_id = input_data.get("conversation_id", "") or "unknown"
-    existing = await buf.get_pending(session_id)
+    session = await buf.get_session(session_id)
 
-    if not existing:
+    if not session or session.get("status") != "active":
+        return {"action": "ok", "flushed": False}
+
+    # Always try personal memory extraction on session end
+    await _try_extract_personal_memory(session_id, buf, config)
+
+    # Check if there are any assistant messages
+    messages = await buf.get_assistant_messages(session_id)
+    if not messages:
         return {"action": "ok", "flushed": False}
 
     try:
@@ -212,6 +201,6 @@ async def process_session_end(
                 "draft_id": result.get("draft_id", ""),
             }
     except Exception:
-        logger.exception("Failed to flush draft for session=%s", session_id)
+        logger.exception("Failed to flush session=%s", session_id)
 
     return {"action": "ok", "flushed": False}

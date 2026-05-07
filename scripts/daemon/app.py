@@ -15,7 +15,7 @@ from typing import Any
 
 from fastapi import FastAPI
 from hooks.convergence_detector import ConvergenceDetector
-from hooks.draft_buffer import DraftBuffer
+from daemon.conversation_buffer import ConversationBuffer
 from pydantic import BaseModel, Field
 
 from daemon.config import DaemonConfig, load_config
@@ -137,7 +137,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         db_path = config.draft.db_path or ":memory:"
         if db_path != ":memory:":
             os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        buf = DraftBuffer(db_path)
+        buf = ConversationBuffer(db_path)
         await buf.__aenter__()
         application.state.buf = buf
 
@@ -415,6 +415,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             input_data=payload.model_dump(),
             config=app.state.config,
             sink=app.state.sink,
+            buf=app.state.buf,
         )
         project = result.get("project", "")
         all_results = result.get("results", [])

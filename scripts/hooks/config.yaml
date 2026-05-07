@@ -5,7 +5,7 @@ daemon:
 tm:
   mode: "local"
   base_url: "http://localhost:9111"
-  user: "daemon"
+  user: "admin"
 
 obsidian:
   vaults:

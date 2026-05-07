@@ -1,6 +1,6 @@
-"""Background worker that refines drafts via LLM and updates Experience records.
+"""Background refinement worker for the TM Daemon.
 
-Scans the DraftBuffer for drafts with status='needs_refinement',
+Scans the ConversationBuffer for sessions with status='needs_refinement',
 calls an LLM (via LiteLLM proxy or Ollama) to extract structured fields,
 publishes the draft, then updates the published Experience with refined data.
 """
@@ -12,7 +12,7 @@ import os
 from typing import Any
 
 from daemon.config import DaemonConfig, RefinementSettings
-from daemon.draft_buffer import DraftBuffer
+from daemon.conversation_buffer import ConversationBuffer
 from daemon.tm_sink import TMSink
 from team_memory.services.llm_parser import LLMParseError, parse_content_openai
 
@@ -37,7 +37,7 @@ class RefinementWorker:
     def __init__(
         self,
         config: DaemonConfig,
-        buf: DraftBuffer,
+        buf: ConversationBuffer,
         sink: TMSink,
     ) -> None:
         self._cfg: RefinementSettings = config.refinement

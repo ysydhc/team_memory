@@ -37,7 +37,7 @@ class TestTMSettings:
         s = TMSettings()
         assert s.mode == "local"
         assert s.base_url == ""
-        assert s.user == "daemon"
+        assert s.user == "admin"
 
     def test_custom_values(self):
         from daemon.config import TMSettings
@@ -250,7 +250,7 @@ class TestLoadConfig:
         # 未覆盖的部分保持默认
         assert cfg.daemon.host == "127.0.0.1"
         assert cfg.tm.base_url == ""
-        assert cfg.tm.user == "daemon"
+        assert cfg.tm.user == "admin"
 
     def test_load_config_none_path_uses_default(self):
         """config_path=None 时使用默认路径（可能不存在），返回默认值。"""

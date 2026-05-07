@@ -45,7 +45,7 @@ class TMSettings:
 
     mode: str = "local"  # "local" | "remote"
     base_url: str = ""
-    user: str = "daemon"
+    user: str = "admin"
 
 
 @dataclass

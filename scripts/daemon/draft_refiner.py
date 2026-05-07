@@ -1,8 +1,7 @@
 """DraftRefiner — daemon adaptation.
 
-Copy of scripts/hooks/draft_refiner.py but replaces TMClient with TMSink:
-  - Constructor: __init__(self, sink: TMSink, buf: DraftBuffer)
-  - self._tm → self._sink for draft_save / draft_publish calls
+Uses ConversationBuffer (structured messages) instead of old DraftBuffer.
+Extracts facts from assistant messages and publishes to TM.
 """
 
 from __future__ import annotations
@@ -38,7 +37,7 @@ class DraftRefiner:
 
     Args:
         sink: TMSink instance for calling TM endpoints.
-        draft_buffer: DraftBuffer instance for local SQLite persistence.
+        draft_buffer: ConversationBuffer instance.
         wiki_compiler: Optional WikiCompiler instance for post-publish wiki compilation.
     """
 

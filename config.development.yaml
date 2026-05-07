@@ -91,7 +91,7 @@ extraction:
 auth:
   type: db_api_key
   api_key: "${TEAM_MEMORY_API_KEY}"
-  default_admin_password: "admin"
+  default_admin_password: "admin1234"
   session_secret: "dev-session-secret-change-in-production"
 
 # -----------------------------------------------------------------------------
@@ -283,7 +283,7 @@ uploads:
   enabled: true
   root_dir: ".tmp/uploads"
   max_bytes: 52428800
-  allowed_extensions: [".md", ".txt", ".json", ".pdf"]
+  allowed_extensions: [ ".md", ".txt", ".json", ".pdf" ]
 
 # -----------------------------------------------------------------------------
 # log_format — 控制台/结构化日志形态

@@ -492,29 +492,48 @@ async def parse_personal_memory(
         List of {"content": str, "scope": "generic"|"context", "profile_kind": "static"|"dynamic",
         "context_hint": str|None}.
     """
-    llm_model = "gpt-oss:120b-cloud"
-    llm_base_url = "http://localhost:11434"
+    llm_model = "DeepSeek-V3"
+    llm_base_url = "http://localhost:4000/v1"
+    llm_api_key = ""
     if llm_config is not None:
         llm_model = llm_config.model
         llm_base_url = llm_config.base_url
+        llm_api_key = getattr(llm_config, "api_key", "") or ""
 
     system_prompt = load_prompt("parse_personal_memory", llm_config=llm_config)
     user_content = content[:max_input_chars]
 
     try:
+        headers = {"Content-Type": "application/json"}
+        if llm_api_key:
+            headers["Authorization"] = f"Bearer {llm_api_key}"
+
         async with httpx.AsyncClient(timeout=timeout) as client:
             messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ]
+            # Use OpenAI-compatible /chat/completions format (works with LiteLLM)
+            base = llm_base_url.rstrip("/")
+            # Auto-detect endpoint: if base already ends with /v1, use /chat/completions
+            # Otherwise append /v1/chat/completions
+            if base.endswith("/v1"):
+                endpoint = f"{base}/chat/completions"
+            elif "/api/chat" in base:
+                # Legacy Ollama path — keep for backward compat
+                endpoint = f"{base}"
+            else:
+                endpoint = f"{base}/v1/chat/completions"
+
             resp = await client.post(
-                f"{llm_base_url.rstrip('/')}/api/chat",
+                endpoint,
                 json={
                     "model": llm_model,
                     "messages": messages,
-                    "stream": False,
-                    "options": {"temperature": 0.2},
+                    "temperature": 0.2,
+                    "max_tokens": 1000,
                 },
+                headers=headers,
             )
             resp.raise_for_status()
             data = resp.json()
@@ -525,7 +544,11 @@ async def parse_personal_memory(
         logger.warning("Personal memory extraction error (no block): %s", e, exc_info=True)
         return []
 
-    llm_text = data.get("message", {}).get("content", "")
+    # Parse response — support both OpenAI and Ollama formats
+    if "choices" in data:
+        llm_text = data["choices"][0]["message"]["content"]
+    else:
+        llm_text = data.get("message", {}).get("content", "")
     if not llm_text or not llm_text.strip():
         return []
 
