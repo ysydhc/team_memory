@@ -140,8 +140,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     mount_all(v1_router)
     app.include_router(v1_router)
     await start_background_tasks(ctx)
+
+    # Start heartbeat
+    import sys as _sys
+    _scripts_dir = str(Path(__file__).resolve().parents[3] / "scripts")
+    if _scripts_dir not in _sys.path:
+        _sys.path.insert(0, _scripts_dir)
+    from monitoring.heartbeat import start_heartbeat
+    app.state.heartbeat = start_heartbeat()
+
     logger.info("TeamMemory web server started")
     yield
+    # Stop heartbeat
+    from monitoring.heartbeat import stop_heartbeat
+    stop_heartbeat(app.state.heartbeat)
     await stop_background_tasks(ctx)
     # Ensure DB connections are released even if stop_background_tasks changes
     from team_memory.storage.database import close_db
@@ -280,15 +292,16 @@ async def health_check():
         status = "healthy"
 
     status_code = 200 if status != "unhealthy" else 503
-    return JSONResponse(
-        status_code=status_code,
-        content={
-            "status": status,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "version": app.version,
-            "checks": checks,
-        },
-    )
+    heartbeat = getattr(app.state, "heartbeat", None)
+    content = {
+        "status": status,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "version": app.version,
+        "checks": checks,
+    }
+    if heartbeat:
+        content["heartbeat"] = heartbeat.to_dict()
+    return JSONResponse(status_code=status_code, content=content)
 
 
 @app.get("/ready")

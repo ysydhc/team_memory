@@ -130,6 +130,10 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         application.state.tm_mode = config.tm.mode
         application.state.config = config
 
+        # Start heartbeat
+        from monitoring.heartbeat import start_heartbeat
+        application.state.heartbeat = start_heartbeat()
+
         db_path = config.draft.db_path or ":memory:"
         if db_path != ":memory:":
             os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -256,12 +260,16 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
     # ------------------------------------------------------------------
 
     @app.get("/status")
-    async def get_status() -> dict[str, str]:
+    async def get_status() -> dict[str, Any]:
         """Return daemon status and TM mode."""
-        return {
+        heartbeat = getattr(app.state, "heartbeat", None)
+        result = {
             "status": "running",
             "tm_mode": getattr(app.state, "tm_mode", "unknown"),
         }
+        if heartbeat:
+            result["heartbeat"] = heartbeat.to_dict()
+        return result
 
     @app.get("/status/faithfulness")
     async def get_faithfulness_status(limit: int = 10) -> dict[str, Any]:

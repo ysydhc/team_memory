@@ -233,6 +233,17 @@ daemon-start:    ## Start TM Daemon (launchd)
 daemon-stop:     ## Stop TM Daemon (launchd)
 	launchctl unload ~/Library/LaunchAgents/com.teammemory.daemon.plist
 
+watchdog-start:  ## Start TM Watchdog (launchd)
+	launchctl load ~/Library/LaunchAgents/com.teammemory.watchdog.plist
+
+watchdog-stop:   ## Stop TM Watchdog (launchd)
+	launchctl unload ~/Library/LaunchAgents/com.teammemory.watchdog.plist
+
+watchdog-status: ## Check TM Watchdog status
+	@launchctl list | grep teammemory.watchdog || echo "Watchdog not running"
+	@echo "---"
+	@tail -5 /tmp/tm-watchdog.log 2>/dev/null || echo "No watchdog log"
+
 daemon-run:      ## Run TM Daemon in foreground (for testing)
 	PYTHONPATH=src:scripts $(PYTHON_BIN) -m daemon
 
