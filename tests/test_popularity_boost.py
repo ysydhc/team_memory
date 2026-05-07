@@ -236,33 +236,3 @@ class TestPopularityBoost:
 
 # --- Unit tests for _extract_mem_references ---
 
-class TestExtractMemReferences:
-    """Test the [mem:xxx] reference extraction utility."""
-
-    def test_single_reference(self):
-        from daemon.pipeline import _extract_mem_references
-        text = "Based on [mem:d4529bba-d4d8-4389-a018-7b5d69b4a123], we should..."
-        ids = _extract_mem_references(text)
-        assert ids == ["d4529bba-d4d8-4389-a018-7b5d69b4a123"]
-
-    def test_multiple_references(self):
-        from daemon.pipeline import _extract_mem_references
-        text = "See [mem:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee] and [mem:11111111-2222-3333-4444-555555555555]"
-        ids = _extract_mem_references(text)
-        assert len(ids) == 2
-
-    def test_duplicate_references_deduped(self):
-        from daemon.pipeline import _extract_mem_references
-        text = "[mem:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee] again [mem:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee]"
-        ids = _extract_mem_references(text)
-        assert len(ids) == 1
-
-    def test_no_references(self):
-        from daemon.pipeline import _extract_mem_references
-        ids = _extract_mem_references("No references here")
-        assert ids == []
-
-    def test_partial_uuid_not_matched(self):
-        from daemon.pipeline import _extract_mem_references
-        ids = _extract_mem_references("[mem:short-id]")
-        assert ids == []

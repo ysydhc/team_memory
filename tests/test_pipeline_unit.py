@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from daemon.pipeline import (
-    _extract_mem_references,
     _resolve_project,
     process_after_response,
     process_before_prompt,
@@ -25,37 +24,6 @@ from daemon.pipeline import (
 
 pytestmark = pytest.mark.unit
 
-
-class TestExtractMemReferences:
-    """Tests for _extract_mem_references / 提取 [mem:xxx] 引用测试"""
-
-    def test_single_reference(self):
-        """Single [mem:uuid] should be extracted / 单个引用应被提取"""
-        result = _extract_mem_references("Based on [mem:abc12345-6789-def0-1234-567890abcdef]...")
-        assert len(result) == 1
-        assert result[0] == "abc12345-6789-def0-1234-567890abcdef"
-
-    def test_multiple_references(self):
-        """Multiple references should all be extracted / 多个引用应全部提取"""
-        text = "Used [mem:aaa11111-2222-3333-4444-555566667777] and [mem:bbb99999-8888-7777-6666-555544443333]"
-        result = _extract_mem_references(text)
-        assert len(result) == 2
-
-    def test_duplicate_references_deduped(self):
-        """Duplicate references should be deduplicated / 重复引用应去重"""
-        text = "See [mem:abc12345-6789-def0-1234-567890abcdef] again [mem:abc12345-6789-def0-1234-567890abcdef]"
-        result = _extract_mem_references(text)
-        assert len(result) == 1
-
-    def test_no_references(self):
-        """No references should return empty list / 无引用应返回空列表"""
-        result = _extract_mem_references("Just a normal response")
-        assert result == []
-
-    def test_empty_text(self):
-        """Empty text should return empty list / 空文本应返回空列表"""
-        result = _extract_mem_references("")
-        assert result == []
 
 
 class TestResolveProject:

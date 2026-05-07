@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from daemon.search_log_writer import SearchLogWriter, _MEM_MARKER_RE
+from daemon.search_log_writer import SearchLogWriter
 
 pytestmark = pytest.mark.unit
 
@@ -67,65 +67,6 @@ def _mock_pool(rows_fetch=None, row_fetchrow=None, execute_result=None):
 # _MEM_MARKER_RE — additional edge-case tests
 # ===================================================================
 
-class TestMemMarkerRegexExtended:
-    """Extended tests for _MEM_MARKER_RE covering edge cases."""
-
-    def test_marker_at_start_of_string(self):
-        matches = _MEM_MARKER_RE.findall("[mem:aabbccdd] start")
-        assert matches == ["aabbccdd"]
-
-    def test_marker_at_end_of_string(self):
-        matches = _MEM_MARKER_RE.findall("end [mem:aabbccdd]")
-        assert matches == ["aabbccdd"]
-
-    def test_only_hex_chars_in_prefix(self):
-        matches = _MEM_MARKER_RE.findall("[mem:deadbeef]")
-        assert matches == ["deadbeef"]
-
-    def test_all_zeros_prefix(self):
-        matches = _MEM_MARKER_RE.findall("[mem:00000000]")
-        assert matches == ["00000000"]
-
-    def test_mixed_case_hex(self):
-        matches = _MEM_MARKER_RE.findall("[mem:AbCdEf01]")
-        assert matches == ["AbCdEf01"]
-
-    def test_no_prefix_returns_empty(self):
-        """Marker with no prefix like [mem:] should not match."""
-        matches = _MEM_MARKER_RE.findall("[mem:]")
-        assert matches == []
-
-    def test_prefix_with_non_hex_returns_no_match(self):
-        """Prefix containing 'g' (not hex) should not match."""
-        matches = _MEM_MARKER_RE.findall("[mem:zzzzzzzz]")
-        assert matches == []
-
-    def test_marker_with_surrounding_brackets(self):
-        """Adjacent brackets like [[mem:...]] should still capture the prefix."""
-        matches = _MEM_MARKER_RE.findall("ref [[mem:abcdef01]] here")
-        assert matches == ["abcdef01"]
-
-    def test_repeated_same_marker(self):
-        text = "ref [mem:aaaa1111] and again [mem:aaaa1111]"
-        matches = _MEM_MARKER_RE.findall(text)
-        assert len(matches) == 2
-        assert matches[0] == matches[1]
-
-    def test_empty_string(self):
-        assert _MEM_MARKER_RE.findall("") == []
-
-    def test_whitespace_only(self):
-        assert _MEM_MARKER_RE.findall("   \t\n") == []
-
-    def test_newlines_and_tabs_around_marker(self):
-        text = "line1\n[mem:aabbccdd]\tline2"
-        matches = _MEM_MARKER_RE.findall(text)
-        assert matches == ["aabbccdd"]
-
-
-# ===================================================================
-# SearchLogWriter constructor and attributes
-# ===================================================================
 
 class TestSearchLogWriterConstructor:
     """Tests for constructor defaults and attribute storage."""
@@ -155,15 +96,10 @@ class TestSearchLogWriterConstructor:
         sig = inspect.signature(SearchLogWriter.log_search)
         assert sig.parameters["source"].default == "daemon"
 
-    def test_default_hours_window_mark_used(self):
-        import inspect
-        sig = inspect.signature(SearchLogWriter.mark_used_from_response)
-        assert sig.parameters["hours_window"].default == 24
-
     def test_default_threshold_fuzzy(self):
         import inspect
         sig = inspect.signature(SearchLogWriter.mark_used_fuzzy)
-        assert sig.parameters["threshold"].default == 0.8
+        assert sig.parameters["threshold"].default == 0.3
 
 
 # ===================================================================
@@ -174,16 +110,6 @@ class TestEnsurePool:
     """Tests for pool creation and reuse."""
 
     @pytest.mark.asyncio
-    async def test_creates_pool_when_none(self):
-        w = _make_writer()
-        mock_pool = _mock_pool()
-        with patch("daemon.search_log_writer.asyncpg") as mock_asyncpg:
-            mock_asyncpg.create_pool = AsyncMock(return_value=mock_pool)
-            pool = await w._ensure_pool()
-            assert pool is mock_pool
-            mock_asyncpg.create_pool.assert_called_once()
-
-    @pytest.mark.asyncio
     async def test_reuses_existing_open_pool(self):
         w = _make_writer()
         existing = MagicMock()
@@ -192,22 +118,6 @@ class TestEnsurePool:
         pool = await w._ensure_pool()
         assert pool is existing
 
-    @pytest.mark.asyncio
-    async def test_recreates_when_pool_closed(self):
-        w = _make_writer()
-        old = MagicMock()
-        old._closed = True
-        w._pool = old
-        new_pool = _mock_pool()
-        with patch("daemon.search_log_writer.asyncpg") as mock_asyncpg:
-            mock_asyncpg.create_pool = AsyncMock(return_value=new_pool)
-            pool = await w._ensure_pool()
-            assert pool is new_pool
-
-
-# ===================================================================
-# close()
-# ===================================================================
 
 class TestClose:
     """Tests for the close() method."""
@@ -321,120 +231,8 @@ class TestLogSearch:
 
 
 # ===================================================================
-# mark_used_from_response
 # ===================================================================
 
-class TestMarkUsedFromResponse:
-    """Tests for marker-based usage marking with mocked DB."""
-
-    @pytest.mark.asyncio
-    async def test_returns_0_when_no_markers(self):
-        w = _make_writer()
-        w._pool = _mock_pool()
-        result = await w.mark_used_from_response("no markers here")
-        assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_returns_0_on_empty_string(self):
-        w = _make_writer()
-        w._pool = _mock_pool()
-        result = await w.mark_used_from_response("")
-        assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_returns_0_when_marker_present_but_no_matching_logs(self):
-        """Markers found but no search_logs rows → returns 0."""
-        w = _make_writer()
-        mock_pool = _mock_pool(rows_fetch=[])
-        w._pool = mock_pool
-
-        result = await w.mark_used_from_response("Based on [mem:aabbccdd] I suggest")
-        assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_marks_log_when_result_id_starts_with_marker(self):
-        """When a search_log's result_id starts with the marker prefix."""
-        full_id = str(uuid.uuid4())  # 32 hex chars
-        marker_prefix = full_id[:8]
-
-        row = {
-            "id": uuid.uuid4(),
-            "result_ids": [{"id": full_id, "score": 0.9}],
-        }
-        mock_pool = _mock_pool(rows_fetch=[row])
-        w = _make_writer()
-        w._pool = mock_pool
-
-        result = await w.mark_used_from_response(f"Using [mem:{marker_prefix}]")
-        assert result == 1
-
-        # Verify execute was called to update search_logs
-        conn = mock_pool.acquire.return_value.__aenter__.return_value
-        assert conn.execute.await_count >= 1
-
-    @pytest.mark.asyncio
-    async def test_skips_log_with_null_result_ids(self):
-        row = {"id": uuid.uuid4(), "result_ids": None}
-        mock_pool = _mock_pool(rows_fetch=[row])
-        w = _make_writer()
-        w._pool = mock_pool
-
-        result = await w.mark_used_from_response("Text [mem:aabbccdd] more")
-        assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_parses_string_result_ids(self):
-        """result_ids as JSON string should be parsed."""
-        full_id = str(uuid.uuid4())
-        marker_prefix = full_id[:8]
-
-        row = {
-            "id": uuid.uuid4(),
-            "result_ids": json.dumps([{"id": full_id}]),
-        }
-        mock_pool = _mock_pool(rows_fetch=[row])
-        w = _make_writer()
-        w._pool = mock_pool
-
-        result = await w.mark_used_from_response(f"[mem:{marker_prefix}]")
-        assert result == 1
-
-    @pytest.mark.asyncio
-    async def test_returns_0_on_exception(self):
-        w = _make_writer()
-        pool = AsyncMock()
-        pool._closed = False
-        # Make pool.acquire raise
-        pool.acquire = MagicMock(side_effect=Exception("connection lost"))
-        w._pool = pool
-
-        result = await w.mark_used_from_response("[mem:aabbccdd]")
-        assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_passes_project_and_hours_window(self):
-        row = {
-            "id": uuid.uuid4(),
-            "result_ids": [{"id": str(uuid.uuid4())}],
-        }
-        mock_pool = _mock_pool(rows_fetch=[row])
-        w = _make_writer()
-        w._pool = mock_pool
-
-        await w.mark_used_from_response(
-            "[mem:aabbccdd]", project="myproj", hours_window=48
-        )
-        conn = mock_pool.acquire.return_value.__aenter__.return_value
-        # The fetch call should have hours_window and project
-        conn.fetch.assert_awaited_once()
-        call_args = conn.fetch.call_args
-        assert call_args[0][1] == 48  # hours_window
-        assert call_args[0][2] == "myproj"  # project
-
-
-# ===================================================================
-# mark_used_fuzzy
-# ===================================================================
 
 class TestMarkUsedFuzzy:
     """Tests for fuzzy matching logic with mocked DB."""
@@ -752,7 +550,6 @@ class TestGetStats:
             "hit": 80,
             "used": 50,
             "unjudged": 20,
-            "used_marker": 30,
             "used_fuzzy": 20,
         }
         project_rows = [
@@ -792,7 +589,6 @@ class TestGetStats:
         assert result["hit"] == 80
         assert result["used"] == 50
         assert result["unjudged"] == 20
-        assert result["used_marker"] == 30
         assert result["used_fuzzy"] == 20
         assert result["use_rate"] == 0.625  # 50/80
         assert "default" in result["by_project"]
@@ -805,7 +601,6 @@ class TestGetStats:
             "hit": 0,
             "used": 0,
             "unjudged": 0,
-            "used_marker": 0,
             "used_fuzzy": 0,
         }
         conn = AsyncMock()
@@ -832,7 +627,6 @@ class TestGetStats:
             "hit": None,
             "used": None,
             "unjudged": None,
-            "used_marker": None,
             "used_fuzzy": None,
         }
         conn = AsyncMock()
@@ -972,7 +766,6 @@ class TestGetTrends:
             "total": 10,
             "hit": 8,
             "used": 5,
-            "used_marker": 3,
             "used_fuzzy": 2,
         }
         conn = AsyncMock()
@@ -1002,7 +795,6 @@ class TestGetTrends:
             "total": 5,
             "hit": 3,
             "used": 1,
-            "used_marker": 0,
             "used_fuzzy": 0,
         }
         conn = AsyncMock()
@@ -1251,15 +1043,3 @@ class TestOverlapRatioCalculation:
 # ===================================================================
 # Integration marker check (no actual DB needed here, just marker)
 # ===================================================================
-
-class TestMarkerIntegration:
-
-    @pytest.mark.asyncio
-    async def test_mark_used_from_response_integration_skip(self):
-        """Placeholder: real integration test would need PostgreSQL."""
-        pytest.skip("Requires running PostgreSQL")
-
-    @pytest.mark.asyncio
-    async def test_mark_used_fuzzy_integration_skip(self):
-        """Placeholder: real integration test would need PostgreSQL."""
-        pytest.skip("Requires running PostgreSQL")

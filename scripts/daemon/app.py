@@ -333,16 +333,10 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             "[WRITE] after_response → project=%s action=%s convergence=%s",
             resolved_project, action, convergence,
         )
-        # Scan for [mem:xxx] markers to mark search logs as used
+        # Evaluate usage: fuzzy match + faithfulness buffer
         response_text = payload.response_text or payload.prompt
         if response_text:
             search_log: SearchLogWriter = app.state.search_log
-            marked = await search_log.mark_used_from_response(
-                response_text,
-                project=resolved_project or None,
-            )
-            if marked > 0:
-                logger.info("[EVAL]  marked %d search_log(s) as was_used (marker)", marked)
 
             # Look up cached search from before_prompt
             recent_searches: dict = app.state.recent_searches

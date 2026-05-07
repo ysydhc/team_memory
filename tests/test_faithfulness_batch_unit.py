@@ -146,7 +146,7 @@ class TestLoadExperienceContexts:
 
         mock_row = {
             "title": "Test Title",
-            "problem": "Test Problem",
+            "description": "Test Problem",
             "solution": "Test Solution",
         }
         mock_conn = AsyncMock()
@@ -167,7 +167,7 @@ class TestLoadExperienceContexts:
         valid_id = uuid.uuid4()
         result_ids = [{"id": str(valid_id)}]
 
-        mock_row = {"title": "Only Title", "problem": None, "solution": None}
+        mock_row = {"title": "Only Title", "description": None, "solution": None}
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(return_value=[mock_row])
         mock_conn.close = AsyncMock()
@@ -185,7 +185,7 @@ class TestLoadExperienceContexts:
         result_ids = [{"id": str(valid_id)}]
 
         long_problem = "x" * 300
-        mock_row = {"title": "T", "problem": long_problem, "solution": None}
+        mock_row = {"title": "T", "description": long_problem, "solution": None}
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(return_value=[mock_row])
         mock_conn.close = AsyncMock()
@@ -204,7 +204,7 @@ class TestLoadExperienceContexts:
         result_ids = [{"id": str(valid_id)}]
 
         long_solution = "y" * 400
-        mock_row = {"title": "T", "problem": None, "solution": long_solution}
+        mock_row = {"title": "T", "description": None, "solution": long_solution}
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(return_value=[mock_row])
         mock_conn.close = AsyncMock()
@@ -222,7 +222,7 @@ class TestLoadExperienceContexts:
         valid_id = uuid.uuid4()
         result_ids = [{"id": str(valid_id)}]
 
-        mock_row = {"title": "", "problem": "", "solution": ""}
+        mock_row = {"title": "", "description": "", "solution": ""}
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(return_value=[mock_row])
         mock_conn.close = AsyncMock()
@@ -272,8 +272,8 @@ class TestLoadExperienceContexts:
         ids = [{"id": valid_id1}, {"id": valid_id2}]
 
         rows = [
-            {"title": "T1", "problem": "P1", "solution": "S1"},
-            {"title": "T2", "problem": None, "solution": "S2"},
+            {"title": "T1", "description": "P1", "solution": "S1"},
+            {"title": "T2", "description": None, "solution": "S2"},
         ]
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(return_value=rows)

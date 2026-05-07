@@ -6,57 +6,15 @@ Unit tests cover:
 - Fuzzy matching logic / 模糊匹配逻辑
 
 Integration tests (marked @pytest.mark.integration) cover:
-- log_search / mark_used_from_response / get_stats with real DB
 """
 from __future__ import annotations
 
 import pytest
 
-from daemon.search_log_writer import SearchLogWriter, _MEM_MARKER_RE
+from daemon.search_log_writer import SearchLogWriter
 
 pytestmark = pytest.mark.unit
 
-
-class TestMemMarkerRegex:
-    """Tests for _MEM_MARKER_RE pattern / _MEM_MARKER_RE 正则模式测试"""
-
-    def test_standard_marker(self):
-        """Standard [mem:abc12345] should match / 标准 [mem:abc12345] 应匹配"""
-        matches = _MEM_MARKER_RE.findall("Based on [mem:abc12345] I suggest...")
-        assert matches == ["abc12345"]
-
-    def test_uppercase_marker(self):
-        """Uppercase [mem:ABC12345] should match (case-insensitive) / 大写也应匹配"""
-        matches = _MEM_MARKER_RE.findall("See [mem:ABC12345] for details")
-        assert matches == ["ABC12345"]
-
-    def test_multiple_markers(self):
-        """Multiple markers should all be found / 多个标记应全部找到"""
-        text = "Used [mem:aaa11111] and [mem:bbb22222]"
-        matches = _MEM_MARKER_RE.findall(text)
-        assert len(matches) == 2
-        assert "aaa11111" in matches
-        assert "bbb22222" in matches
-
-    def test_no_marker(self):
-        """No marker should return empty list / 无标记应返回空列表"""
-        matches = _MEM_MARKER_RE.findall("Just a normal response")
-        assert matches == []
-
-    def test_partial_marker_not_matched(self):
-        """Partial marker [mem:abc] (too short) should NOT match / 过短标记不应匹配"""
-        matches = _MEM_MARKER_RE.findall("See [mem:abc] for info")
-        assert matches == []
-
-    def test_long_prefix_not_matched(self):
-        """9-char prefix should NOT match / 9 字符前缀不应匹配"""
-        matches = _MEM_MARKER_RE.findall("See [mem:abc123456] for info")
-        assert matches == []
-
-    def test_marker_in_code_block(self):
-        """Marker inside code block should match / 代码块中的标记应匹配"""
-        matches = _MEM_MARKER_RE.findall("```python\n# [mem:abc12345]\n```")
-        assert matches == ["abc12345"]
 
 
 class TestSearchLogWriterInit:

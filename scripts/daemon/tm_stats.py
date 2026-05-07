@@ -84,6 +84,24 @@ async def _faithfulness_breakdown(dsn: str, days: int, threshold: float = 0.7, a
         await conn.close()
 
 
+async def _faithfulness_avg(dsn: str, days: int) -> float:
+    """Average faithfulness score for evaluated entries."""
+    import asyncpg
+    conn = await asyncpg.connect(dsn)
+    try:
+        avg = await conn.fetchval(
+            """
+            SELECT avg(faithfulness_score) FROM response_buffer
+            WHERE evaluated = TRUE
+              AND created_at > NOW() - make_interval(days => $1)
+            """,
+            days,
+        )
+        return float(avg) if avg else 0.0
+    finally:
+        await conn.close()
+
+
 async def _get_low_faithfulness_entries(dsn: str, days: int, limit: int = 5) -> list[dict]:
     """Get entries with low faithfulness scores."""
     import asyncpg
@@ -136,7 +154,6 @@ async def run_stats(days: int, granularity: str) -> None:
         total = stats["total_searches"]
         hit = stats["hit"]
         used = stats["used"]
-        used_marker = stats.get("used_marker", 0)
         used_fuzzy = stats.get("used_fuzzy", 0)
         unjudged = stats["unjudged"]
         use_rate = stats["use_rate"]
@@ -147,12 +164,37 @@ async def run_stats(days: int, granularity: str) -> None:
         funnel_text.append(f"  ({hit/total*100:.0f}%)\n" if total else " (0%)\n")
         funnel_text.append(f"  Used by agent:  {used}", style="cyan")
         funnel_text.append(f"  ({use_rate*100:.1f}% use rate)\n")
-        funnel_text.append(f"    ├─ marker: {used_marker}\n", style="dim")
         funnel_text.append(f"    └─ fuzzy:  {used_fuzzy}\n", style="dim")
         funnel_text.append(f"  Unjudged:  {unjudged}", style="yellow")
         funnel_text.append(f"  ({unjudged/hit*100:.0f}% of hits)\n" if hit else " (0%)\n")
 
         console.print(Panel(funnel_text, title=f"TM Search Funnel ({days}d)", border_style="blue"))
+
+        # --- Faithfulness ---
+        try:
+            fb_total = await _faithfulness_breakdown(dsn, days, threshold=0.0, above=True)
+            fb_high = await _faithfulness_breakdown(dsn, days, threshold=0.7, above=True)
+            fb_low = await _faithfulness_breakdown(dsn, days, threshold=0.7, above=False)
+            fb_pending = fb_total - fb_high - fb_low if fb_total else 0
+
+            fb_text = Text()
+            fb_text.append(f"  Evaluated: {fb_high + fb_low}", style="bold")
+            fb_text.append(f"  | Pending: {fb_pending}\n", style="yellow")
+            fb_text.append(f"  High (≥0.7): {fb_high}", style="green")
+            fb_text.append(f"  | Low (<0.7): {fb_low}\n", style="red" if fb_low > 0 else "dim")
+            if fb_high + fb_low > 0:
+                avg_score = await _faithfulness_avg(dsn, days)
+                fb_text.append(f"  Avg score: {avg_score:.2f}\n", style="cyan")
+
+            low_entries = await _get_low_faithfulness_entries(dsn, days, limit=3)
+            if low_entries:
+                fb_text.append("  Low faithfulness:\n", style="dim")
+                for e in low_entries:
+                    fb_text.append(f"    • {e['score']:.2f} | {e['query'][:50]}\n", style="dim")
+
+            console.print(Panel(fb_text, title="Faithfulness (LLM Eval)", border_style="magenta"))
+        except Exception:
+            pass  # faithfulness not available
 
         # --- Trend ---
         if trends and "error" not in trends[0]:
