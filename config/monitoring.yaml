@@ -2,15 +2,15 @@
 # 管理员专属配置，控制 watchdog 和告警行为
 
 admin:
-  restart_allowed: true          # 允许 watchdog 自动重启服务
+  restart_allowed: true # 允许 watchdog 自动重启服务
 
   # 告警渠道（可配多个，全部发送）
   channels:
     # 飞书机器人
     - type: feishu
-      webhook: ""                # https://open.feishu.cn/open-apis/bot/v2/hook/xxx
-      secret: ""                 # 签名密钥（可选，飞书机器人设置中获取）
-
+      webhook: "https://open.feishu.cn/open-apis/bot/v2/hook/6302c564-9058-4e4e-8693-\
+        6e360ae7a32c" # https://open.feishu.cn/open-apis/bot/v2/hook/xxx
+      secret: "w7D3Y6mGzs3ReiUS0BXF0c" # 签名密钥（可选，飞书机器人设置中获取）
     # 企业微信机器人
     # - type: wecom
     #   webhook: ""              # https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
