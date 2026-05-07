@@ -59,6 +59,9 @@ class JanitorConfig:
     promotion_group_key_threshold: int = 5
     """Same group_key reaching this count triggers promotion."""
 
+    dedup_enabled: bool = True
+    """Whether automatic dedup of experiences and search_logs is enabled / 是否启用自动去重."""
+
     tier_gold: float = 120.0
     """Quality score threshold for Gold tier."""
 

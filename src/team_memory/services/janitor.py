@@ -555,6 +555,88 @@ class MemoryJanitor:
         except Exception:
             pass  # best effort
 
+    async def dedup_experiences(self, project: str | None = None) -> dict:
+        """Soft-delete duplicate experiences, keeping the latest version / 去重经验，保留最新版本.
+
+        For each group of experiences with the same title+project,
+        keep the one with the latest updated_at and soft-delete the rest.
+
+        Returns:
+            Dict with dedup statistics.
+        """
+        from sqlalchemy import text
+
+        async with self._session() as session:
+            # Find and soft-delete duplicates: keep latest (max updated_at), delete others
+            result = await session.execute(
+                text("""
+                    WITH duplicates AS (
+                        SELECT id, title, project,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY title, project
+                                   ORDER BY updated_at DESC NULLS LAST, created_at DESC
+                               ) as rn
+                        FROM experiences
+                        WHERE is_deleted = false
+                          AND (CAST(:project AS TEXT) IS NULL OR project = :project)
+                    )
+                    UPDATE experiences
+                    SET is_deleted = true, deleted_at = NOW()
+                    WHERE id IN (
+                        SELECT id FROM duplicates WHERE rn > 1
+                    )
+                """),
+                {"project": project},
+            )
+            deleted_count = result.rowcount
+
+            logger.info(
+                "Experience dedup completed: soft-deleted %d duplicates in project '%s'",
+                deleted_count, project or "all",
+            )
+
+            return {
+                "soft_deleted_count": deleted_count,
+                "project": project,
+            }
+
+    async def dedup_search_logs(self, project: str | None = None) -> dict:
+        """Delete duplicate search logs, keeping the earliest per hour / 去重搜索日志，保留每小时最早一条.
+
+        Returns:
+            Dict with dedup statistics.
+        """
+        from sqlalchemy import text
+
+        async with self._session() as session:
+            result = await session.execute(
+                text("""
+                    WITH ranked AS (
+                        SELECT id,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY query, project, date_trunc('hour', created_at)
+                                   ORDER BY created_at ASC
+                               ) as rn
+                        FROM search_logs
+                        WHERE (CAST(:project AS TEXT) IS NULL OR project = :project)
+                    )
+                    DELETE FROM search_logs
+                    WHERE id IN (SELECT id FROM ranked WHERE rn > 1)
+                """),
+                {"project": project},
+            )
+            deleted_count = result.rowcount
+
+            logger.info(
+                "Search log dedup completed: deleted %d duplicates in project '%s'",
+                deleted_count, project or "all",
+            )
+
+            return {
+                "deleted_count": deleted_count,
+                "project": project,
+            }
+
     async def run_all(self, project: str | None = None) -> dict:
         """Run all janitor operations in sequence.
 
@@ -598,6 +680,11 @@ class MemoryJanitor:
             # 6. Promote experiences (L2→L3)
             if promotion_enabled:
                 results["promotion"] = await self.run_promotion(project)
+
+            # 7. Dedup experiences and search logs / 去重
+            if self._get_config("dedup_enabled", True):
+                results["dedup_experiences"] = await self.dedup_experiences(project)
+                results["dedup_search_logs"] = await self.dedup_search_logs(project)
 
             logger.info(
                 "Full janitor run completed successfully for project '%s'", project or "all"
