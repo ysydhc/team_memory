@@ -372,7 +372,7 @@ async def parse_content_openai(
     Raises:
         LLMParseError: On connection, parsing, or validation errors.
     """
-    from team_memory.schemas import EXPERIENCE_TYPES, SEVERITY_LEVELS, CATEGORIES
+    from team_memory.schemas import CATEGORIES, EXPERIENCE_TYPES, SEVERITY_LEVELS
 
     system_prompt = _BUILTIN_PARSE_SINGLE.replace(
         "{{experience_types}}", ", ".join(EXPERIENCE_TYPES)

@@ -37,6 +37,7 @@ class OllamaEmbedding(EmbeddingProvider):
         """Encode texts via Ollama Embeddings API.
 
         Ollama's /api/embed endpoint supports batch input.
+        Retries up to 3 times on 429/5xx errors.
 
         Args:
             texts: List of texts to encode.
@@ -45,24 +46,33 @@ class OllamaEmbedding(EmbeddingProvider):
             List of embedding vectors.
 
         Raises:
-            httpx.HTTPStatusError: If the API request fails.
+            httpx.HTTPStatusError: If the API request fails after retries.
             ConnectionError: If Ollama is not running.
         """
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    f"{self._base_url}/api/embed",
-                    json={
-                        "model": self._model,
-                        "input": texts,
-                    },
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    response = await client.post(
+                        f"{self._base_url}/api/embed",
+                        json={
+                            "model": self._model,
+                            "input": texts,
+                        },
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                return data["embeddings"]
+            except httpx.HTTPStatusError as e:
+                last_error = e
+                if e.response.status_code in (429, 500, 502, 503, 504) and attempt < 2:
+                    import asyncio
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                raise
+            except httpx.ConnectError:
+                raise ConnectionError(
+                    f"Cannot connect to Ollama at {self._base_url}. "
+                    "Make sure Ollama is running: https://ollama.com"
                 )
-                response.raise_for_status()
-                data = response.json()
-        except httpx.ConnectError:
-            raise ConnectionError(
-                f"Cannot connect to Ollama at {self._base_url}. "
-                "Make sure Ollama is running: https://ollama.com"
-            )
-
-        return data["embeddings"]
+        raise last_error  # type: ignore[misc]

@@ -755,6 +755,7 @@ class SearchPipeline:
 
         # Fetch experience data from PG
         from sqlalchemy import text as sql_text
+
         from team_memory.storage.database import get_session
 
         items: list[SearchResultItem] = []

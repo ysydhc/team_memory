@@ -535,9 +535,10 @@ async def memory_submit_response(
         result_ids: Optional list of experience IDs from the search results
     """
     try:
-        import asyncpg
         import uuid as _uuid
         from datetime import datetime, timezone
+
+        import asyncpg
 
         dsn = os.environ.get(
             "TEAM_MEMORY_DB_URL",

@@ -136,11 +136,11 @@ class ArchiveService:
         embed_ms = int((time.monotonic() - start) * 1000)
 
         if embedding is None:
-            raise ArchiveUploadError(
-                "embedding_failed",
-                "Embedding generation failed. Archive save aborted.",
-                http_status=500,
+            logger.warning(
+                "Archive embedding failed; saving without embedding (project=%s, title=%s)",
+                project, title,
             )
+            # Graceful degradation: save archive without embedding instead of failing
 
         persist_start = time.monotonic()
         async with get_session(self._db_url) as session:
@@ -269,10 +269,9 @@ class ArchiveService:
         embed_ms = int((time.monotonic() - start) * 1000)
 
         if embedding is None:
-            raise ArchiveUploadError(
-                "embedding_failed",
-                "Embedding generation failed. Archive upsert aborted.",
-                http_status=500,
+            logger.warning(
+                "Archive embedding failed; saving without embedding (project=%s, title=%s)",
+                project, title,
             )
 
         persist_start = time.monotonic()
