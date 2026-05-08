@@ -274,14 +274,17 @@ class AutoDreamWorker:
 
     async def _query_candidates_db(self, last_dream: datetime | None) -> list[dict]:
         """Direct PG query for candidate experiences."""
+        from team_memory.config import load_settings as _load_tm_settings
         from team_memory.storage.database import get_session
         from team_memory.storage.models import Experience
 
         from sqlalchemy import select, and_
 
+        _settings = _load_tm_settings()
+        database_url = str(_settings.database.url)
         candidates: list[dict] = []
 
-        async for session in get_session():
+        async with get_session(database_url) as session:
             # Build query: recent + (Bronze OR low recall_count)
             conditions = [
                 Experience.is_deleted == False,  # noqa: E712
@@ -343,8 +346,6 @@ class AutoDreamWorker:
                         "recall_count": exp.recall_count,
                         "created_at": exp.created_at.isoformat() if exp.created_at else None,
                     })
-
-            break  # Only need one session
 
         return candidates
 
@@ -610,15 +611,18 @@ class AutoDreamWorker:
 
     async def _prune_db(self) -> int:
         """Direct PG query to find and soft-delete stale experiences."""
+        from team_memory.config import load_settings as _load_tm_settings
         from team_memory.storage.database import get_session
         from team_memory.storage.models import Experience
 
         from sqlalchemy import select, and_, update
 
+        _settings = _load_tm_settings()
+        database_url = str(_settings.database.url)
         cutoff = _utcnow() - timedelta(days=self._cfg.prune_max_age_days)
 
         pruned = 0
-        async for session in get_session():
+        async with get_session(database_url) as session:
             # Find stale experiences: Bronze + recall_count=0 + old
             stmt = select(Experience).where(
                 and_(
@@ -642,8 +646,6 @@ class AutoDreamWorker:
             if stale_experiences:
                 await session.commit()
 
-            break  # Only need one session
-
         if pruned > 0:
             logger.info("pruned %d stale experiences", pruned)
 
@@ -655,11 +657,16 @@ class AutoDreamWorker:
 
     async def _soft_delete(self, experience_id: str) -> None:
         """Soft-delete an experience (is_deleted=true, deleted_at=NOW())."""
+        from team_memory.config import load_settings as _load_tm_settings
         from team_memory.storage.database import get_session
         from team_memory.storage.models import Experience
 
-        async for session in get_session():
+        _settings = _load_tm_settings()
+        database_url = str(_settings.database.url)
+
+        async with get_session(database_url) as session:
             import uuid as _uuid
+            from sqlalchemy import select
             stmt = select(Experience).where(Experience.id == _uuid.UUID(experience_id))
             result = await session.execute(stmt)
             exp = result.scalar_one_or_none()
@@ -667,7 +674,6 @@ class AutoDreamWorker:
                 exp.is_deleted = True
                 exp.deleted_at = _utcnow()
                 await session.commit()
-            break
 
     async def _count_new_experiences(self, last_dream: datetime | None) -> int:
         """Count experiences created since last dream run."""
@@ -680,12 +686,16 @@ class AutoDreamWorker:
 
     async def _count_new_experiences_db(self, last_dream: datetime | None) -> int:
         """Direct PG count of new experiences."""
+        from team_memory.config import load_settings as _load_tm_settings
         from team_memory.storage.database import get_session
         from team_memory.storage.models import Experience
 
         from sqlalchemy import select, func, and_
 
-        async for session in get_session():
+        _settings = _load_tm_settings()
+        database_url = str(_settings.database.url)
+
+        async with get_session(database_url) as session:
             conditions = [
                 Experience.is_deleted == False,  # noqa: E712
             ]
@@ -695,6 +705,5 @@ class AutoDreamWorker:
             stmt = select(func.count(Experience.id)).where(and_(*conditions))
             result = await session.execute(stmt)
             count = result.scalar() or 0
-            break
 
         return count
