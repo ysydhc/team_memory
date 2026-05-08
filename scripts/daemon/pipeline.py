@@ -140,7 +140,37 @@ async def process_before_prompt(
             results.append(wr)
             seen_titles.add(wr.get("title", "").lower())
 
-    return {"results": results, "project": project or ""}
+    # Persona profile: classify intent and load personal memories
+    persona_context = ""
+    persona = "general"
+    try:
+        from daemon.intent_classifier import classify_persona
+        persona = classify_persona(prompt)
+        user_id = getattr(config.tm, "user", "admin") or "admin"
+
+        from team_memory.services.personal_memory import PersonalMemoryService
+        from team_memory.config import load_settings as _load_tm_settings
+        from team_memory.embedding.factory import create_embedding_provider
+
+        _settings = _load_tm_settings()
+        embedding = create_embedding_provider(_settings.embedding)
+        pms = PersonalMemoryService(embedding_provider=embedding, db_url=str(_settings.database.url))
+        profile = await pms.build_profile_for_user(user_id=user_id, persona=persona)
+
+        # Format persona context as compact string
+        all_memories = profile.get("static", []) + profile.get("dynamic", [])
+        if all_memories:
+            lines = [f"[PERSONA: {persona}]"]
+            for mem in all_memories:
+                lines.append(f"- {mem}")
+            persona_context = "\n".join(lines)
+            logger.info("[READ]  persona profile → persona=%s memories=%d", persona, len(all_memories))
+        else:
+            logger.debug("No persona memories for user=%s persona=%s", user_id, persona)
+    except Exception:
+        logger.debug("Persona profile loading failed (non-critical)", exc_info=True)
+
+    return {"results": results, "project": project or "", "persona": persona, "persona_context": persona_context}
 
 
 async def process_after_response(

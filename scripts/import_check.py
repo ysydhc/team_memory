@@ -29,6 +29,7 @@ MODULES = [
     "daemon.reloader",
     "daemon.conversation_buffer",
     "daemon.personal_memory_extractor",
+    "daemon.intent_classifier",
 ]
 
 failed = []

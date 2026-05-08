@@ -599,4 +599,41 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             return {"total": 0, "by_project": {}}
         return await llm_wiki.stats()
 
+    @app.get("/persona/profile")
+    async def persona_profile(persona: str = "general") -> dict[str, Any]:
+        """Return user's personal memory profile for a given persona.
+
+        Useful for debugging/inspection of persona-specific memories.
+        """
+        config_obj: DaemonConfig = app.state.config
+        user_id = getattr(config_obj.tm, "user", "admin") or "admin"
+
+        try:
+            from team_memory.services.personal_memory import PersonalMemoryService
+            from team_memory.config import load_settings as _load_tm_settings
+            from team_memory.embedding.factory import create_embedding_provider
+
+            _settings = _load_tm_settings()
+            embedding = create_embedding_provider(_settings.embedding)
+            pms = PersonalMemoryService(
+                embedding_provider=embedding,
+                db_url=str(_settings.database.url),
+            )
+            profile = await pms.build_profile_for_user(user_id=user_id, persona=persona)
+            return {
+                "user_id": user_id,
+                "persona": persona,
+                "static": profile.get("static", []),
+                "dynamic": profile.get("dynamic", []),
+            }
+        except Exception as e:
+            logger.warning("persona/profile failed: %s", e, exc_info=True)
+            return {
+                "user_id": user_id,
+                "persona": persona,
+                "static": [],
+                "dynamic": [],
+                "error": str(e),
+            }
+
     return app
