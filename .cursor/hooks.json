@@ -32,6 +32,17 @@
           }
         ]
       }
+    ],
+    "afterMCPExecution": [
+      {
+        "matcher": "MCP:team_memory",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/yeshouyou/Work/agent/team_doc/.venv/bin/python /Users/yeshouyou/Work/agent/team_doc/scripts/hooks/cursor_after_mcp.py"
+          }
+        ]
+      }
     ]
   }
 }
