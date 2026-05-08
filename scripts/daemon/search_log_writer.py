@@ -277,7 +277,8 @@ class SearchLogWriter:
                         COUNT(*) FILTER (WHERE result_ids IS NOT NULL AND result_ids::text NOT IN ('[]', 'null')) AS hit,
                         COUNT(*) FILTER (WHERE was_used = TRUE) AS used,
                         COUNT(*) FILTER (WHERE was_used IS NULL AND result_ids IS NOT NULL AND result_ids::text NOT IN ('[]', 'null')) AS unjudged,
-                        COUNT(*) FILTER (WHERE judgment_source = 'fuzzy') AS used_fuzzy
+                        COUNT(*) FILTER (WHERE judgment_source = 'fuzzy') AS used_fuzzy,
+                        COUNT(*) FILTER (WHERE judgment_source = 'faithfulness') AS used_faithfulness
                     FROM search_logs
                     WHERE created_at > NOW() - make_interval(days => $1)
                     """,
@@ -288,6 +289,7 @@ class SearchLogWriter:
                 used = row["used"] or 0
                 unjudged = row["unjudged"] or 0
                 used_fuzzy = row["used_fuzzy"] or 0
+                used_faithfulness = row["used_faithfulness"] or 0
                 use_rate = used / hit if hit > 0 else 0.0
 
                 # Per-project breakdown
@@ -326,6 +328,7 @@ class SearchLogWriter:
                     "hit": hit,
                     "used": used,
                     "used_fuzzy": used_fuzzy,
+                    "used_faithfulness": used_faithfulness,
                     "unjudged": unjudged,
                     "use_rate": round(use_rate, 3),
                     "by_project": by_project,
@@ -357,7 +360,8 @@ class SearchLogWriter:
                         COUNT(*) AS total,
                         COUNT(*) FILTER (WHERE result_ids IS NOT NULL AND result_ids::text NOT IN ('[]', 'null')) AS hit,
                         COUNT(*) FILTER (WHERE was_used = TRUE) AS used,
-                        COUNT(*) FILTER (WHERE judgment_source = 'fuzzy') AS used_fuzzy
+                        COUNT(*) FILTER (WHERE judgment_source = 'fuzzy') AS used_fuzzy,
+                        COUNT(*) FILTER (WHERE judgment_source = 'faithfulness') AS used_faithfulness
                     FROM search_logs
                     WHERE created_at > NOW() - make_interval(days => $2)
                     GROUP BY period
@@ -379,6 +383,7 @@ class SearchLogWriter:
                         "hit": hit,
                         "used": used,
                         "used_fuzzy": r["used_fuzzy"] or 0,
+                        "used_faithfulness": r["used_faithfulness"] or 0,
                         "use_rate": round(use_rate, 3),
                     })
                 return result

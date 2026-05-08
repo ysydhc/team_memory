@@ -155,6 +155,7 @@ async def run_stats(days: int, granularity: str) -> None:
         hit = stats["hit"]
         used = stats["used"]
         used_fuzzy = stats.get("used_fuzzy", 0)
+        used_faithfulness = stats.get("used_faithfulness", 0)
         unjudged = stats["unjudged"]
         use_rate = stats["use_rate"]
 
@@ -165,6 +166,7 @@ async def run_stats(days: int, granularity: str) -> None:
         funnel_text.append(f"  Used by agent:  {used}", style="cyan")
         funnel_text.append(f"  ({use_rate*100:.1f}% use rate)\n")
         funnel_text.append(f"    └─ fuzzy:  {used_fuzzy}\n", style="dim")
+        funnel_text.append(f"    └─ faithfulness:  {used_faithfulness}\n", style="dim")
         funnel_text.append(f"  Unjudged:  {unjudged}", style="yellow")
         funnel_text.append(f"  ({unjudged/hit*100:.0f}% of hits)\n" if hit else " (0%)\n")
 

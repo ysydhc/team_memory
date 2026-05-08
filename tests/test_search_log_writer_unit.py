@@ -551,6 +551,7 @@ class TestGetStats:
             "used": 50,
             "unjudged": 20,
             "used_fuzzy": 20,
+            "used_faithfulness": 30,
         }
         project_rows = [
             {"project": "default", "total": 60, "used": 30},
@@ -602,6 +603,7 @@ class TestGetStats:
             "used": 0,
             "unjudged": 0,
             "used_fuzzy": 0,
+            "used_faithfulness": 0,
         }
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(return_value=row)
@@ -628,6 +630,7 @@ class TestGetStats:
             "used": None,
             "unjudged": None,
             "used_fuzzy": None,
+            "used_faithfulness": None,
         }
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(return_value=row)
@@ -767,6 +770,7 @@ class TestGetTrends:
             "hit": 8,
             "used": 5,
             "used_fuzzy": 2,
+            "used_faithfulness": 3,
         }
         conn = AsyncMock()
         conn.fetch = AsyncMock(return_value=[row])
@@ -796,6 +800,7 @@ class TestGetTrends:
             "hit": 3,
             "used": 1,
             "used_fuzzy": 0,
+            "used_faithfulness": 0,
         }
         conn = AsyncMock()
         conn.fetch = AsyncMock(return_value=[row])
