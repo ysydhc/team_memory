@@ -19,7 +19,7 @@ class TestCursorAfterResponseThin:
     """Tests for the thin cursor_after_response hook."""
 
     def test_forwards_input_to_daemon(self) -> None:
-        from hooks.cursor_after_response import main
+        from team_memory.hooks.cursor_after_response import main
 
         mock_response = httpx.Response(
             200,
@@ -29,7 +29,7 @@ class TestCursorAfterResponseThin:
 
         input_data = {"conversation_id": "sess-1", "prompt": "hello", "workspace_roots": ["/tmp"]}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.cursor_after_response.httpx.post", return_value=mock_response) as mock_post:
+            with patch("team_memory.hooks.cursor_after_response.httpx.post", return_value=mock_response) as mock_post:
                 with patch("builtins.print") as mock_print:
                     main()
 
@@ -42,11 +42,11 @@ class TestCursorAfterResponseThin:
         )
 
     def test_daemon_not_running_returns_ok(self) -> None:
-        from hooks.cursor_after_response import main
+        from team_memory.hooks.cursor_after_response import main
 
         input_data = {"conversation_id": "sess-1", "prompt": "hello"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.cursor_after_response.httpx.post", side_effect=httpx.ConnectError("refused")):
+            with patch("team_memory.hooks.cursor_after_response.httpx.post", side_effect=httpx.ConnectError("refused")):
                 with patch("builtins.print") as mock_print:
                     main()
 
@@ -55,7 +55,7 @@ class TestCursorAfterResponseThin:
         )
 
     def test_invalid_stdin_returns_error(self) -> None:
-        from hooks.cursor_after_response import main
+        from team_memory.hooks.cursor_after_response import main
 
         with patch("sys.stdin", io.StringIO("not json!!!")):
             with patch("builtins.print") as mock_print:
@@ -66,11 +66,11 @@ class TestCursorAfterResponseThin:
         )
 
     def test_timeout_returns_error(self) -> None:
-        from hooks.cursor_after_response import main
+        from team_memory.hooks.cursor_after_response import main
 
         input_data = {"conversation_id": "sess-1", "prompt": "hello"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.cursor_after_response.httpx.post", side_effect=httpx.TimeoutException("timed out")):
+            with patch("team_memory.hooks.cursor_after_response.httpx.post", side_effect=httpx.TimeoutException("timed out")):
                 with patch("builtins.print") as mock_print:
                     main()
 
@@ -79,11 +79,11 @@ class TestCursorAfterResponseThin:
         )
 
     def test_generic_exception_returns_error(self) -> None:
-        from hooks.cursor_after_response import main
+        from team_memory.hooks.cursor_after_response import main
 
         input_data = {"conversation_id": "sess-1", "prompt": "hello"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.cursor_after_response.httpx.post", side_effect=RuntimeError("fail")):
+            with patch("team_memory.hooks.cursor_after_response.httpx.post", side_effect=RuntimeError("fail")):
                 with patch("builtins.print") as mock_print:
                     main()
 
@@ -92,6 +92,6 @@ class TestCursorAfterResponseThin:
         )
 
     def test_daemon_url_is_correct(self) -> None:
-        from hooks.cursor_after_response import DAEMON_URL
+        from team_memory.hooks.cursor_after_response import DAEMON_URL
 
         assert DAEMON_URL == "http://127.0.0.1:3901"

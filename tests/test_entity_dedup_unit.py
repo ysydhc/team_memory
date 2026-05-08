@@ -22,8 +22,8 @@ import pytest
 # ---------------------------------------------------------------------------
 # Import the module under test
 # ---------------------------------------------------------------------------
-from daemon import entity_dedup
-from daemon.entity_dedup import (
+
+from team_memory.daemon.entity_dedup import (
     main,
     run_dedup,
     _find_duplicates,
@@ -45,7 +45,7 @@ class TestEntityDedupImports:
         assert hasattr(ed, "run_dedup")
 
     def test_import_main(self):
-        from daemon.entity_dedup import main as m
+        from team_memory.daemon.entity_dedup import main as m
         assert callable(m)
 
     def test_import_find_duplicates(self):
@@ -65,7 +65,7 @@ class TestMainArgparse:
     def test_no_args_default_dry_run_false(self):
         """No --dry-run => dry_run=False."""
         with patch.object(sys, "argv", ["entity_dedup.py"]):
-            with patch("daemon.entity_dedup.asyncio.run") as mock_run:
+            with patch("team_memory.daemon.entity_dedup.asyncio.run") as mock_run:
                 main()
                 mock_run.assert_called_once()
                 coroutine = mock_run.call_args[0][0]
@@ -74,14 +74,14 @@ class TestMainArgparse:
     def test_dry_run_flag(self):
         """--dry-run => dry_run=True."""
         with patch.object(sys, "argv", ["entity_dedup.py", "--dry-run"]):
-            with patch("daemon.entity_dedup.asyncio.run") as mock_run:
+            with patch("team_memory.daemon.entity_dedup.asyncio.run") as mock_run:
                 main()
                 mock_run.assert_called_once()
 
     def test_main_calls_asyncio_run(self):
         """main() should always call asyncio.run."""
         with patch.object(sys, "argv", ["entity_dedup.py"]):
-            with patch("daemon.entity_dedup.asyncio.run", new_callable=MagicMock) as mock_run:
+            with patch("team_memory.daemon.entity_dedup.asyncio.run", new_callable=MagicMock) as mock_run:
                 main()
                 mock_run.assert_called_once()
 
@@ -260,7 +260,7 @@ class TestRunDedup:
     @pytest.mark.asyncio
     async def test_no_duplicates(self, capsys):
         """When no duplicates, prints message and returns early."""
-        with patch("daemon.entity_dedup._find_duplicates", new_callable=AsyncMock, return_value=[]):
+        with patch("team_memory.daemon.entity_dedup._find_duplicates", new_callable=AsyncMock, return_value=[]):
             with patch("team_memory.config.load_settings"):
                 await run_dedup(dry_run=False)
             output = capsys.readouterr().out
@@ -291,7 +291,7 @@ class TestRunDedup:
         mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_cm.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("daemon.entity_dedup._find_duplicates", new_callable=AsyncMock, return_value=groups):
+        with patch("team_memory.daemon.entity_dedup._find_duplicates", new_callable=AsyncMock, return_value=groups):
             with patch("team_memory.config.load_settings", return_value=mock_settings):
                 with patch("team_memory.storage.database.get_session", return_value=mock_cm):
                     await run_dedup(dry_run=True)
@@ -324,8 +324,8 @@ class TestRunDedup:
         mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_cm.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("daemon.entity_dedup._find_duplicates", new_callable=AsyncMock, return_value=groups):
-            with patch("daemon.entity_dedup._merge_group", new_callable=AsyncMock, return_value=2):
+        with patch("team_memory.daemon.entity_dedup._find_duplicates", new_callable=AsyncMock, return_value=groups):
+            with patch("team_memory.daemon.entity_dedup._merge_group", new_callable=AsyncMock, return_value=2):
                 with patch("team_memory.config.load_settings", return_value=mock_settings):
                     with patch("team_memory.storage.database.get_session", return_value=mock_cm):
                         await run_dedup(dry_run=False)
@@ -356,8 +356,8 @@ class TestRunDedup:
         mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_cm.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("daemon.entity_dedup._find_duplicates", new_callable=AsyncMock, return_value=groups):
-            with patch("daemon.entity_dedup._merge_group", new_callable=AsyncMock, return_value=0):
+        with patch("team_memory.daemon.entity_dedup._find_duplicates", new_callable=AsyncMock, return_value=groups):
+            with patch("team_memory.daemon.entity_dedup._merge_group", new_callable=AsyncMock, return_value=0):
                 with patch("team_memory.config.load_settings", return_value=mock_settings):
                     with patch("team_memory.storage.database.get_session", return_value=mock_cm):
                         await run_dedup(dry_run=False)
@@ -395,7 +395,7 @@ class TestRunDedup:
         mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_cm.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("daemon.entity_dedup._find_duplicates", new_callable=AsyncMock, return_value=groups):
+        with patch("team_memory.daemon.entity_dedup._find_duplicates", new_callable=AsyncMock, return_value=groups):
             with patch("team_memory.config.load_settings", return_value=mock_settings):
                 with patch("team_memory.storage.database.get_session", return_value=mock_cm):
                     await run_dedup(dry_run=True)

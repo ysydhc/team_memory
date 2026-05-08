@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from daemon.search_log_writer import SearchLogWriter
+from team_memory.daemon.search_log_writer import SearchLogWriter
 
 pytestmark = pytest.mark.unit
 

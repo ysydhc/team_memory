@@ -28,7 +28,7 @@ class TestCursorAfterResponse:
     """Tests for scripts/hooks/cursor_after_response.py."""
 
     def test_forwards_to_daemon(self) -> None:
-        from hooks.cursor_after_response import main
+        from team_memory.hooks.cursor_after_response import main
 
         mock_response = httpx.Response(
             200,
@@ -38,7 +38,7 @@ class TestCursorAfterResponse:
 
         input_data = {"conversation_id": "sess-1", "prompt": "hello"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.cursor_after_response.httpx.post", return_value=mock_response):
+            with patch("team_memory.hooks.cursor_after_response.httpx.post", return_value=mock_response):
                 with patch("builtins.print") as mock_print:
                     main()
 
@@ -47,11 +47,11 @@ class TestCursorAfterResponse:
         )
 
     def test_daemon_not_running(self) -> None:
-        from hooks.cursor_after_response import main
+        from team_memory.hooks.cursor_after_response import main
 
         input_data = {"conversation_id": "sess-1", "prompt": "hello"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.cursor_after_response.httpx.post", side_effect=httpx.ConnectError("Connection refused")):
+            with patch("team_memory.hooks.cursor_after_response.httpx.post", side_effect=httpx.ConnectError("Connection refused")):
                 with patch("builtins.print") as mock_print:
                     main()
 
@@ -60,7 +60,7 @@ class TestCursorAfterResponse:
         )
 
     def test_invalid_stdin(self) -> None:
-        from hooks.cursor_after_response import main
+        from team_memory.hooks.cursor_after_response import main
 
         with patch("sys.stdin", io.StringIO("not json!!!")):
             with patch("builtins.print") as mock_print:
@@ -71,11 +71,11 @@ class TestCursorAfterResponse:
         )
 
     def test_generic_exception(self) -> None:
-        from hooks.cursor_after_response import main
+        from team_memory.hooks.cursor_after_response import main
 
         input_data = {"conversation_id": "sess-1", "prompt": "hello"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.cursor_after_response.httpx.post", side_effect=RuntimeError("something broke")):
+            with patch("team_memory.hooks.cursor_after_response.httpx.post", side_effect=RuntimeError("something broke")):
                 with patch("builtins.print") as mock_print:
                     main()
 
@@ -84,11 +84,11 @@ class TestCursorAfterResponse:
         )
 
     def test_timeout_exception(self) -> None:
-        from hooks.cursor_after_response import main
+        from team_memory.hooks.cursor_after_response import main
 
         input_data = {"conversation_id": "sess-1", "prompt": "hello"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.cursor_after_response.httpx.post", side_effect=httpx.TimeoutException("timed out")):
+            with patch("team_memory.hooks.cursor_after_response.httpx.post", side_effect=httpx.TimeoutException("timed out")):
                 with patch("builtins.print") as mock_print:
                     main()
 
@@ -106,7 +106,7 @@ class TestCursorSessionStart:
     """Tests for scripts/hooks/cursor_session_start.py."""
 
     def test_forwards_to_daemon(self) -> None:
-        from hooks.cursor_session_start import main
+        from team_memory.hooks.cursor_session_start import main
 
         mock_response = httpx.Response(
             200,
@@ -116,7 +116,7 @@ class TestCursorSessionStart:
 
         input_data = {"workspace_roots": ["/tmp"], "conversation_id": "sess-1"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.cursor_session_start.httpx.post", return_value=mock_response):
+            with patch("team_memory.hooks.cursor_session_start.httpx.post", return_value=mock_response):
                 with patch("builtins.print") as mock_print:
                     main()
 
@@ -125,11 +125,11 @@ class TestCursorSessionStart:
         )
 
     def test_daemon_not_running(self) -> None:
-        from hooks.cursor_session_start import main
+        from team_memory.hooks.cursor_session_start import main
 
         input_data = {"workspace_roots": ["/tmp"]}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.cursor_session_start.httpx.post", side_effect=httpx.ConnectError("Connection refused")):
+            with patch("team_memory.hooks.cursor_session_start.httpx.post", side_effect=httpx.ConnectError("Connection refused")):
                 with patch("builtins.print") as mock_print:
                     main()
 
@@ -138,7 +138,7 @@ class TestCursorSessionStart:
         )
 
     def test_invalid_stdin(self) -> None:
-        from hooks.cursor_session_start import main
+        from team_memory.hooks.cursor_session_start import main
 
         with patch("sys.stdin", io.StringIO("invalid!")):
             with patch("builtins.print") as mock_print:
@@ -158,7 +158,7 @@ class TestCursorBeforePrompt:
     """Tests for scripts/hooks/cursor_before_prompt.py."""
 
     def test_forwards_to_daemon(self) -> None:
-        from hooks.cursor_before_prompt import main
+        from team_memory.hooks.cursor_before_prompt import main
 
         mock_response = httpx.Response(
             200,
@@ -168,7 +168,7 @@ class TestCursorBeforePrompt:
 
         input_data = {"prompt": "之前的问题", "workspace_roots": ["/tmp"]}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.cursor_before_prompt.httpx.post", return_value=mock_response):
+            with patch("team_memory.hooks.cursor_before_prompt.httpx.post", return_value=mock_response):
                 with patch("builtins.print") as mock_print:
                     main()
 
@@ -177,11 +177,11 @@ class TestCursorBeforePrompt:
         )
 
     def test_daemon_not_running(self) -> None:
-        from hooks.cursor_before_prompt import main
+        from team_memory.hooks.cursor_before_prompt import main
 
         input_data = {"prompt": "test", "workspace_roots": []}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.cursor_before_prompt.httpx.post", side_effect=httpx.ConnectError("Connection refused")):
+            with patch("team_memory.hooks.cursor_before_prompt.httpx.post", side_effect=httpx.ConnectError("Connection refused")):
                 with patch("builtins.print") as mock_print:
                     main()
 
@@ -190,7 +190,7 @@ class TestCursorBeforePrompt:
         )
 
     def test_invalid_stdin(self) -> None:
-        from hooks.cursor_before_prompt import main
+        from team_memory.hooks.cursor_before_prompt import main
 
         with patch("sys.stdin", io.StringIO("not-json")):
             with patch("builtins.print") as mock_print:
@@ -201,11 +201,11 @@ class TestCursorBeforePrompt:
         )
 
     def test_timeout_exception(self) -> None:
-        from hooks.cursor_before_prompt import main
+        from team_memory.hooks.cursor_before_prompt import main
 
         input_data = {"prompt": "test"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.cursor_before_prompt.httpx.post", side_effect=httpx.TimeoutException("timed out")):
+            with patch("team_memory.hooks.cursor_before_prompt.httpx.post", side_effect=httpx.TimeoutException("timed out")):
                 with patch("builtins.print") as mock_print:
                     main()
 
@@ -223,7 +223,7 @@ class TestClaudeSessionStart:
     """Tests for scripts/hooks/claude_session_start.py."""
 
     def test_forwards_to_daemon(self) -> None:
-        from hooks.claude_session_start import main
+        from team_memory.hooks.claude_session_start import main
 
         # Daemon returns additional_context with experiences/profile
         mock_response = httpx.Response(
@@ -242,7 +242,7 @@ class TestClaudeSessionStart:
 
         input_data = {"workspace": "/tmp/project", "session_id": "sess-1"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.claude_session_start.httpx.post", return_value=mock_response):
+            with patch("team_memory.hooks.claude_session_start.httpx.post", return_value=mock_response):
                 with patch("builtins.print") as mock_print:
                     main()
 
@@ -252,11 +252,11 @@ class TestClaudeSessionStart:
         assert "abcd1234" in printed["additionalContext"]
 
     def test_daemon_not_running(self) -> None:
-        from hooks.claude_session_start import main
+        from team_memory.hooks.claude_session_start import main
 
         input_data = {"workspace": "/tmp/project"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.claude_session_start.httpx.post", side_effect=httpx.ConnectError("Connection refused")):
+            with patch("team_memory.hooks.claude_session_start.httpx.post", side_effect=httpx.ConnectError("Connection refused")):
                 with patch("builtins.print") as mock_print:
                     main()
 
@@ -264,7 +264,7 @@ class TestClaudeSessionStart:
         mock_print.assert_called_once_with("{}")
 
     def test_invalid_stdin(self) -> None:
-        from hooks.claude_session_start import main
+        from team_memory.hooks.claude_session_start import main
 
         with patch("sys.stdin", io.StringIO("not-json")):
             with pytest.raises(SystemExit) as exc_info:
@@ -283,7 +283,7 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_turn_start_success(self) -> None:
-        from hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.hermes_pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 
@@ -301,7 +301,7 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_turn_start_daemon_not_running(self) -> None:
-        from hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.hermes_pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 
@@ -315,7 +315,7 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_turn_end_success(self) -> None:
-        from hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.hermes_pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 
@@ -333,7 +333,7 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_turn_end_daemon_not_running(self) -> None:
-        from hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.hermes_pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 
@@ -347,7 +347,7 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_session_end_success(self) -> None:
-        from hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.hermes_pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 
@@ -365,7 +365,7 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_session_end_daemon_not_running(self) -> None:
-        from hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.hermes_pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 
@@ -379,7 +379,7 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_session_end_generic_error(self) -> None:
-        from hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.hermes_pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 
@@ -393,7 +393,7 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_context_manager(self) -> None:
-        from hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.hermes_pipeline import HermesPipeline
 
         async with HermesPipeline() as pipeline:
             mock_response = httpx.Response(
@@ -407,7 +407,7 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_turn_start_generic_error(self) -> None:
-        from hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.hermes_pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 
@@ -421,7 +421,7 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_turn_end_generic_error(self) -> None:
-        from hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.hermes_pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 

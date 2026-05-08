@@ -6,9 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-from daemon.pipeline import process_after_response
+from team_memory.daemon.pipeline import process_after_response
 
 
 @pytest.fixture(autouse=True)

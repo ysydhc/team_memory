@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from daemon.watcher import _find_vault, _process_changes
+from team_memory.daemon.watcher import _find_vault, _process_changes
 
 pytestmark = pytest.mark.unit
 

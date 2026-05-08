@@ -8,9 +8,8 @@ from unittest.mock import patch
 import pytest
 
 # Ensure scripts/hooks/ is importable
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "hooks"))
 
-import common
+from team_memory.hooks import common
 
 
 # ---------------------------------------------------------------------------

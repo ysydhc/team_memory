@@ -102,7 +102,7 @@ class TestMcpCallbackEndpoint:
     def app_client(self):
         """Create a test client for the daemon app."""
         from httpx import AsyncClient, ASGITransport
-        from daemon.app import create_app
+        from team_memory.daemon.app import create_app
 
         app = create_app()
         app.state.recent_searches = {}
@@ -196,7 +196,7 @@ class TestResponseBufferHasSearchLog:
 
     @pytest.mark.asyncio
     async def test_has_search_log_returns_true_for_existing(self):
-        from daemon.response_buffer import ResponseBuffer
+        from team_memory.daemon.response_buffer import ResponseBuffer
 
         buf = ResponseBuffer(dsn="postgresql://test")
         log_id = str(uuid.uuid4())
@@ -214,7 +214,7 @@ class TestResponseBufferHasSearchLog:
 
     @pytest.mark.asyncio
     async def test_has_search_log_returns_false_for_missing(self):
-        from daemon.response_buffer import ResponseBuffer
+        from team_memory.daemon.response_buffer import ResponseBuffer
 
         buf = ResponseBuffer(dsn="postgresql://test")
         log_id = str(uuid.uuid4())
@@ -235,7 +235,7 @@ class TestResponseBufferHasSearchLog:
 
     @pytest.mark.asyncio
     async def test_has_search_log_returns_false_on_error(self):
-        from daemon.response_buffer import ResponseBuffer
+        from team_memory.daemon.response_buffer import ResponseBuffer
 
         buf = ResponseBuffer(dsn="postgresql://test")
 

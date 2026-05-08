@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from daemon.response_buffer import ResponseBuffer
+from team_memory.daemon.response_buffer import ResponseBuffer
 
 pytestmark = pytest.mark.unit
 

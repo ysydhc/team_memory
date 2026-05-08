@@ -16,7 +16,7 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 
-from daemon.draft_buffer import DraftBuffer, _CREATE_TABLE
+from team_memory.daemon.draft_buffer import DraftBuffer, _CREATE_TABLE
 
 # ---------------------------------------------------------------------------
 # Markers

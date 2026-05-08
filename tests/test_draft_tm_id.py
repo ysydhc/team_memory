@@ -12,11 +12,10 @@ import pytest
 
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-from hooks.draft_buffer import DraftBuffer
-from daemon.draft_refiner import DraftRefiner
-from daemon.tm_sink import TMSink
+from team_memory.daemon.draft_buffer import DraftBuffer
+from team_memory.daemon.draft_refiner import DraftRefiner
+from team_memory.daemon.tm_sink import TMSink
 
 
 # ---------------------------------------------------------------------------

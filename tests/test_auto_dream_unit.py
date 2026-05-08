@@ -14,8 +14,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from daemon.auto_dream import AutoDreamWorker, _read_last_dream, _write_last_dream
-from daemon.config import AutoDreamSettings, DaemonConfig
+from team_memory.daemon.auto_dream import AutoDreamWorker, _read_last_dream, _write_last_dream
+from team_memory.daemon.config import AutoDreamSettings, DaemonConfig
 
 
 # ---------------------------------------------------------------------------
@@ -83,21 +83,21 @@ class TestDreamPersistence:
 
     def test_read_nonexistent_file(self, tmp_path):
         """Reading a non-existent file returns None."""
-        with patch("daemon.auto_dream._LAST_DREAM_FILE", tmp_path / "nope.txt"):
+        with patch("team_memory.daemon.auto_dream._LAST_DREAM_FILE", tmp_path / "nope.txt"):
             assert _read_last_dream() is None
 
     def test_read_empty_file(self, tmp_path):
         """Reading an empty file returns None."""
         f = tmp_path / "last_dream.txt"
         f.write_text("")
-        with patch("daemon.auto_dream._LAST_DREAM_FILE", f):
+        with patch("team_memory.daemon.auto_dream._LAST_DREAM_FILE", f):
             assert _read_last_dream() is None
 
     def test_roundtrip(self, tmp_path):
         """Write then read returns the same timestamp."""
         ts = datetime(2025, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
         f = tmp_path / "last_dream.txt"
-        with patch("daemon.auto_dream._LAST_DREAM_FILE", f):
+        with patch("team_memory.daemon.auto_dream._LAST_DREAM_FILE", f):
             _write_last_dream(ts)
             result = _read_last_dream()
         assert result is not None
@@ -171,7 +171,7 @@ class TestTriggerConditions:
         f = tmp_path / "last_dream.txt"
         f.write_text(recent.isoformat())
 
-        with patch("daemon.auto_dream._LAST_DREAM_FILE", f):
+        with patch("team_memory.daemon.auto_dream._LAST_DREAM_FILE", f):
             await worker._tick()
 
         # Should not have called any sink methods
@@ -189,7 +189,7 @@ class TestTriggerConditions:
         f = tmp_path / "last_dream.txt"
         f.write_text(old.isoformat())
 
-        with patch("daemon.auto_dream._LAST_DREAM_FILE", f):
+        with patch("team_memory.daemon.auto_dream._LAST_DREAM_FILE", f):
             with patch.object(worker, "_count_new_experiences", return_value=2):
                 await worker._tick()
 
@@ -206,7 +206,7 @@ class TestTriggerConditions:
         f = tmp_path / "last_dream.txt"
         f.write_text(old.isoformat())
 
-        with patch("daemon.auto_dream._LAST_DREAM_FILE", f):
+        with patch("team_memory.daemon.auto_dream._LAST_DREAM_FILE", f):
             with patch.object(worker, "_count_new_experiences", return_value=10):
                 with patch.object(worker, "_dream", return_value={"candidates": 5, "clusters": 2, "merged": 3, "pruned": 1}) as mock_dream:
                     await worker._tick()
@@ -495,7 +495,7 @@ class TestAutoDreamConfig:
 
     def test_config_from_yaml_dict(self):
         """AutoDreamSettings can be loaded from YAML dict."""
-        from daemon.config import _dict_to_dataclass
+        from team_memory.daemon.config import _dict_to_dataclass
 
         data = {
             "enabled": False,

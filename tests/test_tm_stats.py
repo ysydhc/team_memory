@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from daemon.tm_stats import _bar, _resolve_dsn
+from team_memory.daemon.tm_stats import _bar, _resolve_dsn
 
 pytestmark = pytest.mark.unit
 

@@ -14,14 +14,14 @@ class TestDaemonSettings:
     """DaemonSettings 数据类。"""
 
     def test_defaults(self):
-        from daemon.config import DaemonSettings
+        from team_memory.daemon.config import DaemonSettings
 
         s = DaemonSettings()
         assert s.host == "127.0.0.1"
         assert s.port == 3901
 
     def test_custom_values(self):
-        from daemon.config import DaemonSettings
+        from team_memory.daemon.config import DaemonSettings
 
         s = DaemonSettings(host="0.0.0.0", port=8080)
         assert s.host == "0.0.0.0"
@@ -32,7 +32,7 @@ class TestTMSettings:
     """TMSettings 数据类。"""
 
     def test_defaults(self):
-        from daemon.config import TMSettings
+        from team_memory.daemon.config import TMSettings
 
         s = TMSettings()
         assert s.mode == "local"
@@ -40,7 +40,7 @@ class TestTMSettings:
         assert s.user == "admin"
 
     def test_custom_values(self):
-        from daemon.config import TMSettings
+        from team_memory.daemon.config import TMSettings
 
         s = TMSettings(mode="remote", base_url="http://tm:3900", user="test")
         assert s.mode == "remote"
@@ -52,7 +52,7 @@ class TestVaultConfig:
     """VaultConfig 数据类。"""
 
     def test_defaults(self):
-        from daemon.config import VaultConfig
+        from team_memory.daemon.config import VaultConfig
 
         v = VaultConfig()
         assert v.path == ""
@@ -60,7 +60,7 @@ class TestVaultConfig:
         assert v.exclude == []
 
     def test_custom_values(self):
-        from daemon.config import VaultConfig
+        from team_memory.daemon.config import VaultConfig
 
         v = VaultConfig(path="/vault", project="knowledge", exclude=[".obsidian"])
         assert v.path == "/vault"
@@ -72,13 +72,13 @@ class TestObsidianSettings:
     """ObsidianSettings 数据类。"""
 
     def test_defaults(self):
-        from daemon.config import ObsidianSettings
+        from team_memory.daemon.config import ObsidianSettings
 
         s = ObsidianSettings()
         assert s.vaults == []
 
     def test_custom_values(self):
-        from daemon.config import ObsidianSettings, VaultConfig
+        from team_memory.daemon.config import ObsidianSettings, VaultConfig
 
         vaults = [VaultConfig(path="/v1", project="p1")]
         s = ObsidianSettings(vaults=vaults)
@@ -90,14 +90,14 @@ class TestDraftSettings:
     """DraftSettings 数据类。"""
 
     def test_defaults(self):
-        from daemon.config import DraftSettings
+        from team_memory.daemon.config import DraftSettings
 
         s = DraftSettings()
         assert s.max_age_minutes == 30
         assert s.db_path == ""
 
     def test_custom_values(self):
-        from daemon.config import DraftSettings
+        from team_memory.daemon.config import DraftSettings
 
         s = DraftSettings(max_age_minutes=60, db_path="/tmp/drafts.db")
         assert s.max_age_minutes == 60
@@ -108,14 +108,14 @@ class TestRetrievalSettings:
     """RetrievalSettings 数据类。"""
 
     def test_defaults(self):
-        from daemon.config import RetrievalSettings
+        from team_memory.daemon.config import RetrievalSettings
 
         s = RetrievalSettings()
         assert s.session_start_top_k == 3
         assert s.keyword_triggers == []
 
     def test_custom_values(self):
-        from daemon.config import RetrievalSettings
+        from team_memory.daemon.config import RetrievalSettings
 
         s = RetrievalSettings(session_start_top_k=5, keyword_triggers=["之前", "经验"])
         assert s.session_start_top_k == 5
@@ -126,14 +126,14 @@ class TestProjectMapping:
     """ProjectMapping 数据类。"""
 
     def test_defaults(self):
-        from daemon.config import ProjectMapping
+        from team_memory.daemon.config import ProjectMapping
 
         p = ProjectMapping()
         assert p.name == ""
         assert p.path_patterns == []
 
     def test_custom_values(self):
-        from daemon.config import ProjectMapping
+        from team_memory.daemon.config import ProjectMapping
 
         p = ProjectMapping(name="team_doc", path_patterns=["team_doc", "td"])
         assert p.name == "team_doc"
@@ -144,7 +144,7 @@ class TestDaemonConfig:
     """DaemonConfig 聚合数据类。"""
 
     def test_defaults(self):
-        from daemon.config import DaemonConfig, DaemonSettings, TMSettings
+        from team_memory.daemon.config import DaemonConfig, DaemonSettings, TMSettings
 
         cfg = DaemonConfig()
         assert isinstance(cfg.daemon, DaemonSettings)
@@ -153,7 +153,7 @@ class TestDaemonConfig:
         assert cfg.tm.mode == "local"
 
     def test_all_subconfigs_present(self):
-        from daemon.config import (
+        from team_memory.daemon.config import (
             DaemonConfig,
             DaemonSettings,
             DraftSettings,
@@ -176,7 +176,7 @@ class TestLoadConfig:
     """load_config 函数测试。"""
 
     def test_load_from_yaml_file(self):
-        from daemon.config import DaemonConfig, load_config
+        from team_memory.daemon.config import DaemonConfig, load_config
 
         config_data = {
             "daemon": {"host": "0.0.0.0", "port": 8080},
@@ -218,7 +218,7 @@ class TestLoadConfig:
 
     def test_load_missing_file_returns_defaults(self):
         """配置文件不存在时返回默认值。"""
-        from daemon.config import DaemonConfig, load_config
+        from team_memory.daemon.config import DaemonConfig, load_config
 
         cfg = load_config("/nonexistent/config.yaml")
         assert isinstance(cfg, DaemonConfig)
@@ -228,7 +228,7 @@ class TestLoadConfig:
 
     def test_load_partial_config(self):
         """部分配置只覆盖指定字段，其余用默认值。"""
-        from daemon.config import load_config
+        from team_memory.daemon.config import load_config
 
         config_data = {
             "daemon": {"port": 9999},
@@ -254,14 +254,14 @@ class TestLoadConfig:
 
     def test_load_config_none_path_uses_default(self):
         """config_path=None 时使用默认路径（可能不存在），返回默认值。"""
-        from daemon.config import DaemonConfig, load_config
+        from team_memory.daemon.config import DaemonConfig, load_config
 
         cfg = load_config(None)
         assert isinstance(cfg, DaemonConfig)
 
     def test_load_empty_yaml(self):
         """空 YAML 文件返回全默认配置。"""
-        from daemon.config import load_config
+        from team_memory.daemon.config import load_config
 
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".yaml", delete=False

@@ -3,5 +3,5 @@
 # 此文件声明规范项目名和别名。
 
 [project]
-name = "team_doc"              # Canonical name / 规范名
-aliases = ["team_memory"]      # Historical names / 历史别名
+name = "team_memory"              # Canonical name / 规范名
+aliases = ["team_doc", "team-memory"]      # Historical names / 历史别名

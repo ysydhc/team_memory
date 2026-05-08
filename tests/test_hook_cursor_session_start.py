@@ -13,7 +13,7 @@ class TestCursorSessionStartThin:
     """Tests for the thin cursor_session_start hook."""
 
     def test_forwards_input_to_daemon(self) -> None:
-        from hooks.cursor_session_start import main
+        from team_memory.hooks.cursor_session_start import main
 
         mock_response = httpx.Response(
             200,
@@ -23,7 +23,7 @@ class TestCursorSessionStartThin:
 
         input_data = {"workspace_roots": ["/tmp"], "conversation_id": "sess-1"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.cursor_session_start.httpx.post", return_value=mock_response) as mock_post:
+            with patch("team_memory.hooks.cursor_session_start.httpx.post", return_value=mock_response) as mock_post:
                 with patch("builtins.print") as mock_print:
                     main()
 
@@ -33,11 +33,11 @@ class TestCursorSessionStartThin:
         )
 
     def test_daemon_not_running_returns_ok(self) -> None:
-        from hooks.cursor_session_start import main
+        from team_memory.hooks.cursor_session_start import main
 
         input_data = {"workspace_roots": ["/tmp"]}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.cursor_session_start.httpx.post", side_effect=httpx.ConnectError("refused")):
+            with patch("team_memory.hooks.cursor_session_start.httpx.post", side_effect=httpx.ConnectError("refused")):
                 with patch("builtins.print") as mock_print:
                     main()
 
@@ -46,7 +46,7 @@ class TestCursorSessionStartThin:
         )
 
     def test_invalid_stdin_returns_error(self) -> None:
-        from hooks.cursor_session_start import main
+        from team_memory.hooks.cursor_session_start import main
 
         with patch("sys.stdin", io.StringIO("invalid!")):
             with patch("builtins.print") as mock_print:
@@ -57,11 +57,11 @@ class TestCursorSessionStartThin:
         )
 
     def test_timeout_returns_error(self) -> None:
-        from hooks.cursor_session_start import main
+        from team_memory.hooks.cursor_session_start import main
 
         input_data = {"workspace_roots": ["/tmp"]}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("hooks.cursor_session_start.httpx.post", side_effect=httpx.TimeoutException("timed out")):
+            with patch("team_memory.hooks.cursor_session_start.httpx.post", side_effect=httpx.TimeoutException("timed out")):
                 with patch("builtins.print") as mock_print:
                     main()
 

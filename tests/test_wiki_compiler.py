@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 
 import pytest
-from daemon.wiki_compiler import WikiCompiler
+from team_memory.daemon.wiki_compiler import WikiCompiler
 
 # ---------------------------------------------------------------------------
 # Fixtures

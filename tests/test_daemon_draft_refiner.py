@@ -19,8 +19,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from daemon.draft_refiner import DraftRefiner, _FACT_KEYWORDS, _MAX_FACTS
-from daemon.draft_buffer import DraftBuffer
+from team_memory.daemon.draft_refiner import DraftRefiner, _FACT_KEYWORDS, _MAX_FACTS
+from team_memory.daemon.draft_buffer import DraftBuffer
 
 
 # ---------------------------------------------------------------------------

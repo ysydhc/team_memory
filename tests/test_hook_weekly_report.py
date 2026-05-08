@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from scripts.hooks.weekly_report import WeeklyReport
+from team_memory.hooks.weekly_report import WeeklyReport
 
 
 class TestFormatReport:

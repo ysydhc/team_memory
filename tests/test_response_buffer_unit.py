@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from daemon.response_buffer import ResponseBuffer
+from team_memory.daemon.response_buffer import ResponseBuffer
 
 pytestmark = pytest.mark.unit
 
@@ -124,7 +124,7 @@ class TestEnsurePool:
     async def test_creates_pool_when_none(self):
         buf = _make_buffer()
         mock_pool = _mock_pool()
-        with patch("daemon.response_buffer.asyncpg") as mock_asyncpg:
+        with patch("team_memory.daemon.response_buffer.asyncpg") as mock_asyncpg:
             mock_asyncpg.create_pool = AsyncMock(return_value=mock_pool)
             pool = await buf._ensure_pool()
             assert pool is mock_pool
@@ -146,7 +146,7 @@ class TestEnsurePool:
         old._closed = True
         buf._pool = old
         new_pool = _mock_pool()
-        with patch("daemon.response_buffer.asyncpg") as mock_asyncpg:
+        with patch("team_memory.daemon.response_buffer.asyncpg") as mock_asyncpg:
             mock_asyncpg.create_pool = AsyncMock(return_value=new_pool)
             pool = await buf._ensure_pool()
             assert pool is new_pool

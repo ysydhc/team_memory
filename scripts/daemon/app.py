@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
-from hooks.convergence_detector import ConvergenceDetector
+from daemon.convergence_detector import ConvergenceDetector
 from daemon.conversation_buffer import ConversationBuffer
 from pydantic import BaseModel, Field
 

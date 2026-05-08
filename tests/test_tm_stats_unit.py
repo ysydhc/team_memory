@@ -28,7 +28,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # Import the module under test
 # ---------------------------------------------------------------------------
-from daemon.tm_stats import (
+from team_memory.daemon.tm_stats import (
     _bar,
     _resolve_dsn,
     _render_plain,
@@ -215,8 +215,8 @@ class TestRenderPlain:
             "total": 10, "evaluated": 5, "pending": 5, "avg_faithfulness": 0.8,
         })
         mock_buf.close = AsyncMock()
-        with patch("daemon.response_buffer.ResponseBuffer", return_value=mock_buf):
-            with patch("daemon.tm_stats._resolve_dsn", return_value="postgresql://test"):
+        with patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=mock_buf):
+            with patch("team_memory.daemon.tm_stats._resolve_dsn", return_value="postgresql://test"):
                 yield
 
     def test_prints_header(self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use):
@@ -314,35 +314,35 @@ class TestMain:
 
     def test_default_args(self):
         """Default args should call run_stats with 7 days, day granularity."""
-        with patch("daemon.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
+        with patch("team_memory.daemon.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
             with patch("sys.argv", ["tm_stats.py"]):
                 main()
         mock_run.assert_awaited_once_with(7, "day")
 
     def test_custom_days(self):
         """--days 30 should pass 30."""
-        with patch("daemon.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
+        with patch("team_memory.daemon.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
             with patch("sys.argv", ["tm_stats.py", "--days", "30"]):
                 main()
         mock_run.assert_awaited_once_with(30, "day")
 
     def test_custom_granularity_hour(self):
         """--granularity hour should pass 'hour'."""
-        with patch("daemon.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
+        with patch("team_memory.daemon.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
             with patch("sys.argv", ["tm_stats.py", "--granularity", "hour"]):
                 main()
         mock_run.assert_awaited_once_with(7, "hour")
 
     def test_custom_granularity_week(self):
         """--granularity week should pass 'week'."""
-        with patch("daemon.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
+        with patch("team_memory.daemon.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
             with patch("sys.argv", ["tm_stats.py", "--granularity", "week"]):
                 main()
         mock_run.assert_awaited_once_with(7, "week")
 
     def test_all_custom_args(self):
         """Combined --days and --granularity."""
-        with patch("daemon.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
+        with patch("team_memory.daemon.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
             with patch("sys.argv", ["tm_stats.py", "--days", "14", "--granularity", "week"]):
                 main()
         mock_run.assert_awaited_once_with(14, "week")
@@ -478,8 +478,8 @@ class TestRunStats:
         mock_writer.get_stats = AsyncMock(return_value={"error": "connection refused"})
         mock_writer.close = AsyncMock()
 
-        with patch("daemon.tm_stats._resolve_dsn", return_value="postgresql://test"):
-            with patch("daemon.search_log_writer.SearchLogWriter", return_value=mock_writer):
+        with patch("team_memory.daemon.tm_stats._resolve_dsn", return_value="postgresql://test"):
+            with patch("team_memory.daemon.search_log_writer.SearchLogWriter", return_value=mock_writer):
                 with patch("builtins.print") as mock_print:
                     await run_stats(7, "day")
         mock_print.assert_any_call("[ERROR] Failed to fetch stats: connection refused")
@@ -521,9 +521,9 @@ class TestRunStats:
         mock_conn.fetchval = AsyncMock(return_value=20)
         mock_conn.fetch = AsyncMock(return_value=[])
 
-        with patch("daemon.tm_stats._resolve_dsn", return_value="postgresql://test"):
-            with patch("daemon.search_log_writer.SearchLogWriter", return_value=mock_writer):
-                with patch("daemon.response_buffer.ResponseBuffer", return_value=mock_buffer):
+        with patch("team_memory.daemon.tm_stats._resolve_dsn", return_value="postgresql://test"):
+            with patch("team_memory.daemon.search_log_writer.SearchLogWriter", return_value=mock_writer):
+                with patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=mock_buffer):
                     with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
                         await run_stats(7, "day")
 
@@ -549,10 +549,10 @@ class TestRunStats:
         mock_writer.get_low_use_queries = AsyncMock(return_value=[])
         mock_writer.close = AsyncMock()
 
-        with patch("daemon.tm_stats._resolve_dsn", return_value="postgresql://test"):
-            with patch("daemon.search_log_writer.SearchLogWriter", return_value=mock_writer):
+        with patch("team_memory.daemon.tm_stats._resolve_dsn", return_value="postgresql://test"):
+            with patch("team_memory.daemon.search_log_writer.SearchLogWriter", return_value=mock_writer):
                 with patch.dict("sys.modules", {"rich": None, "rich.console": None}):
-                    with patch("daemon.tm_stats._render_plain") as mock_plain:
+                    with patch("team_memory.daemon.tm_stats._render_plain") as mock_plain:
                         await run_stats(7, "day")
         mock_plain.assert_called_once()
 
@@ -570,8 +570,8 @@ class TestRunStats:
         mock_writer.get_trends = AsyncMock(side_effect=RuntimeError("boom"))
         mock_writer.close = AsyncMock()
 
-        with patch("daemon.tm_stats._resolve_dsn", return_value="postgresql://test"):
-            with patch("daemon.search_log_writer.SearchLogWriter", return_value=mock_writer):
+        with patch("team_memory.daemon.tm_stats._resolve_dsn", return_value="postgresql://test"):
+            with patch("team_memory.daemon.search_log_writer.SearchLogWriter", return_value=mock_writer):
                 with pytest.raises(RuntimeError):
                     await run_stats(7, "day")
         mock_writer.close.assert_awaited_once()

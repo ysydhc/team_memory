@@ -11,9 +11,8 @@ from unittest.mock import patch
 import pytest
 
 # Ensure scripts/hooks/ is importable
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "hooks"))
 
-import draft_buffer  # noqa: E402
+from team_memory.daemon.draft_buffer import DraftBuffer  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +38,7 @@ def db_path():
 @pytest.fixture
 def buf(db_path):
     """Create a DraftBuffer backed by a temp DB."""
-    return draft_buffer.DraftBuffer(db_path)
+    return DraftBuffer(db_path)
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +50,7 @@ class TestInit:
 
     @pytest.mark.asyncio
     async def test_table_created(self, db_path):
-        buf = draft_buffer.DraftBuffer(db_path)
+        buf = DraftBuffer(db_path)
         async with buf:
             # Verify table exists by querying it
             pending = await buf.get_pending_drafts()
@@ -61,10 +60,10 @@ class TestInit:
     @pytest.mark.asyncio
     async def test_idempotent_init(self, db_path):
         """Creating DraftBuffer twice on same DB should not raise."""
-        buf1 = draft_buffer.DraftBuffer(db_path)
+        buf1 = DraftBuffer(db_path)
         async with buf1:
             pass
-        buf2 = draft_buffer.DraftBuffer(db_path)
+        buf2 = DraftBuffer(db_path)
         async with buf2:
             pending = await buf2.get_pending_drafts()
         assert len(pending) == 0

@@ -13,7 +13,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from daemon.pipeline import (
+from team_memory.daemon.pipeline import (
     _resolve_project,
     process_before_prompt,
     process_session_end,

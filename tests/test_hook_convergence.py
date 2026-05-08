@@ -7,9 +7,8 @@ from pathlib import Path
 import pytest
 
 # Ensure scripts/hooks/ is importable
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "hooks"))
 
-from convergence_detector import ConvergenceDetector
+from team_memory.daemon.convergence_detector import ConvergenceDetector
 
 
 # ---------------------------------------------------------------------------

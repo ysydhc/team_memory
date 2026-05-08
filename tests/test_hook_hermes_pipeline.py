@@ -10,7 +10,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from hooks.hermes_pipeline import HermesPipeline
+from team_memory.hooks.hermes_pipeline import HermesPipeline
 
 
 class TestHermesPipelineOnTurnStart:

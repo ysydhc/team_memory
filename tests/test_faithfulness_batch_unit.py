@@ -103,19 +103,19 @@ class TestLoadExperienceContexts:
 
     @pytest.mark.asyncio
     async def test_empty_result_ids_returns_empty_list(self):
-        from daemon.faithfulness_batch import load_experience_contexts
+        from team_memory.daemon.faithfulness_batch import load_experience_contexts
         result = await load_experience_contexts("postgresql://x", None)
         assert result == []
 
     @pytest.mark.asyncio
     async def test_empty_list_returns_empty_list(self):
-        from daemon.faithfulness_batch import load_experience_contexts
+        from team_memory.daemon.faithfulness_batch import load_experience_contexts
         result = await load_experience_contexts("postgresql://x", [])
         assert result == []
 
     @pytest.mark.asyncio
     async def test_all_invalid_uuids_returns_empty_list(self):
-        from daemon.faithfulness_batch import load_experience_contexts
+        from team_memory.daemon.faithfulness_batch import load_experience_contexts
         result_ids = [{"id": "not-a-uuid"}, {"id": ""}, {"id": None}]
         result = await load_experience_contexts("postgresql://x", result_ids)
         assert result == []
@@ -123,7 +123,7 @@ class TestLoadExperienceContexts:
     @pytest.mark.asyncio
     async def test_valid_uuid_connects_and_queries(self):
         """Valid UUID should trigger asyncpg.connect and fetch."""
-        from daemon.faithfulness_batch import load_experience_contexts
+        from team_memory.daemon.faithfulness_batch import load_experience_contexts
         valid_id = str(uuid.uuid4())
         result_ids = [{"id": valid_id}]
 
@@ -140,7 +140,7 @@ class TestLoadExperienceContexts:
     @pytest.mark.asyncio
     async def test_context_formatting_with_all_fields(self):
         """Test that title, problem, solution are formatted correctly."""
-        from daemon.faithfulness_batch import load_experience_contexts
+        from team_memory.daemon.faithfulness_batch import load_experience_contexts
         valid_id = uuid.uuid4()
         result_ids = [{"id": str(valid_id)}]
 
@@ -163,7 +163,7 @@ class TestLoadExperienceContexts:
     @pytest.mark.asyncio
     async def test_context_formatting_with_title_only(self):
         """Test context when only title is present."""
-        from daemon.faithfulness_batch import load_experience_contexts
+        from team_memory.daemon.faithfulness_batch import load_experience_contexts
         valid_id = uuid.uuid4()
         result_ids = [{"id": str(valid_id)}]
 
@@ -180,7 +180,7 @@ class TestLoadExperienceContexts:
     @pytest.mark.asyncio
     async def test_problem_truncated_to_200(self):
         """Test that problem text is truncated to 200 chars."""
-        from daemon.faithfulness_batch import load_experience_contexts
+        from team_memory.daemon.faithfulness_batch import load_experience_contexts
         valid_id = uuid.uuid4()
         result_ids = [{"id": str(valid_id)}]
 
@@ -199,7 +199,7 @@ class TestLoadExperienceContexts:
     @pytest.mark.asyncio
     async def test_solution_truncated_to_300(self):
         """Test that solution text is truncated to 300 chars."""
-        from daemon.faithfulness_batch import load_experience_contexts
+        from team_memory.daemon.faithfulness_batch import load_experience_contexts
         valid_id = uuid.uuid4()
         result_ids = [{"id": str(valid_id)}]
 
@@ -218,7 +218,7 @@ class TestLoadExperienceContexts:
     @pytest.mark.asyncio
     async def test_empty_title_problem_solution_excluded(self):
         """Empty strings should be excluded from context."""
-        from daemon.faithfulness_batch import load_experience_contexts
+        from team_memory.daemon.faithfulness_batch import load_experience_contexts
         valid_id = uuid.uuid4()
         result_ids = [{"id": str(valid_id)}]
 
@@ -235,7 +235,7 @@ class TestLoadExperienceContexts:
     @pytest.mark.asyncio
     async def test_multiple_valid_uuids(self):
         """Multiple valid UUIDs should all be collected."""
-        from daemon.faithfulness_batch import load_experience_contexts
+        from team_memory.daemon.faithfulness_batch import load_experience_contexts
         ids = [{"id": str(uuid.uuid4())}, {"id": str(uuid.uuid4())}]
 
         mock_conn = AsyncMock()
@@ -250,7 +250,7 @@ class TestLoadExperienceContexts:
     @pytest.mark.asyncio
     async def test_mixed_valid_invalid_uuids(self):
         """Mix of valid and invalid UUIDs should only use valid ones."""
-        from daemon.faithfulness_batch import load_experience_contexts
+        from team_memory.daemon.faithfulness_batch import load_experience_contexts
         valid_id = str(uuid.uuid4())
         ids = [{"id": "bad"}, {"id": valid_id}, {"id": ""}]
 
@@ -266,7 +266,7 @@ class TestLoadExperienceContexts:
     @pytest.mark.asyncio
     async def test_multiple_rows_formatted(self):
         """Multiple rows from DB should produce multiple context strings."""
-        from daemon.faithfulness_batch import load_experience_contexts
+        from team_memory.daemon.faithfulness_batch import load_experience_contexts
         valid_id1 = str(uuid.uuid4())
         valid_id2 = str(uuid.uuid4())
         ids = [{"id": valid_id1}, {"id": valid_id2}]
@@ -296,11 +296,11 @@ class TestRunBatch:
     @pytest.mark.asyncio
     async def test_skipped_below_threshold(self):
         """Should skip when pending < threshold and not force."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         buf = _mock_buffer(pending_count=3, batch_threshold=5)
 
-        with patch("daemon.response_buffer.ResponseBuffer", return_value=buf):
+        with patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf):
             result = await run_batch(dsn="postgresql://x", force=False)
             assert result["skipped"] is True
             assert result["pending"] == 3
@@ -309,11 +309,11 @@ class TestRunBatch:
     @pytest.mark.asyncio
     async def test_not_skipped_with_force(self):
         """Should not skip when force=True, even below threshold."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         buf = _mock_buffer(pending_count=3, batch_threshold=5, entries=[])
 
-        with patch("daemon.response_buffer.ResponseBuffer", return_value=buf):
+        with patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf):
             result = await run_batch(dsn="postgresql://x", force=True)
             assert result["skipped"] is False
             assert result["evaluated"] == 0
@@ -321,11 +321,11 @@ class TestRunBatch:
     @pytest.mark.asyncio
     async def test_empty_entries_returns_zero(self):
         """Should return evaluated=0 when fetch_pending returns empty."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         buf = _mock_buffer(pending_count=10, batch_threshold=5, entries=[])
 
-        with patch("daemon.response_buffer.ResponseBuffer", return_value=buf):
+        with patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf):
             result = await run_batch(dsn="postgresql://x", force=True)
             assert result["evaluated"] == 0
             assert result["skipped"] is False
@@ -333,7 +333,7 @@ class TestRunBatch:
     @pytest.mark.asyncio
     async def test_single_entry_evaluation(self):
         """Should evaluate a single entry and return summary."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         entry = _make_entry(query="query1", agent_response="response1")
         buf = _mock_buffer(pending_count=5, batch_threshold=5, entries=[entry])
@@ -341,9 +341,9 @@ class TestRunBatch:
         judge = _mock_judge(eval_result)
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
-            patch("daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx1"]),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
+            patch("team_memory.daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx1"]),
         ):
             result = await run_batch(dsn="postgresql://x", force=True)
             assert result["evaluated"] == 1
@@ -356,7 +356,7 @@ class TestRunBatch:
     @pytest.mark.asyncio
     async def test_dry_run_does_not_write_to_db(self):
         """In dry_run mode, mark_evaluated and sync_to_search_log should not be called."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         entry = _make_entry(query="q", agent_response="r")
         buf = _mock_buffer(pending_count=5, batch_threshold=5, entries=[entry])
@@ -364,9 +364,9 @@ class TestRunBatch:
         judge = _mock_judge(eval_result)
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
-            patch("daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
+            patch("team_memory.daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
         ):
             result = await run_batch(dsn="postgresql://x", dry_run=True, force=True)
             assert result["dry_run"] is True
@@ -376,7 +376,7 @@ class TestRunBatch:
     @pytest.mark.asyncio
     async def test_non_dry_run_writes_to_db(self):
         """In non-dry-run mode, mark_evaluated and sync_to_search_log should be called."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         entry = _make_entry(query="q", agent_response="r")
         buf = _mock_buffer(pending_count=5, batch_threshold=5, entries=[entry])
@@ -384,9 +384,9 @@ class TestRunBatch:
         judge = _mock_judge(eval_result)
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
-            patch("daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
+            patch("team_memory.daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
         ):
             result = await run_batch(dsn="postgresql://x", dry_run=False, force=True)
             assert result["dry_run"] is False
@@ -396,7 +396,7 @@ class TestRunBatch:
     @pytest.mark.asyncio
     async def test_multiple_entries_summary_stats(self):
         """Should correctly compute avg, high, low from multiple entries."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         entry1 = _make_entry(query="q1", agent_response="r1")
         entry2 = _make_entry(query="q2", agent_response="r2")
@@ -416,9 +416,9 @@ class TestRunBatch:
         judge.evaluate = AsyncMock(side_effect=lambda **kw: next(results_iter))
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
-            patch("daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
+            patch("team_memory.daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
         ):
             result = await run_batch(dsn="postgresql://x", force=True)
             assert result["evaluated"] == 3
@@ -431,7 +431,7 @@ class TestRunBatch:
     @pytest.mark.asyncio
     async def test_all_error_scores_avg_is_zero(self):
         """When all scores are negative (errors), avg should be 0."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         entry = _make_entry(query="q", agent_response="r")
         buf = _mock_buffer(pending_count=5, batch_threshold=5, entries=[entry])
@@ -439,9 +439,9 @@ class TestRunBatch:
         judge = _mock_judge(eval_result)
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
-            patch("daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
+            patch("team_memory.daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
         ):
             result = await run_batch(dsn="postgresql://x", force=True)
             assert result["avg_faithfulness"] == 0
@@ -450,7 +450,7 @@ class TestRunBatch:
     @pytest.mark.asyncio
     async def test_close_always_called(self):
         """buffer.close() should always be called even if evaluation fails."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         entry = _make_entry(query="q", agent_response="r")
         buf = _mock_buffer(pending_count=5, batch_threshold=5, entries=[entry])
@@ -458,9 +458,9 @@ class TestRunBatch:
         judge.evaluate = AsyncMock(side_effect=Exception("LLM error"))
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
-            patch("daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
+            patch("team_memory.daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
         ):
             with pytest.raises(Exception, match="LLM error"):
                 await run_batch(dsn="postgresql://x", force=True)
@@ -469,7 +469,7 @@ class TestRunBatch:
     @pytest.mark.asyncio
     async def test_reasoning_truncated_to_2000(self):
         """Reasoning should be truncated to 2000 chars."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         entry = _make_entry(query="q", agent_response="r")
         buf = _mock_buffer(pending_count=5, batch_threshold=5, entries=[entry])
@@ -480,9 +480,9 @@ class TestRunBatch:
         judge = _mock_judge(eval_result)
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
-            patch("daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
+            patch("team_memory.daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
         ):
             result = await run_batch(dsn="postgresql://x", force=True)
             assert result["evaluated"] == 1
@@ -493,7 +493,7 @@ class TestRunBatch:
     @pytest.mark.asyncio
     async def test_passed_model_and_base_url(self):
         """Model and base_url should be forwarded to FaithfulnessJudge."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         # Need at least one entry so judge is actually created
         entry = _make_entry(query="q", agent_response="r")
@@ -502,9 +502,9 @@ class TestRunBatch:
         judge = _mock_judge(eval_result)
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge) as mock_judge_cls,
-            patch("daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge) as mock_judge_cls,
+            patch("team_memory.daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
         ):
             await run_batch(
                 dsn="postgresql://x",
@@ -522,11 +522,11 @@ class TestRunBatch:
     @pytest.mark.asyncio
     async def test_pending_at_exactly_threshold_not_skipped(self):
         """When pending == threshold, should not skip (>= check)."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         buf = _mock_buffer(pending_count=5, batch_threshold=5, entries=[])
 
-        with patch("daemon.response_buffer.ResponseBuffer", return_value=buf):
+        with patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf):
             result = await run_batch(dsn="postgresql://x", force=False)
             assert result["skipped"] is False
             assert result["evaluated"] == 0
@@ -534,7 +534,7 @@ class TestRunBatch:
     @pytest.mark.asyncio
     async def test_query_and_response_forwarded_to_judge(self):
         """Judge.evaluate should receive the entry's query and response."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         entry = _make_entry(query="my question", agent_response="my answer")
         buf = _mock_buffer(pending_count=5, batch_threshold=5, entries=[entry])
@@ -542,9 +542,9 @@ class TestRunBatch:
         judge = _mock_judge(eval_result)
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
-            patch("daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
+            patch("team_memory.daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
         ):
             await run_batch(dsn="postgresql://x", force=True)
             judge.evaluate.assert_called_once_with(
@@ -564,7 +564,7 @@ class TestShowRecent:
     @pytest.mark.asyncio
     async def test_no_entries_prints_message(self, capsys):
         """Should print 'No entries' when rows is empty."""
-        from daemon.faithfulness_batch import show_recent
+        from team_memory.daemon.faithfulness_batch import show_recent
 
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(return_value=[])
@@ -578,7 +578,7 @@ class TestShowRecent:
     @pytest.mark.asyncio
     async def test_prints_entries(self, capsys):
         """Should print entry details when rows exist."""
-        from daemon.faithfulness_batch import show_recent
+        from team_memory.daemon.faithfulness_batch import show_recent
 
         mock_row = {
             "id": str(uuid.uuid4()),
@@ -604,7 +604,7 @@ class TestShowRecent:
     @pytest.mark.asyncio
     async def test_result_ids_from_string_parsed(self, capsys):
         """Should parse result_ids when provided as a JSON string."""
-        from daemon.faithfulness_batch import show_recent
+        from team_memory.daemon.faithfulness_batch import show_recent
 
         mock_row = {
             "id": str(uuid.uuid4()),
@@ -629,7 +629,7 @@ class TestShowRecent:
     @pytest.mark.asyncio
     async def test_result_ids_as_list(self, capsys):
         """Should handle result_ids already as a list (not string)."""
-        from daemon.faithfulness_batch import show_recent
+        from team_memory.daemon.faithfulness_batch import show_recent
 
         mock_row = {
             "id": str(uuid.uuid4()),
@@ -654,7 +654,7 @@ class TestShowRecent:
     @pytest.mark.asyncio
     async def test_score_display_green(self, capsys):
         """Score >= 0.7 should show green checkmark."""
-        from daemon.faithfulness_batch import show_recent
+        from team_memory.daemon.faithfulness_batch import show_recent
 
         mock_row = {
             "id": str(uuid.uuid4()),
@@ -680,7 +680,7 @@ class TestShowRecent:
     @pytest.mark.asyncio
     async def test_score_display_red(self, capsys):
         """Score 0 <= s < 0.7 should show red cross."""
-        from daemon.faithfulness_batch import show_recent
+        from team_memory.daemon.faithfulness_batch import show_recent
 
         mock_row = {
             "id": str(uuid.uuid4()),
@@ -706,7 +706,7 @@ class TestShowRecent:
     @pytest.mark.asyncio
     async def test_score_display_error(self, capsys):
         """Negative score should show 'error'."""
-        from daemon.faithfulness_batch import show_recent
+        from team_memory.daemon.faithfulness_batch import show_recent
 
         mock_row = {
             "id": str(uuid.uuid4()),
@@ -731,7 +731,7 @@ class TestShowRecent:
     @pytest.mark.asyncio
     async def test_score_display_pending(self, capsys):
         """Not evaluated should show 'pending'."""
-        from daemon.faithfulness_batch import show_recent
+        from team_memory.daemon.faithfulness_batch import show_recent
 
         mock_row = {
             "id": str(uuid.uuid4()),
@@ -756,7 +756,7 @@ class TestShowRecent:
     @pytest.mark.asyncio
     async def test_evaluated_no_score(self, capsys):
         """Evaluated but None score should show 'evaluated (no score)'."""
-        from daemon.faithfulness_batch import show_recent
+        from team_memory.daemon.faithfulness_batch import show_recent
 
         mock_row = {
             "id": str(uuid.uuid4()),
@@ -781,7 +781,7 @@ class TestShowRecent:
     @pytest.mark.asyncio
     async def test_none_result_ids(self, capsys):
         """None result_ids should show results=0."""
-        from daemon.faithfulness_batch import show_recent
+        from team_memory.daemon.faithfulness_batch import show_recent
 
         mock_row = {
             "id": str(uuid.uuid4()),
@@ -806,7 +806,7 @@ class TestShowRecent:
     @pytest.mark.asyncio
     async def test_truncated_query_and_response(self, capsys):
         """Query truncated to 80 chars, response to 150 chars."""
-        from daemon.faithfulness_batch import show_recent
+        from team_memory.daemon.faithfulness_batch import show_recent
 
         long_query = "Q" * 100
         long_response = "R" * 200
@@ -845,10 +845,10 @@ class TestMain:
 
     def test_show_mode_calls_show_recent(self):
         """--show should call show_recent and return."""
-        from daemon.faithfulness_batch import main
+        from team_memory.daemon.faithfulness_batch import main
         with (
             patch("sys.argv", ["faithfulness_batch.py", "--show", "5"]),
-            patch("daemon.faithfulness_batch.show_recent", new_callable=AsyncMock),
+            patch("team_memory.daemon.faithfulness_batch.show_recent", new_callable=AsyncMock),
             patch("asyncio.run") as mock_run,
         ):
             main()
@@ -856,12 +856,12 @@ class TestMain:
 
     def test_recent_mode_passes_force_true(self):
         """--recent should call run_batch with force=True."""
-        from daemon.faithfulness_batch import main
+        from team_memory.daemon.faithfulness_batch import main
         mock_result = {"skipped": False, "evaluated": 3}
 
         with (
             patch("sys.argv", ["faithfulness_batch.py", "--recent", "3"]),
-            patch("daemon.faithfulness_batch.run_batch", new_callable=AsyncMock, return_value=mock_result) as mock_run_batch,
+            patch("team_memory.daemon.faithfulness_batch.run_batch", new_callable=AsyncMock, return_value=mock_result) as mock_run_batch,
             patch("asyncio.run", return_value=mock_result),
         ):
             main()
@@ -873,7 +873,7 @@ class TestMain:
 
     def test_default_mode_passes_args(self):
         """Default mode should forward all CLI args to run_batch."""
-        from daemon.faithfulness_batch import main
+        from team_memory.daemon.faithfulness_batch import main
         mock_result = {"skipped": False, "evaluated": 5}
 
         with (
@@ -887,7 +887,7 @@ class TestMain:
                 "--force",
                 "--db-url", "postgresql://custom/db",
             ]),
-            patch("daemon.faithfulness_batch.run_batch", new_callable=AsyncMock, return_value=mock_result) as mock_run_batch,
+            patch("team_memory.daemon.faithfulness_batch.run_batch", new_callable=AsyncMock, return_value=mock_result) as mock_run_batch,
             patch("asyncio.run", return_value=mock_result),
         ):
             main()
@@ -895,12 +895,12 @@ class TestMain:
 
     def test_default_db_url(self):
         """Should use default db-url when not specified."""
-        from daemon.faithfulness_batch import main
+        from team_memory.daemon.faithfulness_batch import main
         mock_result = {"skipped": False}
 
         with (
             patch("sys.argv", ["faithfulness_batch.py"]),
-            patch("daemon.faithfulness_batch.run_batch", new_callable=AsyncMock, return_value=mock_result) as mock_run_batch,
+            patch("team_memory.daemon.faithfulness_batch.run_batch", new_callable=AsyncMock, return_value=mock_result) as mock_run_batch,
             patch("asyncio.run", return_value=mock_result),
         ):
             main()
@@ -911,7 +911,7 @@ class TestMain:
 
     def test_skipped_result_exits_zero(self):
         """When run_batch returns skipped=True, sys.exit(0) should be called."""
-        from daemon.faithfulness_batch import main
+        from team_memory.daemon.faithfulness_batch import main
         mock_result = {"skipped": True}
 
         with (
@@ -924,7 +924,7 @@ class TestMain:
 
     def test_non_skipped_result_no_exit(self):
         """When run_batch returns skipped=False, should not exit."""
-        from daemon.faithfulness_batch import main
+        from team_memory.daemon.faithfulness_batch import main
         mock_result = {"skipped": False, "evaluated": 5}
 
         with (
@@ -936,7 +936,7 @@ class TestMain:
 
     def test_argument_parsing_all_flags(self):
         """All CLI flags should be parsed correctly."""
-        from daemon.faithfulness_batch import main
+        from team_memory.daemon.faithfulness_batch import main
         mock_result = {"skipped": False}
 
         with (
@@ -952,7 +952,7 @@ class TestMain:
                 "--show", "0",
                 "--db-url", "postgresql://test/db",
             ]),
-            patch("daemon.faithfulness_batch.run_batch", new_callable=AsyncMock, return_value=mock_result) as mock_run_batch,
+            patch("team_memory.daemon.faithfulness_batch.run_batch", new_callable=AsyncMock, return_value=mock_result) as mock_run_batch,
             patch("asyncio.run", return_value=mock_result),
         ):
             main()
@@ -961,12 +961,12 @@ class TestMain:
 
     def test_recent_mode_always_forces(self):
         """--recent should always pass force=True regardless of --force flag."""
-        from daemon.faithfulness_batch import main
+        from team_memory.daemon.faithfulness_batch import main
         mock_result = {"skipped": False, "evaluated": 2}
 
         with (
             patch("sys.argv", ["faithfulness_batch.py", "--recent", "5"]),
-            patch("daemon.faithfulness_batch.run_batch", new_callable=AsyncMock, return_value=mock_result) as mock_run_batch,
+            patch("team_memory.daemon.faithfulness_batch.run_batch", new_callable=AsyncMock, return_value=mock_result) as mock_run_batch,
             patch("asyncio.run", return_value=mock_result),
         ):
             main()
@@ -975,12 +975,12 @@ class TestMain:
 
     def test_custom_db_url_passed(self):
         """Custom --db-url should be forwarded to run_batch."""
-        from daemon.faithfulness_batch import main
+        from team_memory.daemon.faithfulness_batch import main
         mock_result = {"skipped": False}
 
         with (
             patch("sys.argv", ["faithfulness_batch.py", "--db-url", "postgresql://custom:5432/mydb"]),
-            patch("daemon.faithfulness_batch.run_batch", new_callable=AsyncMock, return_value=mock_result) as mock_run_batch,
+            patch("team_memory.daemon.faithfulness_batch.run_batch", new_callable=AsyncMock, return_value=mock_result) as mock_run_batch,
             patch("asyncio.run", return_value=mock_result),
         ):
             main()
@@ -998,7 +998,7 @@ class TestRunBatchEndToEnd:
     @pytest.mark.asyncio
     async def test_full_batch_with_multiple_entries_and_results(self):
         """Full run with 2 entries, different scores, verifying summary."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         entry1 = _make_entry(query="what is python", agent_response="Python is a language")
         entry2 = _make_entry(query="how to cook", agent_response="Use a pan")
@@ -1012,9 +1012,9 @@ class TestRunBatchEndToEnd:
         judge.evaluate = AsyncMock(side_effect=lambda **kw: next(results_iter))
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
-            patch("daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
+            patch("team_memory.daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
         ):
             result = await run_batch(dsn="postgresql://x", force=True)
             assert result["evaluated"] == 2
@@ -1029,13 +1029,13 @@ class TestRunBatchEndToEnd:
     @pytest.mark.asyncio
     async def test_batch_respects_batch_size(self):
         """fetch_pending should be called with the correct limit."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         buf = _mock_buffer(pending_count=100, batch_threshold=5, entries=[])
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge"),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge"),
         ):
             await run_batch(dsn="postgresql://x", batch_size=50, force=True)
             buf.fetch_pending.assert_called_once_with(limit=50)
@@ -1043,7 +1043,7 @@ class TestRunBatchEndToEnd:
     @pytest.mark.asyncio
     async def test_all_high_faithfulness(self):
         """All entries >= 0.7 should be counted as high."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         entry1 = _make_entry(query="q1", agent_response="r1")
         entry2 = _make_entry(query="q2", agent_response="r2")
@@ -1057,9 +1057,9 @@ class TestRunBatchEndToEnd:
         judge.evaluate = AsyncMock(side_effect=lambda **kw: next(results_iter))
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
-            patch("daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
+            patch("team_memory.daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
         ):
             result = await run_batch(dsn="postgresql://x", force=True)
             assert result["high_faithfulness"] == 2
@@ -1068,7 +1068,7 @@ class TestRunBatchEndToEnd:
     @pytest.mark.asyncio
     async def test_all_low_faithfulness(self):
         """All entries 0 <= s < 0.7 should be counted as low."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         entry = _make_entry(query="q", agent_response="r")
         buf = _mock_buffer(pending_count=5, batch_threshold=5, entries=[entry])
@@ -1076,9 +1076,9 @@ class TestRunBatchEndToEnd:
         judge = _mock_judge(eval_result)
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
-            patch("daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
+            patch("team_memory.daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
         ):
             result = await run_batch(dsn="postgresql://x", force=True)
             assert result["high_faithfulness"] == 0
@@ -1087,7 +1087,7 @@ class TestRunBatchEndToEnd:
     @pytest.mark.asyncio
     async def test_multiple_errors(self):
         """Multiple error scores should all be counted."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         entry1 = _make_entry(query="q1", agent_response="r1")
         entry2 = _make_entry(query="q2", agent_response="r2")
@@ -1101,9 +1101,9 @@ class TestRunBatchEndToEnd:
         judge.evaluate = AsyncMock(side_effect=lambda **kw: next(results_iter))
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
-            patch("daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
+            patch("team_memory.daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
         ):
             result = await run_batch(dsn="postgresql://x", force=True)
             assert result["errors"] == 2
@@ -1112,13 +1112,13 @@ class TestRunBatchEndToEnd:
     @pytest.mark.asyncio
     async def test_buffer_close_on_success(self):
         """buffer.close() should be called on successful completion."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         buf = _mock_buffer(pending_count=5, batch_threshold=5, entries=[])
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge"),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge"),
         ):
             await run_batch(dsn="postgresql://x", force=True)
             buf.close.assert_called_once()
@@ -1126,7 +1126,7 @@ class TestRunBatchEndToEnd:
     @pytest.mark.asyncio
     async def test_default_params_used(self):
         """Default parameters should be used when not specified."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         # Need at least one entry so judge is created
         entry = _make_entry(query="q", agent_response="r")
@@ -1135,9 +1135,9 @@ class TestRunBatchEndToEnd:
         judge = _mock_judge(eval_result)
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf) as mock_buf_cls,
-            patch("daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge) as mock_judge_cls,
-            patch("daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf) as mock_buf_cls,
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge) as mock_judge_cls,
+            patch("team_memory.daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
         ):
             await run_batch(dsn="postgresql://x")
             # Default batch_size=20
@@ -1152,7 +1152,7 @@ class TestRunBatchEndToEnd:
     @pytest.mark.asyncio
     async def test_result_ids_forwarded_to_load_contexts(self):
         """Result IDs from entry should be forwarded to load_experience_contexts."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         rids = [{"id": "abc-123"}, {"id": "def-456"}]
         entry = _make_entry(query="q", agent_response="r", result_ids=rids)
@@ -1161,9 +1161,9 @@ class TestRunBatchEndToEnd:
         judge = _mock_judge(eval_result)
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
-            patch("daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]) as mock_load,
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
+            patch("team_memory.daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]) as mock_load,
         ):
             await run_batch(dsn="postgresql://x", force=True)
             mock_load.assert_called_once_with("postgresql://x", rids)
@@ -1171,7 +1171,7 @@ class TestRunBatchEndToEnd:
     @pytest.mark.asyncio
     async def test_report_header_printed(self, capsys):
         """The batch report header should be printed."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         entry = _make_entry(query="q", agent_response="r")
         buf = _mock_buffer(pending_count=5, batch_threshold=5, entries=[entry])
@@ -1179,9 +1179,9 @@ class TestRunBatchEndToEnd:
         judge = _mock_judge(eval_result)
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
-            patch("daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
+            patch("team_memory.daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
         ):
             await run_batch(dsn="postgresql://x", force=True)
             captured = capsys.readouterr()
@@ -1190,7 +1190,7 @@ class TestRunBatchEndToEnd:
     @pytest.mark.asyncio
     async def test_low_entries_printed(self, capsys):
         """Low faithfulness entries should be printed in the report."""
-        from daemon.faithfulness_batch import run_batch
+        from team_memory.daemon.faithfulness_batch import run_batch
 
         entry = _make_entry(query="low question", agent_response="low answer")
         buf = _mock_buffer(pending_count=5, batch_threshold=5, entries=[entry])
@@ -1198,9 +1198,9 @@ class TestRunBatchEndToEnd:
         judge = _mock_judge(eval_result)
 
         with (
-            patch("daemon.response_buffer.ResponseBuffer", return_value=buf),
-            patch("daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
-            patch("daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
+            patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=buf),
+            patch("team_memory.daemon.faithfulness_judge.FaithfulnessJudge", return_value=judge),
+            patch("team_memory.daemon.faithfulness_batch.load_experience_contexts", new_callable=AsyncMock, return_value=["ctx"]),
         ):
             result = await run_batch(dsn="postgresql://x", force=True)
             captured = capsys.readouterr()

@@ -5,9 +5,8 @@ import sys
 from pathlib import Path
 
 # Ensure scripts/hooks/ is importable
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "hooks"))
 
-from retrieval_trigger import KEYWORD_TRIGGERS, should_retrieve  # noqa: I001,E402
+from team_memory.hooks.retrieval_trigger import KEYWORD_TRIGGERS, should_retrieve
 
 
 # ---------------------------------------------------------------------------

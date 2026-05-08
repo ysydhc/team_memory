@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from daemon.markdown_indexer import (
+from team_memory.daemon.markdown_indexer import (
     MarkdownIndexer,
     _infer_tags,
     _match_pattern,

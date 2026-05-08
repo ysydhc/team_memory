@@ -68,6 +68,7 @@ Issues = "https://github.com/ysydhc/team_memory/issues"
 team-memory = "team_memory.server:main"
 team-memory-web = "team_memory.web.app:main"
 tm-cli = "team_memory.cli:main"
+tm-daemon = "team_memory.daemon.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/team_memory"]
@@ -75,7 +76,7 @@ packages = ["src/team_memory"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-pythonpath = ["src", "scripts"]
+pythonpath = ["src"]
 markers = [
     "unit: Unit tests — no external dependencies, mock DB/LLM (单元测试)",
     "integration: Integration tests — require PostgreSQL, Ollama, or web server (集成测试)",

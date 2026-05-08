@@ -11,7 +11,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # Import target
 # ---------------------------------------------------------------------------
-from scripts.hooks.markdown_indexer import MarkdownIndexer
+from team_memory.daemon.markdown_indexer import MarkdownIndexer
 
 
 # ---------------------------------------------------------------------------

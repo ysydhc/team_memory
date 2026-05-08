@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from scripts.hooks.git_watcher import GitWatcher
-from scripts.hooks.markdown_indexer import MarkdownIndexer
+from team_memory.hooks.git_watcher import GitWatcher
+from team_memory.daemon.markdown_indexer import MarkdownIndexer
 
 
 # ---------------------------------------------------------------------------

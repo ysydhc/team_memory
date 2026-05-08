@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import yaml
 
-from scripts.hooks.initial_index import _is_untracked, initial_index
-from scripts.hooks.markdown_indexer import MarkdownIndexer
+from team_memory.hooks.initial_index import _is_untracked, initial_index
+from team_memory.daemon.markdown_indexer import MarkdownIndexer
 
 
 # ---------------------------------------------------------------------------

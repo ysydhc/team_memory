@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from daemon.llm_wiki import LLMWiki
+from team_memory.daemon.llm_wiki import LLMWiki
 
 
 # ---------------------------------------------------------------------------

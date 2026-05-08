@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from daemon.convergence_detector import ConvergenceDetector
+from team_memory.daemon.convergence_detector import ConvergenceDetector
 
 pytestmark = pytest.mark.unit
 

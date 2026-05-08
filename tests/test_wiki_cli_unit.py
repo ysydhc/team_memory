@@ -23,8 +23,8 @@ import pytest
 # ---------------------------------------------------------------------------
 # Import the module under test
 # ---------------------------------------------------------------------------
-from daemon import wiki_cli
-from daemon.wiki_cli import (
+
+from team_memory.daemon.wiki_cli import (
     _default_wiki_root,
     cmd_compile,
     cmd_status,
@@ -78,14 +78,14 @@ class TestMainArgparse:
     def _run_main(self, argv: list[str]):
         """Helper: run main() with mocked sys.argv and mocked asyncio.run."""
         with patch.object(sys, "argv", ["wiki_cli.py"] + argv):
-            with patch("daemon.wiki_cli.asyncio.run") as mock_run:
+            with patch("team_memory.daemon.wiki_cli.asyncio.run") as mock_run:
                 main()
                 return mock_run
 
     def test_no_command_prints_help(self):
         """No subcommand should call parser.print_help."""
         with patch.object(sys, "argv", ["wiki_cli.py"]):
-            with patch("daemon.wiki_cli.argparse.ArgumentParser.print_help") as mock_help:
+            with patch("team_memory.daemon.wiki_cli.argparse.ArgumentParser.print_help") as mock_help:
                 main()
                 mock_help.assert_called_once()
 
@@ -131,7 +131,7 @@ class TestCmdCompile:
     async def test_no_experiences_prints_message(self, capsys):
         """When no published experiences, should print message and return."""
         with patch(
-            "daemon.wiki_cli._fetch_published_experiences",
+            "team_memory.daemon.wiki_cli._fetch_published_experiences",
             new_callable=AsyncMock,
             return_value=[],
         ):
@@ -154,12 +154,12 @@ class TestCmdCompile:
         mock_settings = SimpleNamespace(database=SimpleNamespace(url="postgresql://test"))
 
         with patch(
-            "daemon.wiki_cli._fetch_published_experiences",
+            "team_memory.daemon.wiki_cli._fetch_published_experiences",
             new_callable=AsyncMock,
             return_value=fake_experiences,
         ):
             with patch("team_memory.config.load_settings", return_value=mock_settings):
-                with patch("daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
+                with patch("team_memory.daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
                     await cmd_compile(full=False, wiki_root="/tmp/testwiki")
                     mock_compiler.compile_incremental.assert_called_once()
 
@@ -177,12 +177,12 @@ class TestCmdCompile:
         mock_settings = SimpleNamespace(database=SimpleNamespace(url="postgresql://test"))
 
         with patch(
-            "daemon.wiki_cli._fetch_published_experiences",
+            "team_memory.daemon.wiki_cli._fetch_published_experiences",
             new_callable=AsyncMock,
             return_value=fake_experiences,
         ):
             with patch("team_memory.config.load_settings", return_value=mock_settings):
-                with patch("daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
+                with patch("team_memory.daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
                     await cmd_compile(full=True, wiki_root="/tmp/testwiki")
                     mock_compiler.full_rebuild.assert_called_once()
 
@@ -200,12 +200,12 @@ class TestCmdCompile:
         mock_settings = SimpleNamespace(database=SimpleNamespace(url="postgresql://test"))
 
         with patch(
-            "daemon.wiki_cli._fetch_published_experiences",
+            "team_memory.daemon.wiki_cli._fetch_published_experiences",
             new_callable=AsyncMock,
             return_value=fake_experiences,
         ):
             with patch("team_memory.config.load_settings", return_value=mock_settings):
-                with patch("daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler) as mock_cls:
+                with patch("team_memory.daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler) as mock_cls:
                     await cmd_compile(full=False, wiki_root=None)
                     # WikiCompiler should have been called with default wiki_root
                     call_kwargs = mock_cls.call_args
@@ -229,11 +229,11 @@ class TestCmdStatus:
         mock_compiler.__aexit__ = AsyncMock(return_value=False)
 
         with patch(
-            "daemon.wiki_cli._fetch_published_experiences",
+            "team_memory.daemon.wiki_cli._fetch_published_experiences",
             new_callable=AsyncMock,
             return_value=[],
         ):
-            with patch("daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
+            with patch("team_memory.daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
                 await cmd_status(wiki_root="/tmp/testwiki")
                 output = capsys.readouterr().out
                 assert "Wiki Status" in output
@@ -249,11 +249,11 @@ class TestCmdStatus:
         mock_compiler.__aexit__ = AsyncMock(return_value=False)
 
         with patch(
-            "daemon.wiki_cli._fetch_published_experiences",
+            "team_memory.daemon.wiki_cli._fetch_published_experiences",
             new_callable=AsyncMock,
             return_value=[],
         ):
-            with patch("daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
+            with patch("team_memory.daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
                 await cmd_status(wiki_root="/tmp/testwiki")
                 output = capsys.readouterr().out
                 assert "By Project" in output
@@ -272,11 +272,11 @@ class TestCmdStatus:
         mock_compiler.__aexit__ = AsyncMock(return_value=False)
 
         with patch(
-            "daemon.wiki_cli._fetch_published_experiences",
+            "team_memory.daemon.wiki_cli._fetch_published_experiences",
             new_callable=AsyncMock,
             return_value=fake_exps,
         ):
-            with patch("daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
+            with patch("team_memory.daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
                 await cmd_status(wiki_root="/tmp/testwiki")
                 output = capsys.readouterr().out
                 assert "not yet compiled" in output
@@ -293,11 +293,11 @@ class TestCmdStatus:
         mock_compiler.__aexit__ = AsyncMock(return_value=False)
 
         with patch(
-            "daemon.wiki_cli._fetch_published_experiences",
+            "team_memory.daemon.wiki_cli._fetch_published_experiences",
             new_callable=AsyncMock,
             return_value=fake_exps,
         ):
-            with patch("daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
+            with patch("team_memory.daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
                 await cmd_status(wiki_root="/tmp/testwiki")
                 output = capsys.readouterr().out
                 assert "All" in output and "compiled" in output
@@ -320,11 +320,11 @@ class TestCmdUncompiled:
         mock_compiler.__aexit__ = AsyncMock(return_value=False)
 
         with patch(
-            "daemon.wiki_cli._fetch_published_experiences",
+            "team_memory.daemon.wiki_cli._fetch_published_experiences",
             new_callable=AsyncMock,
             return_value=fake_exps,
         ):
-            with patch("daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
+            with patch("team_memory.daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
                 await cmd_uncompiled(wiki_root="/tmp/testwiki")
                 output = capsys.readouterr().out
                 assert "All experiences are compiled" in output
@@ -339,11 +339,11 @@ class TestCmdUncompiled:
         mock_compiler.__aexit__ = AsyncMock(return_value=False)
 
         with patch(
-            "daemon.wiki_cli._fetch_published_experiences",
+            "team_memory.daemon.wiki_cli._fetch_published_experiences",
             new_callable=AsyncMock,
             return_value=fake_exps,
         ):
-            with patch("daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
+            with patch("team_memory.daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
                 await cmd_uncompiled(wiki_root="/tmp/testwiki")
                 output = capsys.readouterr().out
                 assert "2 uncompiled" in output
@@ -360,11 +360,11 @@ class TestCmdUncompiled:
         mock_compiler.__aexit__ = AsyncMock(return_value=False)
 
         with patch(
-            "daemon.wiki_cli._fetch_published_experiences",
+            "team_memory.daemon.wiki_cli._fetch_published_experiences",
             new_callable=AsyncMock,
             return_value=fake_exps,
         ):
-            with patch("daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
+            with patch("team_memory.daemon.wiki_compiler.WikiCompiler", return_value=mock_compiler):
                 await cmd_uncompiled(wiki_root="/tmp/testwiki")
                 mock_compiler.get_uncompiled.assert_called_once_with(["aaa", "bbb"])
 

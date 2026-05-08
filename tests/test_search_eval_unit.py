@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from daemon.search_eval import DEFAULT_TEST_QUERIES, print_report
+from team_memory.daemon.search_eval import DEFAULT_TEST_QUERIES, print_report
 
 pytestmark = pytest.mark.unit
 
@@ -444,7 +444,7 @@ class TestRunEvaluationFlow:
     @pytest.mark.asyncio
     async def test_returns_metrics_dict(self):
         """run_evaluation should return a dict with expected keys."""
-        from daemon.search_eval import run_evaluation
+        from team_memory.daemon.search_eval import run_evaluation
 
         mock_recall_result = {
             "results": [
@@ -475,7 +475,7 @@ class TestRunEvaluationFlow:
     @pytest.mark.asyncio
     async def test_handles_recall_exception(self):
         """When op_recall raises, the query should be recorded as error."""
-        from daemon.search_eval import run_evaluation
+        from team_memory.daemon.search_eval import run_evaluation
 
         mock_recall = AsyncMock(side_effect=Exception("search failed"))
 
@@ -491,7 +491,7 @@ class TestRunEvaluationFlow:
     @pytest.mark.asyncio
     async def test_successful_queries_count(self):
         """successful_queries should count only ok results."""
-        from daemon.search_eval import run_evaluation
+        from team_memory.daemon.search_eval import run_evaluation
 
         # Return results that match keywords for all queries
         mock_recall_result = {
@@ -522,7 +522,7 @@ class TestRunEvaluationFlow:
     @pytest.mark.asyncio
     async def test_empty_results_gives_zero_precision(self):
         """Empty recall results should give 0 precision and 0 recall."""
-        from daemon.search_eval import run_evaluation
+        from team_memory.daemon.search_eval import run_evaluation
 
         mock_recall_result = {"results": []}
         mock_recall = AsyncMock(return_value=mock_recall_result)
@@ -539,7 +539,7 @@ class TestRunEvaluationFlow:
     @pytest.mark.asyncio
     async def test_top_result_field(self):
         """top_result should be set from the first result's title."""
-        from daemon.search_eval import run_evaluation
+        from team_memory.daemon.search_eval import run_evaluation
 
         mock_recall_result = {
             "results": [
@@ -564,7 +564,7 @@ class TestRunEvaluationFlow:
     @pytest.mark.asyncio
     async def test_top_result_empty_when_no_results(self):
         """top_result should be empty string when there are no results."""
-        from daemon.search_eval import run_evaluation
+        from team_memory.daemon.search_eval import run_evaluation
 
         mock_recall_result = {"results": []}
         mock_recall = AsyncMock(return_value=mock_recall_result)

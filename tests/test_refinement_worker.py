@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from daemon.refinement_worker import RefinementWorker
+from team_memory.daemon.refinement_worker import RefinementWorker
 
 pytestmark = pytest.mark.unit
 

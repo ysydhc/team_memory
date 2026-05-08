@@ -11,12 +11,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 # Ensure scripts/hooks/ is importable
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "hooks"))
 
-import session_timeout  # noqa: E402
-from draft_buffer import DraftBuffer  # noqa: E402
-from draft_refiner import DraftRefiner  # noqa: E402
-from session_timeout import SessionTimeoutManager  # noqa: E402
+from team_memory.hooks.session_timeout import SessionTimeoutManager  # noqa: E402
+from team_memory.daemon.draft_buffer import DraftBuffer  # noqa: E402
+from team_memory.daemon.draft_refiner import DraftRefiner  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

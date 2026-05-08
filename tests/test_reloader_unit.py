@@ -22,8 +22,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # Import the module under test
 # ---------------------------------------------------------------------------
-from daemon import reloader
-from daemon.reloader import (
+from team_memory.daemon.reloader import (
     DAEMON_DIR,
     DAEMON_PLIST,
     DEFAULT_INTERVAL,
@@ -123,8 +122,8 @@ class TestGetMtimeMap:
 class TestRestartDaemon:
     """restart_daemon() calls launchctl unload/load."""
 
-    @patch("daemon.reloader.time.sleep")
-    @patch("daemon.reloader.subprocess.run")
+    @patch("team_memory.daemon.reloader.time.sleep")
+    @patch("team_memory.daemon.reloader.subprocess.run")
     def test_success_returns_true(self, mock_run, mock_sleep):
         """Successful restart should return True."""
         mock_run.return_value = SimpleNamespace(returncode=0)
@@ -132,8 +131,8 @@ class TestRestartDaemon:
         assert result is True
         assert mock_run.call_count == 2
 
-    @patch("daemon.reloader.time.sleep")
-    @patch("daemon.reloader.subprocess.run")
+    @patch("team_memory.daemon.reloader.time.sleep")
+    @patch("team_memory.daemon.reloader.subprocess.run")
     def test_failure_returns_false(self, mock_run, mock_sleep):
         """Failed load should return False."""
         # First call (unload) succeeds, second (load) fails
@@ -144,15 +143,15 @@ class TestRestartDaemon:
         result = restart_daemon()
         assert result is False
 
-    @patch("daemon.reloader.time.sleep")
-    @patch("daemon.reloader.subprocess.run", side_effect=Exception("launchctl not found"))
+    @patch("team_memory.daemon.reloader.time.sleep")
+    @patch("team_memory.daemon.reloader.subprocess.run", side_effect=Exception("launchctl not found"))
     def test_exception_returns_false(self, mock_run, mock_sleep):
         """Exception should be caught, returning False."""
         result = restart_daemon()
         assert result is False
 
-    @patch("daemon.reloader.time.sleep")
-    @patch("daemon.reloader.subprocess.run")
+    @patch("team_memory.daemon.reloader.time.sleep")
+    @patch("team_memory.daemon.reloader.subprocess.run")
     def test_unload_called_first(self, mock_run, mock_sleep):
         """Unload should be called before load."""
         mock_run.return_value = SimpleNamespace(returncode=0)
@@ -162,8 +161,8 @@ class TestRestartDaemon:
         second_call = mock_run.call_args_list[1]
         assert "load" in second_call[0][0]
 
-    @patch("daemon.reloader.time.sleep")
-    @patch("daemon.reloader.subprocess.run")
+    @patch("team_memory.daemon.reloader.time.sleep")
+    @patch("team_memory.daemon.reloader.subprocess.run")
     def test_plist_path_uses_home(self, mock_run, mock_sleep):
         """Plist path should be under ~/Library/LaunchAgents."""
         mock_run.return_value = SimpleNamespace(returncode=0)
@@ -173,8 +172,8 @@ class TestRestartDaemon:
             assert "Library/LaunchAgents" in plist_arg
             assert DAEMON_PLIST in plist_arg
 
-    @patch("daemon.reloader.time.sleep")
-    @patch("daemon.reloader.subprocess.run")
+    @patch("team_memory.daemon.reloader.time.sleep")
+    @patch("team_memory.daemon.reloader.subprocess.run")
     def test_sleep_between_unload_and_load(self, mock_run, mock_sleep):
         """Should sleep 1s between unload and load."""
         mock_run.return_value = SimpleNamespace(returncode=0)
@@ -189,9 +188,9 @@ class TestRestartDaemon:
 class TestMainArgparse:
     """main() parses sys.argv for interval."""
 
-    @patch("daemon.reloader.restart_daemon")
-    @patch("daemon.reloader.time.sleep")
-    @patch("daemon.reloader.get_mtime_map", return_value={"a.py": 1.0})
+    @patch("team_memory.daemon.reloader.restart_daemon")
+    @patch("team_memory.daemon.reloader.time.sleep")
+    @patch("team_memory.daemon.reloader.get_mtime_map", return_value={"a.py": 1.0})
     def test_default_interval(self, mock_mtime, mock_sleep, mock_restart):
         """No argv => default interval of 3."""
         with patch.object(sys, "argv", ["reloader.py"]):
@@ -207,9 +206,9 @@ class TestMainArgparse:
             with pytest.raises(KeyboardInterrupt):
                 main()
 
-    @patch("daemon.reloader.restart_daemon")
-    @patch("daemon.reloader.time.sleep")
-    @patch("daemon.reloader.get_mtime_map", return_value={"a.py": 1.0})
+    @patch("team_memory.daemon.reloader.restart_daemon")
+    @patch("team_memory.daemon.reloader.time.sleep")
+    @patch("team_memory.daemon.reloader.get_mtime_map", return_value={"a.py": 1.0})
     def test_custom_interval(self, mock_mtime, mock_sleep, mock_restart):
         """argv[1] sets the interval."""
         with patch.object(sys, "argv", ["reloader.py", "5"]):
@@ -226,9 +225,9 @@ class TestMainArgparse:
             with pytest.raises(KeyboardInterrupt):
                 main()
 
-    @patch("daemon.reloader.restart_daemon")
-    @patch("daemon.reloader.time.sleep")
-    @patch("daemon.reloader.get_mtime_map")
+    @patch("team_memory.daemon.reloader.restart_daemon")
+    @patch("team_memory.daemon.reloader.time.sleep")
+    @patch("team_memory.daemon.reloader.get_mtime_map")
     def test_detects_changes_and_restarts(self, mock_mtime, mock_sleep, mock_restart):
         """When file mtime changes, restart should be called."""
         with patch.object(sys, "argv", ["reloader.py", "1"]):
@@ -262,9 +261,9 @@ class TestMainArgparse:
 
             mock_restart.assert_called()
 
-    @patch("daemon.reloader.restart_daemon")
-    @patch("daemon.reloader.time.sleep")
-    @patch("daemon.reloader.get_mtime_map")
+    @patch("team_memory.daemon.reloader.restart_daemon")
+    @patch("team_memory.daemon.reloader.time.sleep")
+    @patch("team_memory.daemon.reloader.get_mtime_map")
     def test_no_change_no_restart(self, mock_mtime, mock_sleep, mock_restart):
         """When nothing changes, restart should NOT be called."""
         with patch.object(sys, "argv", ["reloader.py", "1"]):
@@ -285,9 +284,9 @@ class TestMainArgparse:
 
             mock_restart.assert_not_called()
 
-    @patch("daemon.reloader.restart_daemon")
-    @patch("daemon.reloader.time.sleep")
-    @patch("daemon.reloader.get_mtime_map")
+    @patch("team_memory.daemon.reloader.restart_daemon")
+    @patch("team_memory.daemon.reloader.time.sleep")
+    @patch("team_memory.daemon.reloader.get_mtime_map")
     def test_new_file_detected(self, mock_mtime, mock_sleep, mock_restart):
         """New .py files appearing should trigger restart."""
         with patch.object(sys, "argv", ["reloader.py", "1"]):
@@ -308,9 +307,9 @@ class TestMainArgparse:
 
             mock_restart.assert_called()
 
-    @patch("daemon.reloader.restart_daemon")
-    @patch("daemon.reloader.time.sleep")
-    @patch("daemon.reloader.get_mtime_map")
+    @patch("team_memory.daemon.reloader.restart_daemon")
+    @patch("team_memory.daemon.reloader.time.sleep")
+    @patch("team_memory.daemon.reloader.get_mtime_map")
     def test_output_on_change(self, mock_mtime, mock_sleep, mock_restart, capsys):
         """Should print detected changes."""
         with patch.object(sys, "argv", ["reloader.py", "1"]):
@@ -332,9 +331,9 @@ class TestMainArgparse:
             output = capsys.readouterr().out
             assert "Detected changes" in output
 
-    @patch("daemon.reloader.restart_daemon")
-    @patch("daemon.reloader.time.sleep")
-    @patch("daemon.reloader.get_mtime_map")
+    @patch("team_memory.daemon.reloader.restart_daemon")
+    @patch("team_memory.daemon.reloader.time.sleep")
+    @patch("team_memory.daemon.reloader.get_mtime_map")
     def test_watching_output(self, mock_mtime, mock_sleep, mock_restart, capsys):
         """Should print watching message on start."""
         mock_mtime.return_value = {}

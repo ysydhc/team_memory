@@ -4,8 +4,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from daemon.config import DaemonConfig, ProjectMapping, RetrievalSettings
-from daemon.pipeline import (
+from team_memory.daemon.config import DaemonConfig, ProjectMapping, RetrievalSettings
+from team_memory.daemon.pipeline import (
     _resolve_project,
     process_after_response,
     process_before_prompt,
@@ -146,7 +146,7 @@ class TestProcessAfterResponse:
         buf.add_message.assert_called_once_with("123", "assistant", "hello", project="team_doc")
 
     @pytest.mark.asyncio
-    @patch("daemon.pipeline._try_extract_personal_memory", new_callable=AsyncMock)
+    @patch("team_memory.daemon.pipeline._try_extract_personal_memory", new_callable=AsyncMock)
     async def test_converged_marks_refinement(self, mock_extract):
         config = _make_config()
         buf = _make_buf()
@@ -245,7 +245,7 @@ class TestProcessSessionEnd:
         assert result["flushed"] is False
 
     @pytest.mark.asyncio
-    @patch("daemon.pipeline._try_extract_personal_memory", new_callable=AsyncMock)
+    @patch("team_memory.daemon.pipeline._try_extract_personal_memory", new_callable=AsyncMock)
     async def test_active_session_marked_for_refinement(self, mock_extract):
         config = _make_config()
         buf = _make_buf()
@@ -259,7 +259,7 @@ class TestProcessSessionEnd:
         mock_extract.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("daemon.pipeline._try_extract_personal_memory", new_callable=AsyncMock)
+    @patch("team_memory.daemon.pipeline._try_extract_personal_memory", new_callable=AsyncMock)
     async def test_mark_refinement_failure_returns_ok(self, mock_extract):
         config = _make_config()
         buf = _make_buf()

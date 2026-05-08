@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from daemon.faithfulness_judge import (
+from team_memory.daemon.faithfulness_judge import (
     FaithfulnessJudge,
     FaithfulnessResult,
     _is_retryable_error,

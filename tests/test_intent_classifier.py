@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from daemon.intent_classifier import classify_persona
+from team_memory.daemon.intent_classifier import classify_persona
 
 
 class TestClassifyPersona:

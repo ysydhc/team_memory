@@ -6,8 +6,8 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
-from daemon.config import DaemonConfig, ObsidianSettings, VaultConfig
-from daemon.watcher import _find_vault, _process_changes
+from team_memory.daemon.config import DaemonConfig, ObsidianSettings, VaultConfig
+from team_memory.daemon.watcher import _find_vault, _process_changes
 
 
 # ---------------------------------------------------------------------------
