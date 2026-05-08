@@ -1,15 +1,15 @@
 #!/usr/bin/env python
-"""test_llm.py — Quick LLM connectivity test for the daemon.
+"""test_llm.py — Full connectivity test for TM services.
 
-Verifies that the LLM proxy (LiteLLM) is reachable and returns valid
-chat-completion responses. Uses the same config as FaithfulnessJudge and
-the RefinementWorker so operators can validate connectivity before
-starting the daemon.
+Tests all external model dependencies:
+1. LiteLLM proxy: /models + /chat/completions
+2. Ollama embedding: /api/embed
+3. Web service: /api/v1/health
 
 Usage:
     PYTHONPATH=src:scripts python scripts/daemon/test_llm.py
-    PYTHONPATH=src:scripts python scripts/daemon/test_llm.py --base-url http://localhost:4000/v1
-    PYTHONPATH=src:scripts python scripts/daemon/test_llm.py --model glm-4-flash --timeout 30
+    PYTHONPATH=src:scripts python scripts/daemon/test_llm.py --skip-ollama
+    PYTHONPATH=src:scripts python scripts/daemon/test_llm.py --skip-web
 
 Exit codes:
     0  All tests passed
@@ -20,27 +20,50 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
 import sys
 import time
 from typing import Any
 
+
 # ---------------------------------------------------------------------------
-# Test runner
+# Individual tests
 # ---------------------------------------------------------------------------
 
 
-async def _test_llm_connectivity(
-    base_url: str,
-    model: str,
-    api_key: str,
-    timeout: int,
+async def _test_litellm_models(
+    base_url: str, api_key: str, timeout: int,
 ) -> dict[str, Any]:
-    """Test LLM connectivity by sending a simple chat completion request.
+    """Test LiteLLM /models endpoint."""
+    import httpx
 
-    Returns a dict with test results and metadata.
-    """
+    url = f"{base_url.rstrip('/')}/models"
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["x-api-key"] = api_key
+
+    result: dict[str, Any] = {"url": url, "status": "unknown", "models": [], "error": None}
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code != 200:
+                result["status"] = "http_error"
+                result["error"] = f"HTTP {resp.status_code}"
+                return result
+            data = resp.json()
+            models = [m.get("id", "?") for m in data.get("data", [])]
+            result["status"] = "ok"
+            result["models"] = models[:20]
+    except Exception as e:
+        result["status"] = "error"
+        result["error"] = str(e)
+    return result
+
+
+async def _test_litellm_chat(
+    base_url: str, model: str, api_key: str, timeout: int,
+) -> dict[str, Any]:
+    """Test LiteLLM /chat/completions."""
     import httpx
 
     url = f"{base_url.rstrip('/')}/chat/completions"
@@ -56,13 +79,9 @@ async def _test_llm_connectivity(
     }
 
     result: dict[str, Any] = {
-        "url": url,
-        "model": model,
-        "status": "unknown",
-        "latency_ms": 0,
-        "error": None,
-        "response_content": None,
-        "response_model": None,
+        "url": url, "model": model, "status": "unknown",
+        "latency_ms": 0, "error": None,
+        "response_content": None, "response_model": None,
     }
 
     start = time.monotonic()
@@ -78,8 +97,6 @@ async def _test_llm_connectivity(
                 return result
 
             data = resp.json()
-
-            # Validate response structure
             choices = data.get("choices", [])
             if not choices:
                 result["status"] = "invalid_response"
@@ -87,76 +104,119 @@ async def _test_llm_connectivity(
                 return result
 
             message = choices[0].get("message", {})
-            content = message.get("content", "")
-            resp_model = data.get("model", "")
-
             result["status"] = "ok"
-            result["response_content"] = content[:200]
-            result["response_model"] = resp_model
+            result["response_content"] = message.get("content", "")[:200]
+            result["response_model"] = data.get("model", "")
 
     except httpx.ConnectError as e:
         result["status"] = "connection_error"
-        result["error"] = f"Cannot connect to {url}: {e}"
-    except httpx.TimeoutException as e:
+        result["error"] = f"Cannot connect: {e}"
+    except httpx.TimeoutException:
         result["status"] = "timeout"
-        result["error"] = f"Request timed out after {timeout}s: {e}"
+        result["error"] = f"Request timed out after {timeout}s"
     except Exception as e:
         result["status"] = "error"
         result["error"] = str(e)
-
     return result
 
 
-async def _test_models_endpoint(
-    base_url: str,
-    api_key: str,
-    timeout: int,
+async def _test_ollama_embed(
+    base_url: str, model: str, timeout: int,
 ) -> dict[str, Any]:
-    """Test /models endpoint to list available models.
-
-    Returns a dict with test results.
-    """
+    """Test Ollama /api/embed endpoint."""
     import httpx
 
-    url = f"{base_url.rstrip('/')}/models"
-    headers: dict[str, str] = {}
-    if api_key:
-        headers["x-api-key"] = api_key
+    url = f"{base_url.rstrip('/')}/api/embed"
+    payload = {"model": model, "input": ["test embedding"]}
 
     result: dict[str, Any] = {
-        "url": url,
-        "status": "unknown",
-        "models": [],
-        "error": None,
+        "url": url, "model": model, "status": "unknown",
+        "latency_ms": 0, "dimension": 0, "error": None,
     }
 
+    start = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.get(url, headers=headers)
+            resp = await client.post(url, json=payload)
+            elapsed = time.monotonic() - start
+            result["latency_ms"] = round(elapsed * 1000)
+
+            if resp.status_code != 200:
+                result["status"] = "http_error"
+                result["error"] = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                return result
+
+            data = resp.json()
+            embeddings = data.get("embeddings", [])
+            if embeddings and len(embeddings) > 0:
+                result["status"] = "ok"
+                result["dimension"] = len(embeddings[0])
+            else:
+                result["status"] = "invalid_response"
+                result["error"] = "No embeddings in response"
+
+    except httpx.ConnectError:
+        result["status"] = "connection_error"
+        result["error"] = f"Cannot connect to Ollama at {base_url}"
+    except httpx.TimeoutException:
+        result["status"] = "timeout"
+        result["error"] = f"Ollama timed out after {timeout}s"
+    except Exception as e:
+        result["status"] = "error"
+        result["error"] = str(e)
+    return result
+
+
+async def _test_web_health(
+    base_url: str, timeout: int,
+) -> dict[str, Any]:
+    """Test Web service health endpoint."""
+    import httpx
+
+    url = f"{base_url.rstrip('/')}/health"
+
+    result: dict[str, Any] = {
+        "url": url, "status": "unknown",
+        "latency_ms": 0, "error": None, "detail": None,
+    }
+
+    start = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(url)
+            elapsed = time.monotonic() - start
+            result["latency_ms"] = round(elapsed * 1000)
+
             if resp.status_code != 200:
                 result["status"] = "http_error"
                 result["error"] = f"HTTP {resp.status_code}"
                 return result
 
             data = resp.json()
-            models = [m.get("id", "?") for m in data.get("data", [])]
             result["status"] = "ok"
-            result["models"] = models[:20]  # cap display
+            result["detail"] = data.get("status", "unknown")
 
+    except httpx.ConnectError:
+        result["status"] = "connection_error"
+        result["error"] = f"Cannot connect to Web service at {base_url}"
     except Exception as e:
         result["status"] = "error"
         result["error"] = str(e)
-
     return result
 
 
+# ---------------------------------------------------------------------------
+# Runner
+# ---------------------------------------------------------------------------
+
+
 async def run_tests(args: argparse.Namespace) -> int:
-    """Run all LLM connectivity tests. Returns exit code."""
-    # Resolve config from daemon config if not explicitly provided
+    """Run all connectivity tests. Returns exit code."""
+    # Resolve config from daemon config
     base_url = args.base_url
     model = args.model
     api_key = args.api_key
-    timeout = args.timeout
+    timeout = args.timeout or 30
 
     if not base_url or not model:
         try:
@@ -167,90 +227,101 @@ async def run_tests(args: argparse.Namespace) -> int:
             model = model or ref.model
             if not api_key:
                 api_key = os.environ.get(ref.api_key_env, "")
-            timeout = timeout or ref.timeout
         except Exception:
             pass
 
-    # Defaults if still not set
-    base_url = base_url or "http://localhost:4000/v1"
-    model = model or "glm-4-flash"
-    timeout = timeout or 30
+    # Defaults
+    llm_base = base_url or "http://localhost:4000/v1"
+    llm_model = model or "glm-4-flash"
+    ollama_base = args.ollama_base or "http://127.0.0.1:11434"
+    ollama_model = args.ollama_model or "qwen3-embedding:0.6b"
+    web_base = args.web_base or "http://localhost:9111"
 
+    any_fail = False
+
+    # ── Section 1: LiteLLM ──
     print("=" * 60)
-    print("TM Daemon — LLM Connectivity Test")
+    print("TM Service Connectivity Test")
     print("=" * 60)
-    print(f"  Base URL : {base_url}")
-    print(f"  Model    : {model}")
-    print(f"  API Key  : {'***' + api_key[-4:] if api_key and len(api_key) > 4 else '(none)'}")
-    print(f"  Timeout  : {timeout}s")
-    print()
 
-    # Test 1: List models
-    print("[1/2] Testing /models endpoint ...")
-    models_result = await _test_models_endpoint(base_url, api_key, timeout)
-    if models_result["status"] == "ok":
-        n = len(models_result["models"])
-        print(f"       OK — {n} model(s) available")
-        for m in models_result["models"][:10]:
-            print(f"         - {m}")
-        if n > 10:
-            print(f"         ... and {n - 10} more")
+    if not args.skip_litellm:
+        print(f"\n[1/3] LiteLLM Proxy ({llm_base})")
+        print(f"  Model: {llm_model}")
+
+        # Models endpoint
+        r = await _test_litellm_models(llm_base, api_key, timeout)
+        if r["status"] == "ok":
+            n = len(r["models"])
+            print(f"  /models     OK ({n} models)")
+        else:
+            print(f"  /models     SKIP — {r['error']}")
+            any_fail = True
+
+        # Chat completion
+        r = await _test_litellm_chat(llm_base, llm_model, api_key, timeout)
+        if r["status"] == "ok":
+            print(f"  /chat       OK ({r['latency_ms']}ms, model={r['response_model']})")
+        else:
+            label = "FAIL" if r["status"] not in ("timeout",) else "SLOW"
+            print(f"  /chat       {label} — {r['error']}")
+            if r["status"] == "http_error" and "429" in (r["error"] or ""):
+                print(f"              (rate-limited, connectivity OK)")
+            else:
+                any_fail = True
     else:
-        print(f"       SKIP — {models_result['error']}")
-    print()
+        print("\n[1/3] LiteLLM Proxy — SKIPPED")
 
-    # Test 2: Chat completion
-    print(f"[2/2] Testing /chat/completions (model={model}) ...")
-    chat_result = await _test_llm_connectivity(base_url, model, api_key, timeout)
+    # ── Section 2: Ollama ──
+    if not args.skip_ollama:
+        print(f"\n[2/3] Ollama Embedding ({ollama_base})")
+        print(f"  Model: {ollama_model}")
 
-    if chat_result["status"] == "ok":
-        print(f"       OK — response received in {chat_result['latency_ms']}ms")
-        print(f"       Model  : {chat_result['response_model']}")
-        print(f"       Content: {chat_result['response_content']!r}")
-        print()
-        print("All tests passed!")
-        return 0
-    elif chat_result["status"] == "invalid_response":
-        print(f"       FAIL — Invalid response: {chat_result['error']}")
-        print()
-        print("LLM responded but with unexpected format.")
-        return 2
+        r = await _test_ollama_embed(ollama_base, ollama_model, timeout)
+        if r["status"] == "ok":
+            print(f"  /api/embed  OK ({r['latency_ms']}ms, dim={r['dimension']})")
+        else:
+            print(f"  /api/embed  FAIL — {r['error']}")
+            any_fail = True
     else:
-        print(f"       FAIL — {chat_result['status']}: {chat_result['error']}")
-        print()
-        print("LLM connectivity test FAILED.")
-        if chat_result["status"] == "connection_error":
-            print("Hint: Is the LiteLLM proxy running? Try: docker compose up -d litellm")
-        elif chat_result["status"] == "timeout":
-            print("Hint: The LLM backend may be overloaded. Try increasing --timeout.")
+        print("\n[2/3] Ollama Embedding — SKIPPED")
+
+    # ── Section 3: Web Service ──
+    if not args.skip_web:
+        print(f"\n[3/3] Web Service ({web_base})")
+
+        r = await _test_web_health(web_base, timeout)
+        if r["status"] == "ok":
+            print(f"  /health     OK ({r['latency_ms']}ms, status={r['detail']})")
+        else:
+            print(f"  /health     FAIL — {r['error']}")
+            any_fail = True
+    else:
+        print("\n[3/3] Web Service — SKIPPED")
+
+    # ── Summary ──
+    print("\n" + "=" * 60)
+    if any_fail:
+        print("RESULT: Some tests FAILED")
         return 1
+    else:
+        print("RESULT: All tests PASSED")
+        return 0
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Test LLM connectivity for TM Daemon",
+        description="Test TM service connectivity (LiteLLM + Ollama + Web)",
     )
-    parser.add_argument(
-        "--base-url",
-        default="",
-        help="LLM proxy base URL (default: from daemon config or http://localhost:4000/v1)",
-    )
-    parser.add_argument(
-        "--model",
-        default="",
-        help="Model name (default: from daemon config or glm-4-flash)",
-    )
-    parser.add_argument(
-        "--api-key",
-        default="",
-        help="API key (default: from LITELLM_MASTER_KEY env or daemon config)",
-    )
-    parser.add_argument(
-        "--timeout",
-        type=int,
-        default=0,
-        help="Request timeout in seconds (default: from daemon config or 30)",
-    )
+    parser.add_argument("--base-url", default="", help="LiteLLM base URL")
+    parser.add_argument("--model", default="", help="LiteLLM model name")
+    parser.add_argument("--api-key", default="", help="LiteLLM API key")
+    parser.add_argument("--timeout", type=int, default=0, help="Request timeout (default: 30s)")
+    parser.add_argument("--ollama-base", default="", help="Ollama base URL (default: http://127.0.0.1:11434)")
+    parser.add_argument("--ollama-model", default="", help="Ollama embedding model (default: qwen3-embedding:0.6b)")
+    parser.add_argument("--web-base", default="", help="Web service base URL (default: http://localhost:9111)")
+    parser.add_argument("--skip-litellm", action="store_true", help="Skip LiteLLM test")
+    parser.add_argument("--skip-ollama", action="store_true", help="Skip Ollama test")
+    parser.add_argument("--skip-web", action="store_true", help="Skip Web service test")
 
     args = parser.parse_args()
     exit_code = asyncio.run(run_tests(args))
