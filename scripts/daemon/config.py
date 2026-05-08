@@ -95,6 +95,8 @@ class RefinementSettings:
     max_input_chars: int = 6000
     max_retries: int = 1
     fallback_on_failure: bool = True
+    quality_gate_enabled: bool = True
+    quality_min_score: int = 60
 
 
 @dataclass

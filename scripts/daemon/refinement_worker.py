@@ -21,6 +21,29 @@ logger = logging.getLogger("daemon.refinement_worker")
 # Maximum refinement attempts before giving up on a draft
 _MAX_REFINE_ATTEMPTS = 3
 
+# Minimum character lengths for structural quality checks
+_MIN_TITLE_LEN = 5
+_MIN_PROBLEM_LEN = 50
+_MIN_SOLUTION_LEN = 50
+
+# ---------------------------------------------------------------------------
+# Quality Evaluation Prompt — asks LLM to score a refined experience
+# ---------------------------------------------------------------------------
+_QUALITY_EVAL_PROMPT = """\
+Evaluate the following technical experience on a 0-100 scale based on:
+- Specificity: Does it describe a concrete problem with clear context?
+- Actionability: Can someone follow the solution steps?
+- Completeness: Are problem context and solution steps both well-described?
+- Uniqueness: Is this a specific incident, not generic advice?
+
+Title: {title}
+Problem: {problem}
+Solution: {solution}
+Type: {experience_type}
+
+Return ONLY a JSON object: {{"score": <integer 0-100>}}
+"""
+
 # Mapping from refinement experience_type → canonical EXPERIENCE_TYPES
 _REFINEMENT_TYPE_MAP = {
     "problem_solution": "bugfix",
@@ -397,6 +420,32 @@ class RefinementWorker:
         if "description" in structured and "problem" not in structured:
             structured["problem"] = structured["description"]
 
+        # ---- Quality Gate ----
+        if self._cfg.quality_gate_enabled:
+            passed, reason = self._structural_check(structured)
+            if not passed:
+                logger.info(
+                    "Quality gate discarded draft %s (experience %s): %s",
+                    draft_id, experience_id, reason,
+                )
+                # Still publish the draft (move it out of draft status) but skip
+                # the update_experience call so the DB keeps the unrefined version
+                await self._sink.draft_publish(draft_id=experience_id)
+                await self._buf.mark_published(draft_id)
+                return
+
+            score = await self._quality_score(structured)
+            if score < self._cfg.quality_min_score:
+                logger.info(
+                    "Quality gate discarded draft %s (experience %s): "
+                    "quality score %d < %d",
+                    draft_id, experience_id, score,
+                    self._cfg.quality_min_score,
+                )
+                await self._sink.draft_publish(draft_id=experience_id)
+                await self._buf.mark_published(draft_id)
+                return
+
         # Step 3: Publish the draft (status → published)
         publish_result = await self._sink.draft_publish(
             draft_id=experience_id,
@@ -434,6 +483,65 @@ class RefinementWorker:
             experience_id,
             structured.get("title", "")[:40],
         )
+
+    # ------------------------------------------------------------------
+    # Quality gate helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _structural_check(structured: dict[str, Any]) -> tuple[bool, str]:
+        """Validate structural quality of a refined experience.
+
+        Returns (passed, reason) where reason is empty on success.
+        """
+        title = str(structured.get("title", "")).strip()
+        problem = str(structured.get("problem", "")).strip()
+        solution = str(structured.get("solution", "") or "").strip()
+        exp_type = str(structured.get("experience_type", "")).strip()
+
+        if not title or len(title) < _MIN_TITLE_LEN:
+            return False, "discarded: title too short"
+        if not problem or len(problem) < _MIN_PROBLEM_LEN:
+            return False, "discarded: problem too short"
+        if not solution or len(solution) < _MIN_SOLUTION_LEN:
+            return False, "discarded: solution too short"
+        if not exp_type:
+            return False, "discarded: experience_type empty"
+
+        return True, ""
+
+    async def _quality_score(self, structured: dict[str, Any]) -> int:
+        """Ask LLM to score a refined experience on 0-100.
+
+        On any error, returns 100 (pass) so that LLM failures don't block
+        experiences that already passed structural checks.
+        """
+        try:
+            prompt = _QUALITY_EVAL_PROMPT.format(
+                title=structured.get("title", ""),
+                problem=structured.get("problem", ""),
+                solution=structured.get("solution", ""),
+                experience_type=structured.get("experience_type", ""),
+            )
+            messages = [
+                {"role": "system", "content": "You are a quality evaluator. Output valid JSON only."},
+                {"role": "user", "content": prompt},
+            ]
+            llm_text = await call_llm_openai(
+                messages,
+                model=self._cfg.model,
+                base_url=self._cfg.base_url,
+                api_key=os.environ.get(self._cfg.api_key_env, "") or None,
+                timeout=self._cfg.timeout,
+                temperature=0.1,
+            )
+            parsed = _extract_json(llm_text)
+            score = int(parsed.get("score", 100))
+            # Clamp to 0-100
+            return max(0, min(100, score))
+        except Exception:
+            logger.warning("Quality scoring LLM call failed, defaulting to pass", exc_info=True)
+            return 100
 
     async def _call_llm(self, content: str, project: str = "default") -> dict[str, Any]:
         """Call LLM to extract structured fields from draft content.

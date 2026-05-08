@@ -36,11 +36,24 @@ def _make_config(**overrides) -> DaemonConfig:
         max_input_chars=4000,
         max_retries=2,
         fallback_on_failure=True,
+        quality_gate_enabled=False,  # disabled by default for legacy tests
+        quality_min_score=60,
     )
     defaults.update(overrides)
     cfg = DaemonConfig()
     cfg.refinement = RefinementSettings(**defaults)
     return cfg
+
+
+def _valid_llm_result() -> dict[str, Any]:
+    """Return a structurally valid LLM result that passes the quality gate."""
+    return {
+        "title": "A sufficiently long title for quality",
+        "problem": "This is a problem description that is long enough to pass the minimum length check",
+        "solution": "This is a solution description that is long enough to pass the minimum length check",
+        "tags": ["test"],
+        "experience_type": "bugfix",
+    }
 
 
 def _make_draft(
@@ -884,3 +897,291 @@ class TestMaxRefineAttemptsConstant:
 
     def test_is_int(self):
         assert isinstance(_MAX_REFINE_ATTEMPTS, int)
+
+
+@pytest.mark.unit
+class TestStructuralCheck:
+    """Tests for _structural_check quality gate."""
+
+    def test_valid_result_passes(self):
+        ok, reason = RefinementWorker._structural_check(_valid_llm_result())
+        assert ok is True
+        assert reason == ""
+
+    def test_title_too_short_rejected(self):
+        data = _valid_llm_result()
+        data["title"] = "ab"
+        ok, reason = RefinementWorker._structural_check(data)
+        assert ok is False
+        assert "title too short" in reason
+
+    def test_empty_title_rejected(self):
+        data = _valid_llm_result()
+        data["title"] = ""
+        ok, reason = RefinementWorker._structural_check(data)
+        assert ok is False
+        assert "title too short" in reason
+
+    def test_title_exactly_5_chars_passes(self):
+        data = _valid_llm_result()
+        data["title"] = "abcde"
+        ok, reason = RefinementWorker._structural_check(data)
+        assert ok is True
+
+    def test_title_4_chars_rejected(self):
+        data = _valid_llm_result()
+        data["title"] = "abcd"
+        ok, reason = RefinementWorker._structural_check(data)
+        assert ok is False
+
+    def test_problem_too_short_rejected(self):
+        data = _valid_llm_result()
+        data["problem"] = "short problem"
+        ok, reason = RefinementWorker._structural_check(data)
+        assert ok is False
+        assert "problem too short" in reason
+
+    def test_empty_problem_rejected(self):
+        data = _valid_llm_result()
+        data["problem"] = ""
+        ok, reason = RefinementWorker._structural_check(data)
+        assert ok is False
+
+    def test_solution_too_short_rejected(self):
+        data = _valid_llm_result()
+        data["solution"] = "short solution"
+        ok, reason = RefinementWorker._structural_check(data)
+        assert ok is False
+        assert "solution too short" in reason
+
+    def test_empty_solution_rejected(self):
+        data = _valid_llm_result()
+        data["solution"] = ""
+        ok, reason = RefinementWorker._structural_check(data)
+        assert ok is False
+
+    def test_none_solution_rejected(self):
+        data = _valid_llm_result()
+        data["solution"] = None
+        ok, reason = RefinementWorker._structural_check(data)
+        assert ok is False
+
+    def test_empty_experience_type_rejected(self):
+        data = _valid_llm_result()
+        data["experience_type"] = ""
+        ok, reason = RefinementWorker._structural_check(data)
+        assert ok is False
+        assert "experience_type empty" in reason
+
+    def test_missing_fields_rejected(self):
+        ok, reason = RefinementWorker._structural_check({})
+        assert ok is False
+
+    def test_problem_exactly_50_chars_passes(self):
+        data = _valid_llm_result()
+        data["problem"] = "a" * 50
+        ok, reason = RefinementWorker._structural_check(data)
+        assert ok is True
+
+    def test_problem_49_chars_rejected(self):
+        data = _valid_llm_result()
+        data["problem"] = "a" * 49
+        ok, reason = RefinementWorker._structural_check(data)
+        assert ok is False
+
+
+@pytest.mark.unit
+class TestQualityGateRefineOne:
+    """Tests for quality gate integration in _refine_one."""
+
+    @pytest.mark.asyncio
+    async def test_structural_check_discard_publishes_draft_but_skips_update(self):
+        """When structural check fails, draft is published but not updated with refined data."""
+        cfg = _make_config(quality_gate_enabled=True)
+        buf = AsyncMock()
+        sink = AsyncMock()
+        sink.draft_save = AsyncMock(return_value={"id": "exp-qg1"})
+        sink.draft_publish = AsyncMock(return_value={})
+
+        worker = RefinementWorker(cfg, buf, sink)
+        draft = _make_draft()
+
+        with patch.object(worker, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            # Title too short, no problem/solution/type
+            mock_llm.return_value = {"title": "X"}
+            await worker._refine_one(draft)
+
+        # draft_publish should be called (to move draft out of draft state)
+        sink.draft_publish.assert_awaited_once_with(draft_id="exp-qg1")
+        # update_experience should NOT be called (refined data is discarded)
+        sink.update_experience.assert_not_awaited()
+        # Local draft should be marked published
+        buf.mark_published.assert_awaited_once_with("d-001")
+
+    @pytest.mark.asyncio
+    async def test_quality_score_too_low_discards(self):
+        """When LLM quality score is below threshold, experience is discarded."""
+        cfg = _make_config(quality_gate_enabled=True, quality_min_score=60)
+        buf = AsyncMock()
+        sink = AsyncMock()
+        sink.draft_save = AsyncMock(return_value={"id": "exp-qg2"})
+        sink.draft_publish = AsyncMock(return_value={})
+
+        worker = RefinementWorker(cfg, buf, sink)
+        draft = _make_draft()
+
+        with patch.object(worker, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = _valid_llm_result()
+            with patch.object(worker, "_quality_score", new_callable=AsyncMock) as mock_score:
+                mock_score.return_value = 40
+                await worker._refine_one(draft)
+
+        sink.draft_publish.assert_awaited_once_with(draft_id="exp-qg2")
+        sink.update_experience.assert_not_awaited()
+        buf.mark_published.assert_awaited_once_with("d-001")
+
+    @pytest.mark.asyncio
+    async def test_quality_score_at_threshold_passes(self):
+        """When LLM quality score equals the threshold, experience is published."""
+        cfg = _make_config(quality_gate_enabled=True, quality_min_score=60)
+        buf = AsyncMock()
+        sink = AsyncMock()
+        sink.draft_save = AsyncMock(return_value={"id": "exp-qg3"})
+        sink.draft_publish = AsyncMock(return_value={})
+        sink.update_experience = AsyncMock(return_value={})
+
+        worker = RefinementWorker(cfg, buf, sink)
+        draft = _make_draft()
+
+        with patch.object(worker, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = _valid_llm_result()
+            with patch.object(worker, "_quality_score", new_callable=AsyncMock) as mock_score:
+                mock_score.return_value = 60
+                await worker._refine_one(draft)
+
+        # Both publish and update should be called (gate passed)
+        sink.draft_publish.assert_awaited()
+        sink.update_experience.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_quality_score_above_threshold_passes(self):
+        """When LLM quality score is above threshold, experience is published."""
+        cfg = _make_config(quality_gate_enabled=True, quality_min_score=60)
+        buf = AsyncMock()
+        sink = AsyncMock()
+        sink.draft_save = AsyncMock(return_value={"id": "exp-qg4"})
+        sink.draft_publish = AsyncMock(return_value={})
+        sink.update_experience = AsyncMock(return_value={})
+
+        worker = RefinementWorker(cfg, buf, sink)
+        draft = _make_draft()
+
+        with patch.object(worker, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = _valid_llm_result()
+            with patch.object(worker, "_quality_score", new_callable=AsyncMock) as mock_score:
+                mock_score.return_value = 85
+                await worker._refine_one(draft)
+
+        sink.update_experience.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_quality_gate_disabled_skips_checks(self):
+        """When quality gate is disabled, no checks are performed."""
+        cfg = _make_config(quality_gate_enabled=False)
+        buf = AsyncMock()
+        sink = AsyncMock()
+        sink.draft_save = AsyncMock(return_value={"id": "exp-qg5"})
+        sink.draft_publish = AsyncMock(return_value={})
+        sink.update_experience = AsyncMock(return_value={})
+
+        worker = RefinementWorker(cfg, buf, sink)
+        draft = _make_draft()
+
+        with patch.object(worker, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            # This would fail structural check, but gate is disabled
+            mock_llm.return_value = {"title": "X"}
+            await worker._refine_one(draft)
+
+        # update_experience should be called (gate bypassed)
+        sink.update_experience.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_structural_check_before_quality_score(self):
+        """Structural check runs first; if it fails, quality scoring is not called."""
+        cfg = _make_config(quality_gate_enabled=True)
+        buf = AsyncMock()
+        sink = AsyncMock()
+        sink.draft_save = AsyncMock(return_value={"id": "exp-qg6"})
+        sink.draft_publish = AsyncMock(return_value={})
+
+        worker = RefinementWorker(cfg, buf, sink)
+        draft = _make_draft()
+
+        with patch.object(worker, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = {"title": "X"}  # fails structural
+            with patch.object(worker, "_quality_score", new_callable=AsyncMock) as mock_score:
+                await worker._refine_one(draft)
+                # _quality_score should NOT have been called
+                mock_score.assert_not_awaited()
+
+
+@pytest.mark.unit
+class TestQualityScore:
+    """Tests for _quality_score method."""
+
+    @pytest.mark.asyncio
+    async def test_successful_scoring(self):
+        cfg = _make_config(quality_gate_enabled=True)
+        worker = RefinementWorker(cfg, MagicMock(), MagicMock())
+
+        with patch("daemon.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = '{"score": 75}'
+            score = await worker._quality_score(_valid_llm_result())
+
+        assert score == 75
+
+    @pytest.mark.asyncio
+    async def test_score_clamped_to_100(self):
+        cfg = _make_config(quality_gate_enabled=True)
+        worker = RefinementWorker(cfg, MagicMock(), MagicMock())
+
+        with patch("daemon.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = '{"score": 150}'
+            score = await worker._quality_score(_valid_llm_result())
+
+        assert score == 100
+
+    @pytest.mark.asyncio
+    async def test_score_clamped_to_0(self):
+        cfg = _make_config(quality_gate_enabled=True)
+        worker = RefinementWorker(cfg, MagicMock(), MagicMock())
+
+        with patch("daemon.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = '{"score": -10}'
+            score = await worker._quality_score(_valid_llm_result())
+
+        assert score == 0
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_returns_100(self):
+        """When LLM call fails, default to pass (100)."""
+        cfg = _make_config(quality_gate_enabled=True)
+        worker = RefinementWorker(cfg, MagicMock(), MagicMock())
+
+        with patch("daemon.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
+            mock_call.side_effect = RuntimeError("LLM down")
+            score = await worker._quality_score(_valid_llm_result())
+
+        assert score == 100
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_returns_100(self):
+        """When LLM returns non-JSON, default to pass."""
+        cfg = _make_config(quality_gate_enabled=True)
+        worker = RefinementWorker(cfg, MagicMock(), MagicMock())
+
+        with patch("daemon.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = "not json at all"
+            score = await worker._quality_score(_valid_llm_result())
+
+        assert score == 100
