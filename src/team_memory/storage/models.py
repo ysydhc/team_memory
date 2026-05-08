@@ -409,6 +409,12 @@ class PersonalMemory(Base):
         String(16), default="static", nullable=False, server_default="static"
     )  # static | dynamic
     context_hint: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    persona: Mapped[str] = mapped_column(
+        String(20), default="general", nullable=False, server_default="general"
+    )  # coding | writing | research | debugging | general
+    priority: Mapped[int] = mapped_column(
+        Integer, default=50, nullable=False, server_default="50"
+    )  # 0-100, higher = load first
     embedding = mapped_column(Vector(DB_VECTOR_DIM), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -422,6 +428,8 @@ class PersonalMemory(Base):
             "content": self.content,
             "scope": self.scope,
             "profile_kind": self.profile_kind,
+            "persona": self.persona,
+            "priority": self.priority,
             "context_hint": self.context_hint,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

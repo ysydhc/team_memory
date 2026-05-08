@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import delete, desc, select
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from team_memory.storage.models import PersonalMemory
@@ -103,6 +103,8 @@ class PersonalMemoryRepository:
         context_hint: str | None = None,
         embedding: list[float] | None = None,
         profile_kind: str | None = None,
+        persona: str = "general",
+        priority: int = 50,
     ) -> PersonalMemory:
         pk = profile_kind or ("dynamic" if scope == "context" else "static")
         mem = PersonalMemory(
@@ -112,6 +114,8 @@ class PersonalMemoryRepository:
             profile_kind=pk,
             context_hint=context_hint,
             embedding=embedding,
+            persona=persona,
+            priority=priority,
         )
         self._session.add(mem)
         await self._session.flush()
@@ -126,6 +130,8 @@ class PersonalMemoryRepository:
         context_hint: str | None = None,
         embedding: list[float] | None = None,
         profile_kind: str | None = None,
+        persona: str | None = None,
+        priority: int | None = None,
     ) -> PersonalMemory | None:
         mem = await self.get_by_id(memory_id, user_id)
         if mem is None:
@@ -140,6 +146,10 @@ class PersonalMemoryRepository:
             mem.context_hint = context_hint
         if embedding is not None:
             mem.embedding = embedding
+        if persona is not None:
+            mem.persona = persona
+        if priority is not None:
+            mem.priority = priority
         await self._session.flush()
         return mem
 
@@ -161,6 +171,8 @@ class PersonalMemoryRepository:
         context_hint: str | None = None,
         threshold: float = PERSONAL_MEMORY_OVERWRITE_THRESHOLD,
         profile_kind: str | None = None,
+        persona: str = "general",
+        priority: int = 50,
     ) -> PersonalMemory:
         """Insert or overwrite by semantic similarity within the same profile_kind."""
         pk = profile_kind or ("dynamic" if scope == "context" else "static")
@@ -174,6 +186,8 @@ class PersonalMemoryRepository:
                 context_hint=context_hint,
                 embedding=embedding,
                 profile_kind=pk,
+                persona=persona,
+                priority=priority,
             )
             await self._session.refresh(existing)
             return existing
@@ -184,4 +198,36 @@ class PersonalMemoryRepository:
             context_hint=context_hint,
             embedding=embedding,
             profile_kind=pk,
+            persona=persona,
+            priority=priority,
         )
+
+    async def count_by_persona(self, user_id: str, persona: str) -> int:
+        """Count memories for a (user_id, persona) pair."""
+        q = (
+            select(func.count())
+            .select_from(PersonalMemory)
+            .where(PersonalMemory.user_id == user_id)
+            .where(PersonalMemory.persona == persona)
+        )
+        result = await self._session.execute(q)
+        return result.scalar_one()
+
+    async def delete_oldest_by_persona(self, user_id: str, persona: str) -> bool:
+        """Delete the oldest memory for a (user_id, persona) pair. Returns True if deleted."""
+        # Find the oldest
+        q = (
+            select(PersonalMemory.id)
+            .where(PersonalMemory.user_id == user_id)
+            .where(PersonalMemory.persona == persona)
+            .order_by(PersonalMemory.created_at)
+            .limit(1)
+        )
+        result = await self._session.execute(q)
+        oldest_id = result.scalar_one_or_none()
+        if oldest_id is None:
+            return False
+        await self._session.execute(
+            delete(PersonalMemory).where(PersonalMemory.id == oldest_id)
+        )
+        return True

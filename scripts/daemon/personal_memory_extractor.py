@@ -197,4 +197,5 @@ class PersonalMemoryExtractor:
             content=content,
             scope=scope,
             context_hint=category,
+            persona="general",
         )

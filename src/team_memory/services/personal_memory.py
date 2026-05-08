@@ -67,8 +67,12 @@ class PersonalMemoryService:
         current_context: str | None = None,
         context_similarity_threshold: float = 0.5,
         max_per_side: int = 20,
+        persona: str | None = None,
     ) -> dict[str, list[str]]:
-        """Assemble Supermemory-shaped profile: static/dynamic string lists."""
+        """Assemble Supermemory-shaped profile: static/dynamic string lists.
+
+        If persona is provided, only return memories for that persona.
+        """
         if not user_id or user_id.strip().lower() == "anonymous":
             return {"static": [], "dynamic": []}
         context_embedding = None
@@ -81,6 +85,9 @@ class PersonalMemoryService:
                 context_embedding=context_embedding,
                 context_similarity_threshold=context_similarity_threshold,
             )
+        # Filter by persona if specified
+        if persona:
+            rows = [r for r in rows if r.persona == persona]
         static_ordered: list[str] = []
         dynamic_ordered: list[str] = []
         for r in rows:
@@ -143,8 +150,14 @@ class PersonalMemoryService:
         context_hint: str | None = None,
         overwrite_threshold: float = PERSONAL_MEMORY_OVERWRITE_THRESHOLD,
         profile_kind: str | None = None,
+        persona: str = "general",
+        priority: int = 50,
     ) -> dict:
-        """Write one memory: compute embedding, then upsert by semantic (overwrite if similar)."""
+        """Write one memory: compute embedding, then upsert by semantic (overwrite if similar).
+
+        Enforces a 100-per-(user_id, persona) limit. If the limit is reached,
+        the oldest memory for that persona is deleted before inserting.
+        """
         if profile_kind in ("static", "dynamic"):
             pk: str = profile_kind
         else:
@@ -153,6 +166,14 @@ class PersonalMemoryService:
         embedding = await self._embedding.encode_single(content)
         async with self._session() as session:
             repo = PersonalMemoryRepository(session)
+            # Enforce 100-per-persona limit before insert
+            count = await repo.count_by_persona(user_id, persona)
+            if count >= 100:
+                await repo.delete_oldest_by_persona(user_id, persona)
+                logger.info(
+                    "Persona limit reached (%s/%s): deleted oldest memory",
+                    user_id, persona,
+                )
             mem = await repo.upsert_by_semantic(
                 user_id=user_id,
                 content=content,
@@ -161,6 +182,8 @@ class PersonalMemoryService:
                 embedding=embedding,
                 threshold=overwrite_threshold,
                 profile_kind=pk,
+                persona=persona,
+                priority=priority,
             )
             return mem.to_dict()
 
@@ -207,3 +230,9 @@ class PersonalMemoryService:
         async with self._session() as session:
             repo = PersonalMemoryRepository(session)
             return await repo.delete(uid, user_id)
+
+    async def count_by_persona(self, user_id: str, persona: str) -> int:
+        """Return the count of memories for a (user_id, persona) pair."""
+        async with self._session() as session:
+            repo = PersonalMemoryRepository(session)
+            return await repo.count_by_persona(user_id, persona)

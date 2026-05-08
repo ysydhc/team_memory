@@ -101,6 +101,7 @@ class TestPersonalMemoryWrite:
 
         mock_repo = MagicMock()
         mock_repo.upsert_by_semantic = AsyncMock(return_value=mock_mem)
+        mock_repo.count_by_persona = AsyncMock(return_value=0)
 
         svc = PersonalMemoryService(embedding_provider=embedding_provider, db_url="test://")
         _patch_session_and_repo(svc, mock_repo)
@@ -125,6 +126,7 @@ class TestPersonalMemoryWrite:
 
         mock_repo = MagicMock()
         mock_repo.upsert_by_semantic = AsyncMock(return_value=mock_mem)
+        mock_repo.count_by_persona = AsyncMock(return_value=0)
 
         svc = PersonalMemoryService(embedding_provider=embedding_provider, db_url="test://")
         _patch_session_and_repo(svc, mock_repo)
@@ -145,6 +147,7 @@ class TestPersonalMemoryWrite:
 
         mock_repo = MagicMock()
         mock_repo.upsert_by_semantic = AsyncMock(return_value=mock_mem)
+        mock_repo.count_by_persona = AsyncMock(return_value=0)
 
         svc = PersonalMemoryService(embedding_provider=embedding_provider, db_url="test://")
         _patch_session_and_repo(svc, mock_repo)
