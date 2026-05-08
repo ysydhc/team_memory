@@ -275,17 +275,28 @@ class LLMWiki:
     def _prepare_fts_query(query: str) -> str:
         """Prepare a user query for FTS5 MATCH.
 
-        Splits into tokens and joins with OR for fuzzy matching.
-        Strips FTS5 special characters to prevent syntax errors.
+        Splits into tokens (handles CJK by inserting spaces at boundaries)
+        and joins with OR for fuzzy matching.
         """
+        import re
         # Remove FTS5 special chars
         special = set('"*(){}[]^~:')
         cleaned = "".join(c if c not in special else " " for c in query)
+        # Insert spaces at CJK/ASCII boundaries so "iOS中WebView" → "iOS 中 WebView"
+        cleaned = re.sub(r'([\u4e00-\u9fff\u3040-\u30ff])([A-Za-z0-9])', r'\1 \2', cleaned)
+        cleaned = re.sub(r'([A-Za-z0-9])([\u4e00-\u9fff\u3040-\u30ff])', r'\1 \2', cleaned)
+        # Also split between consecutive CJK chars (bigram-like)
+        # But for FTS5, individual CJK characters are too granular
+        # Just split on common Chinese connectors: 中和与的在是了
+        cleaned = re.sub(r'([的中和与在是了])', r' \1 ', cleaned)
         tokens = cleaned.split()
+        # Filter out single-char Chinese connectors and very short noise
+        stop_chars = set('的中和与在是了')
+        tokens = [t for t in tokens if t.strip() and t not in stop_chars]
         if not tokens:
             return ""
-        # Join tokens with OR for broader matching; quote each token
-        parts = [f'"{t}"' for t in tokens if t.strip()]
+        # Quote each token and join with OR
+        parts = [f'"{t}"' for t in tokens if len(t) >= 2 or not any('\u4e00' <= c <= '\u9fff' for c in t)]
         if not parts:
             return ""
         return " OR ".join(parts)
