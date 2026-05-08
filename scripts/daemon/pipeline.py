@@ -16,7 +16,27 @@ logger = logging.getLogger("tm_daemon.pipeline")
 
 
 def _resolve_project(workspace_roots: list[str], config: DaemonConfig) -> str | None:
-    """Map workspace paths to a TM project name using config patterns."""
+    """Map workspace paths to a TM project name.
+
+    Priority:
+      1. .tm.toml in workspace root (explicit declaration)
+      2. Git repo basename (auto-inferred)
+      3. config.yaml path_patterns (legacy fallback)
+    """
+    from team_memory.project_resolver import infer_project_name, read_tm_toml
+
+    for root in workspace_roots:
+        # 1. .tm.toml
+        tm_config = read_tm_toml(root)
+        if tm_config and tm_config.get("name"):
+            return tm_config["name"]
+
+        # 2. Git repo name (via infer_project_name)
+        inferred = infer_project_name(root)
+        if inferred and inferred != "default":
+            return inferred
+
+    # 3. Legacy: config.yaml path_patterns
     for root in workspace_roots:
         for pm in config.projects:
             for pattern in pm.path_patterns:

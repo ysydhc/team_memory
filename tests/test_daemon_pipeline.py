@@ -1,11 +1,9 @@
 """Tests for daemon pipeline logic."""
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from daemon.config import DaemonConfig, ProjectMapping, RetrievalSettings
 from daemon.pipeline import (
     _resolve_project,
@@ -14,7 +12,6 @@ from daemon.pipeline import (
     process_session_end,
     process_session_start,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -80,6 +77,20 @@ def _make_sink() -> AsyncMock:
     sink = AsyncMock()
     sink.recall = AsyncMock(return_value=[])
     return sink
+
+
+# ---------------------------------------------------------------------------
+# Module-level mock for auto-inference (all test classes inherit)
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _mock_auto_infer(monkeypatch):
+    """Mock auto-inference so tests only exercise path_patterns."""
+    monkeypatch.setattr(
+        "team_memory.project_resolver.read_tm_toml", lambda _: None
+    )
+    monkeypatch.setattr(
+        "team_memory.project_resolver.infer_project_name", lambda _cwd="": "default"
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -214,6 +214,32 @@ mcp = FastMCP(
     ),
 )
 
+# ---------------------------------------------------------------------------
+# Auto-inferred project name (zero-config)
+# ---------------------------------------------------------------------------
+from team_memory.project_resolver import (  # noqa: E402
+    infer_project_name,
+    infer_project_with_aliases,
+)
+
+_inferred_project: str = infer_project_name()
+_inferred_aliases: list[str] = infer_project_with_aliases().get("aliases", [])
+logger.info(
+    "[INIT] Auto-inferred project: %s (aliases: %s)",
+    _inferred_project,
+    _inferred_aliases or "none",
+)
+
+# Register aliases so recall/search can resolve historical names
+if _inferred_aliases:
+    from team_memory.project_resolver import register_aliases
+    register_aliases(_inferred_project, _inferred_aliases)
+
+
+def _resolve_project(project: str | None) -> str | None:
+    """Use inferred project when caller does not specify one."""
+    return project or _inferred_project or None
+
 
 # ============================================================
 # Tool 1: memory_save (unified write)
@@ -260,7 +286,7 @@ async def memory_save(
         tags=tags,
         scope=scope,
         experience_type=experience_type,
-        project=project,
+        project=_resolve_project(project),
         group_key=group_key,
     )
     return _guard_output(json.dumps(result, ensure_ascii=False))
@@ -310,7 +336,7 @@ async def memory_recall(
         framework=framework,
         tags=tags,
         max_results=max_results,
-        project=project,
+        project=_resolve_project(project),
         include_archives=include_archives,
         include_user_profile=include_user_profile,
     )
@@ -341,7 +367,10 @@ async def memory_context(
     """Return user profile + relevant experiences for current context."""
     user = await _get_current_user()
     result = await memory_operations.op_context(
-        user, file_paths=file_paths, task_description=task_description, project=project
+        user,
+        file_paths=file_paths,
+        task_description=task_description,
+        project=_resolve_project(project),
     )
     return _guard_output(json.dumps(result, ensure_ascii=False))
 
@@ -363,7 +392,11 @@ async def memory_context(
 async def memory_get_archive(archive_id: str, project: str | None = None) -> str:
     """Return L2 JSON or 404-style error."""
     user = await _get_current_user()
-    result = await memory_operations.op_get_archive(user, archive_id=archive_id, project=project)
+    result = await memory_operations.op_get_archive(
+        user,
+        archive_id=archive_id,
+        project=_resolve_project(project),
+    )
     return _guard_output(json.dumps(result, ensure_ascii=False))
 
 
@@ -409,7 +442,7 @@ async def memory_archive_upsert(
         conversation_summary=conversation_summary,
         raw_conversation=raw_conversation,
         linked_experience_ids=linked_experience_ids,
-        project=project,
+        project=_resolve_project(project),
         scope=scope,
         scope_ref=scope_ref,
     )
@@ -473,7 +506,7 @@ async def memory_draft_save(
         title=title,
         content=content,
         tags=tags,
-        project=project,
+        project=_resolve_project(project),
         group_key=group_key,
         conversation_id=conversation_id,
     )

@@ -10,13 +10,19 @@ import os
 
 
 def normalize_project_name(project: str | None) -> str:
-    """Normalize legacy project aliases to a canonical project name."""
+    """Normalize project name: resolve aliases from .tm.toml registry."""
     if not project:
         return ""
     value = project.strip()
+    # Check global alias registry (populated by .tm.toml at server startup)
+    try:
+        from team_memory.project_resolver import resolve_alias
+        return resolve_alias(value)
+    except ImportError:
+        pass
+    # Fallback: hardcoded legacy aliases (for environments without .tm.toml)
     alias_map = {
         "team-memory": "team_memory",
-        "team_doc": "team_memory",
     }
     return alias_map.get(value, value)
 

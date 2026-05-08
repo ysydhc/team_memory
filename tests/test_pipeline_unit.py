@@ -13,10 +13,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from daemon.pipeline import (
     _resolve_project,
-    process_after_response,
     process_before_prompt,
     process_session_end,
     process_session_start,
@@ -34,6 +32,16 @@ class TestResolveProject:
         config = MagicMock()
         config.projects = projects or []
         return config
+
+    @pytest.fixture(autouse=True)
+    def _mock_auto_infer(self, monkeypatch):
+        """Mock auto-inference so tests only exercise path_patterns."""
+        monkeypatch.setattr(
+            "team_memory.project_resolver.read_tm_toml", lambda _: None
+        )
+        monkeypatch.setattr(
+            "team_memory.project_resolver.infer_project_name", lambda _cwd="": "default"
+        )
 
     def test_matching_path(self):
         """Matching workspace path should return project name / 匹配的路径应返回项目名"""

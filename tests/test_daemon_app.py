@@ -6,16 +6,28 @@ Pipeline endpoints use mocked TMSink; draft endpoints test with real mocks.
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
-import pytest
 import httpx
-from httpx import ASGITransport
-
+import pytest
 from daemon.app import create_app
 from daemon.config import DaemonConfig, DaemonSettings, DraftSettings, TMSettings
 from daemon.tm_sink import TMSink
+from httpx import ASGITransport
+
+
+# ---------------------------------------------------------------------------
+# Module-level mock: prevent auto-infer from resolving fake paths
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _mock_auto_infer(monkeypatch):
+    """Mock auto-inference so fake test paths don't resolve to project names."""
+    monkeypatch.setattr(
+        "team_memory.project_resolver.read_tm_toml", lambda _: None
+    )
+    monkeypatch.setattr(
+        "team_memory.project_resolver.infer_project_name", lambda _cwd="": "default"
+    )
 
 
 # ---------------------------------------------------------------------------

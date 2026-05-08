@@ -1,13 +1,25 @@
 """Tests for platform-agnostic payload field reading in process_after_response."""
-import asyncio
+import os
+import sys
 from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
-import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 from daemon.pipeline import process_after_response
+
+
+@pytest.fixture(autouse=True)
+def _mock_auto_infer(monkeypatch):
+    """Mock auto-inference so tests only exercise path_patterns."""
+    monkeypatch.setattr(
+        "team_memory.project_resolver.read_tm_toml", lambda _: None
+    )
+    monkeypatch.setattr(
+        "team_memory.project_resolver.infer_project_name", lambda _cwd="": "default"
+    )
 
 
 def _make_mocks(converged: bool = False):
