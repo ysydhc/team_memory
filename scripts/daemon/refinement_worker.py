@@ -117,6 +117,7 @@ experience_type 必须是以下之一:
 返回:
 {{"title": "", "description": "", "solution": "", "tags": [], "experience_type": ""}}
 
+{similar_context}
 对话记录:
 {content}
 """
@@ -131,6 +132,7 @@ async def _refine_via_openai(
     api_key: str | None = None,
     timeout: float = 30.0,
     max_input_chars: int = 6000,
+    similar_context: str = "",
 ) -> dict:
     """Call LLM with the custom refinement prompt and normalize the result.
 
@@ -141,6 +143,7 @@ async def _refine_via_openai(
     system_prompt = _REFINEMENT_PROMPT.format(
         project=project,
         content=content[:max_input_chars],
+        similar_context=similar_context,
     )
     messages = [
         {"role": "system", "content": "You are a technical experience extraction assistant. Output valid JSON only."},
@@ -367,6 +370,10 @@ class RefinementWorker:
         """Refine a single draft via LLM and update the Experience.
 
         Steps:
+        0. Pre-refinement dedup check: search for similar experiences.
+           - If cosine > dedup_similarity_threshold → merge into existing.
+           - If cosine in [dedup_context_threshold, dedup_similarity_threshold)
+             → include as context in the LLM prompt to avoid duplication.
         1. Create/save a draft in TM (skip_dedup=True), getting an experience_id.
            If dedup still triggers, use the candidate's id to continue.
         2. Call LLM to extract structured fields from draft content.
@@ -379,6 +386,40 @@ class RefinementWorker:
         project: str = draft.get("project", "default")
         title: str = draft.get("title", f"Draft {draft_id[:8]}")
         conversation_id: str = draft.get("conversation_id", "")
+
+        # Step 0: Pre-refinement dedup check (single recall for both dedup + context)
+        similar_context = ""
+        dedup_hit, context_hits = await self._dedup_search(content, project)
+        if dedup_hit is not None:
+            hit_id, hit_title, hit_score = dedup_hit
+            # High similarity: merge into existing experience instead of creating new
+            logger.info(
+                "found similar experience: %s (similarity=%.4f), merging draft %s into %s",
+                hit_title, hit_score, draft_id, hit_id,
+            )
+            try:
+                await self._sink.increment_used_count(hit_id)
+            except Exception:
+                logger.warning("Failed to increment used_count for experience %s", hit_id, exc_info=True)
+            await self._buf.mark_published(draft_id)
+            logger.info(
+                "Merged draft %s into existing experience %s (dedup, similarity=%.4f)",
+                draft_id, hit_id, hit_score,
+            )
+            return
+
+        # Medium similarity: build context string for LLM prompt
+        if context_hits:
+            lines = ["已有相关经验（请勿重复）："]
+            for hit in context_hits:
+                hit_title = hit.get("title", "Untitled")
+                hit_desc = hit.get("problem") or hit.get("description", "")
+                lines.append(f"- {hit_title}: {hit_desc[:100]}")
+            similar_context = "\n".join(lines)
+            logger.info(
+                "Including %d similar experience(s) as context for draft %s",
+                len(context_hits), draft_id,
+            )
 
         # Step 1: Save draft to TM — skip dedup since convergence already confirmed
         save_result = await self._sink.draft_save(
@@ -414,7 +455,7 @@ class RefinementWorker:
             raise RuntimeError("draft_save returned no experience_id")
 
         # Step 2: LLM refinement
-        structured = await self._call_llm(content, project=project)
+        structured = await self._call_llm(content, project=project, similar_context=similar_context)
 
         # Map "description" from new prompt output to "problem" for update_experience
         if "description" in structured and "problem" not in structured:
@@ -485,6 +526,62 @@ class RefinementWorker:
         )
 
     # ------------------------------------------------------------------
+    # Pre-refinement dedup helpers
+    # ------------------------------------------------------------------
+
+    async def _dedup_search(
+        self, content: str, project: str
+    ) -> tuple[tuple[str, str, float] | None, list[dict]]:
+        """Single recall for both dedup check and context extraction.
+
+        Returns (dedup_hit, context_hits) where:
+        - dedup_hit: (experience_id, title, similarity) if similarity >
+          dedup_similarity_threshold, else None.
+        - context_hits: list of up to 3 results with similarity in
+          [dedup_context_threshold, dedup_similarity_threshold].
+
+        If recall() fails or returns empty, returns (None, []) so normal
+        refinement proceeds without blocking.
+        """
+        if not content.strip():
+            return None, []
+        try:
+            results = await self._sink.recall(
+                query=content[:500],
+                project=project,
+                max_results=5,
+            )
+        except Exception:
+            logger.warning("Dedup recall failed, proceeding with normal refinement", exc_info=True)
+            return None, []
+
+        if not results:
+            return None, []
+
+        dedup_threshold = self._cfg.dedup_similarity_threshold
+        ctx_threshold = self._cfg.dedup_context_threshold
+
+        dedup_hit = None
+        context_hits: list[dict] = []
+
+        for hit in results:
+            score = hit.get("similarity", 0.0)
+            # Check for high-similarity duplicate (take the first/best match)
+            if dedup_hit is None and score > dedup_threshold:
+                hit_id = hit.get("id") or hit.get("group_id", "")
+                hit_title = hit.get("title", "Untitled")
+                if hit_id:
+                    dedup_hit = (hit_id, hit_title, score)
+                    continue  # Don't also add to context
+            # Check for medium-similarity context
+            if ctx_threshold <= score <= dedup_threshold:
+                context_hits.append(hit)
+                if len(context_hits) >= 3:
+                    pass  # Keep scanning for dedup_hit
+
+        return dedup_hit, context_hits
+
+    # ------------------------------------------------------------------
     # Quality gate helpers
     # ------------------------------------------------------------------
 
@@ -543,7 +640,7 @@ class RefinementWorker:
             logger.warning("Quality scoring LLM call failed, defaulting to pass", exc_info=True)
             return 100
 
-    async def _call_llm(self, content: str, project: str = "default") -> dict[str, Any]:
+    async def _call_llm(self, content: str, project: str = "default", similar_context: str = "") -> dict[str, Any]:
         """Call LLM to extract structured fields from draft content.
 
         Uses the custom _REFINEMENT_PROMPT for technical conversation extraction.
@@ -565,6 +662,7 @@ class RefinementWorker:
                         api_key=api_key or None,
                         timeout=self._cfg.timeout,
                         max_input_chars=self._cfg.max_input_chars,
+                        similar_context=similar_context,
                     )
                 elif self._cfg.provider == "ollama":
                     # Fallback to existing Ollama parse_content

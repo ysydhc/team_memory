@@ -97,6 +97,8 @@ class RefinementSettings:
     fallback_on_failure: bool = True
     quality_gate_enabled: bool = True
     quality_min_score: int = 60
+    dedup_similarity_threshold: float = 0.9  # cosine > this → merge into existing
+    dedup_context_threshold: float = 0.7     # cosine in [0.7, 0.9) → include as LLM context
 
 
 @dataclass
