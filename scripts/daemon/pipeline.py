@@ -207,14 +207,19 @@ async def process_session_end(
         return {"action": "ok", "flushed": False}
 
     try:
-        result = await refiner.refine_and_publish(session_id)
-        if result:
-            return {
-                "action": "published",
-                "flushed": True,
-                "draft_id": result.get("draft_id", ""),
-            }
+        # Delegate to RefinementWorker for LLM refinement + quality gate.
+        # Mark session as needs_refinement so the worker picks it up
+        # on its next tick (within ~30 seconds).
+        await buf.mark_needs_refinement(session_id)
+        logger.info(
+            "[WRITE] session_end → conversation=%s marked for refinement",
+            session_id[:8],
+        )
+        return {
+            "action": "needs_refinement",
+            "flushed": True,
+            "draft_id": session_id,
+        }
     except Exception:
-        logger.exception("Failed to flush session=%s", session_id)
-
-    return {"action": "ok", "flushed": False}
+        logger.exception("Failed to mark session=%s for refinement", session_id)
+        return {"action": "ok", "flushed": False}

@@ -235,25 +235,25 @@ class TestProcessSessionEnd:
 
     @pytest.mark.asyncio
     @patch("daemon.pipeline._try_extract_personal_memory", new_callable=AsyncMock)
-    async def test_active_session_gets_published(self, mock_extract):
+    async def test_active_session_marked_for_refinement(self, mock_extract):
         config = _make_config()
         buf = _make_buf()
         refiner = _make_refiner()
         result = await process_session_end(
             {"conversation_id": "sess-1"}, config, _make_sink(), buf, refiner,
         )
-        assert result["action"] == "published"
+        assert result["action"] == "needs_refinement"
         assert result["flushed"] is True
-        refiner.refine_and_publish.assert_called_once()
+        buf.mark_needs_refinement.assert_called_once_with("sess-1")
         mock_extract.assert_called_once()
 
     @pytest.mark.asyncio
     @patch("daemon.pipeline._try_extract_personal_memory", new_callable=AsyncMock)
-    async def test_refiner_failure_returns_ok(self, mock_extract):
+    async def test_mark_refinement_failure_returns_ok(self, mock_extract):
         config = _make_config()
         buf = _make_buf()
+        buf.mark_needs_refinement = AsyncMock(side_effect=Exception("boom"))
         refiner = _make_refiner()
-        refiner.refine_and_publish = AsyncMock(side_effect=Exception("boom"))
         result = await process_session_end(
             {"conversation_id": "sess-1"}, config, _make_sink(), buf, refiner,
         )

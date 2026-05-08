@@ -289,31 +289,28 @@ class ConversationBuffer:
         """
         cutoff = datetime.utcnow() - timedelta(minutes=idle_minutes)
         cutoff_str = cutoff.isoformat()
-        async with self._lock:
-            # Find active sessions whose last message is older than cutoff
-            # and which have at least one assistant message (worth refining)
-            rows = await self._conn.execute_fetchall(
-                """
-                SELECT s.id FROM sessions s
-                WHERE s.status = 'active'
-                  AND s.updated_at < ?
-                  AND EXISTS (
-                    SELECT 1 FROM messages m
-                    WHERE m.session_id = s.id AND m.role = 'assistant'
-                  )
-                """,
-                (cutoff_str,),
+        rows = await self._db.execute_fetchall(
+            """
+            SELECT s.id FROM sessions s
+            WHERE s.status = 'active'
+              AND s.updated_at < ?
+              AND EXISTS (
+                SELECT 1 FROM messages m
+                WHERE m.session_id = s.id AND m.role = 'assistant'
+              )
+            """,
+            (cutoff_str,),
+        )
+        if not rows:
+            return 0
+        now = datetime.utcnow().isoformat()
+        for row in rows:
+            await self._db.execute(
+                "UPDATE sessions SET status='needs_refinement', updated_at=? WHERE id=?",
+                (now, row[0]),
             )
-            if not rows:
-                return 0
-            now = datetime.utcnow().isoformat()
-            for row in rows:
-                await self._conn.execute(
-                    "UPDATE sessions SET status='needs_refinement', updated_at=? WHERE id=?",
-                    (now, row[0]),
-                )
-            await self._conn.commit()
-            return len(rows)
+        await self._db.commit()
+        return len(rows)
 
     async def get_needs_refinement(self) -> list[dict[str, Any]]:
         """Backward compat: return sessions needing refinement as draft-like dicts."""
