@@ -261,6 +261,25 @@ class ConversationBuffer:
         """Get only assistant messages for a session."""
         return await self.get_messages(session_id, role="assistant")
 
+    async def get_last_user_message_time(self, session_id: str) -> datetime | None:
+        """Get the timestamp of the last user message in a session.
+
+        Used as T1 for time-window fallback when recent_searches is lost.
+        Returns UTC datetime or None if no user messages found.
+        """
+        db = self._require_db()
+        rows = await db.execute_fetchall(
+            "SELECT created_at FROM messages WHERE session_id = ? AND role = 'user' ORDER BY created_at DESC LIMIT 1",
+            (session_id,),
+        )
+        if not rows:
+            return None
+        try:
+            from datetime import datetime as _dt
+            return _dt.fromisoformat(rows[0][0])
+        except (ValueError, IndexError):
+            return None
+
     async def get_accumulated_content(self, session_id: str, role: str | None = None) -> str:
         """Get concatenated content for a session (backward compat).
 

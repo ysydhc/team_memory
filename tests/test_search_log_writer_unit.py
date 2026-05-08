@@ -550,6 +550,7 @@ class TestGetStats:
             "hit": 80,
             "used": 50,
             "unjudged": 20,
+            "legacy_unjudged": 5,
             "used_fuzzy": 20,
             "used_faithfulness": 30,
         }
@@ -590,6 +591,7 @@ class TestGetStats:
         assert result["hit"] == 80
         assert result["used"] == 50
         assert result["unjudged"] == 20
+        assert result["legacy_unjudged"] == 5
         assert result["used_fuzzy"] == 20
         assert result["use_rate"] == 0.625  # 50/80
         assert "default" in result["by_project"]
@@ -602,6 +604,7 @@ class TestGetStats:
             "hit": 0,
             "used": 0,
             "unjudged": 0,
+            "legacy_unjudged": 0,
             "used_fuzzy": 0,
             "used_faithfulness": 0,
         }
@@ -629,6 +632,7 @@ class TestGetStats:
             "hit": None,
             "used": None,
             "unjudged": None,
+            "legacy_unjudged": None,
             "used_fuzzy": None,
             "used_faithfulness": None,
         }

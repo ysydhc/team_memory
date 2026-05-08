@@ -232,6 +232,8 @@ class TestAdd:
         buf = _make_buffer()
         mock_pool = _mock_pool()
         buf._pool = mock_pool
+        # Mock has_search_log to return False (not a duplicate)
+        buf.has_search_log = AsyncMock(return_value=False)
 
         log_id = str(uuid.uuid4())
         result = await buf.add(
@@ -321,6 +323,7 @@ class TestAdd:
         buf = _make_buffer()
         mock_pool = _mock_pool()
         buf._pool = mock_pool
+        buf.has_search_log = AsyncMock(return_value=False)
 
         log_id = str(uuid.uuid4())
         await buf.add(query="q", agent_response="r", search_log_id=log_id)

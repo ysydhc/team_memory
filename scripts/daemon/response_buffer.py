@@ -43,8 +43,16 @@ class ResponseBuffer:
         result_ids: list[dict[str, Any]] | None = None,
         search_log_id: str | None = None,
     ) -> str | None:
-        """Add an entry to the buffer. Returns the buffer entry ID."""
+        """Add an entry to the buffer. Returns the buffer entry ID.
+
+        Skips insertion if search_log_id already exists (dedup).
+        """
         try:
+            # Dedup: skip if search_log_id already buffered
+            if search_log_id and await self.has_search_log(search_log_id):
+                logger.debug("search_log %s already buffered, skipping", search_log_id[:8])
+                return None
+
             pool = await self._ensure_pool()
             entry_id = uuid.uuid4()
             async with pool.acquire() as conn:

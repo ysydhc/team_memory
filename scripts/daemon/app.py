@@ -466,11 +466,60 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                             "result_ids": cached_search["result_ids"],
                         }
                     else:
-                        # Fallback: find most recent search_log with results
-                        recent_log = await search_log.get_recent_with_results(
+                        # Fallback: time-window query for MCP search_logs
+                        # when recent_searches is lost (daemon restart, etc.)
+                        t_end = datetime.now(timezone.utc)
+                        t_start = None
+
+                        # Try ConversationBuffer for T1 (C-2)
+                        conv_buf = getattr(app.state, "conversation_buffer", None)
+                        if conv_buf and payload.conversation_id:
+                            try:
+                                t_start = await conv_buf.get_last_user_message_time(
+                                    payload.conversation_id
+                                )
+                            except Exception:
+                                pass
+
+                        # If no T1 from ConversationBuffer, use 5 min window
+                        if not t_start:
+                            from datetime import timedelta
+                            t_start = t_end - timedelta(minutes=5)
+
+                        # Query unjudged MCP search_logs in window
+                        mcp_fallback = await search_log.find_unjudged_in_window(
+                            t_start=t_start,
+                            t_end=t_end,
                             project=resolved_project or None,
-                            hours_window=1,
+                            source="mcp",
                         )
+                        if mcp_fallback:
+                            # Buffer each MCP search_log found in window
+                            for mcp_log in mcp_fallback:
+                                if not await response_buffer.has_search_log(mcp_log["id"]):
+                                    await response_buffer.add(
+                                        query=mcp_log["query"] or "(mcp recall)",
+                                        agent_response=response_text[:10000],
+                                        result_ids=mcp_log["result_ids"],
+                                        search_log_id=mcp_log["id"],
+                                    )
+                                    logger.info(
+                                        "[EVAL]  fallback: buffered MCP search_log %s (window %s~%s)",
+                                        mcp_log["id"][:8],
+                                        t_start.strftime("%H:%M:%S"),
+                                        t_end.strftime("%H:%M:%S"),
+                                    )
+                            # Also try daemon search_log fallback
+                            recent_log = await search_log.get_recent_with_results(
+                                project=resolved_project or None,
+                                hours_window=1,
+                            )
+                        else:
+                            # Last resort: find any recent search_log with results
+                            recent_log = await search_log.get_recent_with_results(
+                                project=resolved_project or None,
+                                hours_window=1,
+                            )
                     if recent_log:
                         await response_buffer.add(
                             query=recent_log["query"],

@@ -157,6 +157,7 @@ async def run_stats(days: int, granularity: str) -> None:
         used_fuzzy = stats.get("used_fuzzy", 0)
         used_faithfulness = stats.get("used_faithfulness", 0)
         unjudged = stats["unjudged"]
+        legacy_unjudged = stats.get("legacy_unjudged", 0)
         use_rate = stats["use_rate"]
 
         funnel_text = Text()
@@ -169,6 +170,8 @@ async def run_stats(days: int, granularity: str) -> None:
         funnel_text.append(f"    └─ faithfulness:  {used_faithfulness}\n", style="dim")
         funnel_text.append(f"  Unjudged:  {unjudged}", style="yellow")
         funnel_text.append(f"  ({unjudged/hit*100:.0f}% of hits)\n" if hit else " (0%)\n")
+        if legacy_unjudged:
+            funnel_text.append(f"  Legacy (pre-hook):  {legacy_unjudged}\n", style="dim yellow")
 
         console.print(Panel(funnel_text, title=f"TM Search Funnel ({days}d)", border_style="blue"))
 
@@ -310,11 +313,12 @@ def _render_plain(stats, trends, miss_queries, low_use_queries, days, granularit
     used_marker = stats.get("used_marker", 0)
     used_fuzzy = stats.get("used_fuzzy", 0)
     unjudged = stats["unjudged"]
+    legacy_unjudged = stats.get("legacy_unjudged", 0)
     use_rate = stats["use_rate"]
 
     print(f"\n=== TM Search Quality Report ({days}d) ===\n")
     print(f"  Total: {total}  Hit: {hit}  Used: {used} (marker:{used_marker} fuzzy:{used_fuzzy})  Rate: {use_rate:.1%}")
-    print(f"  Unjudged: {unjudged}\n")
+    print(f"  Unjudged: {unjudged}  Legacy (pre-hook): {legacy_unjudged}\n")
 
     if trends and "error" not in trends[0]:
         print(f"  Trend ({granularity}):")

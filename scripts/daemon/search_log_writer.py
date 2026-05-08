@@ -127,6 +127,70 @@ class SearchLogWriter:
             logger.debug("get_recent_with_results failed: %s", e)
             return None
 
+    async def find_unjudged_in_window(
+        self,
+        *,
+        t_start: datetime,
+        t_end: datetime,
+        project: str | None = None,
+        source: str = "mcp",
+    ) -> list[dict]:
+        """Find unjudged search_logs within a time window.
+
+        Used as fallback when recent_searches is lost (daemon restart).
+        Returns list of dicts with: id, query, result_ids.
+        """
+        try:
+            pool = await self._ensure_pool()
+            async with pool.acquire() as conn:
+                if project:
+                    rows = await conn.fetch(
+                        """
+                        SELECT id::text, query, result_ids
+                        FROM search_logs
+                        WHERE source = $1
+                          AND was_used IS NULL
+                          AND result_ids IS NOT NULL
+                          AND result_ids::text NOT IN ('[]', 'null')
+                          AND created_at BETWEEN $2 AND $3
+                          AND project = $4
+                        ORDER BY created_at DESC
+                        LIMIT 10
+                        """,
+                        source,
+                        t_start,
+                        t_end,
+                        project,
+                    )
+                else:
+                    rows = await conn.fetch(
+                        """
+                        SELECT id::text, query, result_ids
+                        FROM search_logs
+                        WHERE source = $1
+                          AND was_used IS NULL
+                          AND result_ids IS NOT NULL
+                          AND result_ids::text NOT IN ('[]', 'null')
+                          AND created_at BETWEEN $2 AND $3
+                        ORDER BY created_at DESC
+                        LIMIT 10
+                        """,
+                        source,
+                        t_start,
+                        t_end,
+                    )
+            return [
+                {
+                    "id": r["id"],
+                    "query": r["query"],
+                    "result_ids": json.loads(r["result_ids"]) if isinstance(r["result_ids"], str) else r["result_ids"],
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.debug("find_unjudged_in_window failed: %s", e)
+            return []
+
     async def mark_used_fuzzy(
         self,
         agent_response: str,
@@ -276,7 +340,9 @@ class SearchLogWriter:
                         COUNT(*) AS total,
                         COUNT(*) FILTER (WHERE result_ids IS NOT NULL AND result_ids::text NOT IN ('[]', 'null')) AS hit,
                         COUNT(*) FILTER (WHERE was_used = TRUE) AS used,
-                        COUNT(*) FILTER (WHERE was_used IS NULL AND result_ids IS NOT NULL AND result_ids::text NOT IN ('[]', 'null')) AS unjudged,
+                        COUNT(*) FILTER (WHERE was_used IS NULL AND result_ids IS NOT NULL AND result_ids::text NOT IN ('[]', 'null')
+                            AND (judgment_source IS NULL OR judgment_source != 'legacy_unjudged')) AS unjudged,
+                        COUNT(*) FILTER (WHERE judgment_source = 'legacy_unjudged') AS legacy_unjudged,
                         COUNT(*) FILTER (WHERE judgment_source = 'fuzzy') AS used_fuzzy,
                         COUNT(*) FILTER (WHERE judgment_source = 'faithfulness') AS used_faithfulness
                     FROM search_logs
@@ -288,6 +354,7 @@ class SearchLogWriter:
                 hit = row["hit"] or 0
                 used = row["used"] or 0
                 unjudged = row["unjudged"] or 0
+                legacy_unjudged = row["legacy_unjudged"] or 0
                 used_fuzzy = row["used_fuzzy"] or 0
                 used_faithfulness = row["used_faithfulness"] or 0
                 use_rate = used / hit if hit > 0 else 0.0
@@ -330,6 +397,7 @@ class SearchLogWriter:
                     "used_fuzzy": used_fuzzy,
                     "used_faithfulness": used_faithfulness,
                     "unjudged": unjudged,
+                    "legacy_unjudged": legacy_unjudged,
                     "use_rate": round(use_rate, 3),
                     "by_project": by_project,
                     "top_queries": [{"query": r["query"][:60], "count": r["cnt"]} for r in top_queries],
