@@ -34,6 +34,36 @@ from daemon.wiki_compiler import WikiCompiler
 
 logger = logging.getLogger("daemon.app")
 
+# ---------------------------------------------------------------------------
+# Alerting helper — thin wrapper around monitoring.alerting.AlertManager
+# ---------------------------------------------------------------------------
+
+
+async def send_daemon_alert(
+    title: str,
+    body: str,
+    severity: str = "critical",
+) -> None:
+    """Send an alert through the daemon's configured alert channels (feishu etc.).
+
+    Safe to call from anywhere in the daemon; silently no-ops if alert
+    manager is not initialized.
+    """
+    try:
+        from monitoring.alerting import AlertManager, AlertSeverity
+        alert_mgr: AlertManager | None = getattr(_app_state, "alert_manager", None)
+        if alert_mgr is None:
+            return
+        sev = AlertSeverity(severity)
+        await alert_mgr.send_alert(title=title, body=body, severity=sev)
+    except Exception:
+        logger.debug("Daemon alert send failed (non-critical)", exc_info=True)
+
+
+# Module-level reference to app.state so send_daemon_alert can access it
+# without needing a FastAPI request context.
+_app_state: Any = None
+
 
 # ---------------------------------------------------------------------------
 # Pydantic request models
@@ -134,6 +164,25 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         # Start heartbeat
         from monitoring.heartbeat import start_heartbeat
         application.state.heartbeat = start_heartbeat()
+
+        # Initialize alert manager (feishu / wecom / webhook channels)
+        try:
+            from monitoring.config import load_monitoring_config
+            from monitoring.alerting import AlertManager
+            mon_config = load_monitoring_config()
+            alert_manager = AlertManager.from_config(mon_config)
+            application.state.alert_manager = alert_manager
+            logger.info(
+                "AlertManager initialized (%d channel(s))",
+                len(alert_manager.channels),
+            )
+        except Exception as e:
+            logger.warning("AlertManager init failed (alerts disabled): %s", e)
+            application.state.alert_manager = None
+
+        # Expose app.state to module-level so send_daemon_alert works
+        global _app_state
+        _app_state = application.state
 
         db_path = config.draft.db_path or ":memory:"
         if db_path != ":memory:":
@@ -423,6 +472,11 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                             )
             except Exception as e:
                 logger.info("Faithfulness buffer capture failed: %s", e, exc_info=True)
+                await send_daemon_alert(
+                    title="Faithfulness Buffer Error",
+                    body=f"Faithfulness buffer capture failed: {e}",
+                    severity="warning",
+                )
         return result
 
     @app.post("/hooks/session_start")
@@ -634,5 +688,25 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                 "dynamic": [],
                 "error": str(e),
             }
+
+    # ------------------------------------------------------------------
+    # Alerting endpoints
+    # ------------------------------------------------------------------
+
+    @app.post("/alert/test")
+    async def alert_test(
+        title: str = "TM Daemon Alert Test",
+        body: str = "This is a test alert from TM Daemon.",
+        severity: str = "info",
+    ) -> dict[str, Any]:
+        """Send a test alert through all configured channels (feishu etc.).
+
+        Useful for verifying feishu webhook integration at deploy time.
+        Query params: title, body, severity (info|warning|critical).
+        """
+        await send_daemon_alert(title=title, body=body, severity=severity)
+        alert_mgr = getattr(app.state, "alert_manager", None)
+        n_channels = len(alert_mgr.channels) if alert_mgr else 0
+        return {"sent": True, "channels": n_channels, "title": title, "severity": severity}
 
     return app

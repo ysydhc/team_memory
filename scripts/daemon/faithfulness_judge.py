@@ -6,13 +6,15 @@ Implements a simplified RAGAS faithfulness metric:
 3. Score = supported_claims / total_claims
 
 Uses LiteLLM proxy for LLM calls. Model is configurable.
+Includes retry with exponential backoff for transient LLM failures.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -22,8 +24,10 @@ logger = logging.getLogger("daemon.faithfulness_judge")
 # Default LLM config — overridable via env vars or constructor
 DEFAULT_BASE_URL = os.environ.get("FAITHFULNESS_LLM_BASE_URL", "http://localhost:4000/v1")
 DEFAULT_MODEL = os.environ.get("FAITHFULNESS_LLM_MODEL", "glm-4-flash")
-DEFAULT_API_KEY = os.environ.get("LITELLM_MASTER_KEY", "")
+DEFAULT_API_KEY = os.environ.get("FAITHFULNESS_LLM_API_KEY", "") or os.environ.get("LITELLM_MASTER_KEY", "")
 DEFAULT_TIMEOUT = int(os.environ.get("FAITHFULNESS_LLM_TIMEOUT", "60"))
+DEFAULT_MAX_RETRIES = int(os.environ.get("FAITHFULNESS_LLM_MAX_RETRIES", "3"))
+DEFAULT_RETRY_BASE_DELAY = float(os.environ.get("FAITHFULNESS_LLM_RETRY_BASE_DELAY", "1.0"))
 
 
 @dataclass
@@ -34,6 +38,7 @@ class FaithfulnessResult:
     supported_claims: int
     claims_detail: list[dict[str, Any]]  # [{claim, supported, reason}]
     raw_response: str
+    retries_used: int = 0  # how many retries were needed (0 = first attempt succeeded)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -41,6 +46,7 @@ class FaithfulnessResult:
             "total_claims": self.total_claims,
             "supported_claims": self.supported_claims,
             "claims_detail": self.claims_detail,
+            "retries_used": self.retries_used,
         }
 
 
@@ -74,8 +80,26 @@ JUDGE_PROMPT = """你是一个 RAG (Retrieval-Augmented Generation) 评估专家
 }}"""
 
 
+def _is_retryable_error(exc: Exception) -> bool:
+    """Check if an exception is worth retrying (transient errors).
+
+    Retries on:
+    - httpx.TimeoutException (request timed out)
+    - httpx.ConnectError (connection refused / network unreachable)
+    - httpx.HTTPStatusError with 429 (rate limit) or 5xx (server error)
+    """
+    if isinstance(exc, httpx.TimeoutException):
+        return True
+    if isinstance(exc, httpx.ConnectError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        return code == 429 or code >= 500
+    return False
+
+
 class FaithfulnessJudge:
-    """LLM-based faithfulness evaluator."""
+    """LLM-based faithfulness evaluator with retry support."""
 
     def __init__(
         self,
@@ -83,11 +107,15 @@ class FaithfulnessJudge:
         model: str | None = None,
         api_key: str | None = None,
         timeout: int | None = None,
+        max_retries: int | None = None,
+        retry_base_delay: float | None = None,
     ) -> None:
         self._base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self._model = model or DEFAULT_MODEL
         self._api_key = api_key or DEFAULT_API_KEY
         self._timeout = timeout or DEFAULT_TIMEOUT
+        self._max_retries = max_retries if max_retries is not None else DEFAULT_MAX_RETRIES
+        self._retry_base_delay = retry_base_delay if retry_base_delay is not None else DEFAULT_RETRY_BASE_DELAY
 
     async def evaluate(
         self,
@@ -126,15 +154,48 @@ class FaithfulnessJudge:
             response=response[:3000],
         )
 
-        try:
-            result_text = await self._call_llm(prompt)
-            return self._parse_result(result_text)
-        except Exception as e:
-            logger.warning("Faithfulness judge failed: %s", e)
-            return FaithfulnessResult(
-                score=-1.0, total_claims=0, supported_claims=0,
-                claims_detail=[], raw_response=str(e),
-            )
+        last_exc: Exception | None = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                result_text = await self._call_llm(prompt)
+                result = self._parse_result(result_text)
+                result.retries_used = attempt
+                if attempt > 0:
+                    logger.info(
+                        "Faithfulness judge succeeded on attempt %d/%d",
+                        attempt + 1, self._max_retries + 1,
+                    )
+                return result
+            except Exception as e:
+                last_exc = e
+                if _is_retryable_error(e) and attempt < self._max_retries:
+                    delay = self._retry_base_delay * (2 ** attempt)
+                    logger.warning(
+                        "Faithfulness judge LLM call failed (attempt %d/%d, retryable), "
+                        "retrying in %.1fs: %s",
+                        attempt + 1, self._max_retries + 1, delay, e,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    # Non-retryable error or all retries exhausted
+                    if attempt < self._max_retries:
+                        logger.warning(
+                            "Faithfulness judge LLM call failed (attempt %d/%d, non-retryable): %s",
+                            attempt + 1, self._max_retries + 1, e,
+                        )
+                    else:
+                        logger.warning(
+                            "Faithfulness judge failed after %d attempts: %s",
+                            self._max_retries + 1, e,
+                        )
+                    break
+
+        return FaithfulnessResult(
+            score=-1.0, total_claims=0, supported_claims=0,
+            claims_detail=[], raw_response=str(last_exc),
+            retries_used=self._max_retries,
+        )
 
     async def _call_llm(self, prompt: str) -> str:
         """Call the LLM via LiteLLM proxy."""
