@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Any
@@ -103,6 +104,23 @@ class DraftPublishPayload(BaseModel):
 
     draft_id: str
     refined_content: str | None = None
+
+
+class MCPCallbackPayload(BaseModel):
+    """Payload for /hooks/mcp_callback — PostToolUse hook reports MCP recall results.
+
+    Called by Claude Code PostToolUse / Cursor afterMCPExecution / Hermes post_tool_call
+    after the AI successfully invokes a TM recall tool.  The hook extracts the
+    ``search_log_id`` from the tool_response and registers it with the daemon so
+    that the subsequent ``after_response`` can correlate the MCP search_log with
+    the AI's final answer.
+    """
+
+    session_id: str
+    tool_use_id: str = ""
+    search_log_id: str = ""
+    tool_name: str = ""
+    result_ids: list[dict] = Field(default_factory=list)
 
 
 class RecallQuery(BaseModel):
@@ -460,16 +478,40 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                             result_ids=recent_log["result_ids"],
                             search_log_id=recent_log["id"],
                         )
-                        # Check if batch threshold reached
-                        if await response_buffer.should_batch():
-                            logger.info("[EVAL]  faithfulness batch threshold reached, triggering evaluation")
-                            import subprocess, sys as _sys
-                            subprocess.Popen(
-                                [_sys.executable, "scripts/daemon/faithfulness_batch.py", "--force"],
-                                cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
+
+                    # Process MCP recall calls registered by PostToolUse hooks
+                    mcp_calls = (cached_search or {}).get("mcp_calls", [])
+                    for mcp in mcp_calls:
+                        if not mcp.get("search_log_id"):
+                            continue
+                        # Skip if this search_log_id was already buffered (dedup)
+                        if await response_buffer.has_search_log(mcp["search_log_id"]):
+                            logger.debug(
+                                "[EVAL]  mcp search_log %s already buffered, skipping",
+                                mcp["search_log_id"][:8],
                             )
+                            continue
+                        await response_buffer.add(
+                            query="(mcp recall)",
+                            agent_response=response_text[:10000],
+                            result_ids=mcp.get("result_ids", []),
+                            search_log_id=mcp["search_log_id"],
+                        )
+                        logger.info(
+                            "[EVAL]  buffered MCP search_log %s for faithfulness",
+                            mcp["search_log_id"][:8],
+                        )
+
+                    # Check if batch threshold reached
+                    if await response_buffer.should_batch():
+                        logger.info("[EVAL]  faithfulness batch threshold reached, triggering evaluation")
+                        import subprocess, sys as _sys
+                        subprocess.Popen(
+                            [_sys.executable, "scripts/daemon/faithfulness_batch.py", "--force"],
+                            cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
             except Exception as e:
                 logger.info("Faithfulness buffer capture failed: %s", e, exc_info=True)
                 await send_daemon_alert(
@@ -544,7 +586,9 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                     "query": query_preview,
                     "result_ids": log_result_ids,
                     "project": project,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "T1": time.monotonic(),  # monotonic timestamp for window matching
+                    "T1_iso": datetime.now(timezone.utc).isoformat(),
+                    "mcp_calls": [],  # populated by /hooks/mcp_callback
                 }
         return result
 
@@ -564,6 +608,55 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             payload.conversation_id[:8] if payload.conversation_id else "?", flushed,
         )
         return result
+
+    @app.post("/hooks/mcp_callback")
+    async def hook_mcp_callback(payload: MCPCallbackPayload) -> dict[str, Any]:
+        """Register an MCP recall result from a PostToolUse hook.
+
+        PostToolUse / afterMCPExecution / post_tool_call hooks call this
+        after the AI successfully invokes a TM recall tool.  The daemon
+        stores the search_log_id in ``recent_searches[session_id].mcp_calls``
+        so that ``after_response`` can correlate it with the AI's answer.
+        """
+        recent_searches: dict = app.state.recent_searches
+        key = payload.session_id
+
+        if key in recent_searches:
+            # Session already has a before_prompt entry — append MCP call
+            recent_searches[key]["mcp_calls"].append({
+                "tool_use_id": payload.tool_use_id,
+                "search_log_id": payload.search_log_id,
+                "result_ids": payload.result_ids,
+                "tool_name": payload.tool_name,
+            })
+            logger.info(
+                "[MCP]   mcp_callback → session=%s tool=%s log_id=%s..%s",
+                key[:8], payload.tool_name,
+                payload.search_log_id[:8] if payload.search_log_id else "?",
+                payload.tool_use_id[:8] if payload.tool_use_id else "?",
+            )
+        else:
+            # No before_prompt entry yet — create a stub entry
+            recent_searches[key] = {
+                "log_id": None,
+                "query": "",
+                "result_ids": [],
+                "project": "",
+                "T1": time.monotonic(),
+                "T1_iso": datetime.now(timezone.utc).isoformat(),
+                "mcp_calls": [{
+                    "tool_use_id": payload.tool_use_id,
+                    "search_log_id": payload.search_log_id,
+                    "result_ids": payload.result_ids,
+                    "tool_name": payload.tool_name,
+                }],
+            }
+            logger.info(
+                "[MCP]   mcp_callback → session=%s (no before_prompt) tool=%s",
+                key[:8], payload.tool_name,
+            )
+
+        return {"status": "ok", "mcp_calls": len(recent_searches[key]["mcp_calls"])}
 
     @app.post("/draft/save")
     async def draft_save(payload: DraftSavePayload) -> dict[str, Any]:

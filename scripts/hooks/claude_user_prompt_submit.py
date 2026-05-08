@@ -1,6 +1,8 @@
 """Claude Code UserPromptSubmit hook — retrieves memories for user prompt.
 
 Fires when user submits a prompt, before Claude processes it.
+Always triggers (no keyword filter) to ensure T1 timestamp is recorded
+for MCP recall correlation in after_response.
 
 Input (from Claude Code):
   {"session_id": "...", "prompt": "user text", "workspace": "/path"}
@@ -14,13 +16,6 @@ import sys
 import httpx
 
 DAEMON_URL = "http://127.0.0.1:3901"
-
-# Trigger keywords for retrieval
-TRIGGER_KEYWORDS = ["之前", "上次", "以前", "经验", "遇到过", "怎么解决", "历史", "记得"]
-
-
-def should_trigger(prompt: str) -> bool:
-    return any(kw in prompt for kw in TRIGGER_KEYWORDS)
 
 
 def main() -> None:
@@ -47,14 +42,9 @@ def main() -> None:
     workspace = input_data.get("cwd", "") or input_data.get("workspace", "") or input_data.get("workingDirectory", "")
 
     with open("/tmp/tm-hook-trace.log", "a") as f:
-        f.write(f"  prompt={prompt[:50]!r} workspace={workspace!r} trigger={should_trigger(prompt)}\n")
+        f.write(f"  prompt={prompt[:50]!r} workspace={workspace!r}\n")
 
-    # Only trigger on keyword matches
-    if not should_trigger(prompt):
-        print("{}")
-        sys.stdout.flush()
-        return
-
+    # Always call daemon to record T1 for MCP recall correlation
     payload = {
         "prompt": prompt,
         "workspace_roots": [workspace] if workspace else [],

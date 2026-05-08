@@ -66,15 +66,18 @@ async def write_search_log(
     project: str = "default",
     source: str = "mcp",
     result_ids: list[dict] | None = None,
-) -> None:
+) -> str | None:
     """Write a SearchLog entry after a search completes.
 
     Failures are logged and do not propagate — search logging is best-effort.
+
+    Returns:
+        The search_log_id (UUID string) on success, None on failure.
     """
     try:
         async with get_session(db_url) as session:
             repo = SearchLogRepository(session)
-            await repo.create(
+            log = await repo.create(
                 query=query,
                 intent_type=intent_type,
                 project=project,
@@ -82,8 +85,10 @@ async def write_search_log(
                 result_ids=result_ids,
             )
             await session.commit()
+            return str(log.id)
     except Exception:
         logger.debug("write_search_log failed (best-effort)", exc_info=True)
+        return None
 
 
 async def _try_extract_and_save_personal_memory(
@@ -588,6 +593,8 @@ async def _maybe_write_search_log(
     """Best-effort write of a SearchLog entry after recall completes.
 
     Extracts intent_type and result_ids from the recall result dict.
+    On success, injects ``search_log_id`` into *recall_result* so that
+    PostToolUse hooks can correlate the MCP response with the log entry.
     Failures are logged and do not propagate.
     """
     results = recall_result.get("results", [])
@@ -602,7 +609,7 @@ async def _maybe_write_search_log(
             score = r.get("score", r.get("similarity", 0))
             result_ids.append({"id": str(rid), "score": score})
 
-    await write_search_log(
+    log_id = await write_search_log(
         db_url=db_url,
         query=query or "(recall)",
         intent_type=intent_type,
@@ -610,6 +617,9 @@ async def _maybe_write_search_log(
         source="mcp",
         result_ids=result_ids,
     )
+    # Inject search_log_id into the result so PostToolUse hooks can pick it up
+    if log_id:
+        recall_result["search_log_id"] = log_id
 
 
 async def op_recall(

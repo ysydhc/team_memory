@@ -85,6 +85,20 @@ class ResponseBuffer:
         count = await self.pending_count()
         return count >= self._batch_threshold
 
+    async def has_search_log(self, search_log_id: str) -> bool:
+        """Check if a search_log_id already exists in the buffer (dedup)."""
+        try:
+            pool = await self._ensure_pool()
+            async with pool.acquire() as conn:
+                exists = await conn.fetchval(
+                    "SELECT 1 FROM response_buffer WHERE search_log_id = $1 LIMIT 1",
+                    uuid.UUID(search_log_id),
+                )
+            return exists is not None
+        except Exception as e:
+            logger.debug("response_buffer.has_search_log failed: %s", e)
+            return False
+
     async def fetch_pending(self, limit: int = 50) -> list[dict[str, Any]]:
         """Fetch unevaluated entries for batch processing."""
         try:
