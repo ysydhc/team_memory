@@ -314,7 +314,7 @@ async def call_llm_openai(
     api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
     headers = {"Content-Type": "application/json"}
     if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+        headers["x-api-key"] = api_key
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -507,7 +507,7 @@ async def parse_personal_memory(
     try:
         headers = {"Content-Type": "application/json"}
         if llm_api_key:
-            headers["Authorization"] = f"Bearer {llm_api_key}"
+            headers["x-api-key"] = llm_api_key
 
         async with httpx.AsyncClient(timeout=timeout) as client:
             messages = [

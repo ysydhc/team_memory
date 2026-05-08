@@ -141,7 +141,7 @@ class FaithfulnessJudge:
         url = f"{self._base_url}/chat/completions"
         headers = {"Content-Type": "application/json"}
         if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
+            headers["x-api-key"] = self._api_key
 
         payload = {
             "model": self._model,

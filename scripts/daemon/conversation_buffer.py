@@ -45,6 +45,23 @@ CREATE INDEX IF NOT EXISTS idx_messages_session_role
 ON messages(session_id, role)
 """
 
+_CREATE_SEARCH_CORRELATIONS = """
+CREATE TABLE IF NOT EXISTS search_correlations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    search_log_id TEXT NOT NULL,
+    query TEXT,
+    result_ids TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    consumed INTEGER DEFAULT 0
+)
+"""
+
+_CREATE_SEARCH_CORR_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_search_corr_session
+ON search_correlations(session_id, consumed)
+"""
+
 
 class ConversationBuffer:
     """Async SQLite-backed conversation buffer.
@@ -74,6 +91,8 @@ class ConversationBuffer:
         await self._db.execute(_CREATE_SESSIONS)
         await self._db.execute(_CREATE_MESSAGES)
         await self._db.execute(_CREATE_INDEX)
+        await self._db.execute(_CREATE_SEARCH_CORRELATIONS)
+        await self._db.execute(_CREATE_SEARCH_CORR_INDEX)
         await self._db.commit()
         return self
 

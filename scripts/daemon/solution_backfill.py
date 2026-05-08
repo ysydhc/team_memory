@@ -69,7 +69,7 @@ async def extract_solution(
         "max_tokens": 300,
     }
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "x-api-key": api_key,
         "Content-Type": "application/json",
     }
 

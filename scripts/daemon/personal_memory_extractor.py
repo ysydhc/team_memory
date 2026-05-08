@@ -166,7 +166,7 @@ class PersonalMemoryExtractor:
             import os
             api_key = os.environ.get(self._llm.api_key_env, "")
             if api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
+                headers["x-api-key"] = api_key
 
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(

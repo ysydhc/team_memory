@@ -713,7 +713,7 @@ class TestSolutionBackfillExtractSolution:
             assert payload["temperature"] == 0.2
             assert payload["max_tokens"] == 300
             headers = call_kwargs[1]["headers"]
-            assert headers["Authorization"] == "Bearer sk-xxx"
+            assert headers["x-api-key"] == "sk-xxx"
 
 
 @pytest.mark.unit

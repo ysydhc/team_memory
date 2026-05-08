@@ -213,7 +213,7 @@ class TestCallLlm:
         async def fake_post(url, **kwargs):
             assert "/chat/completions" in url
             assert kwargs["json"]["model"] == "glm-4-flash"
-            assert kwargs["headers"]["Authorization"] == "Bearer sk-test"
+            assert kwargs["headers"]["x-api-key"] == "sk-test"
             return mock_resp
 
         with patch("httpx.AsyncClient") as mock_client_cls:
