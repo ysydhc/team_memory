@@ -102,6 +102,18 @@ class RefinementSettings:
 
 
 @dataclass
+class AutoDreamSettings:
+    """Auto Dream 后台合并/裁剪配置。"""
+
+    enabled: bool = True
+    min_hours_since_last: int = 24
+    min_new_experiences: int = 5
+    merge_similarity_threshold: float = 0.85
+    prune_max_age_days: int = 30
+    scan_interval_minutes: int = 60  # how often to check trigger conditions
+
+
+@dataclass
 class EvaluationSettings:
     """评估配置：模糊匹配开关与阈值。"""
     fuzzy_match_enabled: bool = True
@@ -136,6 +148,7 @@ class DaemonConfig:
     retrieval: RetrievalSettings = field(default_factory=RetrievalSettings)
     refinement: RefinementSettings = field(default_factory=RefinementSettings)
     evaluation: EvaluationSettings = field(default_factory=EvaluationSettings)
+    auto_dream: AutoDreamSettings = field(default_factory=AutoDreamSettings)
     wiki: WikiSettings = field(default_factory=WikiSettings)
     projects: list[ProjectMapping] = field(default_factory=list)
 
@@ -154,6 +167,7 @@ _SUBCONFIG_KEYS = {
     "retrieval": (RetrievalSettings, None),
     "refinement": (RefinementSettings, None),
     "evaluation": (EvaluationSettings, None),
+    "auto_dream": (AutoDreamSettings, None),
     "wiki": (WikiSettings, None),
 }
 

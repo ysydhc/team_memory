@@ -182,6 +182,13 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         application.state.refinement_worker = refinement_worker
         application.state.refinement_task = refinement_task
 
+        # Auto Dream worker — periodic experience consolidation & pruning
+        from daemon.auto_dream import AutoDreamWorker
+        dream_worker = AutoDreamWorker(config=config, sink=sink)
+        dream_task = dream_worker.start()
+        application.state.dream_worker = dream_worker
+        application.state.dream_task = dream_task
+
         # Search log writer for evaluation
         from team_memory.config import load_settings as _load_tm_settings
         _tm_settings = _load_tm_settings()
@@ -236,6 +243,18 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             refinement_task_obj.cancel()
             try:
                 await asyncio.wait_for(refinement_task_obj, timeout=5.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+
+        # Stop auto dream worker
+        dream_worker_obj = getattr(application.state, "dream_worker", None)
+        if dream_worker_obj is not None:
+            dream_worker_obj.stop()
+        dream_task_obj = getattr(application.state, "dream_task", None)
+        if dream_task_obj is not None:
+            dream_task_obj.cancel()
+            try:
+                await asyncio.wait_for(dream_task_obj, timeout=5.0)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 pass
 
