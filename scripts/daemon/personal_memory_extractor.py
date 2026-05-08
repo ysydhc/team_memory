@@ -15,8 +15,15 @@ from typing import Any
 import httpx
 
 from daemon.config import DaemonConfig, RefinementSettings
+from daemon.intent_classifier import classify_persona
 
 logger = logging.getLogger("tm_daemon.personal_memory")
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_VALID_PERSONAS = frozenset({"coding", "writing", "research", "debugging", "general"})
 
 # ---------------------------------------------------------------------------
 # LLM Prompt
@@ -37,13 +44,20 @@ _EXTRACT_PROMPT = """\
 - 如果没有可提取的个人信息，返回空数组
 - 每条记忆应独立且具体，避免泛泛而谈
 
+每条记忆必须标注 persona 字段，表示该偏好属于哪个场景:
+- coding: 编程/调试/部署/测试相关的偏好 (如 "偏好 pytest", "不喜欢 Java")
+- writing: 写作/文档/翻译相关的偏好 (如 "中英双语输出", "注释用中文")
+- research: 调研/对比/分析相关的偏好 (如 "先比较再决策")
+- debugging: 排障/日志分析相关的偏好 (如 "先看日志再改代码")
+- general: 通用偏好 (如 "不喜欢太长的回复")
+
 输出 JSON 格式:
 ```json
 {{
   "memories": [
-    {{"category": "preference", "content": "具体偏好描述"}},
-    {{"category": "habit", "content": "具体习惯描述"}},
-    {{"category": "context", "content": "具体上下文描述"}}
+    {{"category": "preference", "persona": "coding", "content": "具体偏好描述"}},
+    {{"category": "habit", "persona": "general", "content": "具体习惯描述"}},
+    {{"category": "context", "persona": "research", "content": "具体上下文描述"}}
   ]
 }}
 ```
@@ -112,8 +126,13 @@ class PersonalMemoryExtractor:
             if not content:
                 continue
 
+            # Resolve persona: use LLM-extracted value, validate, fallback to classifier
+            persona = mem.get("persona", "")
+            if persona not in _VALID_PERSONAS:
+                persona = classify_persona(content)
+
             try:
-                await self._save_memory(category, content)
+                await self._save_memory(category, content, persona=persona)
                 saved += 1
             except Exception:
                 logger.warning("Failed to save personal memory: %s", content[:50], exc_info=True)
@@ -170,7 +189,7 @@ class PersonalMemoryExtractor:
         parsed = json.loads(content)
         return parsed.get("memories", [])
 
-    async def _save_memory(self, category: str, content: str) -> None:
+    async def _save_memory(self, category: str, content: str, *, persona: str = "general") -> None:
         """Save a personal memory to the TM database.
 
         Maps extractor category to TM scope/profile_kind:
@@ -197,5 +216,5 @@ class PersonalMemoryExtractor:
             content=content,
             scope=scope,
             context_hint=category,
-            persona="general",
+            persona=persona,
         )
