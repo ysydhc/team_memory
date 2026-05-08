@@ -185,6 +185,16 @@ class ConversationBuffer:
         db = self._require_db()
         await self.ensure_session(session_id, project)
 
+        # Dedup: skip if identical message already exists in this session
+        import hashlib
+        content_hash = hashlib.sha256(f"{role}:{content}".encode()).hexdigest()[:16]
+        existing = await db.execute_fetchall(
+            "SELECT id FROM messages WHERE session_id = ? AND role = ? AND content = ? LIMIT 1",
+            (session_id, role, content),
+        )
+        if existing:
+            return existing[0][0]  # Return existing message id
+
         now = datetime.now(timezone.utc).isoformat()
         cursor = await db.execute(
             "INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
