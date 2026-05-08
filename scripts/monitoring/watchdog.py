@@ -56,21 +56,41 @@ class ServiceWatchdog:
             async with httpx.AsyncClient(timeout=svc.timeout) as client:
                 resp = await client.get(svc.url)
                 ok = resp.status_code == svc.expected_status
+                # Parse health JSON for degraded checks
+                degraded_checks: list[str] = []
+                if ok and svc.name == "team-memory-web":
+                    try:
+                        data = resp.json()
+                        for check_name, check_val in data.get("checks", {}).items():
+                            if isinstance(check_val, dict) and check_val.get("status") == "down":
+                                err = check_val.get("error", "unknown")
+                                degraded_checks.append(f"{check_name}: {err[:60]}")
+                    except Exception:
+                        pass
         except Exception:
             ok = False
+            degraded_checks = []
 
         now = time.time()
         svc.last_check = now
 
-        if ok:
+        if ok and not degraded_checks:
             if not svc.is_up:
                 logger.info("Service %s recovered", svc.name)
                 await self.alert_manager.send_alert(
-                    svc.name, "recovered", f"Service is back online", AlertSeverity.INFO
+                    f"{svc.name} recovered", f"Service is back online", AlertSeverity.INFO
                 )
             svc.consecutive_failures = 0
             svc.is_up = True
             svc.last_ok = now
+        elif ok and degraded_checks:
+            # HTTP OK but some checks degraded
+            svc.last_ok = now
+            svc.is_up = True
+            svc.consecutive_failures = 0
+            detail = "; ".join(degraded_checks)
+            logger.warning("Service %s degraded: %s", svc.name, detail)
+            await self._send_degraded_alert(svc, detail)
         else:
             svc.consecutive_failures += 1
             svc.is_up = False
@@ -83,13 +103,21 @@ class ServiceWatchdog:
 
         return ok
 
+    async def _send_degraded_alert(self, svc: ServiceState, detail: str) -> None:
+        """Send a WARNING alert for degraded checks (respects alert_cooldown)."""
+        await self.alert_manager.send_alert(
+            f"{svc.name} degraded",
+            f"Some checks are down: {detail}",
+            AlertSeverity.WARNING,
+        )
+
     async def _handle_failure(self, svc: ServiceState) -> None:
         """Handle consecutive failure threshold reached."""
         logger.critical("Service %s reached failure threshold, attempting restart", svc.name)
 
         # Alert
         await self.alert_manager.send_alert(
-            svc.name, "down",
+            f"{svc.name} down",
             f"Consecutive failures: {svc.consecutive_failures}. Attempting restart.",
             AlertSeverity.CRITICAL,
         )
@@ -102,7 +130,7 @@ class ServiceWatchdog:
                 logger.info("Service %s restart initiated", svc.name)
             else:
                 await self.alert_manager.send_alert(
-                    svc.name, "restart_failed",
+                    f"{svc.name} restart_failed",
                     "Auto-restart failed. Manual intervention required.",
                     AlertSeverity.CRITICAL,
                 )
