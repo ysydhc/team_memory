@@ -14,12 +14,166 @@ from typing import Any
 from daemon.config import DaemonConfig, RefinementSettings
 from daemon.conversation_buffer import ConversationBuffer
 from daemon.tm_sink import TMSink
-from team_memory.services.llm_parser import LLMParseError, parse_content_openai
+from team_memory.services.llm_parser import LLMParseError, call_llm_openai, _extract_json
 
 logger = logging.getLogger("daemon.refinement_worker")
 
 # Maximum refinement attempts before giving up on a draft
 _MAX_REFINE_ATTEMPTS = 3
+
+# Mapping from refinement experience_type → canonical EXPERIENCE_TYPES
+_REFINEMENT_TYPE_MAP = {
+    "problem_solution": "bugfix",
+    "workaround": "best_practice",
+    "configuration": "feature",
+    "insight": "learning",
+}
+
+# ---------------------------------------------------------------------------
+# Refinement Prompt — targeted at technical coding/debugging/deployment
+# conversations, NOT generic text.
+# Uses {{ }} for literal braces in .format() template strings.
+# ---------------------------------------------------------------------------
+_REFINEMENT_PROMPT = """\
+你是一个技术经验提取助手。你的任务是从项目「{project}」的技术对话记录中，\
+提取结构化的开发经验。
+
+**输入说明**: 输入内容是 AI 助手在编程、调试、部署等技术任务中积累的回复记录，\
+其中包含问题分析、方案尝试、错误排查、配置修改等实际操作过程。
+
+**核心要求**: 每条经验必须包含明确的「问题→解决方案」结构——
+- 问题: 遇到了什么故障 / 需要实现什么功能 / 碰到了什么困难
+- 解决方案: 具体采取了什么行动来解决问题，关键步骤是什么
+
+**以下情况不算经验，不要提取**:
+- 简单问答（如「什么是 Docker？」→ 仅知识陈述，无问题解决过程）
+- 仅有任务描述但无解决方案（如「需要优化性能」→ 缺少行动和结果）
+- 通用知识或事实（如「Python 是解释型语言」→ 无具体场景）
+- 琐碎操作（如「执行了 npm install」「重启了服务」→ 无诊断或决策过程）
+- 重复或空泛内容
+
+**质量要求**:
+- title 必须具体，包含关键技术词，禁止使用泛泛的标题如「调试」「修复」「配置」等。\
+好的标题示例：「Docker 容器内 PostgreSQL 连接 host.docker.internal 超时解决」
+- description 必须解释问题的上下文和具体表现，不少于 50 字
+- solution 必须是可执行的操作步骤或配置变更，不少于 50 字，保留关键命令、路径、参数
+- tags 提取 3-8 个技术关键词，小写英文，包含相关技术栈和问题域
+
+**输出格式** — 严格返回以下 JSON（不要用 markdown 代码块包裹）:
+{{
+  "title": "具体的问题+解决方案标题",
+  "description": "问题的详细描述：现象、上下文、影响范围",
+  "solution": "具体的解决步骤：操作命令、配置修改、代码变更要点",
+  "tags": ["tag1", "tag2", "tag3"],
+  "experience_type": "problem_solution"
+}}
+
+experience_type 必须是以下之一:
+- problem_solution: 故障排查、bug 修复、问题解决（最常见）
+- workaround: 绕过方案、临时解决方案、妥协处理
+- configuration: 环境配置、依赖安装、部署设置、参数调优
+- insight: 从实践中获得的技术洞察、最佳实践总结、架构经验
+
+**反例（不要输出这样的结果）**:
+❌ title: "调试" → 太泛，缺少具体问题
+❌ title: "修复了一个bug" → 没说什么 bug
+❌ description: "遇到了问题" → 没说具体什么问题
+❌ solution: "修改了配置" → 没说改了什么配置、改成什么值
+❌ experience_type: "bug" → 不在允许列表中
+
+**正例**:
+✅ title: "Nginx 反向代理 WebSocket 502 错误修复"
+✅ description: "生产环境中 WebSocket 连接通过 Nginx 反向代理时返回 502 Bad Gateway，\
+排查发现 Nginx 默认不支持 WebSocket 升级请求，需要在 location 块中添加 Upgrade 头处理"
+✅ solution: "在 Nginx 配置的 location 块中添加 proxy_set_header Upgrade $http_upgrade; \
+和 proxy_set_header Connection 'upgrade'; 并设置 proxy_http_version 1.1，reload 后恢复正常"
+✅ tags: ["nginx", "websocket", "reverse-proxy", "502", "configuration"]
+✅ experience_type: "problem_solution"
+
+如果输入内容中没有符合上述标准的经验（即没有包含明确问题解决过程的内容），\
+返回:
+{{"title": "", "description": "", "solution": "", "tags": [], "experience_type": ""}}
+
+对话记录:
+{content}
+"""
+
+
+async def _refine_via_openai(
+    content: str,
+    *,
+    project: str = "default",
+    model: str = "qwen-plus",
+    base_url: str = "http://localhost:4000/v1",
+    api_key: str | None = None,
+    timeout: float = 30.0,
+    max_input_chars: int = 6000,
+) -> dict:
+    """Call LLM with the custom refinement prompt and normalize the result.
+
+    Uses _REFINEMENT_PROMPT instead of the generic parse_single prompt,
+    and maps the output fields (description→problem, experience_type mapping)
+    to match the downstream update_experience API.
+    """
+    system_prompt = _REFINEMENT_PROMPT.format(
+        project=project,
+        content=content[:max_input_chars],
+    )
+    messages = [
+        {"role": "system", "content": "You are a technical experience extraction assistant. Output valid JSON only."},
+        {"role": "user", "content": system_prompt},
+    ]
+
+    llm_text = await call_llm_openai(
+        messages,
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        timeout=timeout,
+        temperature=0.2,
+    )
+
+    parsed = _extract_json(llm_text)
+    return _normalize_refinement_result(parsed)
+
+
+def _normalize_refinement_result(parsed: dict) -> dict:
+    """Normalize the refinement prompt output to match update_experience fields.
+
+    Maps:
+      - description → problem (for update_experience API)
+      - experience_type: problem_solution → bugfix, workaround → best_practice,
+        configuration → feature, insight → learning
+    """
+    from team_memory.schemas import EXPERIENCE_TYPES
+
+    title = str(parsed.get("title", "")).strip()
+    description = str(parsed.get("description", "")).strip()
+    solution = str(parsed.get("solution", "")).strip() or None
+    tags = parsed.get("tags", [])
+    exp_type = str(parsed.get("experience_type", "")).strip()
+
+    # Map refinement-specific types to canonical EXPERIENCE_TYPES
+    if exp_type in _REFINEMENT_TYPE_MAP:
+        exp_type = _REFINEMENT_TYPE_MAP[exp_type]
+
+    # Validate against known types
+    if exp_type not in EXPERIENCE_TYPES:
+        exp_type = "general"
+
+    # Normalize tags
+    if not isinstance(tags, list):
+        tags = []
+    tags = [str(t).strip().lower() for t in tags if t]
+
+    return {
+        "title": title,
+        "problem": description,  # Map description → problem for downstream API
+        "description": description,  # Keep both for flexibility
+        "solution": solution,
+        "tags": tags,
+        "experience_type": exp_type,
+    }
 
 
 class RefinementWorker:
@@ -237,7 +391,11 @@ class RefinementWorker:
             raise RuntimeError("draft_save returned no experience_id")
 
         # Step 2: LLM refinement
-        structured = await self._call_llm(content)
+        structured = await self._call_llm(content, project=project)
+
+        # Map "description" from new prompt output to "problem" for update_experience
+        if "description" in structured and "problem" not in structured:
+            structured["problem"] = structured["description"]
 
         # Step 3: Publish the draft (status → published)
         publish_result = await self._sink.draft_publish(
@@ -277,9 +435,10 @@ class RefinementWorker:
             structured.get("title", "")[:40],
         )
 
-    async def _call_llm(self, content: str) -> dict[str, Any]:
+    async def _call_llm(self, content: str, project: str = "default") -> dict[str, Any]:
         """Call LLM to extract structured fields from draft content.
 
+        Uses the custom _REFINEMENT_PROMPT for technical conversation extraction.
         Supports "litellm" (OpenAI-compatible) and "ollama" providers.
         Retries up to max_retries on transient failures.
         """
@@ -290,8 +449,9 @@ class RefinementWorker:
             try:
                 if self._cfg.provider == "litellm":
                     api_key = os.environ.get(self._cfg.api_key_env, "")
-                    return await parse_content_openai(
+                    return await _refine_via_openai(
                         content,
+                        project=project,
                         model=self._cfg.model,
                         base_url=self._cfg.base_url,
                         api_key=api_key or None,

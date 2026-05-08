@@ -535,7 +535,7 @@ class TestCallLLM:
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
         with patch(
-            "daemon.refinement_worker.parse_content_openai",
+            "daemon.refinement_worker._refine_via_openai",
             new_callable=AsyncMock,
         ) as mock_parse:
             mock_parse.return_value = {"title": "OK", "problem": "P", "solution": "S"}
@@ -551,7 +551,7 @@ class TestCallLLM:
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
         with patch(
-            "daemon.refinement_worker.parse_content_openai",
+            "daemon.refinement_worker._refine_via_openai",
             new_callable=AsyncMock,
         ) as mock_parse:
             mock_parse.return_value = {"title": "OK"}
@@ -570,7 +570,7 @@ class TestCallLLM:
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
         with patch(
-            "daemon.refinement_worker.parse_content_openai",
+            "daemon.refinement_worker._refine_via_openai",
             new_callable=AsyncMock,
         ) as mock_parse:
             mock_parse.side_effect = [
@@ -590,7 +590,7 @@ class TestCallLLM:
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
         with patch(
-            "daemon.refinement_worker.parse_content_openai",
+            "daemon.refinement_worker._refine_via_openai",
             new_callable=AsyncMock,
         ) as mock_parse:
             mock_parse.side_effect = LLMParseError("permanent fail")
@@ -666,7 +666,7 @@ class TestCallLLM:
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
         with patch(
-            "daemon.refinement_worker.parse_content_openai",
+            "daemon.refinement_worker._refine_via_openai",
             new_callable=AsyncMock,
         ) as mock_parse:
             mock_parse.side_effect = LLMParseError("fail")
@@ -682,7 +682,7 @@ class TestCallLLM:
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
         with patch(
-            "daemon.refinement_worker.parse_content_openai",
+            "daemon.refinement_worker._refine_via_openai",
             new_callable=AsyncMock,
         ) as mock_parse:
             mock_parse.side_effect = ConnectionError("network down")
