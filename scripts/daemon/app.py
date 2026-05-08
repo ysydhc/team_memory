@@ -611,10 +611,9 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         try:
             from team_memory.services.personal_memory import PersonalMemoryService
             from team_memory.config import load_settings as _load_tm_settings
-            from team_memory.embedding.factory import create_embedding_provider
-
+            from team_memory.bootstrap import _create_embedding_provider
             _settings = _load_tm_settings()
-            embedding = create_embedding_provider(_settings.embedding)
+            embedding = _create_embedding_provider(_settings)
             pms = PersonalMemoryService(
                 embedding_provider=embedding,
                 db_url=str(_settings.database.url),
