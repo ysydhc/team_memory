@@ -151,6 +151,7 @@ class WikiCompiler:
         self,
         wiki_root: str,
         db_path: str | None = None,
+        llm_wiki: Any | None = None,
     ) -> None:
         self._wiki_root = os.path.abspath(wiki_root)
         if db_path is None:
@@ -158,6 +159,7 @@ class WikiCompiler:
             db_path = os.path.join(meta_dir, "cache.db")
         self._db_path = db_path
         self._db: aiosqlite.Connection | None = None
+        self._llm_wiki = llm_wiki  # LLMWiki instance for writing entries
         # Cache of all experiences for cross-referencing (populated before compile)
         self._all_experiences: list[dict] = []
         # Entity graph: experience_id → set of entity_ids
@@ -330,6 +332,21 @@ class WikiCompiler:
             ),
         )
         await db.commit()
+
+        # 6. Write to LLMWiki for FTS-searchable retrieval
+        if self._llm_wiki is not None:
+            try:
+                tags = experience.get("tags", [])
+                if isinstance(tags, str):
+                    tags = [t.strip() for t in tags.split(",") if t.strip()]
+                await self._llm_wiki.add(
+                    title=experience.get("title", "untitled"),
+                    content=content,
+                    project=experience.get("project", "default"),
+                    tags=tags if tags else None,
+                )
+            except Exception:
+                pass  # Non-fatal: wiki write is best-effort
 
         return wiki_path
 

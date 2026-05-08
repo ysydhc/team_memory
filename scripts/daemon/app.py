@@ -27,6 +27,7 @@ from daemon.pipeline import (
     process_session_end,
     process_session_start,
 )
+from daemon.llm_wiki import LLMWiki
 from daemon.search_log_writer import SearchLogWriter
 from daemon.tm_sink import TMSink, create_sink
 from daemon.wiki_compiler import WikiCompiler
@@ -144,6 +145,13 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         detector = ConvergenceDetector()
         application.state.detector = detector
 
+        # LLMWiki — local SQLite knowledge store with FTS5 search
+        wiki_db_path_default = os.path.expanduser("~/.cache/tm-pipeline/wiki.db")
+        llm_wiki = LLMWiki(db_path=wiki_db_path_default)
+        await llm_wiki.__aenter__()
+        application.state.llm_wiki = llm_wiki
+        logger.info("LLMWiki initialized (db=%s)", wiki_db_path_default)
+
         # Wiki compiler (must init before DraftRefiner)
         wiki_compiler: WikiCompiler | None = None
         if config.wiki.enabled:
@@ -155,7 +163,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 wiki_root = os.path.join(project_root, "wiki")
             wiki_db_path = config.wiki.db_path or None  # None → WikiCompiler default
-            wiki_compiler = WikiCompiler(wiki_root=wiki_root, db_path=wiki_db_path)
+            wiki_compiler = WikiCompiler(wiki_root=wiki_root, db_path=wiki_db_path, llm_wiki=llm_wiki)
             await wiki_compiler.__aenter__()
             # Pre-load entity/embedding data for enhanced cross-referencing
             from team_memory.config import load_settings as _load_tm_settings
@@ -218,6 +226,12 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         yield
 
         # -- Shutdown --
+        # Close LLMWiki
+        llm_wiki_obj: LLMWiki | None = getattr(application.state, "llm_wiki", None)
+        if llm_wiki_obj is not None:
+            await llm_wiki_obj.__aexit__(None, None, None)
+            logger.info("LLMWiki shutdown")
+
         wiki_compiler_obj: WikiCompiler | None = getattr(application.state, "wiki_compiler", None)
         if wiki_compiler_obj is not None:
             await wiki_compiler_obj.__aexit__(None, None, None)
@@ -436,6 +450,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             config=app.state.config,
             sink=app.state.sink,
             buf=app.state.buf,
+            wiki=getattr(app.state, "llm_wiki", None),
         )
         project = result.get("project", "")
         all_results = result.get("results", [])
@@ -558,5 +573,30 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         """Get evaluation statistics for the last N days."""
         search_log: SearchLogWriter = app.state.search_log
         return await search_log.get_stats(days=days)
+
+    @app.get("/wiki/search")
+    async def wiki_search(
+        q: str = "",
+        project: str | None = None,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Search the local LLMWiki knowledge store using FTS5."""
+        llm_wiki: LLMWiki | None = getattr(app.state, "llm_wiki", None)
+        if llm_wiki is None:
+            return []
+        results = await llm_wiki.search(query=q, project=project, limit=limit)
+        logger.info(
+            "[READ]  wiki/search → q=\"%s\" project=%s results=%d",
+            q[:60], project or "?", len(results),
+        )
+        return results
+
+    @app.get("/wiki/stats")
+    async def wiki_stats() -> dict[str, Any]:
+        """Return wiki entry statistics."""
+        llm_wiki: LLMWiki | None = getattr(app.state, "llm_wiki", None)
+        if llm_wiki is None:
+            return {"total": 0, "by_project": {}}
+        return await llm_wiki.stats()
 
     return app

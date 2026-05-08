@@ -73,6 +73,7 @@ async def process_before_prompt(
     config: DaemonConfig,
     sink: TMSink,
     buf: Any = None,  # ConversationBuffer
+    wiki: Any = None,  # LLMWiki (optional)
 ) -> dict[str, Any]:
     """Process before-prompt: retrieve memories and store user message.
 
@@ -81,6 +82,7 @@ async def process_before_prompt(
         config: DaemonConfig.
         sink: TMSink for retrieval.
         buf: ConversationBuffer instance (optional, for storing user prompt).
+        wiki: LLMWiki instance (optional, for local wiki search).
 
     Returns:
         Dict with results and project.
@@ -109,6 +111,34 @@ async def process_before_prompt(
         project=project,
         max_results=getattr(config, "max_results", 5),
     )
+
+    # Normalize results to list (some sinks return dict with "results" key)
+    if isinstance(results, dict):
+        results = results.get("results", [])
+    if not isinstance(results, list):
+        results = []
+
+    # Dual retrieval: also search local wiki
+    wiki_results: list[dict] = []
+    if wiki is not None:
+        try:
+            wiki_results = await wiki.search(query=prompt, project=project, limit=3)
+        except Exception:
+            logger.debug("Wiki search failed for query=%s", prompt[:60], exc_info=True)
+
+    # Tag results with source for downstream formatting
+    for r in results:
+        if "_source" not in r:
+            r["_source"] = "mem"
+    for r in wiki_results:
+        r["_source"] = "wiki"
+
+    # Combine: experiences first, then wiki entries (avoid duplicates by title)
+    seen_titles = {r.get("title", "").lower() for r in results}
+    for wr in wiki_results:
+        if wr.get("title", "").lower() not in seen_titles:
+            results.append(wr)
+            seen_titles.add(wr.get("title", "").lower())
 
     return {"results": results, "project": project or ""}
 
