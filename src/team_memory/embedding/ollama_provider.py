@@ -58,7 +58,7 @@ class OllamaEmbedding(EmbeddingProvider):
                         json={
                             "model": self._model,
                             "input": texts,
-                            "keep_alive": "30m",  # Keep model loaded for 30 min / 模型常驻 30 分钟
+                            "keep_alive": "0",  # Unload after use / 用完即卸载，省内存
                         },
                     )
                     response.raise_for_status()

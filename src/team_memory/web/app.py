@@ -230,39 +230,68 @@ async def _check_ollama() -> dict:
 
 
 async def _check_embedding_provider() -> dict:
-    """Check embedding provider; auto-retry initialization on failure.
+    """Check embedding provider availability without loading the model.
 
-    健康检查嵌入提供者；失败时自动重试初始化。
-    When Ollama restarts while Web is running, the cached embedding
-    provider becomes stale. Re-initialize from settings on failure.
+    健康检查嵌入提供者可达性（不加载模型）。
+    With keep_alive=0, models are unloaded after each call.
+    Checking by actually calling encode_single would reload the model
+    every health check, defeating the purpose of keep_alive=0.
+    Instead, just verify Ollama is reachable and the model exists.
     """
     try:
         ctx = get_context()
         provider_name = ctx.settings.embedding.provider
-        vec = await ctx.embedding.encode_single("health check")
-        return {"status": "up", "provider": provider_name, "dimension": len(vec)}
+        base_url = getattr(
+            ctx.settings.embedding.ollama, "base_url", "http://localhost:11434"
+        )
+        model = getattr(ctx.settings.embedding.ollama, "model", "")
+        dimension = getattr(ctx.settings.embedding.ollama, "dimension", 0)
+
+        if provider_name == "ollama":
+            # Light check: just ping /api/tags to see if model exists
+            # 轻量检查：只 ping /api/tags 确认模型存在，不实际加载
+            import httpx
+
+            try:
+                resp = await httpx.AsyncClient(timeout=5.0).get(
+                    f"{base_url}/api/tags"
+                )
+                if resp.status_code == 200:
+                    models = resp.json().get("models", [])
+                    model_base = model.split(":")[0]
+                    found = any(
+                        m.get("name", "").split(":")[0] == model_base
+                        for m in models
+                    )
+                    if found:
+                        return {
+                            "status": "up",
+                            "provider": provider_name,
+                            "dimension": dimension,
+                            "note": "light check (model not loaded)",
+                        }
+                    return {
+                        "status": "down",
+                        "provider": provider_name,
+                        "error": f"model '{model}' not found in Ollama",
+                    }
+                return {
+                    "status": "down",
+                    "provider": provider_name,
+                    "error": f"Ollama returned {resp.status_code}",
+                }
+            except httpx.ConnectError:
+                return {
+                    "status": "down",
+                    "provider": provider_name,
+                    "error": "Ollama not reachable",
+                }
+        # Non-ollama providers: just report configured
+        return {"status": "up", "provider": provider_name, "dimension": dimension}
     except RuntimeError:
         return {"status": "down", "reason": "not bootstrapped"}
     except Exception as e:
-        # Auto-retry: re-create embedding provider from settings
-        # 自动重试：从配置重新创建嵌入提供者
-        logger.warning("Embedding provider health check failed: %s — retrying init", e)
-        try:
-            from team_memory.bootstrap import _create_embedding_provider
-            new_embedding = _create_embedding_provider(ctx.settings)
-            vec = await new_embedding.encode_single("health check")
-            # Success — update the cached embedding provider
-            # 成功 — 更新缓存的嵌入提供者
-            ctx.embedding = new_embedding
-            logger.info("Embedding provider recovered after re-init")
-            return {
-                "status": "up",
-                "provider": provider_name,
-                "dimension": len(vec),
-                "recovered": True,
-            }
-        except Exception as retry_err:
-            return {"status": "down", "error": str(e)[:80], "retry_error": str(retry_err)[:80]}
+        return {"status": "down", "error": str(e)[:80]}
 
 
 async def _check_llm_provider() -> dict:
@@ -321,8 +350,13 @@ async def health_check():
 
     if db_check["status"] == "down":
         status = "unhealthy"
-    elif any(checks[k].get("status") == "down" for k in ["ollama", "embedding_provider"]):
+    elif checks.get("ollama", {}).get("status") == "down":
+        # Ollama down = can't do anything, still degraded
+        # Ollama 不可用 = 无法工作，仍报降级
         status = "degraded"
+    # embedding_provider down is expected with keep_alive=0
+    # (model unloaded, will reload on next actual call)
+    # embedding_provider down 是正常的（keep_alive=0，模型已卸载，下次实际调用时会重载）
     else:
         status = "healthy"
 
