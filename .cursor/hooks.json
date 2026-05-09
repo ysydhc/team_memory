@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/yeshouyou/Work/agent/team_doc/.venv/bin/python /Users/yeshouyou/Work/agent/team_doc/scripts/hooks/cursor_after_mcp.py"
+            "command": "/Users/yeshouyou/miniconda3/envs/team_memory/bin/python -m team_memory.hooks.cursor_after_mcp"
           }
         ]
       }

@@ -8,6 +8,9 @@ Subcommands:
     context      Profile + relevant knowledge (POST /api/v1/mcp/context)
     get-archive  Fetch full archive L2 by id (GET /api/v1/mcp/archive/{id})
     feedback     Rate an experience (POST /api/v1/mcp/feedback)
+    config       Manage client configuration (show/check/set/init)
+    project      Manage project configuration (init/show/list)
+    setup        Configure AI client hooks (with --uninstall support)
 
 Usage:
     python -m team_memory.cli archive --title "..." --solution-doc "..." [options]
@@ -17,6 +20,12 @@ Usage:
     python -m team_memory.cli context [--file-paths "a.py,b.py"] [options]
     python -m team_memory.cli get-archive --id <uuid> [options]
     python -m team_memory.cli feedback --experience-id <uuid> --rating 5 [options]
+    python -m team_memory.cli config show
+    python -m team_memory.cli config check
+    python -m team_memory.cli config set server.url http://localhost:9111
+    python -m team_memory.cli project init
+    python -m team_memory.cli project show
+    python -m team_memory.cli setup [--platform ...] [--uninstall]
 """
 
 from __future__ import annotations
@@ -266,6 +275,314 @@ def cmd_config_show(_args: argparse.Namespace) -> None:
         print()
 
 
+def cmd_config_check(_args: argparse.Namespace) -> None:
+    """Test connectivity for server, LLM, and Ollama/embedding.
+
+    测试服务器、LLM 和 Ollama/embedding 的连通性。
+    Returns exit code 1 if any critical check fails.
+    """
+    from team_memory.client_config import ClientConfig
+
+    cfg = ClientConfig.load()
+    any_fail = False
+
+    # ── 1. Server health / 服务器健康检查 ──
+    print("1. Server connectivity / 服务器连通性 ...")
+    try:
+        resp = httpx.get(f"{cfg.server.url}/health", timeout=5.0)
+        if resp.status_code == 200:
+            print("   ✅ Server reachable (HTTP 200)")
+        else:
+            print(f"   ⚠️  Server responded with status {resp.status_code}")
+            any_fail = True
+    except httpx.ConnectError:
+        print(f"   ❌ Cannot connect to {cfg.server.url}")
+        any_fail = True
+    except httpx.TimeoutException:
+        print(f"   ❌ Connection timed out to {cfg.server.url}")
+        any_fail = True
+    except Exception as e:
+        print(f"   ❌ Error: {e}")
+        any_fail = True
+
+    # ── 2. LLM connectivity / LLM 连通性 ──
+    print("2. LLM connectivity / LLM 连通性 ...")
+    llm_key = cfg.llm.resolved_api_key
+    llm_headers: dict[str, str] = {"Content-Type": "application/json"}
+    if llm_key:
+        llm_headers["Authorization"] = f"Bearer {llm_key}"
+    try:
+        # Minimal payload / 最小化请求体
+        llm_resp = httpx.post(
+            f"{cfg.llm.base_url}/chat/completions",
+            headers=llm_headers,
+            json={
+                "model": cfg.llm.model,
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 1,
+            },
+            timeout=cfg.llm.timeout,
+        )
+        if llm_resp.status_code in (200, 201):
+            print("   ✅ LLM reachable (chat/completions responded)")
+        else:
+            print(f"   ⚠️  LLM responded with status {llm_resp.status_code}")
+            # Non-critical: LLM failure is warning, not fatal
+    except httpx.ConnectError:
+        print(f"   ❌ Cannot connect to LLM at {cfg.llm.base_url}")
+    except httpx.TimeoutException:
+        print(f"   ❌ Connection timed out to LLM at {cfg.llm.base_url}")
+    except Exception as e:
+        print(f"   ⚠️  LLM check error: {e}")
+
+    # ── 3. Ollama / embedding / Ollama 嵌入模型 ──
+    print("3. Ollama/embedding connectivity / Ollama 嵌入连通性 ...")
+    ollama_url = "http://localhost:11434"
+    try:
+        ollama_resp = httpx.get(f"{ollama_url}/api/tags", timeout=5.0)
+        if ollama_resp.status_code == 200:
+            data = ollama_resp.json()
+            models = [m.get("name", "?") for m in data.get("models", [])]
+            print(f"   ✅ Ollama reachable ({len(models)} model(s) loaded)")
+            if models:
+                for m in models[:5]:
+                    print(f"      - {m}")
+                if len(models) > 5:
+                    print(f"      ... and {len(models) - 5} more")
+        else:
+            print(f"   ⚠️  Ollama responded with status {ollama_resp.status_code}")
+    except httpx.ConnectError:
+        print(f"   ⚠️  Cannot connect to Ollama at {ollama_url} (not critical)")
+    except httpx.TimeoutException:
+        print("   ⚠️  Connection timed out to Ollama (not critical)")
+    except Exception as e:
+        print(f"   ⚠️  Ollama check error: {e} (not critical)")
+
+    if any_fail:
+        print("\n❌ Some critical checks failed / 部分关键检查未通过")
+        sys.exit(1)
+    else:
+        print("\n✅ All critical checks passed / 所有关键检查通过")
+
+
+def cmd_config_set(args: argparse.Namespace) -> None:
+    """Set a config key in ~/.config/tm/config.toml.
+
+    使用点号表示法设置配置项，例如: config set server.url http://localhost:9111
+    """
+    import tomli_w
+
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib  # type: ignore[no-redef]
+
+    key = args.key  # e.g. "server.url"
+    value = args.value
+
+    # Parse dot notation / 解析点号表示法
+    parts = key.split(".")
+    if len(parts) < 2:
+        print(
+            "Error: Key must be in section.field format,"
+            " e.g. server.url / 键必须为 section.field 格式",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Read existing config / 读取现有配置
+    config_dir = Path.home() / ".config" / "tm"
+    config_file = config_dir / "config.toml"
+    config_data: dict[str, Any] = {}
+    if config_file.exists():
+        try:
+            with open(config_file, "rb") as f:
+                config_data = tomllib.load(f)
+        except Exception as e:
+            print(
+                f"Warning: Cannot read existing config: {e}"
+                " / 警告：无法读取现有配置",
+                file=sys.stderr,
+            )
+
+    # Try to convert value to appropriate type / 尝试类型转换
+    converted_value: Any = value
+    if value.lower() == "true":
+        converted_value = True
+    elif value.lower() == "false":
+        converted_value = False
+    else:
+        try:
+            converted_value = int(value)
+        except ValueError:
+            try:
+                converted_value = float(value)
+            except ValueError:
+                pass  # Keep as string / 保持字符串
+
+    # Set nested key / 设置嵌套键
+    current = config_data
+    for part in parts[:-1]:
+        if part not in current or not isinstance(current[part], dict):
+            current[part] = {}
+        current = current[part]
+    current[parts[-1]] = converted_value
+
+    # Write back / 写回文件
+    config_dir.mkdir(parents=True, exist_ok=True)
+    with open(config_file, "wb") as f:
+        tomli_w.dump(config_data, f)
+
+    print(f"Set {key} = {converted_value!r} in {config_file}")
+    print(f"已设置 {key} = {converted_value!r} 于 {config_file}")
+
+
+def cmd_project_init(args: argparse.Namespace) -> None:
+    """Generate .tm.toml in current directory / 在当前目录生成 .tm.toml。
+
+    Auto-detect project name from git repo name.
+    If .tm.toml already exists, print warning and exit.
+    """
+    import tomli_w
+
+    tm_path = Path.cwd() / ".tm.toml"
+    if tm_path.exists():
+        print(
+            f"Warning: .tm.toml already exists at {tm_path}"
+            " / 警告：.tm.toml 已存在",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Auto-detect project name / 自动检测项目名称
+    detected_name = _detect_project_name()
+
+    # Write .tm.toml / 写入 .tm.toml
+    project_data: dict[str, Any] = {
+        "project": {
+            "name": detected_name,
+            "aliases": [],
+        }
+    }
+
+    with open(tm_path, "wb") as f:
+        tomli_w.dump(project_data, f)
+
+    print(f"Created .tm.toml with project name: {detected_name}")
+    print(f"已创建 .tm.toml，项目名称: {detected_name}")
+
+
+def _detect_project_name() -> str:
+    """Detect project name from git repo / 从 git 仓库检测项目名称。"""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return os.path.basename(result.stdout.strip()).replace("-", "_")
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+    # Fallback: directory name / 回退：目录名
+    return os.path.basename(os.getcwd()).replace("-", "_")
+
+
+def cmd_project_show(_args: argparse.Namespace) -> None:
+    """Print current project name and aliases / 显示当前项目名称和别名。"""
+    from team_memory.project_resolver import _git_repo_name, read_tm_toml
+
+    cwd = os.getcwd()
+    tm_path = Path.cwd() / ".tm.toml"
+
+    print(f"Project info / 项目信息 (cwd: {cwd})")
+    print()
+
+    # .tm.toml info / .tm.toml 信息
+    if tm_path.exists():
+        tm_config = read_tm_toml(cwd)
+        if tm_config:
+            print(f"  .tm.toml path: {tm_path}")
+            print(f"  Project name:  {tm_config.get('name', '(not set)')}")
+            aliases = tm_config.get("aliases", [])
+            print(f"  Aliases:       {aliases if aliases else '(none)'}")
+        else:
+            print(f"  .tm.toml path: {tm_path} (invalid or no [project].name)")
+    else:
+        print("  .tm.toml:      (not found)")
+
+    # Git repo name / Git 仓库名
+    git_name = _git_repo_name(cwd)
+    print(f"  Git repo name: {git_name or '(not a git repo)'}")
+
+    # Directory name / 目录名
+    dir_name = os.path.basename(os.path.abspath(cwd))
+    print(f"  Directory name: {dir_name}")
+
+    # Inferred name / 推断名称
+    from team_memory.project_resolver import infer_project_name
+    inferred = infer_project_name(cwd)
+    print(f"  Inferred name: {inferred}")
+
+
+def cmd_project_list(args: argparse.Namespace) -> None:
+    """List all projects with experience count / 列出所有项目及经验数量。"""
+    headers = _headers()
+    base_url = _get_base_url()
+
+    # Try dedicated projects endpoint / 尝试专用的项目端点
+    try:
+        resp = httpx.get(f"{base_url}/api/v1/experiences/projects", headers=headers, timeout=10.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            projects = data.get("projects", data) if isinstance(data, dict) else data
+            if isinstance(projects, list):
+                print(f"Projects ({len(projects)} found) / 项目（共 {len(projects)} 个）:")
+                for p in projects:
+                    name = p if isinstance(p, str) else p.get("name", p.get("project", "?"))
+                    print(f"  {name}")
+                return
+    except (httpx.HTTPStatusError, httpx.ConnectError):
+        pass
+
+    # Fallback: query experiences and extract unique projects / 回退：查询经验并提取唯一项目
+    try:
+        resp = httpx.get(
+            f"{base_url}/api/v1/experiences",
+            headers=headers,
+            params={"limit": "100"},
+            timeout=10.0,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            project_counts: dict[str, int] = {}
+            items = (data if isinstance(data, list)
+                else data.get("items", data.get("experiences", [])))
+            for item in items:
+                proj = item.get("project", "default")
+                project_counts[proj] = project_counts.get(proj, 0) + 1
+            if project_counts:
+                n = len(project_counts)
+                print(f"Projects ({n} found) / 项目（共 {n} 个）:")
+                for name, count in sorted(project_counts.items()):
+                    print(f"  {name}: {count} experiences")
+            else:
+                print("No projects found / 未找到项目")
+        else:
+            print(f"Error: API returned status {resp.status_code}", file=sys.stderr)
+            sys.exit(1)
+    except httpx.ConnectError:
+        print(f"Error: Cannot connect to {base_url}. Is the server running?", file=sys.stderr)
+        sys.exit(1)
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_config_init(args: argparse.Namespace) -> None:
     """Initialize ~/.config/tm/config.toml / 初始化客户端配置。"""
     import tomli_w
@@ -353,18 +670,173 @@ def _test_connection(server_url: str, api_key: str | None) -> None:
 
 def cmd_setup(args: argparse.Namespace) -> None:
     """Configure AI client hooks / 一键配置 AI 客户端 hooks。"""
-    platforms = (
-        ["claude-code", "cursor", "hermes"] if args.platform == "all" else [args.platform]
-    )
     from team_memory.client_config import get_client_config
 
     cfg = get_client_config()
 
-    for platform in platforms:
-        if args.check:
+    # Handle uninstall / 处理卸载
+    if args.uninstall:
+        platforms = (
+            ["claude-code", "cursor", "hermes"] if args.platform == "all" else [args.platform]
+        )
+        for platform in platforms:
+            _uninstall_platform(platform)
+        return
+
+    # Handle check / 处理检查
+    if args.check:
+        platforms = (
+            ["claude-code", "cursor", "hermes"] if args.platform == "all" else [args.platform]
+        )
+        for platform in platforms:
             _check_platform(platform, cfg)
+        return
+
+    # No --platform: interactive wizard / 无 --platform：交互式向导
+    if not args.platform:
+        _setup_wizard(args, cfg)
+        return
+
+    # Specific platform / 指定平台
+    platforms = (
+        ["claude-code", "cursor", "hermes"] if args.platform == "all" else [args.platform]
+    )
+    for platform in platforms:
+        _setup_platform(platform, cfg)
+
+
+def _setup_wizard(args: argparse.Namespace, cfg: Any) -> None:
+    """Interactive setup wizard / 交互式配置向导。"""
+    non_interactive = getattr(args, "non_interactive", False)
+
+    # Step a: Server URL / 步骤 a: 服务器 URL
+    server_url = getattr(args, "server_url", None)
+    if not non_interactive and not server_url:
+        server_url = input("TM server URL [http://localhost:9111]: ").strip()
+        if not server_url:
+            server_url = "http://localhost:9111"
+
+    # Step b: API key / 步骤 b: API 密钥
+    api_key = getattr(args, "api_key", None)
+    if not non_interactive and not api_key:
+        api_key = input("TM API key: ").strip()
+
+    # Step c: Run config check / 步骤 c: 运行配置检查
+    print("\nRunning connectivity check / 运行连通性检查 ...")
+    # Create a mock args for config check
+    check_args = argparse.Namespace()
+    cmd_config_check(check_args)
+
+    # Step d: Ask which platforms / 步骤 d: 询问平台
+    platforms = ["claude-code", "cursor", "hermes"]
+    selected = []
+    if non_interactive:
+        selected = platforms
+    else:
+        print("\nWhich platforms to configure? / 配置哪些平台？")
+        for i, p in enumerate(platforms, 1):
+            print(f"  {i}. {p}")
+        choices = input("Select (comma-separated numbers, or 'all'): ").strip()
+        if choices.lower() in ("all", "a", "*"):
+            selected = platforms
         else:
-            _setup_platform(platform, cfg)
+            for c in choices.split(","):
+                c = c.strip()
+                if c.isdigit() and 1 <= int(c) <= len(platforms):
+                    selected.append(platforms[int(c) - 1])
+
+    # Step e: Setup each platform / 步骤 e: 配置各平台
+    for platform in selected:
+        print()
+        _setup_platform(platform, cfg)
+
+
+def _uninstall_platform(platform: str) -> None:
+    """Remove TM hooks from platform config / 移除平台配置中的 TM hooks。"""
+    if platform == "claude-code":
+        _uninstall_claude_code()
+    elif platform == "cursor":
+        _uninstall_cursor()
+    elif platform == "hermes":
+        _uninstall_hermes()
+
+
+def _uninstall_claude_code() -> None:
+    """Remove TM hooks from Claude Code settings / 从 Claude Code 设置移除 TM hooks。"""
+    settings_path = Path.home() / ".claude" / "settings.json"
+    if not settings_path.exists():
+        print("[claude-code] ⚠️  No settings.json found, nothing to uninstall")
+        return
+
+    try:
+        with open(settings_path) as f:
+            settings = json.load(f)
+
+        hooks = settings.get("hooks", {})
+        post_tool = hooks.get("PostToolUse", [])
+        original_len = len(post_tool)
+        post_tool = [h for h in post_tool if h.get("matcher") != "mcp__team_memory__recall"]
+
+        if len(post_tool) == original_len:
+            print("[claude-code] ⚠️  No TM hooks found to remove")
+            return
+
+        hooks["PostToolUse"] = post_tool
+        settings["hooks"] = hooks
+
+        with open(settings_path, "w") as f:
+            json.dump(settings, f, indent=2)
+
+        print(f"[claude-code] ✅ Removed TM hooks from {settings_path}")
+        print(f"[claude-code] ✅ 已从 {settings_path} 移除 TM hooks")
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[claude-code] ❌ Error: {e}")
+
+
+def _uninstall_cursor() -> None:
+    """Remove TM hooks from Cursor hooks.json / 从 Cursor hooks.json 移除 TM hooks。"""
+    hooks_path = Path.cwd() / ".cursor" / "hooks.json"
+    if not hooks_path.exists():
+        print("[cursor] ⚠️  No hooks.json found, nothing to uninstall")
+        return
+
+    try:
+        with open(hooks_path) as f:
+            hooks_data = json.load(f)
+
+        hooks_section = hooks_data.get("hooks", {})
+        if not isinstance(hooks_section, dict):
+            print("[cursor] ⚠️  Unexpected hooks format, skipping")
+            return
+
+        after_mcp = hooks_section.get("afterMCPExecution", [])
+        original_len = len(after_mcp)
+        after_mcp = [
+            entry for entry in after_mcp
+            if not (isinstance(entry, dict) and "team_memory" in entry.get("matcher", ""))
+        ]
+
+        if len(after_mcp) == original_len:
+            print("[cursor] ⚠️  No TM hooks found to remove")
+            return
+
+        hooks_section["afterMCPExecution"] = after_mcp
+        hooks_data["hooks"] = hooks_section
+
+        with open(hooks_path, "w") as f:
+            json.dump(hooks_data, f, indent=2)
+
+        print(f"[cursor] ✅ Removed TM hooks from {hooks_path}")
+        print(f"[cursor] ✅ 已从 {hooks_path} 移除 TM hooks")
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[cursor] ❌ Error: {e}")
+
+
+def _uninstall_hermes() -> None:
+    """Print manual uninstall instructions for Hermes / 打印 Hermes 手动卸载说明。"""
+    print("[hermes] ⚠️  Manual uninstall required / 需要手动卸载:")
+    print("  Remove post_tool_call hook from ~/.hermes/config.yaml")
+    print("  从 ~/.hermes/config.yaml 中移除 post_tool_call hook")
 
 
 def _check_platform(platform: str, cfg: Any) -> None:
@@ -732,34 +1204,73 @@ def main() -> None:
     p_fb.set_defaults(func=cmd_feedback)
 
     # ── config ──────────────────────────────────────────────────
-    p_cfg = sub.add_parser("config", help="Manage client configuration")
+    p_cfg = sub.add_parser("config", help="Manage client configuration / 管理客户端配置")
     cfg_sub = p_cfg.add_subparsers(dest="config_command")
 
-    p_cfg_show = cfg_sub.add_parser("show", help="Show current config")
+    p_cfg_show = cfg_sub.add_parser("show", help="Show current config / 显示当前配置")
     p_cfg_show.set_defaults(func=cmd_config_show)
 
-    p_cfg_init = cfg_sub.add_parser("init", help="Initialize config interactively")
+    p_cfg_check = cfg_sub.add_parser("check", help="Test connectivity / 测试连通性")
+    p_cfg_check.set_defaults(func=cmd_config_check)
+
+    p_cfg_set = cfg_sub.add_parser("set", help="Set a config key / 设置配置项")
+    p_cfg_set.add_argument("key", help="Config key (dot notation, e.g. server.url)")
+    p_cfg_set.add_argument("value", help="Config value")
+    p_cfg_set.set_defaults(func=cmd_config_set)
+
+    p_cfg_init = cfg_sub.add_parser(
+        "init", help="Initialize config interactively / 交互式初始化配置")
     p_cfg_init.add_argument("--server-url", help="TM server URL")
     p_cfg_init.add_argument("--api-key", help="TM API key")
     p_cfg_init.add_argument(
         "--non-interactive",
         action="store_true",
-        help="Use flags only, no prompts",
+        help="Use flags only, no prompts / 仅使用标志，无提示",
     )
     p_cfg_init.set_defaults(func=cmd_config_init)
 
+    # ── project ──────────────────────────────────────────────────
+    p_proj = sub.add_parser("project", help="Manage project configuration / 管理项目配置")
+    proj_sub = p_proj.add_subparsers(dest="project_command")
+
+    p_proj_init = proj_sub.add_parser("init", help="Initialize .tm.toml / 初始化 .tm.toml")
+    p_proj_init.set_defaults(func=cmd_project_init)
+
+    p_proj_show = proj_sub.add_parser("show", help="Show project info / 显示项目信息")
+    p_proj_show.set_defaults(func=cmd_project_show)
+
+    p_proj_list = proj_sub.add_parser("list", help="List all projects / 列出所有项目")
+    p_proj_list.set_defaults(func=cmd_project_list)
+
     # ── setup ──────────────────────────────────────────────────
-    p_setup = sub.add_parser("setup", help="Configure AI client hooks")
+    p_setup = sub.add_parser("setup", help="Configure AI client hooks / 配置 AI 客户端 hooks")
     p_setup.add_argument(
         "--platform",
-        required=True,
         choices=["claude-code", "cursor", "hermes", "all"],
-        help="Which platform to configure",
+        help="Which platform to configure / 配置哪个平台 (omit for interactive wizard)",
     )
     p_setup.add_argument(
         "--check",
         action="store_true",
-        help="Only check current status, don't modify",
+        help="Only check current status, don't modify / 仅检查状态",
+    )
+    p_setup.add_argument(
+        "--uninstall",
+        action="store_true",
+        help="Remove TM hooks instead of adding / 移除而非添加 TM hooks",
+    )
+    p_setup.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Skip prompts, use defaults/flags only / 跳过提示",
+    )
+    p_setup.add_argument(
+        "--server-url",
+        help="TM server URL (for wizard) / 服务器 URL（向导用）",
+    )
+    p_setup.add_argument(
+        "--api-key",
+        help="TM API key (for wizard) / API 密钥（向导用）",
     )
     p_setup.set_defaults(func=cmd_setup)
 
