@@ -16,12 +16,16 @@ import functools
 import json
 import logging
 import os
+from typing import TYPE_CHECKING
 
 from fastmcp import FastMCP
 
 from team_memory import io_logger
 from team_memory.bootstrap import bootstrap
 from team_memory.services import memory_operations
+
+if TYPE_CHECKING:
+    from team_memory.remote_client import RemoteTMClient
 
 try:
     from team_memory.services.context_trimmer import estimate_tokens
@@ -32,6 +36,39 @@ except ImportError:
 
 
 logger = logging.getLogger("team_memory")
+
+
+# ============================================================
+# Remote mode — 模块级远程客户端 / module-level remote client
+# ============================================================
+
+_remote_client: "RemoteTMClient | None" = None
+
+
+def _init_mode() -> None:
+    """初始化运行模式: remote 或 local / Initialize running mode: remote or local.
+
+    检测逻辑 / Detection logic:
+      1. TM_SERVER_URL 环境变量 / env var
+      2. ClientConfig.server.url (config.toml)
+      3. 非 localhost URL → remote 模式 / non-localhost → remote mode
+      4. TM_REMOTE_MODE=1 强制 remote / force remote mode
+    """
+    global _remote_client
+
+    from team_memory.remote_client import RemoteTMClient, detect_remote_mode
+
+    is_remote, base_url, api_key = detect_remote_mode()
+
+    if is_remote:
+        _remote_client = RemoteTMClient(base_url=base_url, api_key=api_key)
+        logger.info(
+            "[INIT] Remote mode — MCP ops will delegate to %s / 远程模式",
+            base_url,
+        )
+    else:
+        _remote_client = None
+        logger.info("[INIT] Local mode — MCP ops use local DB / 本地模式")
 
 
 # ============================================================
@@ -291,18 +328,33 @@ async def memory_save(
 ) -> str:
     """Unified write: route to direct save or LLM parse based on input."""
     user = await _get_current_user()
-    result = await memory_operations.op_save(
-        user,
-        title=title,
-        problem=problem,
-        solution=solution,
-        content=content,
-        tags=tags,
-        scope=scope,
-        experience_type=experience_type,
-        project=_resolve_project(project),
-        group_key=group_key,
-    )
+    resolved_project = _resolve_project(project)
+    if _remote_client:
+        result = await _remote_client.op_save(
+            user,
+            title=title,
+            problem=problem,
+            solution=solution,
+            content=content,
+            tags=tags,
+            scope=scope,
+            experience_type=experience_type,
+            project=resolved_project,
+            group_key=group_key,
+        )
+    else:
+        result = await memory_operations.op_save(
+            user,
+            title=title,
+            problem=problem,
+            solution=solution,
+            content=content,
+            tags=tags,
+            scope=scope,
+            experience_type=experience_type,
+            project=resolved_project,
+            group_key=group_key,
+        )
     return _guard_output(json.dumps(result, ensure_ascii=False))
 
 
@@ -341,19 +393,35 @@ async def memory_recall(
 ) -> str:
     """Unified read: route to solve/search/suggest mode based on input."""
     user = await _get_current_user()
-    result = await memory_operations.op_recall(
-        user,
-        query=query,
-        problem=problem,
-        file_path=file_path,
-        language=language,
-        framework=framework,
-        tags=tags,
-        max_results=max_results,
-        project=_resolve_project(project),
-        include_archives=include_archives,
-        include_user_profile=include_user_profile,
-    )
+    resolved_project = _resolve_project(project)
+    if _remote_client:
+        result = await _remote_client.op_recall(
+            user,
+            query=query,
+            problem=problem,
+            file_path=file_path,
+            language=language,
+            framework=framework,
+            tags=tags,
+            max_results=max_results,
+            project=resolved_project,
+            include_archives=include_archives,
+            include_user_profile=include_user_profile,
+        )
+    else:
+        result = await memory_operations.op_recall(
+            user,
+            query=query,
+            problem=problem,
+            file_path=file_path,
+            language=language,
+            framework=framework,
+            tags=tags,
+            max_results=max_results,
+            project=resolved_project,
+            include_archives=include_archives,
+            include_user_profile=include_user_profile,
+        )
     return _guard_output(json.dumps(result, ensure_ascii=False))
 
 

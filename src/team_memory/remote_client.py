@@ -1,64 +1,86 @@
-"""Remote HTTP client for team_memory MCP server.
+"""Remote HTTP client for team_memory MCP server — RemoteTMClient.
 
-When TEAM_MEMORY_REMOTE_URL is set, the MCP server delegates all op_*
-calls to the remote team_memory_service via its /mcp/ REST endpoints
-instead of bootstrapping a local AppContext and connecting to PostgreSQL.
+当 MCP server 运行在 remote 模式时，所有 op_* 调用通过 HTTP 转发到
+远程 team_memory_service，无需本地 PostgreSQL 或 AppContext。
+
+When running in remote mode, all op_* calls are forwarded via HTTP to a
+remote team_memory_service instance — no local DB or AppContext needed.
+
+模式检测逻辑 / Mode detection logic:
+  1. TM_SERVER_URL 环境变量 → 使用该 URL / use that URL
+  2. ClientConfig.server.url (config.toml) → 使用配置 URL / use config URL
+  3. URL 不是 localhost/127.0.0.1 → remote 模式 / remote mode
+  4. URL 是 localhost → local 模式（当前行为）/ local mode (current behavior)
+  5. TM_REMOTE_MODE=1 → 强制 remote 模式（即使 localhost）/ force remote mode
 
 Usage (automatic — set env var before starting MCP server):
-    export TEAM_MEMORY_REMOTE_URL=http://your-server:9111
-    export TEAM_MEMORY_API_KEY=your-key
+    export TM_SERVER_URL=http://your-server:9111
+    export TEAM_MEMORY_API_KEY=***
     python -m team_memory.server   # stdio mode, no local DB needed
-
-Design:
-    - RemoteMCPClient wraps every op_* function used in server.py
-    - setup_remote_ops() monkey-patches team_memory.services.memory_operations
-      so server.py tool handlers transparently call remote HTTP
-    - No AppContext / bootstrap / PostgreSQL needed in remote mode
 """
 
 from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 logger = logging.getLogger("team_memory.remote_client")
 
 
-class RemoteMCPClient:
-    """HTTP client that calls /mcp/ endpoints on a remote team_memory_service.
+# ============================================================
+# RemoteTMClient — 带连接池的 HTTP 远程客户端
+# ============================================================
 
-    Mirrors the op_* function signatures used in memory_operations so it
-    can be used as a drop-in patch target.
+
+class RemoteTMClient:
+    """HTTP client that mirrors the memory_operations API via /api/v1/mcp/* endpoints.
+
+    使用 httpx.AsyncClient 连接池，避免每次请求都创建新连接。
+    Uses httpx.AsyncClient with connection pooling for efficiency.
+
+    注意: user 参数不发送到 HTTP API（服务端通过 Bearer token 解析用户身份）。
+    Note: the `user` parameter is NOT sent to the HTTP API (resolved server-side).
     """
 
-    def __init__(self, base_url: str, api_key: str) -> None:
+    def __init__(self, base_url: str, api_key: str, timeout: float = 60.0) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
+        # 连接池: 复用 TCP 连接 / connection pool: reuse TCP connections
+        self._client = httpx.AsyncClient(
+            base_url=self._base_url,
+            headers=self._headers(),
+            timeout=httpx.Timeout(timeout),
+        )
 
     def _headers(self) -> dict[str, str]:
+        """构建请求头，包含 Bearer token / Build headers with Bearer token."""
         h: dict[str, str] = {"Content-Type": "application/json"}
         if self._api_key:
             h["Authorization"] = f"Bearer {self._api_key}"
         return h
 
+    async def close(self) -> None:
+        """关闭连接池 / Close the connection pool."""
+        await self._client.aclose()
+
     async def _post(self, path: str, body: dict[str, Any]) -> dict:
-        url = f"{self._base_url}{path}"
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(url, json=body, headers=self._headers())
-            resp.raise_for_status()
-            return resp.json()
+        """发送 POST 请求到远程 MCP 端点 / POST to remote MCP endpoint."""
+        resp = await self._client.post(path, json=body)
+        resp.raise_for_status()
+        return resp.json()
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict:
-        url = f"{self._base_url}{path}"
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.get(url, params=params, headers=self._headers())
-            resp.raise_for_status()
-            return resp.json()
+        """发送 GET 请求到远程 MCP 端点 / GET to remote MCP endpoint."""
+        resp = await self._client.get(path, params=params)
+        resp.raise_for_status()
+        return resp.json()
 
     # ------------------------------------------------------------------
-    # op_* wrappers — same signatures as memory_operations
+    # op_* wrappers — 与 memory_operations 签名一致
+    # Same signatures as memory_operations; `user` param accepted but not sent
     # ------------------------------------------------------------------
 
     async def op_save(
@@ -208,6 +230,7 @@ class RemoteMCPClient:
         experience_id: str,
         rating: int,
         comment: str | None = None,
+        project: str | None = None,
     ) -> dict:
         body: dict[str, Any] = {
             "experience_id": experience_id,
@@ -215,6 +238,8 @@ class RemoteMCPClient:
         }
         if comment is not None:
             body["comment"] = comment
+        if project is not None:
+            body["project"] = project
         return await self._post("/api/v1/mcp/feedback", body)
 
     async def op_draft_save(
@@ -245,21 +270,212 @@ class RemoteMCPClient:
         *,
         draft_id: str,
         refined_content: str | None = None,
+        project: str | None = None,
     ) -> dict:
         body: dict[str, Any] = {"draft_id": draft_id}
         if refined_content is not None:
             body["refined_content"] = refined_content
+        if project is not None:
+            body["project"] = project
         return await self._post("/api/v1/mcp/draft-publish", body)
+
+    async def op_submit_response(
+        self,
+        user: str,
+        *,
+        query: str,
+        response: str,
+        result_ids: list[str] | None = None,
+        project: str | None = None,
+    ) -> dict:
+        body: dict[str, Any] = {"query": query, "response": response}
+        if result_ids is not None:
+            body["result_ids"] = result_ids
+        if project is not None:
+            body["project"] = project
+        return await self._post("/api/v1/mcp/submit-response", body)
+
+
+# ============================================================
+# Mode detection helpers / 模式检测辅助函数
+# ============================================================
+
+
+def _is_localhost(url: str) -> bool:
+    """判断 URL 是否指向本地 / Check if URL points to localhost.
+
+    >>> _is_localhost("http://localhost:9111")
+    True
+    >>> _is_localhost("http://127.0.0.1:9111")
+    True
+    >>> _is_localhost("http://0.0.0.0:9111")
+    True
+    >>> _is_localhost("http://my-server:9111")
+    False
+    """
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname or ""
+        return hostname in ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+    except Exception:
+        return False
+
+
+def detect_remote_mode() -> tuple[bool, str, str]:
+    """检测是否应该使用远程模式 / Detect whether remote mode should be used.
+
+    Returns:
+        (is_remote, base_url, api_key):
+          - is_remote: True → remote 模式, False → local 模式
+          - base_url: 远程服务器 URL (仅远程模式有意义)
+          - api_key: Bearer token (仅远程模式有意义)
+
+    优先级 / Priority:
+      1. TM_REMOTE_MODE=1 强制远程模式 / force remote mode
+      2. TM_SERVER_URL 环境变量 / environment variable
+      3. ClientConfig.server.url (config.toml)
+      4. URL 不是 localhost → remote 模式
+    """
+    import os
+
+    # 获取 API key / get API key
+    api_key = os.environ.get("TEAM_MEMORY_API_KEY", "")
+
+    # Step 1: TM_SERVER_URL 环境变量 / environment variable
+    server_url = os.environ.get("TM_SERVER_URL", "").strip()
+
+    # Step 2: 如果没有环境变量，从 config.toml 读取 / read from config.toml
+    if not server_url:
+        try:
+            from team_memory.client_config import ClientConfig
+
+            config = ClientConfig.load()
+            server_url = config.server.url
+            if not api_key:
+                api_key = config.server.api_key
+        except Exception:
+            pass
+
+    if not server_url:
+        # 没有配置任何 URL → local 模式 / no URL configured → local mode
+        return False, "", api_key
+
+    # Step 3: 判断是否远程 / determine if remote
+    force_remote = os.environ.get("TM_REMOTE_MODE", "").strip() == "1"
+
+    if force_remote:
+        logger.info(
+            "TM_REMOTE_MODE=1 — 强制远程模式 / forced remote mode → %s",
+            server_url,
+        )
+        return True, server_url, api_key
+
+    if _is_localhost(server_url):
+        logger.info(
+            "URL 指向 localhost (%s) → local 模式 / localhost URL → local mode",
+            server_url,
+        )
+        return False, server_url, api_key
+
+    # 非本地 URL → remote 模式 / non-localhost URL → remote mode
+    logger.info(
+        "非本地 URL (%s) → remote 模式 / non-localhost URL → remote mode",
+        server_url,
+    )
+    return True, server_url, api_key
+
+
+# ============================================================
+# Legacy backward compatibility / 旧版向后兼容
+# ============================================================
+
+
+class RemoteMCPClient:
+    """Deprecated: use RemoteTMClient instead. Kept for backward compatibility.
+
+    旧版实现：每次请求创建新的 httpx.AsyncClient。
+    Legacy implementation: creates a new httpx.AsyncClient per request.
+    """
+
+    def __init__(self, base_url: str, api_key: str) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
+
+    def _headers(self) -> dict[str, str]:
+        h: dict[str, str] = {"Content-Type": "application/json"}
+        if self._api_key:
+            h["Authorization"] = f"Bearer {self._api_key}"
+        return h
+
+    async def _post(self, path: str, body: dict[str, Any]) -> dict:
+        url = f"{self._base_url}{path}"
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(url, json=body, headers=self._headers())
+            resp.raise_for_status()
+            return resp.json()
+
+    async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict:
+        url = f"{self._base_url}{path}"
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.get(url, params=params, headers=self._headers())
+            resp.raise_for_status()
+            return resp.json()
+
+    # 委托到 RemoteTMClient 的方法签名 / delegate method signatures
+    async def op_save(self, user: str, **kwargs: Any) -> dict:
+        return await RemoteTMClient._post.__get__(self)(  # type: ignore[attr-defined]
+            "/api/v1/mcp/save",
+            {k: v for k, v in kwargs.items() if v is not None},
+        )
+
+    async def op_recall(self, user: str, **kwargs: Any) -> dict:
+        return await RemoteTMClient._post.__get__(self)(  # type: ignore[attr-defined]
+            "/api/v1/mcp/recall",
+            {k: v for k, v in kwargs.items() if v is not None},
+        )
+
+    async def op_context(self, user: str, **kwargs: Any) -> dict:
+        return await RemoteTMClient._post.__get__(self)(  # type: ignore[attr-defined]
+            "/api/v1/mcp/context",
+            {k: v for k, v in kwargs.items() if v is not None},
+        )
+
+    async def op_get_archive(self, user: str, *, archive_id: str, **kwargs: Any) -> dict:
+        return await RemoteTMClient._get.__get__(self)(  # type: ignore[attr-defined]
+            f"/api/v1/mcp/archive/{archive_id}",
+            {k: v for k, v in kwargs.items() if v is not None} or None,
+        )
+
+    async def op_archive_upsert(self, user: str, **kwargs: Any) -> dict:
+        return await RemoteTMClient._post.__get__(self)(  # type: ignore[attr-defined]
+            "/api/v1/mcp/archive-upsert",
+            {k: v for k, v in kwargs.items() if v is not None},
+        )
+
+    async def op_feedback(self, user: str, **kwargs: Any) -> dict:
+        return await RemoteTMClient._post.__get__(self)(  # type: ignore[attr-defined]
+            "/api/v1/mcp/feedback",
+            {k: v for k, v in kwargs.items() if v is not None},
+        )
+
+    async def op_draft_save(self, user: str, **kwargs: Any) -> dict:
+        return await RemoteTMClient._post.__get__(self)(  # type: ignore[attr-defined]
+            "/api/v1/mcp/draft-save",
+            {k: v for k, v in kwargs.items() if v is not None},
+        )
+
+    async def op_draft_publish(self, user: str, **kwargs: Any) -> dict:
+        return await RemoteTMClient._post.__get__(self)(  # type: ignore[attr-defined]
+            "/api/v1/mcp/draft-publish",
+            {k: v for k, v in kwargs.items() if v is not None},
+        )
 
 
 def setup_remote_ops(base_url: str, api_key: str) -> RemoteMCPClient:
     """Monkey-patch memory_operations with remote HTTP implementations.
 
-    Called by server.py main() when TEAM_MEMORY_REMOTE_URL is set.
-    After this call, all MCP tool handlers transparently delegate to the
-    remote team_memory_service — no local DB or AppContext needed.
-
-    Returns the RemoteMCPClient for testing / inspection.
+    旧版接口，保留向后兼容。server.py main() 中 TEAM_MEMORY_REMOTE_URL 仍可使用。
+    Legacy interface, kept for backward compatibility.
     """
     from team_memory.services import memory_operations
 
@@ -276,6 +492,7 @@ def setup_remote_ops(base_url: str, api_key: str) -> RemoteMCPClient:
     memory_operations.op_draft_publish = client.op_draft_publish  # type: ignore[method-assign]
 
     logger.info(
-        "MCP server running in REMOTE mode — delegating all ops to %s", base_url
+        "MCP server running in REMOTE mode (legacy) — delegating all ops to %s",
+        base_url,
     )
     return client
