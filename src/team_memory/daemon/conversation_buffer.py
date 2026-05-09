@@ -359,9 +359,22 @@ class ConversationBuffer:
         await self._db.commit()
         return len(rows)
 
-    async def get_needs_refinement(self) -> list[dict[str, Any]]:
-        """Backward compat: return sessions needing refinement as draft-like dicts."""
-        sessions = await self.get_sessions_by_status("needs_refinement")
+    async def get_needs_refinement(self, project: str | None = None) -> list[dict[str, Any]]:
+        """Return sessions needing refinement, optionally filtered by project.
+
+        返回待精炼会话，可按 project 过滤。
+        """
+        db = self._require_db()
+        if project:
+            cursor = await db.execute(
+                "SELECT * FROM sessions WHERE status = 'needs_refinement' AND project = ? ORDER BY updated_at DESC",
+                (project,),
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT * FROM sessions WHERE status = 'needs_refinement' ORDER BY updated_at DESC",
+            )
+        sessions = [self._row_to_dict(r) for r in await cursor.fetchall()]
         result = []
         for s in sessions:
             content = await self.get_accumulated_content(s["id"], role="assistant")

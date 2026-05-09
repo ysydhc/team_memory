@@ -325,46 +325,56 @@ class RefinementWorker:
         # Step 1: auto-mark idle active sessions
         await self._mark_idle_sessions()
 
-        # Step 2: process sessions marked needs_refinement
-        drafts = await self._buf.get_needs_refinement()
-        if not drafts:
+        # Step 2: get unique projects with needs_refinement sessions
+        all_drafts = await self._buf.get_needs_refinement()
+        if not all_drafts:
             return
 
-        logger.info("RefinementWorker: %d draft(s) need refinement", len(drafts))
-        for draft in drafts:
-            draft_id: str = draft["id"]
-            title: str = draft.get("title", "")
-            description: str = draft.get("description", "")
+        # Group by project for isolated processing
+        # 按 project 分组，避免跨项目去重污染
+        projects = list({d.get("project", "default") for d in all_drafts})
+        logger.info("RefinementWorker: %d draft(s) across %d project(s) need refinement",
+                    len(all_drafts), len(projects))
 
-            # Skip learning cards — they don't need solution extraction
-            if self._is_learning_card(title, description):
-                logger.info("Skipping learning card: %s", title[:50])
-                await self._buf.mark_published(draft_id)
-                continue
+        for project in projects:
+            drafts = await self._buf.get_needs_refinement(project=project)
+            logger.info("RefinementWorker: processing project=%s (%d draft(s))", project, len(drafts))
+            for draft in drafts:
+                draft_id: str = draft["id"]
+                title: str = draft.get("title", "")
+                description: str = draft.get("description", "")
 
-            # Check retry limit
-            attempts = self._retry_counts.get(draft_id, 0)
-            if attempts >= _MAX_REFINE_ATTEMPTS:
-                logger.warning(
-                    "Draft %s exceeded %d refine attempts, marking as refinement_failed",
-                    draft_id,
-                    _MAX_REFINE_ATTEMPTS,
-                )
-                await self._buf.mark_published(draft_id)  # Remove from refinement queue
-                self._retry_counts.pop(draft_id, None)
-                continue
+                # Skip learning cards — they don't need solution extraction
+                # 跳过学习卡片，不需要解决方案提取
+                if self._is_learning_card(title, description):
+                    logger.info("Skipping learning card: %s", title[:50])
+                    await self._buf.mark_published(draft_id)
+                    continue
 
-            self._retry_counts[draft_id] = attempts + 1
+                # Check retry limit
+                # 检查重试次数
+                attempts = self._retry_counts.get(draft_id, 0)
+                if attempts >= _MAX_REFINE_ATTEMPTS:
+                    logger.warning(
+                        "Draft %s exceeded %d refine attempts, marking as refinement_failed",
+                        draft_id,
+                        _MAX_REFINE_ATTEMPTS,
+                    )
+                    await self._buf.mark_published(draft_id)  # Remove from refinement queue
+                    self._retry_counts.pop(draft_id, None)
+                    continue
 
-            try:
-                await self._refine_one(draft)
-                # Success: clear retry count
-                self._retry_counts.pop(draft_id, None)
-            except Exception:
-                logger.exception("Failed to refine draft %s (attempt %d/%d)",
-                                 draft_id, attempts + 1, _MAX_REFINE_ATTEMPTS)
-                if self._cfg.fallback_on_failure:
-                    await self._fallback_publish(draft)
+                self._retry_counts[draft_id] = attempts + 1
+
+                try:
+                    await self._refine_one(draft)
+                    # Success: clear retry count
+                    self._retry_counts.pop(draft_id, None)
+                except Exception:
+                    logger.exception("Failed to refine draft %s (attempt %d/%d)",
+                                     draft_id, attempts + 1, _MAX_REFINE_ATTEMPTS)
+                    if self._cfg.fallback_on_failure:
+                        await self._fallback_publish(draft)
 
     async def _refine_one(self, draft: dict[str, Any]) -> None:
         """Refine a single draft via LLM and update the Experience.

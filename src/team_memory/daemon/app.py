@@ -211,6 +211,12 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         await buf.__aenter__()
         application.state.buf = buf
 
+        # Separate DraftBuffer for Obsidian watcher (drafts table, not sessions)
+        # 独立的 DraftBuffer 给 Obsidian watcher 使用（drafts 表，非 sessions）
+        draft_buf = DraftBuffer(db_path)
+        await draft_buf.__aenter__()
+        application.state.draft_buf = draft_buf
+
         detector = ConvergenceDetector()
         application.state.detector = detector
 
@@ -290,7 +296,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
 
         # Start Obsidian vault watcher as background task
         from team_memory.daemon.watcher import start_watcher
-        watcher_task = asyncio.create_task(start_watcher(config, sink, buf))
+        watcher_task = asyncio.create_task(start_watcher(config, sink, draft_buf))
         application.state.watcher_task = watcher_task
 
         logger.info("TM Daemon started (mode=%s)", config.tm.mode)
@@ -352,9 +358,12 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                 pass
 
         # -- Shutdown --
-        buf_obj: DraftBuffer | None = getattr(application.state, "buf", None)
+        buf_obj: ConversationBuffer | None = getattr(application.state, "buf", None)
         if buf_obj is not None:
             await buf_obj.__aexit__(None, None, None)
+        draft_buf_obj: DraftBuffer | None = getattr(application.state, "draft_buf", None)
+        if draft_buf_obj is not None:
+            await draft_buf_obj.__aexit__(None, None, None)
         logger.info("TM Daemon shutdown")
 
     app = FastAPI(title="TM Daemon", lifespan=lifespan)
