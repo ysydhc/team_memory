@@ -110,6 +110,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     ctx = bootstrap()
     _init_from_context(ctx)
 
+    # Register project aliases from .tm.toml / 注册项目别名
+    try:
+        from team_memory.project_resolver import infer_project_with_aliases, register_aliases
+
+        info = infer_project_with_aliases()
+        if info.get("name") and info.get("aliases"):
+            register_aliases(info["name"], info["aliases"])
+            logger.info("Registered aliases: %s → %s", info["aliases"], info["name"])
+    except Exception as e:
+        logger.warning("Failed to register project aliases: %s", e)
+
     # Ensure default admin when db_api_key auth and no users exist
     if ctx.settings.auth.type == "db_api_key":
         password = (

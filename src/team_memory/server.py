@@ -237,8 +237,22 @@ if _inferred_aliases:
 
 
 def _resolve_project(project: str | None) -> str | None:
-    """Use inferred project when caller does not specify one."""
-    return project or _inferred_project or None
+    """Use inferred project when caller does not specify one.
+
+    When a project is given, normalize it through the alias registry
+    so that historical names (e.g. ``team_doc``) resolve to the canonical
+    name (e.g. ``team_memory``).
+    """
+    if project:
+        try:
+            from team_memory.utils.project import normalize_project_name
+            normalized = normalize_project_name(project)
+            if normalized:
+                return normalized
+        except Exception:
+            pass
+        return project
+    return _inferred_project or None
 
 
 # ============================================================
