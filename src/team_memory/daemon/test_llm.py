@@ -7,9 +7,9 @@ Tests all external model dependencies:
 3. Web service: /api/v1/health
 
 Usage:
-    PYTHONPATH=src:scripts python scripts/daemon/test_llm.py
-    PYTHONPATH=src:scripts python scripts/daemon/test_llm.py --skip-ollama
-    PYTHONPATH=src:scripts python scripts/daemon/test_llm.py --skip-web
+    python -m team_memory.daemon.test_llm
+    python -m team_memory.daemon.test_llm --skip-ollama
+    python -m team_memory.daemon.test_llm --skip-web
 
 Exit codes:
     0  All tests passed

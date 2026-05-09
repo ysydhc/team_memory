@@ -4,32 +4,42 @@
 Catches missing imports, syntax errors, and broken references
 that unit tests (with mocks) might miss.
 
-Usage: python scripts/import_check.py
+Usage: PYTHONPATH=src python scripts/import_check.py
 Exit 0 = all OK, 1 = failures found.
 """
 import importlib
 import sys
 
 MODULES = [
-    "daemon.app",
-    "daemon.config",
-    "daemon.pipeline",
-    "daemon.draft_buffer",
-    "daemon.draft_refiner",
-    "daemon.refinement_worker",
-    "daemon.response_buffer",
-    "daemon.search_log_writer",
-    "daemon.tm_sink",
-    "daemon.tm_stats",
-    "daemon.watcher",
-    "daemon.convergence_detector",
-    "daemon.faithfulness_judge",
-    "daemon.faithfulness_batch",
-    "daemon.entity_dedup",
-    "daemon.reloader",
-    "daemon.conversation_buffer",
-    "daemon.personal_memory_extractor",
-    "daemon.intent_classifier",
+    "team_memory.daemon.app",
+    "team_memory.daemon.config",
+    "team_memory.daemon.pipeline",
+    "team_memory.daemon.draft_buffer",
+    "team_memory.daemon.draft_refiner",
+    "team_memory.daemon.refinement_worker",
+    "team_memory.daemon.response_buffer",
+    "team_memory.daemon.search_log_writer",
+    "team_memory.daemon.tm_sink",
+    "team_memory.daemon.tm_stats",
+    "team_memory.daemon.watcher",
+    "team_memory.daemon.convergence_detector",
+    "team_memory.daemon.faithfulness_judge",
+    "team_memory.daemon.faithfulness_batch",
+    "team_memory.daemon.entity_dedup",
+    "team_memory.daemon.reloader",
+    "team_memory.daemon.conversation_buffer",
+    "team_memory.daemon.personal_memory_extractor",
+    "team_memory.daemon.intent_classifier",
+    "team_memory.daemon.entity_backfill",
+    "team_memory.daemon.embedding_backfill",
+    "team_memory.daemon.search_eval",
+    "team_memory.daemon.test_llm",
+    "team_memory.daemon.solution_backfill",
+    "team_memory.daemon.wiki_cli",
+    "team_memory.daemon.wiki_compiler",
+    "team_memory.daemon.llm_wiki",
+    "team_memory.daemon.auto_dream",
+    "team_memory.daemon.markdown_indexer",
 ]
 
 failed = []
@@ -48,9 +58,9 @@ if failed:
 # Also verify that required top-level imports exist in source code
 # (catches accidentally deleted imports like "import asyncpg")
 REQUIRED_SOURCE_IMPORTS = {
-    "daemon.search_log_writer": ["import asyncpg"],
-    "daemon.response_buffer": ["import asyncpg"],
-    "daemon.faithfulness_batch": ["import asyncpg"],
+    "team_memory.daemon.search_log_writer": ["import asyncpg"],
+    "team_memory.daemon.response_buffer": ["import asyncpg"],
+    "team_memory.daemon.faithfulness_batch": ["import asyncpg"],
 }
 
 for mod_name, required_lines in REQUIRED_SOURCE_IMPORTS.items():

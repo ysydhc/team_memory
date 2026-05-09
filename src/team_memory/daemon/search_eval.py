@@ -2,7 +2,7 @@
 """Search Quality Evaluator — tests recall precision against known queries.
 
 Usage:
-    python scripts/daemon/search_eval.py [--db-url URL] [--output FILE]
+    python -m team_memory.daemon.search_eval [--db-url URL] [--output FILE]
 
 Reads test queries from config or stdin, runs them through the search pipeline,
 and reports precision/recall metrics.

@@ -2,7 +2,7 @@
 """Faithfulness Batch Evaluator — processes pending entries in response_buffer.
 
 Usage:
-    python scripts/daemon/faithfulness_batch.py [OPTIONS]
+    python -m team_memory.daemon.faithfulness_batch [OPTIONS]
 
 Options:
     --model MODEL       LLM model for judge (default: from env or glm-4-flash)

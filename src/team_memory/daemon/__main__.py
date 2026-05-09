@@ -1,6 +1,6 @@
 """TM Daemon entry point.
 
-Run with: python -m daemon
+Run with: python -m team_memory.daemon
 """
 import logging
 

@@ -3,16 +3,16 @@
 
 Usage:
     # Full backfill (all experiences without entities)
-    python scripts/daemon/entity_backfill.py
+    python -m team_memory.daemon.entity_backfill
 
     # Dry run (show what would be processed)
-    python scripts/daemon/entity_backfill.py --dry-run
+    python -m team_memory.daemon.entity_backfill --dry-run
 
     # Override model
-    python scripts/daemon/entity_backfill.py --model DeepSeek-V3
+    python -m team_memory.daemon.entity_backfill --model DeepSeek-V3
 
     # Limit batch size
-    python scripts/daemon/entity_backfill.py --limit 10
+    python -m team_memory.daemon.entity_backfill --limit 10
 """
 from __future__ import annotations
 

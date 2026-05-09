@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Lightweight daemon auto-reloader.
 
-Watches scripts/daemon/*.py for changes. When a file is modified,
+Watches src/team_memory/daemon/*.py for changes. When a file is modified,
 stops and restarts the TM Daemon via launchd.
 
 Usage:
-    python scripts/daemon/reloader.py [--interval 5]
+    python -m team_memory.daemon.reloader [--interval 5]
     
 Or run in background:
-    python scripts/daemon/reloader.py --interval 5 &
+    python -m team_memory.daemon.reloader --interval 5 &
 """
 import os
 import subprocess

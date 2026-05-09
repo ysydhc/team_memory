@@ -15,12 +15,23 @@ FAILURES=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# Load Ollama base_url and embedding model from config (same as app); fallback to defaults
+# Determine Python interpreter (prefer conda env, fallback to python3)
+# 确定解释器路径（优先 conda 环境，回退 python3）
+_TM_PYTHON=""
+if [ -n "${CONDA_PREFIX}" ]; then
+    _TM_PYTHON="${CONDA_PREFIX}/bin/python"
+elif [ -f "${ROOT_DIR}/.venv/bin/python" ]; then
+    _TM_PYTHON="${ROOT_DIR}/.venv/bin/python"
+fi
+[ -z "${_TM_PYTHON}" ] && _TM_PYTHON="python3"
+
+# Load Ollama base_url and embedding model from config
+# 从配置加载 Ollama 地址和嵌入模型
 OLLAMA_BASE_URL="http://localhost:11434"
-OLLAMA_EMBED_MODEL="nomic-embed-text:latest"
+OLLAMA_EMBED_MODEL="qwen3-embedding:0.6b"
 OLLAMA_LLM_MODEL_CONFIG=""
 if [ -f "${ROOT_DIR}/config.development.yaml" ] || [ -f "${ROOT_DIR}/config.production.yaml" ]; then
-  CONFIG_OUT=$(cd "${ROOT_DIR}" && python3 -c "
+  CONFIG_OUT=$(cd "${ROOT_DIR}" && PYTHONPATH=src "${_TM_PYTHON}" -c "
 try:
     from team_memory.config import load_settings
     s = load_settings()
@@ -105,7 +116,7 @@ fi
 printf "  %-22s" "Web (port ${PORT}):"
 HEALTH_RESP=$(curl -sf --max-time 3 "${WEB_URL}/health" 2>/dev/null)
 if [ $? -eq 0 ]; then
-    STATUS=$(echo "$HEALTH_RESP" | python3 -c \
+    STATUS=$(echo "$HEALTH_RESP" | "${_TM_PYTHON}" -c \
         "import sys,json; print(json.loads(sys.stdin.read()).get('status','ok'))" \
         2>/dev/null)
     echo "${STATUS:-OK}"
@@ -130,7 +141,7 @@ fi
 
 # 6. Dashboard /stats (if Web returned health JSON)
 if [ -n "$HEALTH_RESP" ]; then
-    DASH=$(echo "$HEALTH_RESP" | python3 -c "
+    DASH=$(echo "$HEALTH_RESP" | "${_TM_PYTHON}" -c "
 import sys, json
 try:
     d = json.load(sys.stdin)

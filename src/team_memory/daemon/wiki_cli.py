@@ -3,13 +3,13 @@
 
 Usage:
     # Incremental compile (only new/changed experiences)
-    python scripts/daemon/wiki_cli.py compile [--full]
+    python -m team_memory.daemon.wiki_cli compile [--full]
 
     # Show wiki status
-    python scripts/daemon/wiki_cli.py status
+    python -m team_memory.daemon.wiki_cli status
 
     # Show uncompiled experience IDs
-    python scripts/daemon/wiki_cli.py uncompiled
+    python -m team_memory.daemon.wiki_cli uncompiled
 """
 from __future__ import annotations
 

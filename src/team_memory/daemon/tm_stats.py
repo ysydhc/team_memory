@@ -2,7 +2,7 @@
 """TM Search Quality Report — CLI stats viewer.
 
 Usage:
-    python scripts/daemon/tm_stats.py [--days 30] [--granularity day|hour|week]
+    python -m team_memory.daemon.tm_stats [--days 30] [--granularity day|hour|week]
 
 Outputs a Rich-formatted terminal report with:
 - Search funnel (total → hit → used)

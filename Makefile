@@ -31,7 +31,7 @@ ALEMBIC ?= $(shell \
 	else echo alembic; fi)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp mcp-verify test lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-install daemon-uninstall stats wiki-compile wiki-status entity-backfill entity-dedup embedding-backfill detect-contradictions search-eval solution-backfill faithfulness-eval test-llm
+.PHONY: help setup dev web mcp mcp-verify test lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-reload daemon-install daemon-uninstall watchdog-start watchdog-stop watchdog-status stats wiki-compile wiki-status entity-backfill entity-dedup embedding-backfill detect-contradictions search-eval solution-backfill faithfulness-eval test-llm
 
 sync-agent-artifacts: ## 由 agents/shared + agents/manifest.yaml 生成 .claude/.cursor 下 agents、prompts、skills
 	python scripts/sync_agent_artifacts.py
@@ -133,7 +133,7 @@ verify:         ## 标准验收：import 检查 + lint + 全量测试
 	@$(MAKE) test
 
 import-check:   ## 检查所有 daemon 模块可正常 import
-	@PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/import_check.py
+	@PYTHONPATH=src $(PYTHON_BIN) scripts/import_check.py
 
 verify-web:     ## Web 验收：lint + lint-js + web测试 + health/stats smoke
 	@$(MAKE) -s release-9111 || true
@@ -153,51 +153,51 @@ verify-web:     ## Web 验收：lint + lint-js + web测试 + health/stats smoke
 
 verify-entities: ## 验证 L2.5 实体图表（建表 + 规则提取 + 样例数据 + 搜索/图遍历）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/verify/verify_entity_graph.py
+	PYTHONPATH=src $(PYTHON_BIN) scripts/verify/verify_entity_graph.py
 
 stats:           ## 搜索质量报告（--days 30 --granularity day）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/daemon/tm_stats.py $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.tm_stats $(OPTS)
 
 wiki-compile:    ## 编译 Wiki（--full 全量重建）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/daemon/wiki_cli.py compile $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.wiki_cli compile $(OPTS)
 
 wiki-status:     ## Wiki 编译状态
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/daemon/wiki_cli.py status $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.wiki_cli status $(OPTS)
 
 entity-backfill: ## 全量补抽实体（--model 指定模型，--dry-run 预览，--limit N 限量）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/daemon/entity_backfill.py $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.entity_backfill $(OPTS)
 
 entity-dedup:	## 实体去重合并
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/daemon/entity_dedup.py $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.entity_dedup $(OPTS)
 
 embedding-backfill:	## 补齐缺失的 experience embedding
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/daemon/embedding_backfill.py $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.embedding_backfill $(OPTS)
 
-detect-contradictions:	## 检测矛盾经验对（含 LLM 验证）
+detect-contradictions:\t## 检测矛盾经验对（含 LLM 验证）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	PYTHONPATH=src:scripts $(PYTHON_BIN) -c "import asyncio; from team_memory.services.contradiction_detector import detect_contradictions; from team_memory.config import load_settings; s=load_settings(); llm=getattr(s,'entity_extraction',None); pairs=asyncio.run(detect_contradictions(str(s.database.url), llm_config=llm)); print(f'Found {len(pairs)} contradiction pairs'); [print(f'  {p.exp_a_title[:50]} vs {p.exp_b_title[:50]} ({p.reason}) [LLM:{p.llm_confirmed}]') for p in pairs]"
+	$(PYTHON_BIN) -c "import asyncio; from team_memory.services.contradiction_detector import detect_contradictions; from team_memory.config import load_settings; s=load_settings(); llm=getattr(s,'entity_extraction',None); pairs=asyncio.run(detect_contradictions(str(s.database.url), llm_config=llm)); print(f'Found {len(pairs)} contradiction pairs'); [print(f'  {p.exp_a_title[:50]} vs {p.exp_b_title[:50]} ({p.reason}) [LLM:{p.llm_confirmed}]') for p in pairs]"
 
 search-eval:		## 搜索质量评估（precision/recall）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/daemon/search_eval.py $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.search_eval $(OPTS)
 
 faithfulness-eval:\t## Faithfulness 批量评估（RAGAS LLM Judge）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/daemon/faithfulness_batch.py $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.faithfulness_batch $(OPTS)
 
 test-llm:		## 测试 LLM 连通性（LiteLLM proxy + chat completion）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/daemon/test_llm.py $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.test_llm $(OPTS)
 
-solution-backfill:	## 补跑无 solution 的 experience（LLM 提取）
+solution-backfill:\t## 补跑无 solution 的 experience（LLM 提取）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	PYTHONPATH=src:scripts $(PYTHON_BIN) scripts/daemon/solution_backfill.py $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.solution_backfill $(OPTS)
 
 migrate:        ## 运行数据库迁移（默认 uv / .venv 内 python -m alembic）
 	@case "$(ALEMBIC)" in \
@@ -253,14 +253,15 @@ watchdog-status: ## Check TM Watchdog status
 	@tail -5 /tmp/tm-watchdog.log 2>/dev/null || echo "No watchdog log"
 
 daemon-run:      ## Run TM Daemon in foreground (for testing)
-	PYTHONPATH=src:scripts $(PYTHON_BIN) -m daemon
+	@set -a && [ -f .env ] && source .env || true && set +a; \
+	$(PYTHON_BIN) -m team_memory.daemon
 
 daemon-reload:   ## Watch daemon code and auto-restart on change
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	PYTHONPATH=scripts $(PYTHON_BIN) scripts/daemon/reloader.py $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.reloader $(OPTS)
 
 daemon-install:  ## Install launchd plist (auto-start on login + crash restart)
-	@PLIST_SRC=scripts/daemon/com.teammemory.daemon.plist; \
+	@PLIST_SRC=src/team_memory/daemon/com.teammemory.daemon.plist; \
 	PLIST_DST=$(HOME)/Library/LaunchAgents/com.teammemory.daemon.plist; \
 	REPO_ABS=$$(pwd); \
 	sed -e "s|__PYTHON_PATH__|$(PYTHON_BIN)|g" -e "s|__REPO_ROOT__|$$REPO_ABS|g" "$$PLIST_SRC" > "$$PLIST_DST"; \

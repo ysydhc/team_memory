@@ -3,10 +3,10 @@
 
 Usage:
     # Dry run (show what would be merged)
-    python scripts/daemon/entity_dedup.py --dry-run
+    python -m team_memory.daemon.entity_dedup --dry-run
 
     # Execute merge
-    python scripts/daemon/entity_dedup.py
+    python -m team_memory.daemon.entity_dedup
 """
 from __future__ import annotations
 

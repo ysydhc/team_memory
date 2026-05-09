@@ -6,7 +6,7 @@ For each experience without a solution, calls LLM to extract one from
 the description/content, then updates the record.
 
 Usage:
-    python scripts/daemon/solution_backfill.py [--limit N] [--dry-run]
+    python -m team_memory.daemon.solution_backfill [--limit N] [--dry-run]
 
 Requires TEAM_DATABASE_URL or .env file.
 """

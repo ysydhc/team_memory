@@ -23,5 +23,5 @@ if [ -z "$PYTHON" ] || [ ! -x "$PYTHON" ]; then
     fi
 fi
 
-export PYTHONPATH=src:scripts
-exec $PYTHON -m daemon
+export PYTHONPATH=src
+exec $PYTHON -m team_memory.daemon

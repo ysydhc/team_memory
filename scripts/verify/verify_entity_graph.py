@@ -2,7 +2,7 @@
 """Entity graph verification script (L2.5).
 
 Usage:
-    PYTHONPATH=src:scripts python scripts/verify/verify_entity_graph.py [--step N]
+    PYTHONPATH=src python scripts/verify/verify_entity_graph.py [--step N]
 
 Steps (all run by default):
   1. DB tables exist and are queryable

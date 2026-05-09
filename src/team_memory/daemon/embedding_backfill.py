@@ -3,13 +3,13 @@
 
 Usage:
     # Dry run
-    python scripts/daemon/embedding_backfill.py --dry-run
+    python -m team_memory.daemon.embedding_backfill --dry-run
 
     # Execute
-    python scripts/daemon/embedding_backfill.py
+    python -m team_memory.daemon.embedding_backfill
 
     # With limit
-    python scripts/daemon/embedding_backfill.py --limit 10
+    python -m team_memory.daemon.embedding_backfill --limit 10
 """
 from __future__ import annotations
 
