@@ -304,6 +304,18 @@ class TestCliArchive:
 class TestCliApiKey:
     """Test API key resolution."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_client_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mock config.toml reading so tests only use env vars."""
+        monkeypatch.setattr(
+            "team_memory.client_config._read_config_toml",
+            lambda: {},
+        )
+        monkeypatch.setattr(
+            "team_memory.client_config._load_dotenv",
+            lambda: None,
+        )
+
     def test_no_api_key_exits(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("TEAM_MEMORY_API_KEY", raising=False)
         from team_memory.cli import _get_api_key
@@ -320,6 +332,7 @@ class TestCliApiKey:
 
     def test_get_base_url_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("TM_BASE_URL", raising=False)
+        monkeypatch.delenv("TM_SERVER_URL", raising=False)
         from team_memory.cli import _get_base_url
 
         assert _get_base_url() == "http://localhost:9111"
@@ -338,6 +351,18 @@ class TestCliApiKey:
 
 class TestCliUpload:
     """Test tm-cli upload subcommand."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_client_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mock config.toml reading so tests only use env vars."""
+        monkeypatch.setattr(
+            "team_memory.client_config._read_config_toml",
+            lambda: {},
+        )
+        monkeypatch.setattr(
+            "team_memory.client_config._load_dotenv",
+            lambda: None,
+        )
 
     @patch("team_memory.cli.httpx")
     def test_upload_success(

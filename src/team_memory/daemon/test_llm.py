@@ -25,7 +25,6 @@ import sys
 import time
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Individual tests
 # ---------------------------------------------------------------------------
@@ -265,7 +264,7 @@ async def run_tests(args: argparse.Namespace) -> int:
             label = "FAIL" if r["status"] not in ("timeout",) else "SLOW"
             print(f"  /chat       {label} — {r['error']}")
             if r["status"] == "http_error" and "429" in (r["error"] or ""):
-                print(f"              (rate-limited, connectivity OK)")
+                print("              (rate-limited, connectivity OK)")
             else:
                 any_fail = True
     else:

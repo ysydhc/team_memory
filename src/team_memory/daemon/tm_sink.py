@@ -280,6 +280,7 @@ class LocalTMSink(TMSink):
         """Increment used_count via direct DB access."""
         _ensure_ops()
         import uuid as _uuid
+
         from team_memory.storage.database import get_session
         from team_memory.storage.repository import ExperienceRepository
         async for session in get_session():

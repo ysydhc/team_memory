@@ -50,21 +50,21 @@ _load_dotenv()
 
 def _get_base_url() -> str:
     try:
-        from team_memory.project_resolver import get_server_url
-        return get_server_url()
+        from team_memory.client_config import ClientConfig
+        return ClientConfig.load().server.url
     except Exception:
         return os.environ.get("TM_BASE_URL", "http://localhost:9111")
 
 
 def _get_api_key() -> str:
     try:
-        from team_memory.project_resolver import get_api_key as _config_api_key
-        key = _config_api_key()
+        from team_memory.client_config import ClientConfig
+        key = ClientConfig.load().server.api_key
     except Exception:
         key = os.environ.get("TEAM_MEMORY_API_KEY", "")
     if not key:
         print("Error: TEAM_MEMORY_API_KEY not set.", file=sys.stderr)
-        print("  Set it via: export TEAM_MEMORY_API_KEY=your_key", file=sys.stderr)
+        print("  Set it via: export TEAM_MEMORY_API_KEY=***", file=sys.stderr)
         print("  Or add it to .env file or ~/.config/tm/config.toml", file=sys.stderr)
         sys.exit(1)
     return key
@@ -231,6 +231,187 @@ def cmd_feedback(args: argparse.Namespace) -> None:
         body["comment"] = args.comment
 
     _post_mcp_json("/api/v1/mcp/feedback", body)
+
+
+# ---------------------------------------------------------------------------
+# config / setup commands
+# ---------------------------------------------------------------------------
+
+
+def cmd_config_show(_args: argparse.Namespace) -> None:
+    """Show current effective configuration / 显示当前生效配置。"""
+    from team_memory.client_config import ClientConfig
+
+    cfg = ClientConfig.load()
+    import json
+
+    print(json.dumps(cfg.to_dict(), indent=2, ensure_ascii=False))
+
+
+def cmd_config_init(args: argparse.Namespace) -> None:
+    """Initialize ~/.config/tm/config.toml / 初始化客户端配置。"""
+    import tomli_w
+
+    config_dir = Path.home() / ".config" / "tm"
+    config_file = config_dir / "config.toml"
+
+    # Gather values
+    server_url = args.server_url
+    api_key = args.api_key
+
+    if not args.non_interactive:
+        if not server_url:
+            server_url = input("TM server URL [http://localhost:9111]: ").strip()
+            if not server_url:
+                server_url = "http://localhost:9111"
+        if not api_key:
+            api_key = input("TM API key: ").strip()
+
+    if not api_key and not args.non_interactive:
+        print("Warning: No API key provided. Set TEAM_MEMORY_API_KEY env var or edit config.")
+
+    # Build config dict
+    config_data: dict[str, Any] = {
+        "server": {
+            "url": server_url,
+        },
+    }
+    if api_key:
+        config_data["server"]["api_key"] = api_key
+
+    # Write
+    config_dir.mkdir(parents=True, exist_ok=True)
+    with open(config_file, "wb") as f:
+        tomli_w.dump(config_data, f)
+
+    print(f"Config written to {config_file}")
+
+
+def cmd_setup(args: argparse.Namespace) -> None:
+    """Configure AI client hooks / 一键配置 AI 客户端 hooks。"""
+    platforms = (
+        ["claude-code", "cursor", "hermes"] if args.platform == "all" else [args.platform]
+    )
+    from team_memory.client_config import get_client_config
+
+    cfg = get_client_config()
+
+    for platform in platforms:
+        if args.check:
+            _check_platform(platform, cfg)
+        else:
+            _setup_platform(platform, cfg)
+
+
+def _check_platform(platform: str, cfg: Any) -> None:
+    """Check hook configuration status / 检查 hook 配置状态。"""
+    if platform == "claude-code":
+        settings = Path.home() / ".claude" / "settings.json"
+        if settings.exists():
+            print(f"[claude-code] ✅ {settings} exists")
+        else:
+            print(f"[claude-code] ❌ {settings} not found")
+
+    elif platform == "cursor":
+        hooks_file = Path.cwd() / ".cursor" / "hooks.json"
+        if hooks_file.exists():
+            print(f"[cursor] ✅ {hooks_file} exists")
+        else:
+            print(f"[cursor] ❌ {hooks_file} not found")
+
+    elif platform == "hermes":
+        config_file = Path.home() / ".hermes" / "config.yaml"
+        if config_file.exists():
+            print(f"[hermes] ✅ {config_file} exists")
+        else:
+            print(f"[hermes] ❌ {config_file} not found")
+
+
+def _setup_platform(platform: str, cfg: Any) -> None:
+    """Write hook configuration / 写入 hook 配置。"""
+    venv_python = sys.executable
+
+    if platform == "claude-code":
+        _setup_claude_code(cfg, venv_python)
+    elif platform == "cursor":
+        _setup_cursor(cfg, venv_python)
+    elif platform == "hermes":
+        _setup_hermes(cfg, venv_python)
+
+
+def _setup_claude_code(cfg: Any, venv_python: str) -> None:
+    """Configure Claude Code PostToolUse hook."""
+    import json
+
+    settings_path = Path.home() / ".claude" / "settings.json"
+    settings: dict[str, Any] = {}
+    if settings_path.exists():
+        with open(settings_path) as f:
+            settings = json.load(f)
+
+    hook_entry = {
+        "matcher": "mcp__team_memory__recall",
+        "command": f"{venv_python} -m team_memory.hooks.claude_post_tool_use",
+    }
+
+    hooks = settings.setdefault("hooks", {})
+    post_tool = hooks.setdefault("PostToolUse", [])
+    # Remove existing TM entry if any
+    post_tool = [h for h in post_tool if h.get("matcher") != "mcp__team_memory__recall"]
+    post_tool.append(hook_entry)
+    hooks["PostToolUse"] = post_tool
+    settings["hooks"] = hooks
+
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(settings_path, "w") as f:
+        json.dump(settings, f, indent=2)
+
+    print(f"[claude-code] ✅ PostToolUse hook added to {settings_path}")
+
+
+def _setup_cursor(cfg: Any, venv_python: str) -> None:
+    """Configure Cursor afterMCPExecution hook."""
+    import json
+
+    hooks_path = Path.cwd() / ".cursor" / "hooks.json"
+    hooks_data: dict[str, Any] = {}
+    if hooks_path.exists():
+        with open(hooks_path) as f:
+            hooks_data = json.load(f)
+
+    hook_entry = {
+        "event": "afterMCPExecution",
+        "matcher": "MCP:team_memory",
+        "command": f"{venv_python} -m team_memory.hooks.cursor_after_mcp",
+    }
+
+    hooks_list = hooks_data.setdefault("hooks", [])
+    hooks_list = [
+        h
+        for h in hooks_list
+        if not (
+            h.get("event") == "afterMCPExecution"
+            and "team_memory" in h.get("matcher", "")
+        )
+    ]
+    hooks_list.append(hook_entry)
+    hooks_data["hooks"] = hooks_list
+
+    hooks_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(hooks_path, "w") as f:
+        json.dump(hooks_data, f, indent=2)
+
+    print(f"[cursor] ✅ afterMCPExecution hook added to {hooks_path}")
+
+
+def _setup_hermes(cfg: Any, venv_python: str) -> None:
+    """Configure Hermes post_tool_call hook."""
+    print("[hermes] ⚠️  Manual setup required:")
+    print("  Add to ~/.hermes/config.yaml:")
+    print("    hooks:")
+    print(f'      post_tool_call: "{venv_python} -m team_memory.hooks.hermes_post_tool_call"')
+    print("    hook_matchers:")
+    print('      post_tool_call: "recall|memory_recall"')
 
 
 def cmd_archive(args: argparse.Namespace) -> None:
@@ -429,6 +610,38 @@ def main() -> None:
     p_fb.add_argument("--rating", type=int, required=True, help="Rating 1-5")
     p_fb.add_argument("--comment", help="Optional comment")
     p_fb.set_defaults(func=cmd_feedback)
+
+    # ── config ──────────────────────────────────────────────────
+    p_cfg = sub.add_parser("config", help="Manage client configuration")
+    cfg_sub = p_cfg.add_subparsers(dest="config_command")
+
+    p_cfg_show = cfg_sub.add_parser("show", help="Show current config")
+    p_cfg_show.set_defaults(func=cmd_config_show)
+
+    p_cfg_init = cfg_sub.add_parser("init", help="Initialize config interactively")
+    p_cfg_init.add_argument("--server-url", help="TM server URL")
+    p_cfg_init.add_argument("--api-key", help="TM API key")
+    p_cfg_init.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Use flags only, no prompts",
+    )
+    p_cfg_init.set_defaults(func=cmd_config_init)
+
+    # ── setup ──────────────────────────────────────────────────
+    p_setup = sub.add_parser("setup", help="Configure AI client hooks")
+    p_setup.add_argument(
+        "--platform",
+        required=True,
+        choices=["claude-code", "cursor", "hermes", "all"],
+        help="Which platform to configure",
+    )
+    p_setup.add_argument(
+        "--check",
+        action="store_true",
+        help="Only check current status, don't modify",
+    )
+    p_setup.set_defaults(func=cmd_setup)
 
     args = parser.parse_args()
     args.func(args)

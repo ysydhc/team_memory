@@ -11,12 +11,10 @@ Or run in background:
     python scripts/daemon/reloader.py --interval 5 &
 """
 import os
-import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
-
 
 DAEMON_PLIST = "com.teammemory.daemon"
 DAEMON_DIR = Path(__file__).parent
@@ -50,7 +48,7 @@ def restart_daemon() -> bool:
             timeout=5,
         )
         if result.returncode == 0:
-            print(f"[reloader] Daemon restarted successfully")
+            print("[reloader] Daemon restarted successfully")
             return True
         else:
             print(f"[reloader] Daemon start failed: {result.stderr.decode()}")

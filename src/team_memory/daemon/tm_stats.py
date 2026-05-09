@@ -16,17 +16,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-import sys
 
-# Add project root to path
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", ".."))
-sys.path.insert(0, os.path.join(_PROJECT_ROOT, "scripts"))
-sys.path.insert(0, os.path.join(_PROJECT_ROOT, "src"))
+from team_memory.project_resolver import find_project_root, load_dotenv_if_exists
 
-from dotenv import load_dotenv
-
-load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
+load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 
 def _bar(value: float, max_value: float, width: int = 20) -> str:
@@ -57,7 +50,7 @@ def _resolve_dsn() -> str:
     try:
         import configparser
         cfg = configparser.ConfigParser()
-        cfg.read(os.path.join(_PROJECT_ROOT, "alembic.ini"))
+        cfg.read(os.path.join(find_project_root(), "alembic.ini"))
         url = cfg.get("alembic", "sqlalchemy.url", fallback="")
         if url:
             return url.replace("postgresql+asyncpg://", "postgresql://")
@@ -328,12 +321,12 @@ def _render_plain(stats, trends, miss_queries, low_use_queries, days, granularit
             print(f"    {period}  {bar}  {t['total']:3d} hits  {t['use_rate']:.0%}")
 
     if miss_queries and "error" not in miss_queries[0]:
-        print(f"\n  Miss Queries:")
+        print("\n  Miss Queries:")
         for q in miss_queries[:5]:
             print(f"    {q['query'][:50]:50s}  x{q['count']}")
 
     if low_use_queries and "error" not in low_use_queries[0]:
-        print(f"\n  Low Use Queries:")
+        print("\n  Low Use Queries:")
         for q in low_use_queries[:5]:
             print(f"    {q['query'][:50]:50s}  x{q['count']} searches, 0 used")
 
@@ -344,7 +337,7 @@ def _render_plain(stats, trends, miss_queries, low_use_queries, days, granularit
     try:
         f_stats = asyncio.run(buffer.get_stats(days=days))
         if f_stats["total"] > 0:
-            print(f"\n  Faithfulness:")
+            print("\n  Faithfulness:")
             print(f"    Evaluated: {f_stats['evaluated']}  Pending: {f_stats['pending']}")
             if f_stats["avg_faithfulness"] is not None:
                 print(f"    Avg score: {f_stats['avg_faithfulness']:.3f}")

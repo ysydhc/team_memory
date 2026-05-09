@@ -247,9 +247,9 @@ class TestLoadConfig:
         # 覆盖的部分
         assert cfg.daemon.port == 9999
         assert cfg.tm.mode == "remote"
-        # 未覆盖的部分保持默认
+        # 未覆盖的部分保持默认（ClientConfig 会填充 tm.base_url）
         assert cfg.daemon.host == "127.0.0.1"
-        assert cfg.tm.base_url == ""
+        assert cfg.tm.base_url  # populated from ClientConfig
         assert cfg.tm.user == "admin"
 
     def test_load_config_none_path_uses_default(self):

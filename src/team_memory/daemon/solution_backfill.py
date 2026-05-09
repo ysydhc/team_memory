@@ -14,18 +14,17 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
 import os
-import sys
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import httpx
 from sqlalchemy import text
+
 from team_memory.bootstrap import bootstrap
+from team_memory.project_resolver import load_dotenv_if_exists
 from team_memory.storage.database import get_session
+
+load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger("solution_backfill")
@@ -157,7 +156,7 @@ async def main():
         )
 
         if not solution:
-            logger.warning(f"  No solution extracted")
+            logger.warning("  No solution extracted")
             failed += 1
             continue
 

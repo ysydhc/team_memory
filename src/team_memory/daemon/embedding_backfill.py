@@ -16,17 +16,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-import sys
 import time
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", ".."))
-sys.path.insert(0, os.path.join(_PROJECT_ROOT, "scripts"))  # noqa: E402
-sys.path.insert(0, os.path.join(_PROJECT_ROOT, "src"))  # noqa: E402
+from team_memory.project_resolver import load_dotenv_if_exists
 
-from dotenv import load_dotenv  # noqa: E402
-
-load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
+load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 
 async def run_backfill(dry_run: bool = False, limit: int = 0) -> None:

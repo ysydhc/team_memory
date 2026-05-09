@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from watchfiles import awatch, Change
+from watchfiles import Change, awatch
 
 from team_memory.daemon.config import DaemonConfig, VaultConfig
 from team_memory.daemon.tm_sink import TMSink

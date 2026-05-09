@@ -18,15 +18,9 @@ import asyncio
 import os
 import sys
 
-# Add project root to path
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", ".."))
-sys.path.insert(0, os.path.join(_PROJECT_ROOT, "scripts"))
-sys.path.insert(0, os.path.join(_PROJECT_ROOT, "src"))
+from team_memory.project_resolver import find_project_root, load_dotenv_if_exists
 
-from dotenv import load_dotenv
-
-load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
+load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 
 async def _fetch_published_experiences() -> list[dict]:
@@ -63,7 +57,8 @@ async def _fetch_published_experiences() -> list[dict]:
 
 def _default_wiki_root() -> str:
     """Default wiki root: <project_root>/wiki/"""
-    return os.path.join(_PROJECT_ROOT, "wiki")
+    start = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    return os.path.join(find_project_root(start), "wiki")
 
 
 async def cmd_compile(full: bool = False, wiki_root: str | None = None) -> None:

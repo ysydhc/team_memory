@@ -6,7 +6,6 @@ conversation buffer, convergence detection, refinement, and TMSink calls.
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 from team_memory.daemon.config import DaemonConfig
@@ -168,9 +167,9 @@ async def process_before_prompt(
         persona = classify_persona(prompt)
         user_id = getattr(config.tm, "user", "admin") or "admin"
 
-        from team_memory.services.personal_memory import PersonalMemoryService
-        from team_memory.config import load_settings as _load_tm_settings
         from team_memory.bootstrap import _create_embedding_provider
+        from team_memory.config import load_settings as _load_tm_settings
+        from team_memory.services.personal_memory import PersonalMemoryService
 
         _settings = _load_tm_settings()
         embedding = _create_embedding_provider(_settings)

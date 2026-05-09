@@ -10,18 +10,19 @@ import asyncio
 import logging
 import os
 import time
-from datetime import datetime, timezone
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import FastAPI
-from team_memory.daemon.convergence_detector import ConvergenceDetector
-from team_memory.daemon.conversation_buffer import ConversationBuffer
 from pydantic import BaseModel, Field
 
 from team_memory.daemon.config import DaemonConfig, load_config
+from team_memory.daemon.convergence_detector import ConvergenceDetector
+from team_memory.daemon.conversation_buffer import ConversationBuffer
 from team_memory.daemon.draft_buffer import DraftBuffer
 from team_memory.daemon.draft_refiner import DraftRefiner
+from team_memory.daemon.llm_wiki import LLMWiki
 from team_memory.daemon.pipeline import (
     _resolve_project,
     process_after_response,
@@ -29,10 +30,10 @@ from team_memory.daemon.pipeline import (
     process_session_end,
     process_session_start,
 )
-from team_memory.daemon.llm_wiki import LLMWiki
 from team_memory.daemon.search_log_writer import SearchLogWriter
 from team_memory.daemon.tm_sink import TMSink, create_sink
 from team_memory.daemon.wiki_compiler import WikiCompiler
+from team_memory.project_resolver import find_project_root
 
 logger = logging.getLogger("daemon.app")
 
@@ -186,8 +187,8 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
 
         # Initialize alert manager (feishu / wecom / webhook channels)
         try:
-            from team_memory.monitoring.config import load_monitoring_config
             from team_memory.monitoring.alerting import AlertManager
+            from team_memory.monitoring.config import load_monitoring_config
             mon_config = load_monitoring_config()
             alert_manager = AlertManager.from_config(mon_config)
             application.state.alert_manager = alert_manager
@@ -227,8 +228,10 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             wiki_root = config.wiki.wiki_root
             if not wiki_root:
                 # Default: <project_root>/wiki/
-                # Project root = grandparent of scripts/daemon/
-                project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                start = os.path.abspath(
+                    os.path.join(os.path.dirname(__file__), "..", "..")
+                )
+                project_root = find_project_root(start)
                 wiki_root = os.path.join(project_root, "wiki")
             wiki_db_path = config.wiki.db_path or None  # None → WikiCompiler default
             wiki_compiler = WikiCompiler(wiki_root=wiki_root, db_path=wiki_db_path, llm_wiki=llm_wiki)
@@ -383,7 +386,6 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         entries = await response_buffer.fetch_pending(limit=0)  # don't fetch pending
 
         # Get recent entries (all, not just pending)
-        import asyncpg
         try:
             pool = await response_buffer._ensure_pool()
             async with pool.acquire() as conn:
@@ -555,10 +557,15 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                     # Check if batch threshold reached
                     if await response_buffer.should_batch():
                         logger.info("[EVAL]  faithfulness batch threshold reached, triggering evaluation")
-                        import subprocess, sys as _sys
+                        import subprocess
+                        import sys as _sys
                         subprocess.Popen(
-                            [_sys.executable, "scripts/daemon/faithfulness_batch.py", "--force"],
-                            cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                            [
+                                _sys.executable, "-m",
+                                "team_memory.daemon.faithfulness_batch",
+                                "--force",
+                            ],
+                            cwd=find_project_root(),
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
                         )
@@ -806,9 +813,9 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         user_id = getattr(config_obj.tm, "user", "admin") or "admin"
 
         try:
-            from team_memory.services.personal_memory import PersonalMemoryService
-            from team_memory.config import load_settings as _load_tm_settings
             from team_memory.bootstrap import _create_embedding_provider
+            from team_memory.config import load_settings as _load_tm_settings
+            from team_memory.services.personal_memory import PersonalMemoryService
             _settings = _load_tm_settings()
             embedding = _create_embedding_provider(_settings)
             pms = PersonalMemoryService(

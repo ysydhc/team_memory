@@ -206,19 +206,40 @@ def load_client_config() -> dict[str, Any]:
         return {}
 
 
+def find_project_root(start: str | None = None) -> str:
+    """Walk up from start to find project root (contains .git or pyproject.toml)."""
+    current = Path(start or os.getcwd())
+    for parent in [current] + list(current.parents):
+        if (parent / ".git").exists() or (parent / "pyproject.toml").exists():
+            return str(parent)
+    return str(current)
+
+
+def load_dotenv_if_exists(start: str | None = None) -> None:
+    """Load .env from project root if it exists.
+
+    Walks up from *start* (or cwd) to find the project root, then loads
+    .env if present.  Safe to call multiple times — dotenv skips already-set
+    variables by default (override=False).
+    """
+    root = find_project_root(start)
+    env_path = os.path.join(root, ".env")
+    if os.path.isfile(env_path):
+        try:
+            from dotenv import load_dotenv as _load_dotenv
+
+            _load_dotenv(env_path)
+        except ImportError:
+            pass
+
+
 def get_server_url() -> str:
     """Get TM server URL from config or env."""
-    env = os.environ.get("TM_BASE_URL", "")
-    if env:
-        return env
-    config = load_client_config()
-    return config.get("server", {}).get("url", "http://localhost:9111")
+    from team_memory.client_config import get_server_url as _get_url
+    return _get_url()
 
 
 def get_api_key() -> str:
     """Get TM API key from env > config."""
-    env = os.environ.get("TEAM_MEMORY_API_KEY", "")
-    if env:
-        return env
-    config = load_client_config()
-    return config.get("server", {}).get("api_key", "")
+    from team_memory.client_config import get_api_key as _get_key
+    return _get_key()

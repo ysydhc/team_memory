@@ -19,27 +19,21 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-import sys
 import time
 
-# Add project root to path
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", ".."))
-sys.path.insert(0, os.path.join(_PROJECT_ROOT, "scripts"))
-sys.path.insert(0, os.path.join(_PROJECT_ROOT, "src"))
+from team_memory.project_resolver import load_dotenv_if_exists
 
-from dotenv import load_dotenv
-
-load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
+load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 
 async def _get_unextracted_experiences(
     db_url: str, limit: int = 0,
 ) -> list[dict]:
     """Fetch published experiences without entity links."""
+    from sqlalchemy import select, text
+
     from team_memory.storage.database import get_session
     from team_memory.storage.models import Experience
-    from sqlalchemy import select, text
 
     experiences = []
     async with get_session(db_url) as session:

@@ -193,11 +193,21 @@ def _dict_to_dataclass(cls: type, data: dict[str, Any]) -> Any:
 
 
 def load_config(config_path: str | None = None) -> DaemonConfig:
-    """从 YAML 文件加载配置，返回 DaemonConfig。
+    """从 YAML 文件 + ClientConfig 加载配置，返回 DaemonConfig。
 
-    如果 config_path 为 None 或文件不存在，返回全默认配置。
-    部分配置只覆盖指定字段，未指定的保持默认值。
+    配置合并优先级 (高→低):
+      1. YAML 文件中的显式配置
+      2. ~/.config/tm/config.toml (ClientConfig)
+      3. 环境变量
+      4. 代码默认值
     """
+    # 先从 ClientConfig 读取基础配置
+    try:
+        from team_memory.client_config import get_client_config
+        client_cfg = get_client_config()
+    except Exception:
+        client_cfg = None
+
     if config_path is None:
         # 默认路径：scripts/hooks/config.yaml
         default_path = Path(__file__).resolve().parent.parent / "hooks" / "config.yaml"
@@ -249,5 +259,16 @@ def load_config(config_path: str | None = None) -> DaemonConfig:
     )
     for vault in config.obsidian.vaults:
         vault.path = os.path.expanduser(vault.path) if vault.path else ""
+
+    # 从 ClientConfig 合并基础配置（仅当 YAML 未显式指定时）
+    if client_cfg is not None:
+        if not config.tm.base_url:
+            config.tm.base_url = client_cfg.server.url
+        if not config.tm.mode and client_cfg.server.url != "http://localhost:9111":
+            config.tm.mode = "remote"
+        if config.daemon.host == "127.0.0.1" and client_cfg.daemon.host != "127.0.0.1":
+            config.daemon.host = client_cfg.daemon.host
+        if config.daemon.port == 3901 and client_cfg.daemon.port != 3901:
+            config.daemon.port = client_cfg.daemon.port
 
     return config

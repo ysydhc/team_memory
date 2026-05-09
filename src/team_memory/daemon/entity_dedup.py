@@ -13,16 +13,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-import sys
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", ".."))
-sys.path.insert(0, os.path.join(_PROJECT_ROOT, "scripts"))
-sys.path.insert(0, os.path.join(_PROJECT_ROOT, "src"))
+from team_memory.project_resolver import load_dotenv_if_exists
 
-from dotenv import load_dotenv
-
-load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
+load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 
 async def _find_duplicates(db_url: str) -> list[dict]:

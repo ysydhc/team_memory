@@ -26,6 +26,7 @@ import pytest
 
 from team_memory.daemon.wiki_cli import (
     _default_wiki_root,
+    _fetch_published_experiences,
     cmd_compile,
     cmd_status,
     cmd_uncompiled,
@@ -52,20 +53,13 @@ class TestDefaultWikiRoot:
 
     def test_contains_project_root(self):
         result = _default_wiki_root()
-        project_root = os.path.abspath(os.path.join(wiki_cli._SCRIPT_DIR, "..", ".."))
+        from team_memory.project_resolver import find_project_root
+        project_root = find_project_root()
         assert result == os.path.join(project_root, "wiki")
 
     def test_is_absolute_path(self):
         result = _default_wiki_root()
         assert os.path.isabs(result)
-
-    def test_script_dir_is_set(self):
-        """_SCRIPT_DIR points to daemon directory."""
-        assert wiki_cli._SCRIPT_DIR.endswith("daemon")
-
-    def test_project_root_is_set(self):
-        """_PROJECT_ROOT points to team_doc root."""
-        assert wiki_cli._PROJECT_ROOT.endswith("team_doc")
 
 
 # ===========================================================================
@@ -380,7 +374,7 @@ class TestFetchPublishedExperiences:
     async def test_returns_empty_on_exception(self):
         """On any exception, should return empty list."""
         with patch("team_memory.config.load_settings", side_effect=ImportError("no module")):
-            result = await wiki_cli._fetch_published_experiences()
+            result = await _fetch_published_experiences()
             assert result == []
 
     @pytest.mark.asyncio
@@ -406,6 +400,6 @@ class TestFetchPublishedExperiences:
         with patch("team_memory.config.load_settings", return_value=mock_settings):
             with patch("team_memory.storage.database.get_session", return_value=mock_cm):
                 with patch("team_memory.storage.database.close_db", new_callable=AsyncMock):
-                    result = await wiki_cli._fetch_published_experiences()
+                    result = await _fetch_published_experiences()
                     assert len(result) == 1
                     assert result[0]["id"] == "1"

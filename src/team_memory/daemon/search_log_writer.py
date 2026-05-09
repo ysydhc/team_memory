@@ -19,8 +19,6 @@ from typing import Any
 
 import asyncpg
 
-
-
 logger = logging.getLogger(__name__)
 
 
@@ -422,7 +420,7 @@ class SearchLogWriter:
                     trunc = "day"
 
                 rows = await conn.fetch(
-                    f"""
+                    """
                     SELECT
                         date_trunc($1, created_at) AS period,
                         COUNT(*) AS total,

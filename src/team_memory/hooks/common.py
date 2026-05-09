@@ -7,11 +7,9 @@ load pipeline configuration.
 
 from __future__ import annotations
 
-import io
 import json
 import sys
 from pathlib import Path
-from typing import Any
 
 import httpx
 import yaml

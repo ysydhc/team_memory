@@ -13,12 +13,11 @@ import argparse
 import asyncio
 import json
 import os
-import sys
 from datetime import datetime, timezone
 
-# Add project paths
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from team_memory.project_resolver import load_dotenv_if_exists
+
+load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 # Default test queries — each has a query and expected experience ids (or titles)
 DEFAULT_TEST_QUERIES = [
@@ -152,7 +151,7 @@ async def run_evaluation(db_url: str) -> dict:
 def print_report(metrics: dict) -> None:
     """Print evaluation report in a readable format."""
     print(f"\n{'='*60}")
-    print(f"  Search Quality Evaluation Report")
+    print("  Search Quality Evaluation Report")
     print(f"  {metrics['timestamp']}")
     print(f"{'='*60}\n")
 

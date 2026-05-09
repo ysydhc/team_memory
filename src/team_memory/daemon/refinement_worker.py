@@ -14,7 +14,7 @@ from typing import Any
 from team_memory.daemon.config import DaemonConfig, RefinementSettings
 from team_memory.daemon.conversation_buffer import ConversationBuffer
 from team_memory.daemon.tm_sink import TMSink
-from team_memory.services.llm_parser import LLMParseError, call_llm_openai, _extract_json
+from team_memory.services.llm_parser import LLMParseError, _extract_json, call_llm_openai
 
 logger = logging.getLogger("daemon.refinement_worker")
 
@@ -666,8 +666,8 @@ class RefinementWorker:
                     )
                 elif self._cfg.provider == "ollama":
                     # Fallback to existing Ollama parse_content
-                    from team_memory.services.llm_parser import parse_content
                     from team_memory.config.llm import LLMConfig
+                    from team_memory.services.llm_parser import parse_content
 
                     llm_config = LLMConfig(
                         model=self._cfg.model,

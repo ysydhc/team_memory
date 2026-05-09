@@ -22,9 +22,9 @@ import logging
 import os
 import sys
 
-# Add project paths
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src"))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from team_memory.project_resolver import load_dotenv_if_exists
+
+load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("faithfulness_batch")
@@ -88,8 +88,8 @@ async def run_batch(
     force: bool = False,
 ) -> dict:
     """Run a batch faithfulness evaluation."""
-    from team_memory.daemon.response_buffer import ResponseBuffer
     from team_memory.daemon.faithfulness_judge import FaithfulnessJudge
+    from team_memory.daemon.response_buffer import ResponseBuffer
 
     buffer = ResponseBuffer(dsn=dsn)
 
@@ -198,7 +198,7 @@ async def run_batch(
         # Show low faithfulness entries
         low_entries = [r for r in results if 0 <= r["score"] < 0.7]
         if low_entries:
-            print(f"\nLow faithfulness entries:")
+            print("\nLow faithfulness entries:")
             for r in low_entries:
                 print(f"  score={r['score']:.2f} claims={r['supported']}/{r['total']} query={r['query']}")
 
@@ -254,7 +254,7 @@ async def show_recent(dsn: str, limit: int = 10) -> None:
                 elif score >= 0:
                     score_str = f"\033[31m{score:.2f} ✗\033[0m"  # red
                 else:
-                    score_str = f"\033[33merror\033[0m"
+                    score_str = "\033[33merror\033[0m"
             elif evaluated:
                 score_str = "evaluated (no score)"
             else:

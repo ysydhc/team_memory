@@ -7,7 +7,6 @@ This thin version delegates all heavy logic to the TM Daemon HTTP API.
 """
 from __future__ import annotations
 
-import json
 import os
 from typing import Any
 
