@@ -58,6 +58,7 @@ class OllamaEmbedding(EmbeddingProvider):
                         json={
                             "model": self._model,
                             "input": texts,
+                            "keep_alive": "30m",  # Keep model loaded for 30 min / 模型常驻 30 分钟
                         },
                     )
                     response.raise_for_status()
@@ -65,7 +66,9 @@ class OllamaEmbedding(EmbeddingProvider):
                 return data["embeddings"]
             except httpx.HTTPStatusError as e:
                 last_error = e
-                if e.response.status_code in (429, 500, 502, 503, 504) and attempt < 2:
+                # Retry on 404 (model not loaded yet), 429, and 5xx
+                # 404 重试：模型可能刚卸载需要重新加载
+                if e.response.status_code in (404, 429, 500, 502, 503, 504) and attempt < 2:
                     import asyncio
                     await asyncio.sleep(2 ** attempt)
                     continue
