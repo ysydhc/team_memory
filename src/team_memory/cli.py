@@ -851,7 +851,8 @@ def _check_platform(platform: str, cfg: Any) -> None:
                 hooks = data.get("hooks", {})
                 post_tool = hooks.get("PostToolUse", [])
                 has_tm = any(
-                    h.get("matcher") == "mcp__team_memory__recall"
+                    "team_memory" in h.get("matcher", "")
+                    or any("team_memory" in c.get("command", "") for c in h.get("hooks", []))
                     for h in post_tool
                 )
                 if has_tm:
@@ -918,7 +919,10 @@ def _setup_platform(platform: str, cfg: Any) -> None:
 
 
 def _setup_claude_code(cfg: Any, venv_python: str) -> None:
-    """Configure Claude Code PostToolUse hook."""
+    """Configure Claude Code hooks (SessionStart, UserPromptSubmit, Stop, PostToolUse).
+
+    配置 Claude Code 全部 hook 事件。
+    """
     import json
 
     settings_path = Path.home() / ".claude" / "settings.json"
@@ -927,24 +931,67 @@ def _setup_claude_code(cfg: Any, venv_python: str) -> None:
         with open(settings_path) as f:
             settings = json.load(f)
 
-    hook_entry = {
-        "matcher": "mcp__team_memory__recall",
-        "command": f"{venv_python} -m team_memory.hooks.claude_post_tool_use",
-    }
-
     hooks = settings.setdefault("hooks", {})
-    post_tool = hooks.setdefault("PostToolUse", [])
-    # Remove existing TM entry if any
-    post_tool = [h for h in post_tool if h.get("matcher") != "mcp__team_memory__recall"]
-    post_tool.append(hook_entry)
-    hooks["PostToolUse"] = post_tool
-    settings["hooks"] = hooks
 
+    # SessionStart hook
+    hooks["SessionStart"] = [
+        {
+            "matcher": "",
+            "hooks": [{
+                "type": "command",
+                "command": f"{venv_python} -m team_memory.hooks.claude_session_start",
+                "timeout": 10000,
+            }],
+        }
+    ]
+
+    # UserPromptSubmit hook
+    hooks["UserPromptSubmit"] = [
+        {
+            "matcher": "",
+            "hooks": [{
+                "type": "command",
+                "command": f"{venv_python} -m team_memory.hooks.claude_user_prompt_submit",
+                "timeout": 10000,
+            }],
+        }
+    ]
+
+    # Stop hook
+    hooks["Stop"] = [
+        {
+            "matcher": "",
+            "hooks": [{
+                "type": "command",
+                "command": f"{venv_python} -m team_memory.hooks.claude_stop",
+                "timeout": 10000,
+            }],
+        }
+    ]
+
+    # PostToolUse hook (TM recall only; preserve existing entries like ruff)
+    post_tool = hooks.get("PostToolUse", [])
+    # Remove old TM PostToolUse entries
+    post_tool = [
+        h for h in post_tool
+        if "team_memory" not in json.dumps(h) and "scripts/hooks" not in json.dumps(h)
+    ]
+    post_tool.append({
+        "matcher": "mcp__team_memory__recall|mcp__team_memory__memory_recall",
+        "hooks": [{
+            "type": "command",
+            "command": f"{venv_python} -m team_memory.hooks.claude_post_tool_use",
+            "timeout": 10000,
+        }],
+    })
+    hooks["PostToolUse"] = post_tool
+
+    settings["hooks"] = hooks
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     with open(settings_path, "w") as f:
         json.dump(settings, f, indent=2)
 
-    print(f"[claude-code] ✅ PostToolUse hook added to {settings_path}")
+    print(f"[claude-code] ✅ All hooks configured in {settings_path}")
 
 
 def _setup_cursor(cfg: Any, venv_python: str) -> None:

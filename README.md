@@ -12,11 +12,13 @@ mcp-name: io.github.ysydhc/team-memory
 
 用 Cursor、Claude 等 AI 助手写代码时，往往会遇到三个问题：
 
-| 盲区 | 现象 |
-|------|------|
-| **无记忆** | 上周刚帮你修过的 Bug，这周遇到类似的，它完全不记得 |
-| **只见代码，不懂决策** | 能看懂「是什么」，却不知道「为什么这么写」「上次踩过什么坑」 |
-| **静态知识不够用** | Rules、Skills 管得了规范，管不住每天冒出来的隐性经验（接口坑、故障根因、被否掉的方案） |
+
+| 盲区            | 现象                                                |
+| ------------- | ------------------------------------------------- |
+| **无记忆**       | 上周刚帮你修过的 Bug，这周遇到类似的，它完全不记得                       |
+| **只见代码，不懂决策** | 能看懂「是什么」，却不知道「为什么这么写」「上次踩过什么坑」                    |
+| **静态知识不够用**   | Rules、Skills 管得了规范，管不住每天冒出来的隐性经验（接口坑、故障根因、被否掉的方案） |
+
 
 **TeamMemory 就是冲着这三个问题来的。** 通过 MCP 把语义可搜索的经验库接进 AI：遇到问题自动查历史方案，解决后自动提炼并存下来，下次谁遇到同类问题，直接就能命中。既适合 3–10 人的技术团队共享，也适合部署在本地个人使用，配合 Cursor / Claude Desktop。
 
@@ -39,7 +41,7 @@ ollama pull qwen3-embedding:0.6b
 make web
 ```
 
-浏览器访问 http://localhost:9111 ，用上面的 API Key 登录即可。更完整的部署与用户流程见下文 [按角色导航](#按角色导航) 与 [快速开始](#快速开始)。
+浏览器访问 [http://localhost:9111](http://localhost:9111) ，用上面的 API Key 登录即可。更完整的部署与用户流程见下文 [按角色导航](#按角色导航) 与 [快速开始](#快速开始)。
 
 ## CLI 工具 / CLI Tools
 
@@ -82,7 +84,7 @@ tm-cli setup --platform all --check
 
 ## MCP 接入（Cursor / Claude）
 
-**本仓库（克隆源码）推荐**：不要把 API Key 写进 mcp.json。在仓库根维护 **`.env`**（从 [example/env.team-memory.example](example/env.team-memory.example) 复制），其中至少设置 **`TEAM_MEMORY_API_KEY`**；MCP 配置为 **`bash`** + **`scripts/run_mcp_with_dotenv.sh`** + **`cwd`= 仓库根**。详见 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)。**Cursor** 一般用 `.cursor/mcp.json`，**Claude Code** 可用根目录 `.mcp.json`，两处内容建议保持一致。
+**本仓库（克隆源码）推荐**：不要把 API Key 写进 mcp.json。在仓库根维护 `**.env`**（从 [example/env.team-memory.example](example/env.team-memory.example) 复制），其中至少设置 `**TEAM_MEMORY_API_KEY**`；MCP 配置为 `**bash**` + `**scripts/run_mcp_with_dotenv.sh**` + `**cwd`= 仓库根**。详见 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)。**Cursor** 一般用 `.cursor/mcp.json`，**Claude Code** 可用根目录 `.mcp.json`，两处内容建议保持一致。
 
 **项目名零配置**：在项目根放置 `.tm.toml`（见 [配置说明](#配置说明-configuration)），或系统自动从 git 仓库名推断，无需传 `--project` 或设 `TEAM_MEMORY_PROJECT`。
 
@@ -105,23 +107,24 @@ tm-cli setup --platform all --check
 
 也可使用客户端配置 `~/.config/tm/config.toml`（`tm-cli config init` 生成），避免在 JSON 中写入密钥。
 
-（MCP 未注册 **Resources / Prompts**；**`memory_*` 七工具**：`memory_save`、`memory_recall`、`memory_context`、`memory_get_archive`、`memory_archive_upsert`、`memory_feedback`、`memory_submit_response`。详情见下文 [MCP 工具列表（当前）](#mcp-工具列表当前) 与 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)。）
+（MCP 未注册 **Resources / Prompts**；`**memory_`* 七工具**：`memory_save`、`memory_recall`、`memory_context`、`memory_get_archive`、`memory_archive_upsert`、`memory_feedback`、`memory_submit_response`。详情见下文 [MCP 工具列表（当前）](#mcp-工具列表当前) 与 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)。）
 
 本机直连数据库时需要配 `TEAM_MEMORY_DB_URL`（或通过 config）；从源码跑且项目里已有 config 的，可不单独设 DB_URL。
 
 ## 架构可视化（现状）
 
-Web 内「架构」导航与 `/api/v1/architecture/*` **已移除**（实现见 `src/team_memory/web/static/js/pages.js`）。若需要代码库图谱，请在本机单独使用 **GitNexus**（CLI / Bridge 等），与当前 TM Web **无集成**。
+Web 内「架构」导航与 `/api/v1/architecture/`* **已移除**（实现见 `src/team_memory/web/static/js/pages.js`）。若需要代码库图谱，请在本机单独使用 **GitNexus**（CLI / Bridge 等），与当前 TM Web **无集成**。
 
 ---
 
 ## 按角色导航
 
-| 角色 | 目标 | 入口 |
-|------|------|------|
-| **初次部署者** | 跑起 Web、拿到 API Key | [快速开始 → 一、初次部署者](#一初次部署者一键部署) |
+
+| 角色        | 目标                  | 入口                                            |
+| --------- | ------------------- | --------------------------------------------- |
+| **初次部署者** | 跑起 Web、拿到 API Key   | [快速开始 → 一、初次部署者](#一初次部署者一键部署)                 |
 | **初级使用者** | 在 Cursor/Claude 里接入 | [快速开始 → 二、初级使用者](#二初级使用者在-cursor--claude-里接入) |
-| **贡献者** | 改代码、提 PR | [开发](#开发) |
+| **贡献者**   | 改代码、提 PR            | [开发](#开发)                                     |
 
 
 ## 目录
@@ -171,13 +174,15 @@ AI 自动提取经验 ──→ TeamMemory（动态积累）
 
 ## 术语表
 
-| 术语 | 说明 |
-|------|------|
-| **经验** | 单条问题-方案对，可被检索和复用 |
-| **经验库** | 经验的集合 |
-| **scope** | 作用域：global（全局）、team（团队）、personal（个人） |
-| **Embedding** | 向量嵌入，用于语义搜索；配置项为 `embedding` |
-| **MCP** | Model Context Protocol，让 AI 客户端调用 `memory_recall`、`memory_save` 等工具 |
+
+| 术语            | 说明                                                                  |
+| ------------- | ------------------------------------------------------------------- |
+| **经验**        | 单条问题-方案对，可被检索和复用                                                    |
+| **经验库**       | 经验的集合                                                               |
+| **scope**     | 作用域：global（全局）、team（团队）、personal（个人）                                |
+| **Embedding** | 向量嵌入，用于语义搜索；配置项为 `embedding`                                        |
+| **MCP**       | Model Context Protocol，让 AI 客户端调用 `memory_recall`、`memory_save` 等工具 |
+
 
 ## 功能概览
 
@@ -185,9 +190,9 @@ AI 自动提取经验 ──→ TeamMemory（动态积累）
 
 AI 从对话和文档中自动提取结构化经验，无需手动录入：
 
-- **对话提取**：通过 MCP **`memory_save(content=...)`** 走 LLM 解析，从长对话中识别问题、方案、标签并写入（含质量门控）；**Web** 上亦支持粘贴文档或 URL 解析
+- **对话提取**：通过 MCP `**memory_save(content=...)`** 走 LLM 解析，从长对话中识别问题、方案、标签并写入（含质量门控）；**Web** 上亦支持粘贴文档或 URL 解析
 - **文档解析**：上传文档或输入 URL，AI 自动解析为标题、问题描述、解决方案、标签
-- **经验组**：保存时可选 **`group_key`**（MCP / HTTP）将相关经验归组；复杂编排可在 Web 完成
+- **经验组**：保存时可选 `**group_key`**（MCP / HTTP）将相关经验归组；复杂编排可在 Web 完成
 - **默认草稿模式**：AI 提取的内容默认为草稿，经人工审核后发布，保证质量
 
 ### 智能检索
@@ -202,7 +207,7 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 - **记忆压缩与摘要**：经验支持 `summary` 字段，LLM 可生成简短摘要；单条（POST `/experiences/{id}/summarize`）与批量（POST `/experiences/batch-summarize`）生成；MCP 搜索结果中每条经验可包含 `summary`，便于节省 Token
 - **PageIndex-Lite**：长文档自动分块建立节点索引，支持节点级精准检索
 - **个人扩写**：per-user tag_synonyms 在检索前生效（词表替换 + LLM 扩写），MCP 搜索返回后自动维护；Web 设置 → 个人扩写
-- **个人记忆 / 用户画像**：按 `user_id` 隔离；**Lite** 下由 **`memory_save(..., content=...)`** 解析等路径可写入；**`memory_context`** 返回 `profile.static` / `profile.dynamic`（字符串列表）。Web **设置 → 用户画像** 可分组查看、过滤 **static/dynamic** 并 **删除** 错误条目（还可调 HTTP API `profile_kind`）。
+- **个人记忆 / 用户画像**：按 `user_id` 隔离；**Lite** 下由 `**memory_save(..., content=...)`** 解析等路径可写入；`**memory_context**` 返回 `profile.static` / `profile.dynamic`（字符串列表）。Web **设置 → 用户画像** 可分组查看、过滤 **static/dynamic** 并 **删除** 错误条目（还可调 HTTP API `profile_kind`）。
 - **文件位置绑定**：保存经验时可传 `file_locations`（路径 + 行范围，可选 snippet/file_mtime/file_content_hash）；检索时可传 `current_file_locations`，与当前编辑位置匹配的经验会获得 location 加分，详见 [src/team_memory/server.py](src/team_memory/server.py) 工具参数与 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)。
 
 ### 三层作用域
@@ -254,7 +259,7 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 - **当前 MCP 未注册** Resources / Prompts；补齐体验以 Web、`/docs` HTTP API 为准
 - **Web 管理界面**：浏览、搜索、审核、档案馆、配置等
 
-旧文若仍写 **`tm_*`** MCP 或任务看板等已下线能力，以 **本文**、[AGENTS.md](AGENTS.md) 与 [src/team_memory/server.py](src/team_memory/server.py) 为准。
+旧文若仍写 `**tm_*`** MCP 或任务看板等已下线能力，以 **本文**、[AGENTS.md](AGENTS.md) 与 [src/team_memory/server.py](src/team_memory/server.py) 为准。
 
 ### TM Daemon（自动采集与精炼）
 
@@ -302,12 +307,14 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 
 ### 前提条件
 
-| 依赖 | 确认方式 |
-|------|----------|
-| Docker Desktop | `docker --version` |
-| Python 3.11+ | `python3 --version` |
-| Make | `make --version`（macOS/Linux 一般自带） |
-| Ollama | `ollama --version`（首次 `make web` 前拉取模型用，见下） |
+
+| 依赖             | 确认方式                                        |
+| -------------- | ------------------------------------------- |
+| Docker Desktop | `docker --version`                          |
+| Python 3.11+   | `python3 --version`                         |
+| Make           | `make --version`（macOS/Linux 一般自带）          |
+| Ollama         | `ollama --version`（首次 `make web` 前拉取模型用，见下） |
+
 
 ### 一、初次部署者：一键部署
 
@@ -336,7 +343,7 @@ echo "你的管理员 API Key: $TEAM_MEMORY_API_KEY"
 
 **首次登录**
 
-- 打开 http://localhost:9111
+- 打开 [http://localhost:9111](http://localhost:9111)
 - 点击「使用 API Key 登录」
 - 将上面的 TEAM_MEMORY_API_KEY 粘贴到输入框，点击「登录」
 - 登录成功后即为 admin，右上角显示当前用户名
@@ -346,6 +353,7 @@ echo "你的管理员 API Key: $TEAM_MEMORY_API_KEY"
 ### 方式二：配置文件
 
 在 `config.development.yaml`（或 `TEAM_MEMORY_CONFIG_PATH` 指向的文件）中设置：
+
 ```
 auth:
   type: db_api_key
@@ -354,26 +362,31 @@ auth:
 ```
 
 或直接写明文（仅限本地/测试，勿提交到 Git；**生产环境禁止**）：
+
 ```
 auth:
   type: db_api_key
   api_key: "你的 API Key"
   user: admin
 ```
+
 启动服务后，用该 api_key 在 Web 登录页选择「使用 API Key 登录」即可获得 admin。
 
 ### 可选：为自己创建持久 Admin 账户
+
 若希望用「用户名 + 密码」登录、且不依赖引导 Key：
+
 1. 已用引导 Key 以 admin 身份登录 Web。
 2. 进入 设置 → 用户管理，点击「添加用户」。
 3. 填写：
-    - 用户名：如 admin 或你的英文名
+  - 用户名：如 admin 或你的英文名
     - 角色：admin
     - 初始密码：设置一个强密码（用于 Web 登录）
 4. 点击「创建」。系统会生成并展示一条 API Key（用于 MCP 客户端），请复制保存。
 5. 之后可：
-    - Web：用刚设置的用户名 + 密码登录。
+  - Web：用刚设置的用户名 + 密码登录。
     - MCP：在 Cursor/Claude 的 mcp.json 中使用刚生成的 API Key 作为 TEAM_MEMORY_API_KEY。
+
 引导 Key（环境变量或 config 中的 key）与数据库中的用户彼此独立：引导 Key 仅用于首次拿到 admin 权限；后续日常可使用数据库里的 admin 账号（用户名+密码 + 自己的 API Key）。
 
 若使用默认 Docker 数据库，`database.url` 无需改；否则改为你的 PostgreSQL 连接串。
@@ -392,11 +405,12 @@ ollama pull qwen3-embedding:0.6b
 make web
 ```
 
-浏览器打开 **http://localhost:9111**。
+浏览器打开 **[http://localhost:9111](http://localhost:9111)**。
 
 **首次登录**：切换到「使用 API Key 登录」，输入上一步的 `TEAM_MEMORY_API_KEY`，即以 admin 身份进入。
 
 **多人使用**：
+
 - 团队成员在登录页点击「注册」，填写用户名和密码
 - Admin 在「设置 > 用户管理」中审批注册申请，系统自动生成 API Key
 - Admin 将 API Key 分发给成员，用于 MCP 客户端（Cursor/Claude Desktop）接入
@@ -438,7 +452,7 @@ pip install team_memory
 
 在 **Cursor** 中编辑项目或用户下的 `.cursor/mcp.json`；在 **Claude Desktop** 中编辑 MCP Servers 对应配置。MCP 的当前用户由 **TEAM_MEMORY_API_KEY** 解析（与 Web 同账号即同一人）；`TEAM_MEMORY_USER` 仅在不设 Key 或解析失败时作为回退，可选。
 
-- **从源码运行本仓库**（推荐：`TEAM_MEMORY_*` 进 `.env`，密钥不进 JSON）：将 [example/env.team-memory.example](example/env.team-memory.example) 复制为仓库根 `.env` 并填写；执行 `chmod +x scripts/run_mcp_with_dotenv.sh`；把 [example/cursor-mcp-team-memory.example.json](example/cursor-mcp-team-memory.example.json) 里的绝对路径换成你的目录后写入 `.cursor/mcp.json` / `.mcp.json`：
+- **从源码运行本仓库**（推荐：`TEAM_MEMORY_`* 进 `.env`，密钥不进 JSON）：将 [example/env.team-memory.example](example/env.team-memory.example) 复制为仓库根 `.env` 并填写；执行 `chmod +x scripts/run_mcp_with_dotenv.sh`；把 [example/cursor-mcp-team-memory.example.json](example/cursor-mcp-team-memory.example.json) 里的绝对路径换成你的目录后写入 `.cursor/mcp.json` / `.mcp.json`：
 
 ```json
 {
@@ -473,20 +487,20 @@ pip install team_memory
 
 **4. 验证**
 
-重启 Cursor 或 Claude Desktop，在对话里请 Agent 使用 **`memory_recall`**（或 **`memory_context`**）搜索与 Docker 相关的经验。若配置正确，会返回 JSON 结果。约定见 [mcp-lite-default.md](docs/decision/mcp-lite-default.md)。
+重启 Cursor 或 Claude Desktop，在对话里请 Agent 使用 `**memory_recall`**（或 `**memory_context**`）搜索与 Docker 相关的经验。若配置正确，会返回 JSON 结果。约定见 [mcp-lite-default.md](docs/decision/mcp-lite-default.md)。
 
 ---
 
 ### 其他安装方式
 
-- **仅 Docker、不克隆源码**：若你只想跑 Web 不跑本地 MCP，可用 `docker compose up -d` 启动（含数据库迁移）。在 `.env` 中设置 `TEAM_MEMORY_API_KEY`（默认 `changeme` 请修改）。**生产环境必须修改默认 Key，禁止使用 changeme**。访问 http://localhost:9111 。
-- **从 PyPI 部署、无 Make**：`pip install team_memory` 后，需自备 PostgreSQL（pgvector）并在项目根目录执行 `alembic upgrade head`，再通过 `TEAM_MEMORY_CONFIG_PATH` 或 `TEAM_MEMORY_DB_URL` 启动 `team-memory-web` 或 **`team-memory`**（MCP）。入口命令：`team-memory-web`（Web）、`team-memory`（MCP）、`tm-cli`（CLI）、`tm-daemon`（Daemon）。
+- **仅 Docker、不克隆源码**：若你只想跑 Web 不跑本地 MCP，可用 `docker compose up -d` 启动（含数据库迁移）。在 `.env` 中设置 `TEAM_MEMORY_API_KEY`（默认 `changeme` 请修改）。**生产环境必须修改默认 Key，禁止使用 changeme**。访问 [http://localhost:9111](http://localhost:9111) 。
+- **从 PyPI 部署、无 Make**：`pip install team_memory` 后，需自备 PostgreSQL（pgvector）并在项目根目录执行 `alembic upgrade head`，再通过 `TEAM_MEMORY_CONFIG_PATH` 或 `TEAM_MEMORY_DB_URL` 启动 `team-memory-web` 或 `**team-memory`**（MCP）。入口命令：`team-memory-web`（Web）、`team-memory`（MCP）、`tm-cli`（CLI）、`tm-daemon`（Daemon）。
 
 ---
 
 ## MCP 接入指南（配置参考）
 
-**克隆本仓库时**：优先 **`.env` + [scripts/run_mcp_with_dotenv.sh](scripts/run_mcp_with_dotenv.sh)**，`mcp.json` 不写密钥；完整步骤见 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)。
+**克隆本仓库时**：优先 `**.env` + [scripts/run_mcp_with_dotenv.sh](scripts/run_mcp_with_dotenv.sh)**，`mcp.json` 不写密钥；完整步骤见 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)。
 
 **Cursor**（`.cursor/mcp.json`）— 从 pip 安装、无项目目录：
 
@@ -509,17 +523,19 @@ pip install team_memory
 
 **Claude Desktop**：在 MCP 设置中添加同名 `team_memory` 条目；源码场景推荐与上文相同的 `bash` + `run_mcp_with_dotenv.sh`，pip 场景与上一致即可。
 
-| 变量 | 必填 | 说明 |
-|------|------|------|
-| `TEAM_MEMORY_DB_URL` | 是（或由 config 提供） | PostgreSQL 连接串，`postgresql+asyncpg://...`，库需启用 pgvector |
-| `TEAM_MEMORY_API_KEY` | 推荐 | 与 Web 同账号的 API Key；MCP 据此解析为当前用户，与 Web 身份统一 |
-| `TEAM_MEMORY_USER` | 否 | 项目级 mcp.json 中配置：写入经验的归属用户（你的 Web 账号），避免「不知谁写入」；不设 API Key 时也作回退，默认 `anonymous` |
-| `TEAM_MEMORY_PROJECT` | 否 | 项目级 mcp.json 中配置：写入经验的归属项目名；不设则用服务端 default_project |
-| `TEAM_MEMORY_CONFIG_PATH` | 否 | 配置文件路径，设置则优先从该文件加载 |
+
+| 变量                        | 必填              | 说明                                                                              |
+| ------------------------- | --------------- | ------------------------------------------------------------------------------- |
+| `TEAM_MEMORY_DB_URL`      | 是（或由 config 提供） | PostgreSQL 连接串，`postgresql+asyncpg://...`，库需启用 pgvector                         |
+| `TEAM_MEMORY_API_KEY`     | 推荐              | 与 Web 同账号的 API Key；MCP 据此解析为当前用户，与 Web 身份统一                                     |
+| `TEAM_MEMORY_USER`        | 否               | 项目级 mcp.json 中配置：写入经验的归属用户（你的 Web 账号），避免「不知谁写入」；不设 API Key 时也作回退，默认 `anonymous` |
+| `TEAM_MEMORY_PROJECT`     | 否               | 项目级 mcp.json 中配置：写入经验的归属项目名；不设则用服务端 default_project                             |
+| `TEAM_MEMORY_CONFIG_PATH` | 否               | 配置文件路径，设置则优先从该文件加载                                                              |
+
 
 **MCP 身份与 Web 统一**：MCP 的当前用户（current_user）优先由 **TEAM_MEMORY_API_KEY** 经服务端 AuthProvider 解析得到，与 Web 使用同一套用户体系。配置与 Web 同账号的 API Key 后，在 Cursor 里写入的 personal 经验在同一 Cursor 会话内可被检索到，且 Web 用该账号登录后也能看到。推荐只配置 `TEAM_MEMORY_API_KEY`（与 Web 同账号的 Key），无需再设 `TEAM_MEMORY_USER`。
 
-**项目级归属（用户 / 项目名）**：推荐使用 **`.tm.toml`** 声明项目名（见 [配置说明 / Project Config](#项目级配置--project-config)），系统也会自动从 git 仓库名推断——大多数情况下无需手动配置。若需显式指定，可在仓库根 **`.env`** 中设置 **TEAM_MEMORY_PROJECT**（及按需 **TEAM_MEMORY_USER**），与包装脚本一起使用。解析顺序：`.tm.toml` > **`TEAM_MEMORY_PROJECT`** > git 仓库名 > 目录名 > 配置 default。
+**项目级归属（用户 / 项目名）**：推荐使用 `**.tm.toml`** 声明项目名（见 [配置说明 / Project Config](#项目级配置--project-config)），系统也会自动从 git 仓库名推断——大多数情况下无需手动配置。若需显式指定，可在仓库根 `**.env**` 中设置 **TEAM_MEMORY_PROJECT**（及按需 **TEAM_MEMORY_USER**），与包装脚本一起使用。解析顺序：`.tm.toml` > `**TEAM_MEMORY_PROJECT`** > git 仓库名 > 目录名 > 配置 default。
 
 **Docker/Helm**：若通过容器或编排部署，在配置中注入上述环境变量；生产环境禁止使用占位或默认 Key（如 `changeme`）。
 
@@ -554,38 +570,44 @@ AI 可调用 memory_recall(file_path="k8s/deployment.yaml", framework="kubernete
 
 ### MCP 工具列表（当前）
 
-| 工具 | 功能 | 输入要点 |
-|------|------|----------|
-| `memory_context` | 任务开始拉上下文 + 用户画像摘要 + 相关经验 | `file_paths` 等（以工具 schema 为准） |
-| `memory_recall` | 统一检索：problem / query / file_path 等 | 至少提供其一；可选 `include_archives`、`include_user_profile` |
-| `memory_get_archive` | 档案 L2 全文 | `archive_id`（通常在 recall 命中 `type=archive` 后调用） |
-| `memory_archive_upsert` | 创建/更新档案馆（与 `POST /api/v1/archives` 一致） | `title`、`solution_doc` 等；大文件见 [mcp-server 档案馆流程](docs/guide/mcp-server.md)（HTTP / `tm-cli upload`） |
-| `memory_save` | 保存或长文解析保存 | `title`+`problem` 或 `content`；**勿**使用已移除的 `scope=archive` |
-| `memory_feedback` | 对结果评分 | `experience_id`、`rating` 等 |
-| `memory_submit_response` | 提交回复用于 Faithfulness 评估 | `query`、`response`、`result_ids`（可选） |
 
-更多管理员操作（审核、去重、配置）请用 **Web** 或 **`GET/POST /api/v1/...`**（见 `/docs`）。历史 **`tm_*`** 已不在 MCP 中暴露。
+| 工具                       | 功能                                     | 输入要点                                                                                               |
+| ------------------------ | -------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `memory_context`         | 任务开始拉上下文 + 用户画像摘要 + 相关经验               | `file_paths` 等（以工具 schema 为准）                                                                      |
+| `memory_recall`          | 统一检索：problem / query / file_path 等     | 至少提供其一；可选 `include_archives`、`include_user_profile`                                                |
+| `memory_get_archive`     | 档案 L2 全文                               | `archive_id`（通常在 recall 命中 `type=archive` 后调用）                                                     |
+| `memory_archive_upsert`  | 创建/更新档案馆（与 `POST /api/v1/archives` 一致） | `title`、`solution_doc` 等；大文件见 [mcp-server 档案馆流程](docs/guide/mcp-server.md)（HTTP / `tm-cli upload`） |
+| `memory_save`            | 保存或长文解析保存                              | `title`+`problem` 或 `content`；**勿**使用已移除的 `scope=archive`                                          |
+| `memory_feedback`        | 对结果评分                                  | `experience_id`、`rating` 等                                                                         |
+| `memory_submit_response` | 提交回复用于 Faithfulness 评估                 | `query`、`response`、`result_ids`（可选）                                                                |
+
+
+更多管理员操作（审核、去重、配置）请用 **Web** 或 `**GET/POST /api/v1/...`**（见 `/docs`）。历史 `**tm_***` 已不在 MCP 中暴露。
 
 ## Web 管理界面
 
 启动 Web 服务后访问 `http://localhost:9111`，提供经验的可视化管理：
 
-| 页面 | 功能 |
-|------|------|
+
+| 页面           | 功能                                   |
+| ------------ | ------------------------------------ |
 | 经验列表（含仪表盘统计） | 经验总量、近期趋势、热门标签、类型分布；按类型/标签/项目/进度多维筛选 |
-| 草稿箱 | 查看 AI 自动提取的待审核草稿 |
-| 审核队列 | 审核团队成员提交的经验 |
-| 去重检测 | 发现和合并相似经验 |
-| 系统设置 | 检索参数、搜索配置等 |
+| 草稿箱          | 查看 AI 自动提取的待审核草稿                     |
+| 审核队列         | 审核团队成员提交的经验                          |
+| 去重检测         | 发现和合并相似经验                            |
+| 系统设置         | 检索参数、搜索配置等                           |
+
 
 档案馆、去重、个人记忆等以当前 Web 导航与 OpenAPI 为准。
 
 创建经验支持三种模式：
+
 - **手动填写**：逐字段填写标题、问题、方案
 - **文档解析**：粘贴文档或 Markdown，AI 自动提取字段
 - **URL 导入**：输入链接，AI 自动抓取并解析内容
 
 API 参考（前缀 `/api/v1`）：
+
 - **Swagger UI**: `http://localhost:9111/docs`
 - **ReDoc**: `http://localhost:9111/redoc`
 
@@ -600,7 +622,7 @@ env vars > .env file > config.toml > code defaults
 
 ### 客户端配置（使用者） / Client Config
 
-统一配置文件：**`~/.config/tm/config.toml`**，CLI、MCP、Daemon、Hooks 所有客户端组件共用。
+统一配置文件：`**~/.config/tm/config.toml**`，CLI、MCP、Daemon、Hooks 所有客户端组件共用。
 
 可通过 `tm-cli config init` 交互式生成，或手动创建：
 
@@ -640,7 +662,7 @@ tm-cli config show     # 显示每个字段的值及其来源
 
 ### 项目级配置 / Project Config
 
-在项目根目录放置 **`.tm.toml`**，声明项目名与别名：
+在项目根目录放置 `**.tm.toml**`，声明项目名与别名：
 
 ```toml
 # .tm.toml — 项目级配置 / Project-level config
@@ -650,6 +672,7 @@ aliases = ["team_memory"]   # 别名：历史项目名映射到当前名
 ```
 
 **项目名推断优先级 / Project name inference**：
+
 1. `.tm.toml` 中 `[project].name` — 显式声明
 2. Git 仓库名（basename → snake_case）— 覆盖 80%+ 场景
 3. 目录名（basename → snake_case）— 兜底
@@ -660,12 +683,14 @@ aliases = ["team_memory"]   # 别名：历史项目名映射到当前名
 
 仅保留**两个**环境配置文件（二选一，再结合环境变量覆盖）：
 
-| 文件 | 用途 |
-|------|------|
+
+| 文件                        | 用途                                                                      |
+| ------------------------- | ----------------------------------------------------------------------- |
 | `config.development.yaml` | 本地 / 默认（`TEAM_MEMORY_ENV` 未设或 `development` / `test` / `dev` / `local`） |
-| `config.production.yaml` | 正式 / 预发（`TEAM_MEMORY_ENV=production` 或 `prod`） |
-| `TEAM_MEMORY_CONFIG_PATH` | 可选：指向任意单文件，则不再按环境名解析上述两个文件 |
-| 环境变量 `TEAM_MEMORY_*` | 最高优先级，覆盖 YAML 中的同名字段 |
+| `config.production.yaml`  | 正式 / 预发（`TEAM_MEMORY_ENV=production` 或 `prod`）                          |
+| `TEAM_MEMORY_CONFIG_PATH` | 可选：指向任意单文件，则不再按环境名解析上述两个文件                                              |
+| 环境变量 `TEAM_MEMORY_`*      | 最高优先级，覆盖 YAML 中的同名字段                                                    |
+
 
 ### 多环境配置（服务端） / Multi-Environment (Server)
 
@@ -683,11 +708,13 @@ TEAM_MEMORY_ENV=production
 
 ### RBAC 角色权限
 
-| 角色 | 权限 |
-|------|------|
-| admin | 全部操作（用户管理、配置修改、审计日志） |
-| editor | 创建、编辑、删除、审核经验 |
-| viewer | 只读（搜索、浏览、反馈） |
+
+| 角色     | 权限                   |
+| ------ | -------------------- |
+| admin  | 全部操作（用户管理、配置修改、审计日志） |
+| editor | 创建、编辑、删除、审核经验        |
+| viewer | 只读（搜索、浏览、反馈）         |
+
 
 管理员通过 Web UI 设置页面管理 API Key 和角色分配。
 
@@ -735,31 +762,31 @@ make daemon-stop  # 停止 TM Daemon
 
 便于问题定位和手动分步启动时参考：
 
-| 命令 | 含义 | 等价手动步骤 |
-|------|------|----------------|
-| `make help` | 列出所有 make 目标 | `grep -E '^[a-zA-Z_-]+:.*?## ' Makefile \| awk ...` |
-| `make release-9111` | 释放 9111 端口 | 停掉占用 9111 的 Docker 容器（如 `team-memory-web`）和本机进程：<br>`docker compose stop team-memory-web`<br>`docker ps -q --filter "publish=9111" \| xargs docker stop`<br>`lsof -i :9111 -t \| xargs kill -9` |
-| `make setup` | 首次安装 | `docker compose up -d` → 等 PG 就绪 → 建库（若无）→ 按需启动 Ollama 容器 → `pip install -e ".[dev]"` → `alembic upgrade head` |
-| `make dev` | 启动全部服务 | 先执行 `make release-9111`（避免 9111 被占）→ `docker compose up -d postgres redis` → 若 11434 未被占用则 `docker compose --profile ollama up -d` → 前台运行 `python -m team_memory.web.app` |
-| `make web` | 仅启动 Web | 先执行 `make release-9111` → 前台运行 `python -m team_memory.web.app`（默认 http://0.0.0.0:9111） |
-| `make mcp` | 启动 MCP | `bash scripts/run_mcp_with_dotenv.sh`（需仓库根 `.env`；stdio，**`memory_*` 六工具**），配置见 [docs/guide/mcp-server.md](docs/guide/mcp-server.md) |
-| `make mcp-verify` | 校验 MCP 工具注册 | 跑 `TestLiteToolRegistration` 中工具数量与名称（无需长驻 MCP 进程） |
-| `make health` | 健康检查 | `./scripts/healthcheck.sh`（检测 DB、Web、Ollama 等） |
-| `make migrate` | 数据库迁移 | `alembic upgrade head` |
-| `make migrate-fts` | 补齐经验表 FTS 字段（存量迁移） | `python scripts/migrate_fts.py`；可用 `--dry-run` 预览待更新条数 |
+
+| 命令                  | 含义                 | 等价手动步骤                                                                                                                                                                               |
+| ------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `make help`         | 列出所有 make 目标       | `grep -E '^[a-zA-Z_-]+:.*?## ' Makefile | awk ...`                                                                                                                                   |
+| `make release-9111` | 释放 9111 端口         | 停掉占用 9111 的 Docker 容器（如 `team-memory-web`）和本机进程： `docker compose stop team-memory-web` `docker ps -q --filter "publish=9111" | xargs docker stop` `lsof -i :9111 -t | xargs kill -9` |
+| `make setup`        | 首次安装               | `docker compose up -d` → 等 PG 就绪 → 建库（若无）→ 按需启动 Ollama 容器 → `pip install -e ".[dev]"` → `alembic upgrade head`                                                                       |
+| `make dev`          | 启动全部服务             | 先执行 `make release-9111`（避免 9111 被占）→ `docker compose up -d postgres redis` → 若 11434 未被占用则 `docker compose --profile ollama up -d` → 前台运行 `python -m team_memory.web.app`            |
+| `make web`          | 仅启动 Web            | 先执行 `make release-9111` → 前台运行 `python -m team_memory.web.app`（默认 [http://0.0.0.0:9111）](http://0.0.0.0:9111）)                                                                       |
+| `make mcp`          | 启动 MCP             | `bash scripts/run_mcp_with_dotenv.sh`（需仓库根 `.env`；stdio，`**memory_*` 六工具**），配置见 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)                                                 |
+| `make mcp-verify`   | 校验 MCP 工具注册        | 跑 `TestLiteToolRegistration` 中工具数量与名称（无需长驻 MCP 进程）                                                                                                                                   |
+| `make health`       | 健康检查               | `./scripts/healthcheck.sh`（检测 DB、Web、Ollama 等）                                                                                                                                       |
+| `make migrate`      | 数据库迁移              | `alembic upgrade head`                                                                                                                                                               |
+| `make migrate-fts`  | 补齐经验表 FTS 字段（存量迁移） | `python scripts/migrate_fts.py`；可用 `--dry-run` 预览待更新条数                                                                                                                               |
+
 
 **说明**：`make dev` 与 `make web` 会在启动前自动释放 9111 端口（停止占用该端口的 Docker 容器或本机进程），因此可重复执行而不会出现「address already in use」。
 
 ### 仪表盘报「加载仪表盘失败」时
 
 1. **先看健康检查**：`make health` 或 `GET http://localhost:9111/health`。
-   - 若输出中有 **`dashboard_stats: FAIL`** 及后面的 `error` / `ops_hint`，按提示排查（常见原因：数据库未启动、未执行迁移、或 config 中 `database.url` 错误）。
-   - 若 **database 为 FAIL**：先启动数据库（如 `docker compose up -d postgres`），执行 `alembic upgrade head` 后再访问仪表盘。
-
+  - 若输出中有 `**dashboard_stats: FAIL`** 及后面的 `error` / `ops_hint`，按提示排查（常见原因：数据库未启动、未执行迁移、或 config 中 `database.url` 错误）。
+  - 若 **database 为 FAIL**：先启动数据库（如 `docker compose up -d postgres`），执行 `alembic upgrade head` 后再访问仪表盘。
 2. **API 错误会返回 JSON**：若后端报 500，接口会返回 `detail`、`ops_error_id`、`ops_hint`。
-   - 前端会把这些信息拼进错误提示；
-   - 在服务端日志中按 `ops_error_id` 搜索可定位对应异常。
-
+  - 前端会把这些信息拼进错误提示；
+  - 在服务端日志中按 `ops_error_id` 搜索可定位对应异常。
 3. **本地快速诊断**：`python scripts/smoke/smoke_web_dashboard.py [--api-key KEY]` 会请求 `/health` 和 `/api/v1/stats` 并打印结果，便于确认是数据库、配置还是鉴权问题。
 
 ### 备份恢复
@@ -799,28 +826,32 @@ docker compose up -d
 
 ## 技术栈 / Tech Stack
 
-| 层面 | 技术选型 |
-|------|----------|
-| MCP | FastMCP |
-| Web | FastAPI + Uvicorn |
-| 数据库 | PostgreSQL + pgvector |
-| ORM | SQLAlchemy 2.0 (async) |
-| 嵌入 | qwen3-embedding:0.6b (Ollama) / OpenAI / 本地模型 |
-| 搜索 | 向量 + 全文检索(jieba+hybrid AND/OR) + RRF 融合 + Reranker |
-| 缓存 | 内存 LRU / Redis |
-| 配置 | Pydantic Settings + YAML（服务端）/ TOML + ClientConfig（客户端） |
-| 迁移 | Alembic |
+
+| 层面     | 技术选型                                                      |
+| ------ | --------------------------------------------------------- |
+| MCP    | FastMCP                                                   |
+| Web    | FastAPI + Uvicorn                                         |
+| 数据库    | PostgreSQL + pgvector                                     |
+| ORM    | SQLAlchemy 2.0 (async)                                    |
+| 嵌入     | qwen3-embedding:0.6b (Ollama) / OpenAI / 本地模型             |
+| 搜索     | 向量 + 全文检索(jieba+hybrid AND/OR) + RRF 融合 + Reranker        |
+| 缓存     | 内存 LRU / Redis                                            |
+| 配置     | Pydantic Settings + YAML（服务端）/ TOML + ClientConfig（客户端）   |
+| 迁移     | Alembic                                                   |
 | Daemon | TM Daemon (launchd) — Obsidian watcher + RefinementWorker |
-| 评估 | Faithfulness (RAGAS LLM Judge) + search_eval |
+| 评估     | Faithfulness (RAGAS LLM Judge) + search_eval              |
+
 
 ### 入口点 / Entry Points
 
-| 命令 | 模块 | 用途 |
-|------|------|------|
-| `team-memory` | `team_memory.server:main` | MCP Server（stdio） |
-| `team-memory-web` | `team_memory.web.app:main` | Web 服务 |
-| `tm-cli` | `team_memory.cli:main` | CLI 兼容层 + 配置管理 |
-| `tm-daemon` | `team_memory.daemon.__main__:main` | TM Daemon 守护进程 |
+
+| 命令                | 模块                                 | 用途                |
+| ----------------- | ---------------------------------- | ----------------- |
+| `team-memory`     | `team_memory.server:main`          | MCP Server（stdio） |
+| `team-memory-web` | `team_memory.web.app:main`         | Web 服务            |
+| `tm-cli`          | `team_memory.cli:main`             | CLI 兼容层 + 配置管理    |
+| `tm-daemon`       | `team_memory.daemon.__main__:main` | TM Daemon 守护进程    |
+
 
 ### 代码组织 / Code Organization
 
@@ -852,7 +883,7 @@ A: 不会。TeamMemory 有多层机制控制输出体量：语义搜索本身只
 
 **Q: 团队成员不想手动录入经验怎么办？**
 
-A: 这正是 TeamMemory 的设计重点。让 AI 在适当时机调用 **`memory_save(content=...)`** 可把长对话交给服务端解析并写入（常为草稿，视配置而定）；也可在 Web 中粘贴文档或 URL 生成经验后再审核发布。
+A: 这正是 TeamMemory 的设计重点。让 AI 在适当时机调用 `**memory_save(content=...)`** 可把长对话交给服务端解析并写入（常为草稿，视配置而定）；也可在 Web 中粘贴文档或 URL 生成经验后再审核发布。
 
 **Q: 切换 Embedding 模型后需要做什么？**
 
@@ -903,3 +934,4 @@ ruff check src/ --fix
 ## 文档结构
 
 - **设计文档**：[docs/](docs/)（索引：[docs/README.md](docs/README.md)）
+

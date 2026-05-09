@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/yeshouyou/Work/agent/team_doc/.venv/bin/python /Users/yeshouyou/Work/agent/team_doc/scripts/hooks/cursor_after_response.py"
+            "command": "/Users/yeshouyou/miniconda3/envs/team_memory/bin/python -m team_memory.hooks.cursor_after_response"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/yeshouyou/Work/agent/team_doc/.venv/bin/python /Users/yeshouyou/Work/agent/team_doc/scripts/hooks/cursor_session_start.py"
+            "command": "/Users/yeshouyou/miniconda3/envs/team_memory/bin/python -m team_memory.hooks.cursor_session_start"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/yeshouyou/Work/agent/team_doc/.venv/bin/python /Users/yeshouyou/Work/agent/team_doc/scripts/hooks/cursor_before_prompt.py"
+            "command": "/Users/yeshouyou/miniconda3/envs/team_memory/bin/python -m team_memory.hooks.cursor_before_prompt"
           }
         ]
       }
