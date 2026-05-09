@@ -79,14 +79,17 @@ class HookPayload(BaseModel):
     Different platforms send the agent response under different field names:
     - Hermes / tm_hook.py: uses ``prompt``
     - Claude Code / claude_stop.py: uses ``response_text``
+    - Cursor afterAgentResponse: uses ``agent_response`` or ``content``
 
-    The pipeline layer reads both (response_text takes precedence) so new
-    platforms can use either convention without touching pipeline code.
+    The pipeline layer reads all variants (response_text takes precedence).
+    各平台字段名不同，pipeline 按优先级读取。
     """
 
     conversation_id: str = ""
     prompt: str = ""
     response_text: str = ""
+    agent_response: str = ""  # Cursor afterAgentResponse format
+    content: str = ""  # Some platforms use content
     workspace_roots: list[str] = Field(default_factory=list)
     model: str = ""
 

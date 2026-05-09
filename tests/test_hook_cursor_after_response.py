@@ -27,7 +27,7 @@ class TestCursorAfterResponseThin:
             request=httpx.Request("POST", "http://127.0.0.1:3901/hooks/after_response"),
         )
 
-        input_data = {"conversation_id": "sess-1", "prompt": "hello", "workspace_roots": ["/tmp"]}
+        input_data = {"conversation_id": "sess-1", "agent_response": "hello", "workspace_roots": ["/tmp"]}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
             with patch("team_memory.hooks.cursor_after_response.httpx.post", return_value=mock_response) as mock_post:
                 with patch("builtins.print") as mock_print:
@@ -35,7 +35,10 @@ class TestCursorAfterResponseThin:
 
         mock_post.assert_called_once()
         call_kwargs = mock_post.call_args
-        assert call_kwargs[1]["json"] == input_data
+        sent = call_kwargs[1]["json"]
+        assert sent["conversation_id"] == "sess-1"
+        assert sent["response_text"] == "hello"
+        assert sent["workspace_roots"] == ["/tmp"]
         assert "after_response" in call_kwargs[0][0] or "after_response" in call_kwargs[1].get("url", "")
         mock_print.assert_called_once_with(
             json.dumps({"action": "draft_saved", "convergence": False, "draft_id": "d1"})

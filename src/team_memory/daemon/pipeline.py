@@ -214,7 +214,13 @@ async def process_after_response(
         Dict with action, convergence flag, and draft_id.
     """
     session_id = input_data.get("conversation_id", "") or "unknown"
-    response_text = input_data.get("response_text") or input_data.get("prompt", "") or ""
+    response_text = (
+        input_data.get("response_text")
+        or input_data.get("prompt", "")
+        or input_data.get("agent_response", "")
+        or input_data.get("content", "")
+        or ""
+    )
     workspace_roots = input_data.get("workspace_roots", [])
     project = _resolve_project(workspace_roots, config)
 
@@ -235,7 +241,12 @@ async def process_after_response(
     # Store assistant message in conversation buffer
     await buf.add_message(session_id, "assistant", response_text, project=project)
 
-    # Detect convergence
+    # Detect convergence — three signals (first match wins)
+    # 检测收敛 — 三个信号（先匹配先赢）
+    converged = False
+
+    # Signal 1: Explicit keyword convergence (original logic)
+    # 信号 1: 显式关键词收敛（原有逻辑）
     converged = detector.detect_convergence(
         response_text,
         recent_tools=[],
@@ -243,10 +254,22 @@ async def process_after_response(
         previous_path=None,
     )
 
+    # Signal 2: Message-count threshold — auto-converge after N assistant messages
+    # 信号 2: 消息累积阈值 — 累积 N 条 assistant 消息后自动收敛
+    if not converged:
+        msg_count = len(await buf.get_messages(session_id, role="assistant"))
+        msg_threshold = 3  # 3+ assistant messages → auto-converge
+        if msg_count >= msg_threshold:
+            converged = True
+            logger.info(
+                "[CONVERGE] session=%s msg_count=%d >= %d (auto-converge)",
+                session_id[:8], msg_count, msg_threshold,
+            )
+
     if converged:
-        # Mark session for LLM refinement
+        # Mark session for LLM refinement / 标记会话待精炼
         result = await refiner.mark_for_refinement(session_id)
-        # Extract personal memory from user messages
+        # Extract personal memory from user messages / 从用户消息提取个人记忆
         await _try_extract_personal_memory(session_id, buf, config)
         if result is not None:
             return {
