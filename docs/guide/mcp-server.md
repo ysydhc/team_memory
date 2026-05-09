@@ -12,7 +12,9 @@ MCP 给 Cursor / Claude Desktop / Claude Code 里的 Agent 用，与 **Web** 是
 
 **原则**：`TEAM_MEMORY_API_KEY`、`TEAM_MEMORY_PROJECT` 放在**仓库根** **`.env`**（已由 `.gitignore` 忽略）；MCP 的 JSON 只声明 **`bash` + [scripts/run_mcp_with_dotenv.sh](../../scripts/run_mcp_with_dotenv.sh) + `cwd`**，不把密钥写进 JSON。换工程时主要改各自 `.env`，**不必**在 JSON 里改 project/Key。
 
-**`project` 解析**（代码顺序，见 `src/team_memory/utils/project.py`）：工具入参 **`project`** > 环境变量 **`TEAM_MEMORY_PROJECT`** > 配置 **`default_project`** > `"default"`。
+**`project` 解析**（代码顺序）：工具入参 **`project`** > **`.tm.toml`** `[project].name` > 环境变量 **`TEAM_MEMORY_PROJECT`** > git 仓库名 > 目录名 > 配置 **`default_project`** > `"default"`。大多数项目无需配置，系统自动从 git 仓库名推断。
+
+**客户端配置**：也可通过 `tm-cli config init` 生成 `~/.config/tm/config.toml`，将 API Key 等存入统一配置文件，避免在 JSON 中暴露。
 
 1. 复制模板 **[env.team-memory.example](../../example/env.team-memory.example)** 为仓库根 **`.env`**，填写至少：
    - **`TEAM_MEMORY_API_KEY`**（与 Web API Key 登录一致）
@@ -36,7 +38,9 @@ MCP 给 Cursor / Claude Desktop / Claude Code 里的 Agent 用，与 **Web** 是
 |------|------|
 | 脚本提示 missing `.env` | 从 `example/env.team-memory.example` 复制并填写 |
 | MCP / `No authenticated user` | `.env` 中 Key 无效，或 MCP 未通过包装脚本启动导致未加载 `.env` |
-| 数据总是进了 `default` 项目 | 检查 `.env` 是否设置 `TEAM_MEMORY_PROJECT`，或工具调用是否显式传 `project` |
+| 数据总是进了 `default` 项目 | 检查 `.tm.toml` 是否设置 `[project].name`，或 `.env` 是否设置 `TEAM_MEMORY_PROJECT`，或工具调用是否显式传 `project` |
+| 项目名不对 | 运行 `tm-cli config show` 查看项目名来源；检查 `.tm.toml` 或 git 仓库名 |
+| Embedding 服务失败 | Ollama 重启后 `/health` 会自动重试初始化；手动验证：`curl localhost:9111/health` |
 
 **档案馆（不增加 MCP 工具的前提）**：结构化文案用 MCP **`memory_archive_upsert`**；**附件**用 HTTP **`POST /api/v1/archives/{archive_id}/attachments/upload`** 或 **`python -m team_memory.cli upload`**（终端需能读到 **`TEAM_MEMORY_API_KEY`**，可与 `.env` 同源：`set -a && source .env`）。设计背景已迁入 Team Memory 档案馆（标题 **`【docs-plans】mcp-archive-api-redesign`**，可 `memory_recall(include_archives=true)` 或 Web 档案馆检索）。
 
@@ -44,7 +48,7 @@ MCP 给 Cursor / Claude Desktop / Claude Code 里的 Agent 用，与 **Web** 是
 
 | 环节 | 做法 |
 |------|------|
-| **多项目** | 各仓库**独立** `.env` 中的 **`TEAM_MEMORY_PROJECT`**；或单次工具调用传 **`project`** |
+| **多项目** | 各仓库**独立** `.tm.toml` 中 **`[project].name`**（零配置时自动从 git 仓库名推断）；或 `.env` 中的 **`TEAM_MEMORY_PROJECT`**；或单次工具调用传 **`project`** |
 | **终端 curl/tm-cli** | 同一 shell `source .env` 后再执行，或与 MCP **不是**同一份进程环境 |
 | **附件** | 先 `memory_archive_upsert` 拿 `archive_id`，再 CLI/HTTP 上传；可加 `?project=` / `--project` |
 
@@ -106,7 +110,7 @@ bash scripts/run_mcp_with_dotenv.sh
 ### 前提
 
 - Web 服务运行中（`make dev` 或 `make web`）
-- 环境变量 `TEAM_MEMORY_API_KEY` 已设置
+- 环境变量 `TEAM_MEMORY_API_KEY` 已设置，或已在 `~/.config/tm/config.toml` 中配置
 
 ### 命令速查
 
@@ -118,6 +122,15 @@ bash scripts/run_mcp_with_dotenv.sh
 | memory_get_archive | `tm-cli get-archive` | `tm-cli get-archive --id "uuid"` |
 | memory_archive_upsert | `tm-cli archive` | `tm-cli archive --title "..." --solution-doc "..."` |
 | memory_feedback | `tm-cli feedback` | `tm-cli feedback --experience-id "uuid" --rating 5` |
+
+### 配置管理命令 / Config Management Commands
+
+| 命令 | 用途 |
+|------|------|
+| `tm-cli config show` | 显示当前生效配置及每个字段的值来源（环境变量 / .env / config.toml / 默认值） |
+| `tm-cli config init` | 交互式生成 `~/.config/tm/config.toml`（含连接测试） |
+| `tm-cli setup --platform {claude-code\|cursor\|hermes\|all}` | 一键配置平台 Hook |
+| `tm-cli setup --platform ... --check` | 仅检查当前 Hook 配置状态 |
 
 ### REST API
 
@@ -143,6 +156,9 @@ CLI 底层调用 `/api/v1/mcp/*` 端点，认证方式与 Web API 一致（`Auth
 | 1 | `make setup` 或至少 DB 就绪 + `alembic upgrade head` |
 | 2 | [env.team-memory.example](../../example/env.team-memory.example) → 复制为仓库根 `.env` 并填写 |
 | 3 | `chmod +x scripts/run_mcp_with_dotenv.sh` |
-| 4 | `make mcp-verify` |
-| 5 | 按示例配置 `.cursor/mcp.json` / `.mcp.json`，**勿在 JSON 写 Key** |
-| 6 | 重载 MCP 后验证工具；附件见上文 CLI/HTTP |
+| 4 | （可选）`tm-cli config init` 生成 `~/.config/tm/config.toml` |
+| 5 | （可选）在项目根创建 `.tm.toml` 声明项目名与别名（否则自动从 git 仓库名推断） |
+| 6 | `make mcp-verify` |
+| 7 | 按示例配置 `.cursor/mcp.json` / `.mcp.json`，**勿在 JSON 写 Key** |
+| 8 | （可选）`tm-cli setup --platform {claude-code\|cursor\|hermes\|all}` 一键配置 Hook |
+| 9 | 重载 MCP 后验证工具；附件见上文 CLI/HTTP |

@@ -20,6 +20,9 @@ make sync-agent-artifacts  # 由 agents/shared 生成 .claude/.cursor agents、.
 
 tm-cli --help    # CLI 兼容层（MCP 工具的 Shell 等价）
 tm-cli recall --query "..." # 搜索团队知识
+tm-cli config show          # 显示当前生效配置及值来源
+tm-cli config init          # 交互式生成 ~/.config/tm/config.toml
+tm-cli setup --platform all # 一键配置平台 Hook
 
 # 单测 / 筛选
 pytest tests/test_server.py::TestLiteToolRegistration::test_exactly_six_tools -v
@@ -50,9 +53,24 @@ pytest -k "search" -v
 ├─────────────────────────────────────────┤
 │  Infrastructure (PostgreSQL + pgvector) │
 └─────────────────────────────────────────┘
+
+客户端组件（PYTHONPATH 只需 src/）:
+┌─────────────────────────────────────────┐
+│  client_config.py                       │  ← ClientConfig（~/.config/tm/config.toml）
+│  project_resolver.py                    │  ← 项目名零配置推断 + 别名注册
+│  daemon/  (原 scripts/daemon/)           │  ← TM Daemon（tm-daemon 入口）
+│  hooks/   (原 scripts/hooks/)            │  ← 平台 Hook（Claude/Cursor/Hermes）
+│  cli.py                                 │  ← tm-cli + config/setup 子命令
+└─────────────────────────────────────────┘
 ```
 
 **依赖方向（仅自上而下）**：Server/Web → Services → Storage → Models。禁止反向 import。
+
+**配置两层 / Two Config Layers**：
+- **服务端**：`config.development.yaml` / `config.production.yaml`（Pydantic Settings + YAML）
+- **客户端**：`~/.config/tm/config.toml`（ClientConfig + TOML），优先级：环境变量 > `.env` > `config.toml` > 代码默认值
+
+**项目名推断 / Project Name Inference**：`.tm.toml` > git 仓库名 > 目录名。别名注册：`project_resolver.register_aliases()`。
 
 ### 核心领域
 
@@ -101,6 +119,8 @@ alembic upgrade head
 - [ ] 无硬编码密钥、无裸 `print()`
 - [ ] Web 改动通过 `make lint-js`
 - [ ] 若变更架构分层、MCP 对外契约或用户可见文档，已同步更新 [README.md](README.md)、本文件与 [docs/](docs/) 相关篇目
+- [ ] 若新增配置项，已在 `ClientConfig`（`client_config.py`）中添加，并在 `load_with_sources()` 中标注来源
+- [ ] 若修改 daemon/hooks 代码，确认 import 路径为 `from team_memory.daemon/...` 而非旧 `from daemon/...`
 
 ## 导航
 
@@ -110,8 +130,13 @@ alembic upgrade head
 | 分层 / import 门禁 | `scripts/harness_import_check.py`（`LAYER_MAP`）；设计文档索引 [docs/README.md](docs/README.md) |
 | Import 分层（L0–L3） | `scripts/harness_import_check.py`（`LAYER_MAP`） |
 | MCP 实现 | [src/team_memory/server.py](src/team_memory/server.py) |
-| CLI 兼容层 | [src/team_memory/cli.py](src/team_memory/cli.py)、[docs/guide/mcp-server.md](docs/guide/mcp-server.md) |
+| CLI 兼容层 + config/setup | [src/team_memory/cli.py](src/team_memory/cli.py)、[docs/guide/mcp-server.md](docs/guide/mcp-server.md) |
+| 统一客户端配置 | [src/team_memory/client_config.py](src/team_memory/client_config.py)（ClientConfig） |
+| 项目名零配置推断 | [src/team_memory/project_resolver.py](src/team_memory/project_resolver.py) |
+| TM Daemon | [src/team_memory/daemon/](src/team_memory/daemon/)（`tm-daemon` 入口） |
+| 平台 Hook | [src/team_memory/hooks/](src/team_memory/hooks/)（Claude/Cursor/Hermes） |
 | MCP 运维与配置 | [docs/guide/mcp-server.md](docs/guide/mcp-server.md)、[docs/decision/mcp-lite-default.md](docs/decision/mcp-lite-default.md) |
+| 配置重构 RFC | [docs/plan/configuration-refactor-rfc.md](docs/plan/configuration-refactor-rfc.md) |
 | 设计文档索引 | [docs/README.md](docs/README.md) |
 | Harness 框架 | [.harness/docs/harness-spec.md](.harness/docs/harness-spec.md) |
 | Harness 配置 | [.harness/harness-config.yaml](.harness/harness-config.yaml) |
@@ -128,10 +153,12 @@ docker compose exec postgres psql -U developer -d team_memory  # DB 调试
 
 | 问题 | 解决 |
 |------|------|
-| `make verify` import 报错 | 检查 import 方向，Storage 不能 import Services |
+| `make verify` import 报错 | 检查 import 方向，Storage 不能 import Services；PYTHONPATH 只需 `src/`，不再需要 `scripts/` |
 | 测试连不上数据库 | `docker compose up -d postgres` |
-| Embedding 失败 | `ollama pull nomic-embed-text` |
+| Embedding 失败 | `ollama pull qwen3-embedding:0.6b`；Ollama 重启后 `/health` 会自动重试初始化 |
 | 端口 9111 被占用 | `make release-9111` |
+| 找不到 daemon/hooks 模块 | 已迁入 `src/team_memory/daemon/` 和 `src/team_memory/hooks/`，使用 `from team_memory.daemon import ...` |
+| 项目名不对 | 检查 `.tm.toml` 或 git 仓库名；`tm-cli config show` 查看来源 |
 
 ## 不确定时
 

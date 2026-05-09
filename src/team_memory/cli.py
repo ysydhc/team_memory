@@ -239,13 +239,31 @@ def cmd_feedback(args: argparse.Namespace) -> None:
 
 
 def cmd_config_show(_args: argparse.Namespace) -> None:
-    """Show current effective configuration / 显示当前生效配置。"""
+    """Show current effective configuration with source annotations / 显示当前生效配置及值来源。"""
     from team_memory.client_config import ClientConfig
 
-    cfg = ClientConfig.load()
-    import json
+    cfg, sources = ClientConfig.load_with_sources()
+    data = cfg.to_dict()
 
-    print(json.dumps(cfg.to_dict(), indent=2, ensure_ascii=False))
+    # 按分组输出，每个字段标注来源 / output by section with source annotation
+    sections = [
+        ("server", ["url", "api_key"]),
+        ("llm", ["base_url", "api_key", "api_key_env", "resolved_api_key", "model", "timeout"]),
+        ("conversation", ["db_path"]),
+        ("wiki", ["enabled", "db_path"]),
+        ("daemon", ["host", "port", "log_level"]),
+    ]
+
+    for section_name, fields in sections:
+        print(f"[{section_name}]")
+        section_data = data.get(section_name, {})
+        for field_name in fields:
+            value = section_data.get(field_name, "")
+            source_key = f"{section_name}.{field_name}"
+            # resolved_api_key 没有 source / no source for derived fields
+            source = sources.get(source_key, "derived")
+            print(f"  {field_name} = {value}  ({source})")
+        print()
 
 
 def cmd_config_init(args: argparse.Namespace) -> None:
@@ -255,7 +273,7 @@ def cmd_config_init(args: argparse.Namespace) -> None:
     config_dir = Path.home() / ".config" / "tm"
     config_file = config_dir / "config.toml"
 
-    # Gather values
+    # Gather values / 收集配置值
     server_url = args.server_url
     api_key = args.api_key
 
@@ -270,7 +288,7 @@ def cmd_config_init(args: argparse.Namespace) -> None:
     if not api_key and not args.non_interactive:
         print("Warning: No API key provided. Set TEAM_MEMORY_API_KEY env var or edit config.")
 
-    # Build config dict
+    # Build config dict / 构建配置字典
     config_data: dict[str, Any] = {
         "server": {
             "url": server_url,
@@ -279,12 +297,58 @@ def cmd_config_init(args: argparse.Namespace) -> None:
     if api_key:
         config_data["server"]["api_key"] = api_key
 
-    # Write
+    # Write / 写入文件
     config_dir.mkdir(parents=True, exist_ok=True)
     with open(config_file, "wb") as f:
         tomli_w.dump(config_data, f)
 
     print(f"Config written to {config_file}")
+
+    # 连接测试 / connection test
+    _test_connection(server_url, api_key)
+
+
+def _test_connection(server_url: str, api_key: str | None) -> None:
+    """Test HTTP connection and auth to TM server / 测试与服务器的连接和认证。"""
+    print(f"\nTesting connection to {server_url} ...")
+
+    # 测试 HTTP 连接 / test HTTP reachability
+    try:
+        resp = httpx.get(f"{server_url}/health", timeout=5.0)
+    except httpx.ConnectError:
+        print(f"  ❌ Cannot connect to {server_url}. Is the server running?")
+        return
+    except httpx.TimeoutException:
+        print(f"  ❌ Connection timed out to {server_url}.")
+        return
+    except Exception as e:
+        print(f"  ❌ Connection error: {e}")
+        return
+
+    # 测试 API key 认证 / test API key authentication
+    if resp.status_code == 200:
+        print("  ✅ Server is reachable (HTTP 200)")
+    else:
+        print(f"  ⚠️  Server responded with status {resp.status_code}")
+
+    if not api_key:
+        print("  ⚠️  No API key configured — skipping auth test")
+        return
+
+    try:
+        auth_resp = httpx.get(
+            f"{server_url}/health",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=5.0,
+        )
+        if auth_resp.status_code == 200:
+            print("  ✅ API key authentication successful")
+        elif auth_resp.status_code == 401:
+            print("  ❌ API key authentication failed (401 Unauthorized)")
+        else:
+            print(f"  ⚠️  Auth test returned status {auth_resp.status_code}")
+    except Exception as e:
+        print(f"  ❌ Auth test error: {e}")
 
 
 def cmd_setup(args: argparse.Namespace) -> None:
@@ -308,23 +372,65 @@ def _check_platform(platform: str, cfg: Any) -> None:
     if platform == "claude-code":
         settings = Path.home() / ".claude" / "settings.json"
         if settings.exists():
-            print(f"[claude-code] ✅ {settings} exists")
+            # 检查 hook 条目是否存在 / check if hook entry exists
+            try:
+                with open(settings) as f:
+                    data = json.load(f)
+                hooks = data.get("hooks", {})
+                post_tool = hooks.get("PostToolUse", [])
+                has_tm = any(
+                    h.get("matcher") == "mcp__team_memory__recall"
+                    for h in post_tool
+                )
+                if has_tm:
+                    print(f"[claude-code] ✅ {settings} exists, PostToolUse hook configured")
+                else:
+                    print(f"[claude-code] ⚠️  {settings} exists but PostToolUse hook not found")
+                    print("  Run: tm-cli setup --platform claude-code")
+            except (json.JSONDecodeError, OSError) as e:
+                print(f"[claude-code] ⚠️  {settings} exists but cannot parse: {e}")
         else:
             print(f"[claude-code] ❌ {settings} not found")
+            print("  Run: tm-cli setup --platform claude-code")
 
     elif platform == "cursor":
         hooks_file = Path.cwd() / ".cursor" / "hooks.json"
         if hooks_file.exists():
-            print(f"[cursor] ✅ {hooks_file} exists")
+            # 检查 hook 条目是否存在 / check if hook entry exists
+            try:
+                with open(hooks_file) as f:
+                    data = json.load(f)
+                # Cursor format: {"hooks": {"afterMCPExecution":
+                # [{"matcher": "...", "hooks": [...]}]}}
+                hooks_section = data.get("hooks", {})
+                if isinstance(hooks_section, dict):
+                    after_mcp = hooks_section.get("afterMCPExecution", [])
+                    has_tm = any(
+                        "team_memory" in entry.get("matcher", "")
+                        for entry in after_mcp
+                        if isinstance(entry, dict)
+                    )
+                else:
+                    has_tm = False
+                if has_tm:
+                    print(f"[cursor] ✅ {hooks_file} exists, afterMCPExecution hook configured")
+                else:
+                    print(f"[cursor] ⚠️  {hooks_file} exists but afterMCPExecution hook not found")
+                    print("  Run: tm-cli setup --platform cursor")
+            except (json.JSONDecodeError, OSError) as e:
+                print(f"[cursor] ⚠️  {hooks_file} exists but cannot parse: {e}")
         else:
             print(f"[cursor] ❌ {hooks_file} not found")
+            print("  Run: tm-cli setup --platform cursor")
 
     elif platform == "hermes":
         config_file = Path.home() / ".hermes" / "config.yaml"
         if config_file.exists():
             print(f"[hermes] ✅ {config_file} exists")
+            print("  Verify manually that post_tool_call hook is configured")
         else:
             print(f"[hermes] ❌ {config_file} not found")
+            print("  Run: tm-cli setup --platform hermes for instructions")
 
 
 def _setup_platform(platform: str, cfg: Any) -> None:
@@ -370,7 +476,12 @@ def _setup_claude_code(cfg: Any, venv_python: str) -> None:
 
 
 def _setup_cursor(cfg: Any, venv_python: str) -> None:
-    """Configure Cursor afterMCPExecution hook."""
+    """Configure Cursor afterMCPExecution hook.
+
+    Cursor hooks.json format:
+    {"hooks": {"afterMCPExecution":
+     [{"matcher": "...", "hooks": [{"type": "command", "command": "..."}]}]}}
+    """
     import json
 
     hooks_path = Path.cwd() / ".cursor" / "hooks.json"
@@ -379,23 +490,32 @@ def _setup_cursor(cfg: Any, venv_python: str) -> None:
         with open(hooks_path) as f:
             hooks_data = json.load(f)
 
-    hook_entry = {
-        "event": "afterMCPExecution",
-        "matcher": "MCP:team_memory",
-        "command": f"{venv_python} -m team_memory.hooks.cursor_after_mcp",
-    }
+    # Ensure nested dict structure / 确保嵌套 dict 结构
+    hooks_section = hooks_data.setdefault("hooks", {})
+    if isinstance(hooks_section, list):
+        # Migrate old format → new format / 迁移旧格式到新格式
+        hooks_section = {}
+        hooks_data["hooks"] = hooks_section
 
-    hooks_list = hooks_data.setdefault("hooks", [])
-    hooks_list = [
-        h
-        for h in hooks_list
-        if not (
-            h.get("event") == "afterMCPExecution"
-            and "team_memory" in h.get("matcher", "")
-        )
+    after_mcp = hooks_section.setdefault("afterMCPExecution", [])
+
+    # Remove existing TM entry / 移除已有的 TM 条目
+    after_mcp = [
+        entry for entry in after_mcp
+        if not (isinstance(entry, dict) and "team_memory" in entry.get("matcher", ""))
     ]
-    hooks_list.append(hook_entry)
-    hooks_data["hooks"] = hooks_list
+
+    # Add new entry in Cursor format / 用 Cursor 格式添加新条目
+    after_mcp.append({
+        "matcher": "MCP:team_memory",
+        "hooks": [
+            {
+                "type": "command",
+                "command": f"{venv_python} -m team_memory.hooks.cursor_after_mcp",
+            }
+        ],
+    })
+    hooks_section["afterMCPExecution"] = after_mcp
 
     hooks_path.parent.mkdir(parents=True, exist_ok=True)
     with open(hooks_path, "w") as f:

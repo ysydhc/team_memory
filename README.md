@@ -41,29 +41,50 @@ make web
 
 浏览器访问 http://localhost:9111 ，用上面的 API Key 登录即可。更完整的部署与用户流程见下文 [按角色导航](#按角色导航) 与 [快速开始](#快速开始)。
 
-## CLI 工具
+## CLI 工具 / CLI Tools
 
 除 MCP 外，所有 `memory_*` 工具也可通过 `tm-cli` 命令行调用：
 
 ```bash
-# 搜索团队知识
+# 搜索团队知识 / Search team knowledge
 tm-cli recall --query "如何配置"
 
-# 保存经验
+# 保存经验 / Save experience
 tm-cli save --title "Bug fix" --problem "连接超时" --solution "增加重试"
 
-# 获取上下文
+# 获取上下文 / Get context
 tm-cli context --file-paths "src/server.py"
 
-# 查看所有命令
+# 查看所有命令 / Show all commands
 tm-cli --help
 ```
 
-前提：`make dev` 启动服务 + `TEAM_MEMORY_API_KEY` 环境变量已设置。
+### 配置命令 / Configuration Commands
+
+```bash
+# 显示当前生效配置及值来源 / Show effective config with source annotations
+tm-cli config show
+
+# 交互式生成 ~/.config/tm/config.toml / Interactive config init
+tm-cli config init
+
+# 一键配置平台 Hook / One-command hook setup
+tm-cli setup --platform claude-code
+tm-cli setup --platform cursor
+tm-cli setup --platform hermes
+tm-cli setup --platform all
+
+# 仅检查当前状态 / Check status only
+tm-cli setup --platform all --check
+```
+
+前提：`make dev` 启动服务 + `TEAM_MEMORY_API_KEY` 环境变量已设置（或已在 `~/.config/tm/config.toml` 中配置）。
 
 ## MCP 接入（Cursor / Claude）
 
-**本仓库（克隆源码）推荐**：不要把 API Key 写进 mcp.json。在仓库根维护 **`.env`**（从 [example/env.team-memory.example](example/env.team-memory.example) 复制），其中至少设置 **`TEAM_MEMORY_API_KEY`**、**`TEAM_MEMORY_PROJECT`**；MCP 配置为 **`bash`** + **`scripts/run_mcp_with_dotenv.sh`** + **`cwd`= 仓库根**。详见 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)。**Cursor** 一般用 `.cursor/mcp.json`，**Claude Code** 可用根目录 `.mcp.json`，两处内容建议保持一致。
+**本仓库（克隆源码）推荐**：不要把 API Key 写进 mcp.json。在仓库根维护 **`.env`**（从 [example/env.team-memory.example](example/env.team-memory.example) 复制），其中至少设置 **`TEAM_MEMORY_API_KEY`**；MCP 配置为 **`bash`** + **`scripts/run_mcp_with_dotenv.sh`** + **`cwd`= 仓库根**。详见 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)。**Cursor** 一般用 `.cursor/mcp.json`，**Claude Code** 可用根目录 `.mcp.json`，两处内容建议保持一致。
+
+**项目名零配置**：在项目根放置 `.tm.toml`（见 [配置说明](#配置说明-configuration)），或系统自动从 git 仓库名推断，无需传 `--project` 或设 `TEAM_MEMORY_PROJECT`。
 
 **仅 `pip install team_memory`、无本地仓库目录**时，可在 `.cursor/mcp.json` 里用本机 Python 与环境变量（数据库与 Key 仍需提供）：
 
@@ -81,6 +102,8 @@ tm-cli --help
   }
 }
 ```
+
+也可使用客户端配置 `~/.config/tm/config.toml`（`tm-cli config init` 生成），避免在 JSON 中写入密钥。
 
 （MCP 未注册 **Resources / Prompts**；**`memory_*` 七工具**：`memory_save`、`memory_recall`、`memory_context`、`memory_get_archive`、`memory_archive_upsert`、`memory_feedback`、`memory_submit_response`。详情见下文 [MCP 工具列表（当前）](#mcp-工具列表当前) 与 [docs/guide/mcp-server.md](docs/guide/mcp-server.md)。）
 
@@ -240,7 +263,8 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 - **Obsidian Watcher**：监听 vault 文件变更，自动创建 draft（同文件去重，更新而非重复创建）
 - **RefinementWorker**：每 30 秒扫描 pending draft，调用 LLM（GLM-5-Turbo）提取结构化字段（title/problem/solution/tags），自动发布
 - **学习卡片跳过**：识别学习类内容（卡片-、主题-、Layer 等），直接发布不走 LLM 抽取
-- **launchd 托管**：`make daemon-start` / `make daemon-stop`，日志 `/tmp/tm-daemon.log`
+- **入口命令**：`tm-daemon`（即 `python -m team_memory.daemon`），`make daemon-start` / `make daemon-stop`（launchd 托管），日志 `/tmp/tm-daemon.log`
+- **代码位置**：`src/team_memory/daemon/`（原 `scripts/daemon/`）
 
 ### Faithfulness 评估系统
 
@@ -408,6 +432,7 @@ pip install team_memory
 
 - 向部署者索取 **TEAM_MEMORY_API_KEY**。
 - 若你**本机直连**团队 PostgreSQL（即 MCP 进程自己连库），还需 **TEAM_MEMORY_DB_URL**（如 `postgresql+asyncpg://用户:密码@主机:5432/team_memory`）。若你使用「从源码运行」且项目目录下已有正确配置，可不设 DB_URL，由 config 提供。
+- 或运行 `tm-cli config init` 交互式生成 `~/.config/tm/config.toml`，后续无需再设环境变量。
 
 **3. 配置 MCP**
 
@@ -455,7 +480,7 @@ pip install team_memory
 ### 其他安装方式
 
 - **仅 Docker、不克隆源码**：若你只想跑 Web 不跑本地 MCP，可用 `docker compose up -d` 启动（含数据库迁移）。在 `.env` 中设置 `TEAM_MEMORY_API_KEY`（默认 `changeme` 请修改）。**生产环境必须修改默认 Key，禁止使用 changeme**。访问 http://localhost:9111 。
-- **从 PyPI 部署、无 Make**：`pip install team_memory` 后，需自备 PostgreSQL（pgvector）并在项目根目录执行 `alembic upgrade head`，再通过 `TEAM_MEMORY_CONFIG_PATH` 或 `TEAM_MEMORY_DB_URL` 启动 `team-memory-web` 或 **`python -m team_memory.server`**（MCP）。
+- **从 PyPI 部署、无 Make**：`pip install team_memory` 后，需自备 PostgreSQL（pgvector）并在项目根目录执行 `alembic upgrade head`，再通过 `TEAM_MEMORY_CONFIG_PATH` 或 `TEAM_MEMORY_DB_URL` 启动 `team-memory-web` 或 **`team-memory`**（MCP）。入口命令：`team-memory-web`（Web）、`team-memory`（MCP）、`tm-cli`（CLI）、`tm-daemon`（Daemon）。
 
 ---
 
@@ -494,7 +519,7 @@ pip install team_memory
 
 **MCP 身份与 Web 统一**：MCP 的当前用户（current_user）优先由 **TEAM_MEMORY_API_KEY** 经服务端 AuthProvider 解析得到，与 Web 使用同一套用户体系。配置与 Web 同账号的 API Key 后，在 Cursor 里写入的 personal 经验在同一 Cursor 会话内可被检索到，且 Web 用该账号登录后也能看到。推荐只配置 `TEAM_MEMORY_API_KEY`（与 Web 同账号的 Key），无需再设 `TEAM_MEMORY_USER`。
 
-**项目级归属（用户 / 项目名）**：推荐在仓库根 **`.env`** 中设置 **TEAM_MEMORY_PROJECT**（及按需 **TEAM_MEMORY_USER**），与包装脚本一起使用。若必须在 JSON 里配，可在 `env` 中加同名变量；未配置时回退为 `anonymous` / 服务端 default_project。解析顺序见 `src/team_memory/utils/project.py`（工具参数 **`project`** > **`TEAM_MEMORY_PROJECT`** > 配置 default）。
+**项目级归属（用户 / 项目名）**：推荐使用 **`.tm.toml`** 声明项目名（见 [配置说明 / Project Config](#项目级配置--project-config)），系统也会自动从 git 仓库名推断——大多数情况下无需手动配置。若需显式指定，可在仓库根 **`.env`** 中设置 **TEAM_MEMORY_PROJECT**（及按需 **TEAM_MEMORY_USER**），与包装脚本一起使用。解析顺序：`.tm.toml` > **`TEAM_MEMORY_PROJECT`** > git 仓库名 > 目录名 > 配置 default。
 
 **Docker/Helm**：若通过容器或编排部署，在配置中注入上述环境变量；生产环境禁止使用占位或默认 Key（如 `changeme`）。
 
@@ -564,7 +589,74 @@ API 参考（前缀 `/api/v1`）：
 - **Swagger UI**: `http://localhost:9111/docs`
 - **ReDoc**: `http://localhost:9111/redoc`
 
-## 配置说明
+## 配置说明 / Configuration
+
+TeamMemory 的配置分为两层：**服务端配置**（部署者）和**客户端配置**（使用者），优先级从高到低为：
+
+```
+环境变量 > .env 文件 > config.toml > 代码默认值
+env vars > .env file > config.toml > code defaults
+```
+
+### 客户端配置（使用者） / Client Config
+
+统一配置文件：**`~/.config/tm/config.toml`**，CLI、MCP、Daemon、Hooks 所有客户端组件共用。
+
+可通过 `tm-cli config init` 交互式生成，或手动创建：
+
+```toml
+# ~/.config/tm/config.toml — 统一客户端配置 / Unified client config
+
+[server]
+url = "http://localhost:9111"       # TM Web 服务地址 / Web server URL
+api_key = ""                         # 或由 TEAM_MEMORY_API_KEY 环境变量提供
+
+[llm]
+base_url = "http://localhost:4000/v1"  # LLM API 地址（用于 Faithfulness 评估等）
+model = "DeepSeek-V3"                   # LLM 模型名
+api_key_env = "LITELLM_MASTER_KEY"      # LLM API Key 的环境变量名（推荐）
+timeout = 30                             # 请求超时（秒）
+
+[conversation]
+db_path = "~/.cache/tm-pipeline/drafts.db"  # 本地对话缓存路径
+
+[wiki]
+enabled = false
+db_path = "~/.cache/tm-pipeline/wiki.db"
+
+[daemon]
+host = "127.0.0.1"
+port = 3901
+log_level = "INFO"
+```
+
+**优先级 / Priority**：`TM_SERVER_URL` 环境变量 > `.env` 文件 > `config.toml` > 代码默认值。
+
+**查看当前生效配置 / Show effective config**：
+
+```bash
+tm-cli config show     # 显示每个字段的值及其来源
+```
+
+### 项目级配置 / Project Config
+
+在项目根目录放置 **`.tm.toml`**，声明项目名与别名：
+
+```toml
+# .tm.toml — 项目级配置 / Project-level config
+[project]
+name = "team_doc"           # 项目名（优先于 git repo 名 / 目录名）
+aliases = ["team_memory"]   # 别名：历史项目名映射到当前名
+```
+
+**项目名推断优先级 / Project name inference**：
+1. `.tm.toml` 中 `[project].name` — 显式声明
+2. Git 仓库名（basename → snake_case）— 覆盖 80%+ 场景
+3. 目录名（basename → snake_case）— 兜底
+
+**零配置**：大多数项目无需 `.tm.toml`，系统自动从 git 仓库名推断。有了 `.tm.toml` 后不再需要传 `--project` 参数。
+
+### 服务端配置（部署者） / Server Config
 
 仅保留**两个**环境配置文件（二选一，再结合环境变量覆盖）：
 
@@ -575,7 +667,7 @@ API 参考（前缀 `/api/v1`）：
 | `TEAM_MEMORY_CONFIG_PATH` | 可选：指向任意单文件，则不再按环境名解析上述两个文件 |
 | 环境变量 `TEAM_MEMORY_*` | 最高优先级，覆盖 YAML 中的同名字段 |
 
-### 多环境配置
+### 多环境配置（服务端） / Multi-Environment (Server)
 
 ```bash
 # 开发（默认）
@@ -599,7 +691,7 @@ TEAM_MEMORY_ENV=production
 
 管理员通过 Web UI 设置页面管理 API Key 和角色分配。
 
-### Embedding 配置
+### Embedding 配置 / Embedding Config
 
 ```yaml
 embedding:
@@ -610,6 +702,8 @@ embedding:
 ```
 
 支持 Ollama（默认，本地运行，无需 API Key）、OpenAI API、本地 sentence-transformers 模型、generic 自定义端点。当前默认使用 `qwen3-embedding:0.6b`（1024 维），中文支持优秀。切换模型后需执行 `make embedding-backfill` 重新生成向量。
+
+**Embedding 自动恢复 / Auto-recovery**：当 Ollama 重启后，Web 服务的 embedding 缓存可能失效。`/health` 健康检查会自动重试 embedding 初始化：检测到失败后从配置重新创建 provider，成功即替换缓存。无需手动重启 Web 服务。
 
 ## 运维
 
@@ -703,7 +797,7 @@ docker compose up -d
 
 日志 JSON 形态与脱敏逻辑见 `src/team_memory/bootstrap.py`（`_JsonFormatter`、`_SENSITIVE_KEYS`）及 `tests/test_logging_json.py`。
 
-## 技术栈
+## 技术栈 / Tech Stack
 
 | 层面 | 技术选型 |
 |------|----------|
@@ -714,10 +808,37 @@ docker compose up -d
 | 嵌入 | qwen3-embedding:0.6b (Ollama) / OpenAI / 本地模型 |
 | 搜索 | 向量 + 全文检索(jieba+hybrid AND/OR) + RRF 融合 + Reranker |
 | 缓存 | 内存 LRU / Redis |
-| 配置 | Pydantic Settings + YAML 分层 |
+| 配置 | Pydantic Settings + YAML（服务端）/ TOML + ClientConfig（客户端） |
 | 迁移 | Alembic |
 | Daemon | TM Daemon (launchd) — Obsidian watcher + RefinementWorker |
 | 评估 | Faithfulness (RAGAS LLM Judge) + search_eval |
+
+### 入口点 / Entry Points
+
+| 命令 | 模块 | 用途 |
+|------|------|------|
+| `team-memory` | `team_memory.server:main` | MCP Server（stdio） |
+| `team-memory-web` | `team_memory.web.app:main` | Web 服务 |
+| `tm-cli` | `team_memory.cli:main` | CLI 兼容层 + 配置管理 |
+| `tm-daemon` | `team_memory.daemon.__main__:main` | TM Daemon 守护进程 |
+
+### 代码组织 / Code Organization
+
+```
+src/team_memory/                  # Python 包（PYTHONPATH 只需 src/）
+  server.py                       # MCP Server（memory_* 工具）
+  cli.py                          # CLI（tm-cli）+ config/setup 子命令
+  client_config.py                # ClientConfig — 统一客户端配置
+  project_resolver.py             # 项目名零配置推断 + 别名注册
+  daemon/                         # TM Daemon（原 scripts/daemon/）
+  hooks/                          # 平台 Hook（原 scripts/hooks/）
+  web/                            # Web 服务（FastAPI）
+  services/                       # 业务逻辑层
+  storage/                        # 数据访问层
+  ...
+```
+
+旧路径 `scripts/daemon/` → `src/team_memory/daemon/`，`scripts/hooks/` → `src/team_memory/hooks/`。PYTHONPATH 不再需要 `scripts/`，只需 `src/`。
 
 ## FAQ
 
@@ -747,7 +868,7 @@ A: 可以。将 `embedding.provider` 改为 `openai` 并配置 API Key，或使�
 
 **Q: 多个项目的经验会混在一起吗？**
 
-A: 不会。通过 `project` 参数或环境变量 `TEAM_MEMORY_PROJECT` 实现项目级隔离。每个项目的经验独立存储和检索，不会互相干扰。
+A: 不会。项目名通过 `.tm.toml` > git 仓库名 > 目录名自动推断，无需手动配置。也可通过 `TEAM_MEMORY_PROJECT` 环境变量或工具入参 `project` 显式指定。每个项目的经验独立存储和检索，不会互相干扰。别名机制（`.tm.toml` 的 `aliases`）确保项目重命名后历史经验仍可检索。
 
 ## 开发
 

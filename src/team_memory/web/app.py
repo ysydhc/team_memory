@@ -230,6 +230,12 @@ async def _check_ollama() -> dict:
 
 
 async def _check_embedding_provider() -> dict:
+    """Check embedding provider; auto-retry initialization on failure.
+
+    健康检查嵌入提供者；失败时自动重试初始化。
+    When Ollama restarts while Web is running, the cached embedding
+    provider becomes stale. Re-initialize from settings on failure.
+    """
     try:
         ctx = get_context()
         provider_name = ctx.settings.embedding.provider
@@ -238,7 +244,25 @@ async def _check_embedding_provider() -> dict:
     except RuntimeError:
         return {"status": "down", "reason": "not bootstrapped"}
     except Exception as e:
-        return {"status": "down", "error": str(e)[:100]}
+        # Auto-retry: re-create embedding provider from settings
+        # 自动重试：从配置重新创建嵌入提供者
+        logger.warning("Embedding provider health check failed: %s — retrying init", e)
+        try:
+            from team_memory.bootstrap import _create_embedding_provider
+            new_embedding = _create_embedding_provider(ctx.settings)
+            vec = await new_embedding.encode_single("health check")
+            # Success — update the cached embedding provider
+            # 成功 — 更新缓存的嵌入提供者
+            ctx.embedding = new_embedding
+            logger.info("Embedding provider recovered after re-init")
+            return {
+                "status": "up",
+                "provider": provider_name,
+                "dimension": len(vec),
+                "recovered": True,
+            }
+        except Exception as retry_err:
+            return {"status": "down", "error": str(e)[:80], "retry_error": str(retry_err)[:80]}
 
 
 async def _check_llm_provider() -> dict:
