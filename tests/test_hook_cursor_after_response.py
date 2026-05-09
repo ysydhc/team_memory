@@ -1,4 +1,4 @@
-"""Tests for scripts/hooks/cursor_after_response.py — thin forwarder to TM Daemon.
+"""Tests for team_memory hooks cursor_after_response — thin forwarder to TM Daemon.
 
 The hook now simply reads stdin JSON and POSTs to the daemon HTTP API.
 Heavy logic (DraftBuffer, ConvergenceDetector, etc.) lives in the daemon.

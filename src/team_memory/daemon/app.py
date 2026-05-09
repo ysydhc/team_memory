@@ -383,7 +383,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             return {"error": "response_buffer not initialized"}
 
         stats = await response_buffer.get_stats(days=7)
-        entries = await response_buffer.fetch_pending(limit=0)  # don't fetch pending
+        await response_buffer.fetch_pending(limit=0)  # don't fetch pending
 
         # Get recent entries (all, not just pending)
         try:

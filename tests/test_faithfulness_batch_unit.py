@@ -1,4 +1,4 @@
-"""Unit tests for scripts/daemon/faithfulness_batch.py
+"""Unit tests for src/team_memory/daemon/faithfulness_batch.py
 
 Tests argument parsing, helper functions, batch logic, and error paths.
 Mocks asyncpg connections, LLM calls, ResponseBuffer, and FaithfulnessJudge.

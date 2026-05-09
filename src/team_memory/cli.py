@@ -535,7 +535,7 @@ def cmd_project_list(args: argparse.Namespace) -> None:
 
     # Try dedicated projects endpoint / 尝试专用的项目端点
     try:
-        resp = httpx.get(f"{base_url}/api/v1/experiences/projects", headers=headers, timeout=10.0)
+        resp = httpx.get(f"{base_url}/api/v1/projects", headers=headers, timeout=10.0)
         if resp.status_code == 200:
             data = resp.json()
             projects = data.get("projects", data) if isinstance(data, dict) else data

@@ -1,4 +1,4 @@
-"""Comprehensive unit tests for scripts/daemon/search_eval.py
+"""Comprehensive unit tests for src/team_memory/daemon/search_eval.py
 
 Tests the search quality evaluator with mocked DB/search pipeline.
 Covers: DEFAULT_TEST_QUERIES structure validation, print_report output,

@@ -1,4 +1,4 @@
-"""Tests for scripts/hooks/draft_refiner.py — fact extraction and draft publishing."""
+"""Tests for team_memory hooks draft_refiner — fact extraction and draft publishing."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Ensure scripts/hooks/ is importable
+# Ensure team_memory hooks are importable
 
 from team_memory.daemon.draft_refiner import DraftRefiner  # noqa: E402
 from team_memory.daemon.draft_buffer import DraftBuffer  # noqa: E402

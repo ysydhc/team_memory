@@ -29,11 +29,13 @@ load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), ".
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger("solution_backfill")
 
-_SOLUTION_PROMPT = """You are a technical knowledge curator. Given an experience's title and description, extract a concise solution.
+_SOLUTION_PROMPT = """You are a technical knowledge curator. \
+Given an experience's title and description, extract a concise solution.
 
 Rules:
 - If the description already contains a clear solution, extract and condense it
-- If the description is a problem/bug report without a solution, write a brief summary of the problem as the solution (so it's not empty)
+- If the description is a problem/bug report without a solution, \
+write a brief summary of the problem as the solution (so it's not empty)
 - If the description is too vague, write "No clear solution documented"
 - Keep it under 500 characters
 - Return ONLY the solution text, no JSON wrapper, no explanation
@@ -137,7 +139,7 @@ async def main():
         exp_id = str(row[0])
         title = row[1] or ""
         description = row[2] or ""
-        source = row[3] or ""
+        row[3] or ""
 
         if not description.strip():
             logger.info(f"[{i+1}/{len(rows)}] SKIP (empty description): {title[:40]}")

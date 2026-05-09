@@ -6,6 +6,7 @@ LAYER_MAP in this file (keep in sync with contributor docs / README).
 
 Usage:
   python scripts/harness_import_check.py [--root PATH]
+  # or via Makefile: make harness-check
   Exit 0 = pass, non-zero = violations found.
 """
 

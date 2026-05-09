@@ -209,7 +209,7 @@ def load_config(config_path: str | None = None) -> DaemonConfig:
         client_cfg = None
 
     if config_path is None:
-        # 默认路径：scripts/hooks/config.yaml
+        # 默认路径：team_memory/hooks/config.yaml
         default_path = Path(__file__).resolve().parent.parent / "hooks" / "config.yaml"
         if default_path.exists():
             config_path = str(default_path)

@@ -102,7 +102,8 @@ class AutoDreamWorker:
         self._running = True
         self._task = asyncio.create_task(self._loop())
         logger.info(
-            "AutoDreamWorker started (scan_interval=%dm, min_hours=%d, min_new=%d, merge_threshold=%.2f, prune_age=%dd)",
+            "AutoDreamWorker started "
+            "(scan_interval=%dm, min_hours=%d, min_new=%d, merge_threshold=%.2f, prune_age=%dd)",
             self._cfg.scan_interval_minutes,
             self._cfg.min_hours_since_last,
             self._cfg.min_new_experiences,
@@ -362,7 +363,7 @@ class AutoDreamWorker:
                     max_results=10,
                 )
                 for r in results:
-                    exp_id = r.get("id", "")
+                    r.get("id", "")
                     quality_tier = r.get("quality_tier", "Silver")
                     recall_count = r.get("recall_count", 0)
                     # Filter for Bronze tier or low recall

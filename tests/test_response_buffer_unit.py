@@ -1,4 +1,4 @@
-"""Comprehensive unit tests for scripts/daemon/response_buffer.py
+"""Comprehensive unit tests for src/team_memory/daemon/response_buffer.py
 
 Tests the ResponseBuffer class with mocked asyncpg to avoid DB dependency.
 Covers: constructor, pool management, add(), pending_count(), should_batch(),

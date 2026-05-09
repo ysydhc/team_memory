@@ -98,7 +98,11 @@ class SearchLogWriter:
                         return {
                             "id": row["id"],
                             "query": row["query"],
-                            "result_ids": json.loads(row["result_ids"]) if isinstance(row["result_ids"], str) else row["result_ids"],
+                            "result_ids": (
+                                json.loads(row["result_ids"])
+                                if isinstance(row["result_ids"], str)
+                                else row["result_ids"]
+                            ),
                         }
 
                 # Fallback: any project
@@ -118,7 +122,11 @@ class SearchLogWriter:
                 return {
                     "id": row["id"],
                     "query": row["query"],
-                    "result_ids": json.loads(row["result_ids"]) if isinstance(row["result_ids"], str) else row["result_ids"],
+                    "result_ids": (
+                        json.loads(row["result_ids"])
+                        if isinstance(row["result_ids"], str)
+                        else row["result_ids"]
+                    ),
                 }
             return None
         except Exception as e:
@@ -236,7 +244,6 @@ class SearchLogWriter:
 
                     # For each result in this search log, fetch the experience text
                     # and check keyword overlap
-                    fuzzy_hit = False
                     for r in result_ids:
                         rid = str(r.get("id", ""))
                         if not rid:
@@ -294,7 +301,6 @@ class SearchLogWriter:
                         overlap_ratio = matched / len(keywords)
 
                         if overlap_ratio > threshold:
-                            fuzzy_hit = True
                             # Mark search log as used with fuzzy source
                             now = datetime.now(timezone.utc)
                             await conn.execute(
@@ -336,10 +342,18 @@ class SearchLogWriter:
                     """
                     SELECT
                         COUNT(*) AS total,
-                        COUNT(*) FILTER (WHERE result_ids IS NOT NULL AND result_ids::text NOT IN ('[]', 'null')) AS hit,
+                        COUNT(*) FILTER (
+                            WHERE result_ids IS NOT NULL
+                            AND result_ids::text NOT IN ('[]', 'null')
+                        ) AS hit,
                         COUNT(*) FILTER (WHERE was_used = TRUE) AS used,
-                        COUNT(*) FILTER (WHERE was_used IS NULL AND result_ids IS NOT NULL AND result_ids::text NOT IN ('[]', 'null')
-                            AND (judgment_source IS NULL OR judgment_source != 'legacy_unjudged')) AS unjudged,
+                        COUNT(*) FILTER (
+                            WHERE was_used IS NULL
+                            AND result_ids IS NOT NULL
+                            AND result_ids::text NOT IN ('[]', 'null')
+                            AND (judgment_source IS NULL
+                                 OR judgment_source != 'legacy_unjudged')
+                        ) AS unjudged,
                         COUNT(*) FILTER (WHERE judgment_source = 'legacy_unjudged') AS legacy_unjudged,
                         COUNT(*) FILTER (WHERE judgment_source = 'fuzzy') AS used_fuzzy,
                         COUNT(*) FILTER (WHERE judgment_source = 'faithfulness') AS used_faithfulness
@@ -424,7 +438,10 @@ class SearchLogWriter:
                     SELECT
                         date_trunc($1, created_at) AS period,
                         COUNT(*) AS total,
-                        COUNT(*) FILTER (WHERE result_ids IS NOT NULL AND result_ids::text NOT IN ('[]', 'null')) AS hit,
+                        COUNT(*) FILTER (
+                            WHERE result_ids IS NOT NULL
+                            AND result_ids::text NOT IN ('[]', 'null')
+                        ) AS hit,
                         COUNT(*) FILTER (WHERE was_used = TRUE) AS used,
                         COUNT(*) FILTER (WHERE judgment_source = 'fuzzy') AS used_fuzzy,
                         COUNT(*) FILTER (WHERE judgment_source = 'faithfulness') AS used_faithfulness

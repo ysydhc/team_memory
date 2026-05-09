@@ -126,7 +126,9 @@ def _simple_kmeans(
     return clusters
 
 
-_TOPIC_NAMING_PROMPT = """You are a topic naming expert. Given a cluster of related experiences, generate a short, descriptive topic name (2-5 words, in English).
+_TOPIC_NAMING_PROMPT = """You are a topic naming expert. \
+Given a cluster of related experiences, generate a short, \
+descriptive topic name (2-5 words, in English).
 
 Rules:
 - The name should capture the MAIN THEME of the cluster
@@ -136,9 +138,15 @@ Rules:
 - Return ONLY the topic name, nothing else
 
 Examples:
-- Entities: [SQLite, asyncpg, PostgreSQL] + Titles: ["Migrate buffer to SQLite", "Fix asyncpg connection pool"] → "Database Migration"
-- Entities: [WKWebView, JavaScript, iOS] + Titles: ["WKWebView cookie sync", "JS bridge timeout"] → "WKWebView Integration"
-- Entities: [Docker, PostgreSQL, team_memory] + Titles: ["Docker compose networking", "PG connection in container"] → "Docker & PostgreSQL Setup"
+- Entities: [SQLite, asyncpg, PostgreSQL] \
++ Titles: ["Migrate buffer to SQLite", "Fix asyncpg connection pool"] \
+→ "Database Migration"
+- Entities: [WKWebView, JavaScript, iOS] \
++ Titles: ["WKWebView cookie sync", "JS bridge timeout"] \
+→ "WKWebView Integration"
+- Entities: [Docker, PostgreSQL, team_memory] \
++ Titles: ["Docker compose networking", "PG connection in container"] \
+→ "Docker & PostgreSQL Setup"
 """
 
 

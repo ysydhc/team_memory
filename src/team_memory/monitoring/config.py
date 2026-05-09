@@ -1,9 +1,8 @@
 """Monitoring configuration loader"""
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 def _find_monitoring_yaml() -> Path:

@@ -205,7 +205,7 @@ class ConversationBuffer:
 
         # Dedup: skip if identical message already exists in this session
         import hashlib
-        content_hash = hashlib.sha256(f"{role}:{content}".encode()).hexdigest()[:16]
+        hashlib.sha256(f"{role}:{content}".encode()).hexdigest()[:16]
         existing = await db.execute_fetchall(
             "SELECT id FROM messages WHERE session_id = ? AND role = ? AND content = ? LIMIT 1",
             (session_id, role, content),
@@ -438,7 +438,7 @@ class ConversationBuffer:
 
     async def set_tm_id(self, local_id: str, tm_id: str) -> None:
         """Backward compat: store PG experience ID on session (for publish)."""
-        db = self._require_db()
+        self._require_db()
         # Use a simple metadata approach: store tm_id in a column or skip
         # For now we track it in-memory via the refiner
         pass

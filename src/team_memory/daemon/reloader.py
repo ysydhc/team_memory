@@ -6,7 +6,7 @@ stops and restarts the TM Daemon via launchd.
 
 Usage:
     python -m team_memory.daemon.reloader [--interval 5]
-    
+
 Or run in background:
     python -m team_memory.daemon.reloader --interval 5 &
 """

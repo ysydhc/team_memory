@@ -9,7 +9,6 @@ import abc
 import base64
 import hashlib
 import hmac
-import json
 import logging
 import subprocess
 import time
@@ -244,7 +243,7 @@ class AlertManager:
     @classmethod
     def from_config(cls, config: Any) -> AlertManager:
         """Create AlertManager from MonitoringConfig / 从配置创建"""
-        from team_memory.monitoring.config import MonitoringConfig, ChannelConfig
+        from team_memory.monitoring.config import MonitoringConfig
         if not isinstance(config, MonitoringConfig):
             raise TypeError(f"Expected MonitoringConfig, got {type(config)}")
 

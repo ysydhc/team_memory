@@ -206,11 +206,13 @@ class ResponseBuffer:
                     days,
                 )
                 evaluated = await conn.fetchval(
-                    "SELECT count(*) FROM response_buffer WHERE evaluated = TRUE AND created_at > NOW() - make_interval(days => $1)",
+                    "SELECT count(*) FROM response_buffer "
+                    "WHERE evaluated = TRUE AND created_at > NOW() - make_interval(days => $1)",
                     days,
                 )
                 avg_score = await conn.fetchval(
-                    "SELECT avg(faithfulness_score) FROM response_buffer WHERE evaluated = TRUE AND created_at > NOW() - make_interval(days => $1)",
+                    "SELECT avg(faithfulness_score) FROM response_buffer "
+                    "WHERE evaluated = TRUE AND created_at > NOW() - make_interval(days => $1)",
                     days,
                 )
             return {

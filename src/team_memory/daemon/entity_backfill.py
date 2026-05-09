@@ -61,7 +61,7 @@ async def _get_unextracted_experiences(
 async def _build_llm_config(
     model: str | None = None,
     base_url: str | None = None,
-) -> "LLMConfig":
+) -> "LLMConfig":  # noqa: F821
     """Build LLMConfig for entity extraction."""
     from team_memory.config import load_settings
     from team_memory.config.llm import LLMConfig

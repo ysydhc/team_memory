@@ -41,7 +41,7 @@ class TestEntityDedupImports:
     """Verify module can be imported."""
 
     def test_import_dedup(self):
-        from daemon import entity_dedup as ed
+        from team_memory.daemon import entity_dedup as ed
         assert hasattr(ed, "run_dedup")
 
     def test_import_main(self):

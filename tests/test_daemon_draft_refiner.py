@@ -1,4 +1,4 @@
-"""Tests for scripts/daemon/draft_refiner.py — coverage for uncovered lines.
+"""Tests for src/team_memory/daemon/draft_refiner.py — coverage for uncovered lines.
 
 Uncovered lines targeted:
   98-99   : elif not pg_id branch in save_draft

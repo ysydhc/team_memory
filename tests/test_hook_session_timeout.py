@@ -1,4 +1,4 @@
-"""Tests for scripts/hooks/session_timeout.py — 30-minute draft safety net."""
+"""Tests for team_memory hooks session_timeout — 30-minute draft safety net."""
 from __future__ import annotations
 
 import os

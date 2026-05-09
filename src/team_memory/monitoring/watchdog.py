@@ -3,12 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import subprocess
 import time
 from dataclasses import dataclass, field
 
-from team_memory.monitoring.config import MonitoringConfig, load_monitoring_config
 from team_memory.monitoring.alerting import AlertManager, AlertSeverity
+from team_memory.monitoring.config import MonitoringConfig, load_monitoring_config
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +77,7 @@ class ServiceWatchdog:
             if not svc.is_up:
                 logger.info("Service %s recovered", svc.name)
                 await self.alert_manager.send_alert(
-                    f"{svc.name} recovered", f"Service is back online", AlertSeverity.INFO
+                    f"{svc.name} recovered", "Service is back online", AlertSeverity.INFO
                 )
             svc.consecutive_failures = 0
             svc.is_up = True

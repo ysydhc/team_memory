@@ -75,8 +75,9 @@ def get_project_from_path(workspace_root: str, config: dict | None = None) -> st
         config = load_config()
 
     projects = config.get("projects", {})
-    # Support both dict format {"name": {"path_patterns": [...]}} and list format [{"name": ..., "path_patterns": [...]}]
     if isinstance(projects, list):
+        # Support both dict format {"name": {"path_patterns": [...]}}
+        # and list format [{"name": ..., "path_patterns": [...]}]
         for entry in projects:
             project_name = entry.get("name", "")
             patterns = entry.get("path_patterns", [])

@@ -32,15 +32,20 @@ class ContradictionPair:
     llm_confirmed: bool = False  # True if LLM validated this as a real contradiction
 
 
-_CONTRADICTION_PROMPT = """You are a technical knowledge curator. Given two experiences that share entities, determine if they contain genuinely contradictory advice.
-
-Rules:
-- TRUE contradiction: One says "always do X" and the other says "never do X" about the SAME aspect
-- FALSE contradiction: They discuss different aspects, different contexts, or are complementary
-- Consider that one may be outdated and the other is a correction — this IS a contradiction worth flagging
-
-Respond with ONLY a JSON object:
-{"contradiction": true/false, "reason": "brief explanation"}"""
+_CONTRADICTION_PROMPT = (
+    "You are a technical knowledge curator. "
+    "Given two experiences that share entities, "
+    "determine if they contain genuinely contradictory advice.\n"
+    "\nRules:\n"
+    "- TRUE contradiction: One says \"always do X\" and the other says \"never do X\" "
+    "about the SAME aspect\n"
+    "- FALSE contradiction: They discuss different aspects, different contexts, "
+    "or are complementary\n"
+    "- Consider that one may be outdated and the other is a correction "
+    "\u2014 this IS a contradiction worth flagging\n"
+    "\nRespond with ONLY a JSON object:\n"
+    "{\"contradiction\": true/false, \"reason\": \"brief explanation\"}"
+)
 
 
 async def _validate_with_llm(

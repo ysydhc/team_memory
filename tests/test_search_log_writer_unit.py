@@ -1,4 +1,4 @@
-"""Comprehensive unit tests for scripts/daemon/search_log_writer.py
+"""Comprehensive unit tests for src/team_memory/daemon/search_log_writer.py
 
 Tests the SearchLogWriter class with mocked asyncpg to avoid DB dependency.
 Covers: marker parsing, fuzzy matching logic, pool management, all async methods,
