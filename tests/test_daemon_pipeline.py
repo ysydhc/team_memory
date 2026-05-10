@@ -40,6 +40,7 @@ def _make_buf() -> AsyncMock:
     buf.get_user_messages = AsyncMock(return_value=[])
     buf.get_assistant_messages = AsyncMock(return_value=[{"content": "some response"}])
     buf.get_pending = AsyncMock(return_value=[{"id": "sess-1", "content": "text", "project": "team_doc", "conversation_id": "sess-1", "status": "active"}])
+    buf.count_messages = AsyncMock(return_value=0)
     buf.mark_published_by_session = AsyncMock()
     buf.mark_needs_refinement = AsyncMock()
     buf.close_session = AsyncMock()

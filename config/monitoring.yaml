@@ -8,9 +8,8 @@ admin:
   channels:
     # 飞书机器人
     - type: feishu
-      webhook: "https://open.feishu.cn/open-apis/bot/v2/hook/6302c564-9058-4e4e-8693-\
-        6e360ae7a32c" # https://open.feishu.cn/open-apis/bot/v2/hook/xxx
-      secret: "w7D3Y6mGzs3ReiUS0BXF0c" # 签名密钥（可选，飞书机器人设置中获取）
+      webhook: "${FEISHU_WEBHOOK_URL}"  # 从环境变量读取 / read from env
+      secret: "${FEISHU_WEBHOOK_SECRET}"  # 签名密钥（可选）
     # 企业微信机器人
     # - type: wecom
     #   webhook: ""              # https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx

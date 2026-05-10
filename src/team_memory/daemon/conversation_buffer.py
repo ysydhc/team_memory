@@ -226,6 +226,22 @@ class ConversationBuffer:
         await db.commit()
         return cursor.lastrowid or 0
 
+    async def count_messages(self, session_id: str, role: str | None = None) -> int:
+        """Count messages efficiently without fetching all rows."""
+        db = self._require_db()
+        if role:
+            cursor = await db.execute(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ? AND role = ?",
+                (session_id, role),
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ?",
+                (session_id,),
+            )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
     async def get_messages(
         self, session_id: str, role: str | None = None
     ) -> list[dict[str, Any]]:

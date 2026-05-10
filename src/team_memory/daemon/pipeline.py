@@ -257,7 +257,7 @@ async def process_after_response(
     # Signal 2: Message-count threshold — auto-converge after N assistant messages
     # 信号 2: 消息累积阈值 — 累积 N 条 assistant 消息后自动收敛
     if not converged:
-        msg_count = len(await buf.get_messages(session_id, role="assistant"))
+        msg_count = await buf.count_messages(session_id, role="assistant")
         msg_threshold = 3  # 3+ assistant messages → auto-converge
         if msg_count >= msg_threshold:
             converged = True
@@ -267,6 +267,16 @@ async def process_after_response(
             )
 
     if converged:
+        # Check session status first — prevent re-trigger on already processed sessions
+        # 检查 session 状态 — 防止对已处理的 session 重复触发
+        session = await buf.get_session(session_id)
+        if session and session.get("status") != "active":
+            logger.debug(
+                "[CONVERGE] session=%s already in status=%s, skipping",
+                session_id[:8], session.get("status"),
+            )
+            return {"action": "ok", "convergence": False, "draft_id": session_id}
+
         # Mark session for LLM refinement / 标记会话待精炼
         result = await refiner.mark_for_refinement(session_id)
         # Extract personal memory from user messages / 从用户消息提取个人记忆

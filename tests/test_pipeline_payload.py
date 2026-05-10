@@ -34,6 +34,7 @@ def _make_mocks(converged: bool = False):
     buf.add_message = AsyncMock(return_value=1)
     buf.ensure_session = AsyncMock(return_value="sess-1")
     buf.get_pending = AsyncMock(return_value=[])
+    buf.count_messages = AsyncMock(return_value=0)
 
     detector = MagicMock()
     detector.detect_convergence = MagicMock(return_value=converged)

@@ -1,6 +1,7 @@
 """Monitoring configuration loader"""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -60,7 +61,16 @@ def load_monitoring_config(config_path: str | None = None) -> MonitoringConfig:
         return MonitoringConfig()
 
     with open(path) as f:
-        raw = yaml.safe_load(f) or {}
+        content = f.read()
+    # Substitute ${VAR} patterns with environment variables
+    import re
+
+    def _env_sub(match: object) -> str:
+        var = match.group(1)  # type: ignore[union-attr]
+        return os.environ.get(var, "")
+
+    content = re.sub(r"\$\{(\w+)\}", _env_sub, content)
+    raw = yaml.safe_load(content) or {}
 
     admin = raw.get("admin", {})
     hc = raw.get("health_check", {})
