@@ -12,10 +12,13 @@ import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from fastapi import FastAPI
-from pydantic import BaseModel, Field
+from fastapi import FastAPI, Request
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+if TYPE_CHECKING:
+    from team_memory.daemon.payload_capture import PayloadCapture  # noqa: F401
 
 from team_memory.daemon.config import DaemonConfig, load_config
 from team_memory.daemon.convergence_detector import ConvergenceDetector
@@ -69,6 +72,24 @@ _app_state: Any = None
 
 
 # ---------------------------------------------------------------------------
+# Payload source detection
+# ---------------------------------------------------------------------------
+
+
+def _detect_source(payload: dict) -> str:
+    """Detect which platform sent the payload based on field patterns."""
+    if "last_assistant_message" in payload or "transcript" in payload:
+        return "claude"
+    if "agent_response" in payload:
+        return "cursor"
+    if "hook_event_name" in payload:
+        return "hermes"
+    if "tool_use_id" in payload:
+        return "mcp"
+    return "unknown"
+
+
+# ---------------------------------------------------------------------------
 # Pydantic request models
 # ---------------------------------------------------------------------------
 
@@ -76,14 +97,11 @@ _app_state: Any = None
 class HookPayload(BaseModel):
     """Payload for hook callback endpoints.
 
-    Different platforms send the agent response under different field names:
-    - Hermes / tm_hook.py: uses ``prompt``
-    - Claude Code / claude_stop.py: uses ``response_text``
-    - Cursor afterAgentResponse: uses ``agent_response`` or ``content``
-
-    The pipeline layer reads all variants (response_text takes precedence).
-    各平台字段名不同，pipeline 按优先级读取。
+    Lenient mode: accepts extra fields and logs them for contract derivation.
+    宽松模式: 接受额外字段并记录，用于契约推导。
     """
+
+    model_config = ConfigDict(extra="allow")
 
     conversation_id: str = ""
     prompt: str = ""
@@ -93,9 +111,22 @@ class HookPayload(BaseModel):
     workspace_roots: list[str] = Field(default_factory=list)
     model: str = ""
 
+    @model_validator(mode="before")
+    @classmethod
+    def _log_extra_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            known = {"conversation_id", "prompt", "response_text", "agent_response",
+                     "content", "workspace_roots", "model"}
+            extra = set(data.keys()) - known
+            if extra:
+                logger.info("[CONTRACT] HookPayload extra fields: %s", sorted(extra))
+        return data
+
 
 class DraftSavePayload(BaseModel):
     """Payload for /draft/save endpoint."""
+
+    model_config = ConfigDict(extra="allow")
 
     title: str
     content: str
@@ -120,6 +151,8 @@ class MCPCallbackPayload(BaseModel):
     that the subsequent ``after_response`` can correlate the MCP search_log with
     the AI's final answer.
     """
+
+    model_config = ConfigDict(extra="allow")
 
     session_id: str
     tool_use_id: str = ""
@@ -219,6 +252,15 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         draft_buf = DraftBuffer(db_path)
         await draft_buf.__aenter__()
         application.state.draft_buf = draft_buf
+
+        # Payload capture for contract derivation
+        from team_memory.daemon.payload_capture import PayloadCapture
+        capture_db = config.draft.db_path or ":memory:"
+        if capture_db != ":memory:":
+            capture_db = capture_db.replace(".db", "_capture.db")
+        payload_capture = PayloadCapture(db_path=capture_db)
+        await payload_capture.start()
+        application.state.payload_capture = payload_capture
 
         detector = ConvergenceDetector()
         application.state.detector = detector
@@ -367,6 +409,11 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         draft_buf_obj: DraftBuffer | None = getattr(application.state, "draft_buf", None)
         if draft_buf_obj is not None:
             await draft_buf_obj.__aexit__(None, None, None)
+        # Shutdown PayloadCapture
+        capture_obj = getattr(application.state, "payload_capture", None)
+        if capture_obj is not None:
+            await capture_obj.stop()
+
         logger.info("TM Daemon shutdown")
 
     app = FastAPI(title="TM Daemon", lifespan=lifespan)
@@ -429,8 +476,13 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         }
 
     @app.post("/hooks/after_response")
-    async def hook_after_response(payload: HookPayload) -> dict[str, Any]:
+    async def hook_after_response(request: Request) -> dict[str, Any]:
         """Process agent response (draft pipeline)."""
+        raw = await request.json()
+        capture = getattr(app.state, "payload_capture", None)
+        if capture:
+            await capture.capture("/hooks/after_response", raw, source=_detect_source(raw))
+        payload = HookPayload.model_validate(raw)
         result = await process_after_response(
             input_data=payload.model_dump(),
             config=app.state.config,
@@ -591,8 +643,13 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         return result
 
     @app.post("/hooks/session_start")
-    async def hook_session_start(payload: HookPayload) -> dict[str, Any]:
+    async def hook_session_start(request: Request) -> dict[str, Any]:
         """Inject project context at session start."""
+        raw = await request.json()
+        capture = getattr(app.state, "payload_capture", None)
+        if capture:
+            await capture.capture("/hooks/session_start", raw, source=_detect_source(raw))
+        payload = HookPayload.model_validate(raw)
         result = await process_session_start(
             input_data=payload.model_dump(),
             config=app.state.config,
@@ -608,8 +665,13 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         return result
 
     @app.post("/hooks/before_prompt")
-    async def hook_before_prompt(payload: HookPayload) -> dict[str, Any]:
+    async def hook_before_prompt(request: Request) -> dict[str, Any]:
         """Retrieve relevant memories before prompt."""
+        raw = await request.json()
+        capture = getattr(app.state, "payload_capture", None)
+        if capture:
+            await capture.capture("/hooks/before_prompt", raw, source=_detect_source(raw))
+        payload = HookPayload.model_validate(raw)
         result = await process_before_prompt(
             input_data=payload.model_dump(),
             config=app.state.config,
@@ -662,8 +724,13 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         return result
 
     @app.post("/hooks/session_end")
-    async def hook_session_end(payload: HookPayload) -> dict[str, Any]:
+    async def hook_session_end(request: Request) -> dict[str, Any]:
         """Flush remaining drafts at session end."""
+        raw = await request.json()
+        capture = getattr(app.state, "payload_capture", None)
+        if capture:
+            await capture.capture("/hooks/session_end", raw, source=_detect_source(raw))
+        payload = HookPayload.model_validate(raw)
         result = await process_session_end(
             input_data=payload.model_dump(),
             config=app.state.config,
@@ -679,7 +746,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         return result
 
     @app.post("/hooks/mcp_callback")
-    async def hook_mcp_callback(payload: MCPCallbackPayload) -> dict[str, Any]:
+    async def hook_mcp_callback(request: Request) -> dict[str, Any]:
         """Register an MCP recall result from a PostToolUse hook.
 
         PostToolUse / afterMCPExecution / post_tool_call hooks call this
@@ -687,6 +754,11 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         stores the search_log_id in ``recent_searches[session_id].mcp_calls``
         so that ``after_response`` can correlate it with the AI's answer.
         """
+        raw = await request.json()
+        capture = getattr(app.state, "payload_capture", None)
+        if capture:
+            await capture.capture("/hooks/mcp_callback", raw, source=_detect_source(raw))
+        payload = MCPCallbackPayload.model_validate(raw)
         recent_searches: dict = app.state.recent_searches
         key = payload.session_id
 
@@ -870,5 +942,35 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         alert_mgr = getattr(app.state, "alert_manager", None)
         n_channels = len(alert_mgr.channels) if alert_mgr else 0
         return {"sent": True, "channels": n_channels, "title": title, "severity": severity}
+
+    @app.get("/debug/payloads")
+    async def debug_payloads(endpoint: str = "", limit: int = 20) -> dict[str, Any]:
+        capture = getattr(app.state, "payload_capture", None)
+        if capture is None:
+            return {"error": "payload_capture not initialized"}
+        if endpoint:
+            payloads = await capture.get_payloads(endpoint=endpoint, limit=limit)
+            summary = await capture.get_field_summary(endpoint)
+            return {"payloads": payloads, "summary": summary}
+        payloads = await capture.get_payloads(limit=limit)
+        return {"payloads": payloads}
+
+    @app.get("/debug/contracts")
+    async def debug_contracts() -> dict[str, Any]:
+        capture = getattr(app.state, "payload_capture", None)
+        if capture is None:
+            return {"error": "payload_capture not initialized"}
+        endpoints = [
+            "/hooks/before_prompt", "/hooks/after_response",
+            "/hooks/session_start", "/hooks/session_end", "/hooks/mcp_callback",
+        ]
+        result = {}
+        for ep in endpoints:
+            result[ep] = await capture.get_field_summary(ep)
+        result["_hook_payload_schema"] = {
+            "fields": list(HookPayload.model_fields.keys()),
+            "extra": "allow",
+        }
+        return result
 
     return app
