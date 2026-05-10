@@ -135,3 +135,35 @@ def api_key_auth() -> ApiKeyAuth:
     auth = ApiKeyAuth()
     auth.register_key("test_key_123", "test_user", "admin")
     return auth
+
+
+# --- Pipeline Acceptance Test Fixtures / Pipeline 验收测试固件 ---
+
+import pytest_asyncio  # noqa: E402, I001
+
+from team_memory.daemon.conversation_buffer import ConversationBuffer  # noqa: E402
+
+
+# Note: mock_embedding fixture already defined above (line 121)
+# 注意：mock_embedding 固件已在上方定义（第 121 行）
+
+
+@pytest_asyncio.fixture  # noqa: E402
+async def fresh_conversation_buffer():
+    """Fresh in-memory ConversationBuffer per test / 每次测试新建内存 ConversationBuffer."""
+    buf = ConversationBuffer(":memory:")
+    await buf.__aenter__()
+    yield buf
+    await buf.__aexit__(None, None, None)
+
+
+@pytest.fixture
+def mock_llm_result():
+    """Deterministic LLM refinement result / 确定性 LLM 精炼结果."""
+    return {
+        "title": "A sufficiently long title for quality",
+        "problem": "This is a problem description that is long enough to pass the minimum length check",
+        "solution": "This is a solution description that is long enough to pass the minimum length check",
+        "tags": ["test"],
+        "experience_type": "bugfix",
+    }

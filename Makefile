@@ -31,7 +31,7 @@ ALEMBIC ?= $(shell \
 	else echo alembic; fi)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp mcp-verify test lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-reload daemon-install daemon-uninstall watchdog-start watchdog-stop watchdog-status stats wiki-compile wiki-status entity-backfill entity-dedup embedding-backfill detect-contradictions search-eval solution-backfill faithfulness-eval test-llm
+.PHONY: help setup dev web mcp mcp-verify test test-acceptance lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-reload daemon-install daemon-uninstall watchdog-start watchdog-stop watchdog-status stats wiki-compile wiki-status entity-backfill entity-dedup embedding-backfill detect-contradictions search-eval solution-backfill faithfulness-eval test-llm
 
 sync-agent-artifacts: ## 由 agents/shared + agents/manifest.yaml 生成 .claude/.cursor 下 agents、prompts、skills
 	python scripts/sync_agent_artifacts.py
@@ -108,6 +108,9 @@ test:           ## 运行全部测试（默认 uv / .venv 中的 pytest）
 	    fi ;; \
 	esac
 	$(PYTEST) tests/ -v
+
+test-acceptance: ## Run pipeline acceptance tests (Tier 2+3 integration)
+	PYTHONPATH=src $(PYTHON_BIN) -m pytest tests/test_pipeline_acceptance.py -v $(OPTS)
 
 lint:           ## Ruff 代码检查
 	ruff check src/
