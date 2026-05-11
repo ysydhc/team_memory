@@ -87,12 +87,23 @@ async def process_session_start(
     return {"project": project or "", "additional_context": ""}
 
 
+def _detect_source_pipeline(data: dict) -> str:
+    """Detect hook source from payload fields / 从 payload 字段检测来源."""
+    if data.get("agent_response") or data.get("generation_id"):
+        return "cursor"
+    if data.get("last_assistant_message"):
+        return "claude"
+    if data.get("hook_event_name"):
+        return "hermes"
+    return "unknown"
+
 async def process_before_prompt(
     input_data: dict,
     config: DaemonConfig,
     sink: TMSink,
-    buf: Any = None,  # ConversationBuffer
-    wiki: Any = None,  # LLMWiki (optional)
+    buf: Any = None,
+    wiki: Any = None,
+    metrics: Any = None,
 ) -> dict[str, Any]:
     """Process before-prompt: retrieve memories and store user message.
 
@@ -203,6 +214,13 @@ async def process_before_prompt(
         context_parts.append(persona_context)
     context = "\n\n".join(context_parts)[:2000]
 
+    if metrics:
+        source = _detect_source_pipeline(input_data)
+        metrics.record(
+            "hook_calls_total", 1,
+            {"source": source, "event": "before_prompt", "project": project or "unknown"},
+        )
+
     return {
         "results": results,
         "project": project or "",
@@ -216,9 +234,10 @@ async def process_after_response(
     input_data: dict,
     config: DaemonConfig,
     sink: TMSink,
-    buf: Any,  # ConversationBuffer
-    detector: Any,  # ConvergenceDetector
-    refiner: Any,  # DraftRefiner
+    buf: Any,
+    detector: Any,
+    refiner: Any,
+    metrics: Any = None,
 ) -> dict[str, Any]:
     """Process agent response: store message, detect convergence, publish.
 
@@ -252,7 +271,6 @@ async def process_after_response(
 
     if project is None:
         logger.debug("No project resolved for workspace: %s", workspace_roots)
-        return {"action": "ok", "convergence": False, "draft_id": ""}
 
     if not response_text.strip():
         logger.debug("Empty response_text, skipping draft pipeline for session=%s", session_id)
@@ -309,6 +327,10 @@ async def process_after_response(
             }
         return {"action": "ok", "convergence": True, "draft_id": session_id}
 
+    if metrics:
+        source = _detect_source_pipeline(input_data)
+        metrics.record("hook_calls_total", 1,
+            {"source": source, "event": "after_response", "project": project or "unknown"})
     return {"action": "draft_updated", "convergence": False, "draft_id": session_id}
 
 

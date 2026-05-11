@@ -315,6 +315,13 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                 ref_count, pub_count,
             )
 
+        # Metrics collector / 指标收集
+        from team_memory.daemon.metrics_collector import MetricsCollector
+        metrics = MetricsCollector(db_path=db_path,
+                                   pg_url=str(_tm_settings.database.url).replace("+asyncpg", ""))
+        metrics.cleanup()
+        application.state.metrics = metrics
+
         # Pending queue for graceful degradation / 优雅降级队列
         from team_memory.daemon.pending_queue import PendingQueue
         pending_queue = PendingQueue(db_path=db_path)
@@ -322,7 +329,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         # LLM background refinement worker
         from team_memory.daemon.refinement_worker import RefinementWorker
         refinement_worker = RefinementWorker(
-            config=config, buf=buf, sink=sink, queue=pending_queue
+            config=config, buf=buf, sink=sink, queue=pending_queue, metrics=metrics
         )
         refinement_task = refinement_worker.start()
         application.state.refinement_worker = refinement_worker
@@ -506,6 +513,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             buf=app.state.buf,
             detector=app.state.detector,
             refiner=app.state.refiner,
+            metrics=getattr(app.state, "metrics", None),
         )
         # Resolve project from workspace_roots for logging
         resolved_project = _resolve_project(payload.workspace_roots, app.state.config) or ""
@@ -694,6 +702,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             sink=app.state.sink,
             buf=app.state.buf,
             wiki=getattr(app.state, "llm_wiki", None),
+            metrics=getattr(app.state, "metrics", None),
         )
         project = result.get("project", "")
         all_results = result.get("results", [])

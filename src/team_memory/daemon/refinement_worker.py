@@ -220,11 +220,13 @@ class RefinementWorker:
         buf: ConversationBuffer,
         sink: TMSink,
         queue: Any = None,
+        metrics: Any = None,
     ) -> None:
         self._cfg: RefinementSettings = config.refinement
         self._buf = buf
         self._sink = sink
-        self._queue = queue  # Optional PendingQueue for retry/backoff
+        self._queue = queue
+        self._metrics = metrics
         self._running = False
         self._task: asyncio.Task | None = None
 
@@ -353,6 +355,10 @@ class RefinementWorker:
                         backoff_idx = min(retries - 1, len(self._queue.BACKOFF_SECONDS) - 1)
                         backoff = self._queue.BACKOFF_SECONDS[backoff_idx]
                         self._queue.bump_retry(op_id, str(retry_err)[:500], backoff)
+
+        # Snapshot cross-DB metrics
+        if self._metrics:
+            await self._metrics.cross_db_snapshot()
 
         # Step 2: Process new needs_refinement sessions
         all_drafts = await self._buf.get_needs_refinement()

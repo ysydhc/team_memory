@@ -1266,6 +1266,44 @@ def cmd_queue_clear(args: Any) -> None:
     else:
         print("Use --id <id> or --all")
 
+def cmd_metrics_show(args: Any) -> None:
+    """Show current metrics / 显示当前指标."""
+    from team_memory.daemon.metrics_collector import MetricsCollector
+    mc = MetricsCollector(db_path=_get_queue_db_path())
+    rows = mc.query(name=getattr(args, "name", None))
+    if not rows:
+        print("No metrics recorded yet")
+        return
+    print(f"{'Name':<30} {'Labels':<30} {'Value':<10}")
+    print("-" * 72)
+    for r in rows:
+        labels = r.get("labels", "{}")
+        if isinstance(labels, str):
+            import json as _json
+            try:
+                labels = _json.loads(labels)
+            except Exception:
+                pass
+        if isinstance(labels, dict):
+            label_str = ",".join(f"{k}={v}" for k, v in sorted(labels.items()))
+        else:
+            label_str = str(labels)
+        print(f"{r['name']:<30} {label_str[:28]:<30} {r['value']:<10.2f}")
+
+
+def cmd_metrics_summary(args: Any) -> None:
+    """Print aggregated metrics summary / 打印聚合指标摘要."""
+    from team_memory.daemon.metrics_collector import MetricsCollector
+    mc = MetricsCollector(db_path=_get_queue_db_path())
+    s = mc.summary(hours=getattr(args, "hours", 24))
+    if not s:
+        print("No metrics data in time window")
+        return
+    for name, labels_dict in sorted(s.items()):
+        print(f"{name}:")
+        for label_key, val in sorted(labels_dict.items()):
+            print(f"  {label_key}: {val:.2f}")
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="tm-cli",
