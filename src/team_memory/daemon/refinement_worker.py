@@ -221,12 +221,14 @@ class RefinementWorker:
         sink: TMSink,
         queue: Any = None,
         metrics: Any = None,
+        health_check: Any = None,
     ) -> None:
         self._cfg: RefinementSettings = config.refinement
         self._buf = buf
         self._sink = sink
         self._queue = queue
         self._metrics = metrics
+        self._health_check = health_check
         self._running = False
         self._task: asyncio.Task | None = None
 
@@ -359,6 +361,13 @@ class RefinementWorker:
         # Snapshot cross-DB metrics
         if self._metrics:
             await self._metrics.cross_db_snapshot()
+
+        # In-process health check
+        if self._health_check:
+            try:
+                await self._health_check.check_all()
+            except Exception:
+                logger.exception("HealthCheck failed (non-critical)")
 
         # Step 2: Process new needs_refinement sessions
         all_drafts = await self._buf.get_needs_refinement()

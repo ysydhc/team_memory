@@ -317,10 +317,18 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
 
         # Metrics collector / 指标收集
         from team_memory.daemon.metrics_collector import MetricsCollector
-        metrics = MetricsCollector(db_path=db_path,
-                                   pg_url=str(_tm_settings.database.url).replace("+asyncpg", ""))
+        _pg_url_clean = str(_tm_settings.database.url).replace("+asyncpg", "")
+        metrics = MetricsCollector(db_path=db_path, pg_url=_pg_url_clean)
         metrics.cleanup()
         application.state.metrics = metrics
+
+        # In-process health check / 进程内健康检查
+        from team_memory.daemon.health_check import HealthCheck
+        _health_check = HealthCheck(
+            db_path=db_path, pg_url=_pg_url_clean,
+            worker_task=None,  # will be set after worker starts
+            alert_callback=send_daemon_alert,
+        )
 
         # Pending queue for graceful degradation / 优雅降级队列
         from team_memory.daemon.pending_queue import PendingQueue
@@ -329,9 +337,11 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         # LLM background refinement worker
         from team_memory.daemon.refinement_worker import RefinementWorker
         refinement_worker = RefinementWorker(
-            config=config, buf=buf, sink=sink, queue=pending_queue, metrics=metrics
+            config=config, buf=buf, sink=sink,
+            queue=pending_queue, metrics=metrics, health_check=_health_check,
         )
         refinement_task = refinement_worker.start()
+        _health_check._worker_task = refinement_task  # 绑定实际 task
         application.state.refinement_worker = refinement_worker
         application.state.refinement_task = refinement_task
 
