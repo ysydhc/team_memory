@@ -397,7 +397,10 @@ class RefinementWorker:
                 try:
                     await self._refine_one(draft)
                 except Exception:
-                    logger.exception("Failed to refine draft %s", draft_id)
+                    from team_memory.daemon.structured_logger import StructuredLogger
+                    sl = StructuredLogger(logger)
+                    sl.error("refine_fail", session=draft_id, project=draft.get("project","default"))
+                    logger.exception("Failed to refine draft %s (traceback above)", draft_id)
                     if self._queue:
                         self._queue.enqueue(
                             op_type="refine",
@@ -571,12 +574,10 @@ class RefinementWorker:
 
         # Step 5: mark local draft published
         await self._buf.mark_published(draft_id)
-        logger.info(
-            "Refined and published draft %s → experience %s (title=%s)",
-            draft_id,
-            experience_id,
-            structured.get("title", "")[:40],
-        )
+        from team_memory.daemon.structured_logger import StructuredLogger
+        sl = StructuredLogger(logger)
+        sl.info("refine_done", session=draft_id, project=project,
+                experience_id=experience_id, title=structured.get("title","")[:40])
 
     # ------------------------------------------------------------------
     # Pre-refinement dedup helpers
