@@ -189,7 +189,27 @@ async def process_before_prompt(
     except Exception:
         logger.debug("Persona profile loading failed (non-critical)", exc_info=True)
 
-    return {"results": results, "project": project or "", "persona": persona, "persona_context": persona_context}
+    # Build immediate-feedback context (recall + persona)
+    context_parts = []
+    if results:
+        titles = []
+        for r in results[:5]:
+            t = r.get("title", "") or r.get("content", "")[:60]
+            if t:
+                titles.append(f"- {t}")
+        if titles:
+            context_parts.append(f"TeamMemory found {len(results)} relevant experience(s):\n" + "\n".join(titles))
+    if persona_context:
+        context_parts.append(persona_context)
+    context = "\n\n".join(context_parts)[:2000]
+
+    return {
+        "results": results,
+        "project": project or "",
+        "persona": persona,
+        "persona_context": persona_context,
+        "context": context,
+    }
 
 
 async def process_after_response(

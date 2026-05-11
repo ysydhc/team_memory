@@ -1,4 +1,4 @@
-"""Cursor beforeSubmitPrompt hook — forwards to TM Daemon."""
+"""Cursor beforeSubmitPrompt hook — forwards to TM Daemon and injects context."""
 import json
 import sys
 
@@ -15,8 +15,18 @@ def main() -> None:
         return
 
     try:
-        resp = httpx.post(f"{DAEMON_URL}/hooks/before_prompt", json=input_data, timeout=10.0)
-        print(resp.text)
+        resp = httpx.post(
+            f"{DAEMON_URL}/hooks/before_prompt",
+            json=input_data,
+            timeout=10.0,
+        )
+        result = resp.json()
+        context = result.get("context", "")
+        # Inject TM context into Cursor's prompt
+        if context:
+            print(json.dumps({"action": "ok", "context": context}))
+        else:
+            print(resp.text)
     except httpx.ConnectError:
         print(json.dumps({"action": "ok", "message": "daemon not running"}))
     except Exception as e:
