@@ -219,14 +219,14 @@ class RefinementWorker:
         config: DaemonConfig,
         buf: ConversationBuffer,
         sink: TMSink,
+        queue: Any = None,
     ) -> None:
         self._cfg: RefinementSettings = config.refinement
         self._buf = buf
         self._sink = sink
+        self._queue = queue  # Optional PendingQueue for retry/backoff
         self._running = False
         self._task: asyncio.Task | None = None
-        # In-memory retry counter: draft_id → attempt count
-        self._retry_counts: dict[str, int] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -325,7 +325,36 @@ class RefinementWorker:
         # Step 1: auto-mark idle active sessions
         await self._mark_idle_sessions()
 
-        # Step 2: get unique projects with needs_refinement sessions
+        # Step 1: Process queue retries FIRST (积压优先)
+        if self._queue:
+            due_ops = self._queue.get_due_ops()
+            for op in due_ops:
+                op_id = op["id"]
+                try:
+                    payload = op["payload"]
+                    draft = {
+                        "id": payload.get("draft_id") or payload.get("session_id") or op["session_id"],
+                        "content": payload.get("content", ""),
+                        "project": payload.get("project", "default"),
+                        "title": payload.get("title", f"Draft {op['session_id'][:8]}"),
+                        "conversation_id": payload.get("conversation_id", ""),
+                    }
+                    await self._refine_one(draft)
+                    self._queue.dequeue(op_id)
+                    logger.info("Queue retry succeeded for %s", op_id)
+                except Exception as retry_err:
+                    retries = op["retries"] + 1
+                    if retries >= self._queue.MAX_RETRIES:
+                        self._queue.mark_failed(op_id)
+                        logger.error("Queue op %s permanently failed after %d retries", op_id, retries)
+                        if self._cfg.fallback_on_failure:
+                            await self._fallback_publish_from_payload(op["payload"], op["session_id"])
+                    else:
+                        backoff_idx = min(retries - 1, len(self._queue.BACKOFF_SECONDS) - 1)
+                        backoff = self._queue.BACKOFF_SECONDS[backoff_idx]
+                        self._queue.bump_retry(op_id, str(retry_err)[:500], backoff)
+
+        # Step 2: Process new needs_refinement sessions
         all_drafts = await self._buf.get_needs_refinement()
         if not all_drafts:
             return
@@ -351,29 +380,26 @@ class RefinementWorker:
                     await self._buf.mark_published(draft_id)
                     continue
 
-                # Check retry limit
-                # 检查重试次数
-                attempts = self._retry_counts.get(draft_id, 0)
-                if attempts >= _MAX_REFINE_ATTEMPTS:
-                    logger.warning(
-                        "Draft %s exceeded %d refine attempts, marking as refinement_failed",
-                        draft_id,
-                        _MAX_REFINE_ATTEMPTS,
-                    )
-                    await self._buf.mark_published(draft_id)  # Remove from refinement queue
-                    self._retry_counts.pop(draft_id, None)
-                    continue
-
-                self._retry_counts[draft_id] = attempts + 1
+                # Mark as refining before processing / 处理前标记 refining
+                await self._buf.mark_refining(draft_id)
 
                 try:
                     await self._refine_one(draft)
-                    # Success: clear retry count
-                    self._retry_counts.pop(draft_id, None)
                 except Exception:
-                    logger.exception("Failed to refine draft %s (attempt %d/%d)",
-                                     draft_id, attempts + 1, _MAX_REFINE_ATTEMPTS)
-                    if self._cfg.fallback_on_failure:
+                    logger.exception("Failed to refine draft %s", draft_id)
+                    if self._queue:
+                        self._queue.enqueue(
+                            op_type="refine",
+                            session_id=draft_id,
+                            payload={
+                                "draft_id": draft_id,
+                                "content": draft.get("content", ""),
+                                "project": draft.get("project", "default"),
+                                "title": title,
+                                "conversation_id": draft.get("conversation_id", ""),
+                            },
+                        )
+                    elif self._cfg.fallback_on_failure:
                         await self._fallback_publish(draft)
 
     async def _refine_one(self, draft: dict[str, Any]) -> None:
@@ -704,6 +730,19 @@ class RefinementWorker:
         # All retries exhausted
         raise last_error or LLMParseError("LLM refinement failed after all retries")
 
+    async def _fallback_publish_from_payload(
+        self, payload: dict[str, Any], session_id: str
+    ) -> None:
+        """Fallback publish from a queue payload / 从队列 payload 恢复并发布。"""
+        draft = {
+            "id": payload.get("draft_id") or session_id,
+            "content": payload.get("content", ""),
+            "project": payload.get("project", "default"),
+            "title": payload.get("title", f"Draft {session_id[:8]}"),
+            "conversation_id": payload.get("conversation_id", ""),
+        }
+        await self._fallback_publish(draft)
+
     async def _fallback_publish(self, draft: dict[str, Any]) -> None:
         """Fallback: publish the draft without LLM refinement.
 
@@ -753,7 +792,6 @@ class RefinementWorker:
                 )
                 return
             await self._buf.mark_published(draft_id)
-            self._retry_counts.pop(draft_id, None)
             logger.warning(
                 "Fallback published draft %s without LLM refinement (experience_id=%s)",
                 draft_id,

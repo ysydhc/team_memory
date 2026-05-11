@@ -175,8 +175,26 @@ class ConversationBuffer:
         await db.commit()
 
     async def mark_session(self, session_id: str, status: str) -> None:
-        """Set session status (active/needs_refinement/published/expired)."""
+        """Set session status (active/needs_refinement/refining/published/expired)."""
         await self.close_session(session_id, status)
+
+    async def mark_refining(self, session_id: str) -> None:
+        """Mark session as being refined (prevents duplicate processing)."""
+        await self.mark_session(session_id, "refining")
+
+    async def reset_refining_sessions(self) -> int:
+        """Reset all 'refining' sessions back to 'needs_refinement'.
+
+        Called on daemon startup to recover from crash mid-refinement.
+        Returns count of sessions reset.
+        """
+        db = self._require_db()
+        cursor = await db.execute(
+            "UPDATE sessions SET status = 'needs_refinement', updated_at = ? WHERE status = 'refining'",
+            (datetime.now(timezone.utc).isoformat(),),
+        )
+        await db.commit()
+        return cursor.rowcount
 
     # ------------------------------------------------------------------
     # Message operations

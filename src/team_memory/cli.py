@@ -1176,6 +1176,96 @@ def cmd_upload(args: argparse.Namespace) -> None:
 # Argument parser
 # ---------------------------------------------------------------------------
 
+def _get_queue_db_path() -> str:
+    """Resolve the drafts.db path for queue access / 解析队列数据库路径。"""
+    import os
+    env_path = os.environ.get("TM_PIPELINE_DB_PATH")
+    if env_path:
+        return env_path
+    from pathlib import Path
+    default = Path.home() / ".cache" / "tm-pipeline" / "drafts.db"
+    return str(default)
+
+
+def cmd_queue_list(args: Any) -> None:
+    """List pending retry operations / 列出待重试操作。"""
+    from team_memory.daemon.pending_queue import PendingQueue
+    db_path = _get_queue_db_path()
+    try:
+        queue = PendingQueue(db_path=db_path)
+    except Exception as e:
+        print(f"Error opening queue: {e}")
+        return
+
+    ops = queue.list_ops(op_type=getattr(args, "op_type", None))
+    if not ops:
+        print("Queue is empty")
+        return
+
+    print(f"{'ID':<14} {'Type':<12} {'Session':<14} {'Retries':<8} {'Status':<10} {'Next Retry'}")
+    print("-" * 80)
+    for op in ops:
+        next_retry = (op.get("next_retry_at") or "")[:19]
+        print(f"{op['id']:<14} {op['op_type']:<12} {(op.get('session_id') or '')[:12]:<14} "
+              f"{op['retries']:<8} {op['status']:<10} {next_retry}")
+
+
+def cmd_queue_stats(args: Any) -> None:
+    """Print queue statistics / 打印队列统计。"""
+    from team_memory.daemon.pending_queue import PendingQueue
+    db_path = _get_queue_db_path()
+    try:
+        queue = PendingQueue(db_path=db_path)
+    except Exception as e:
+        print(f"Error opening queue: {e}")
+        return
+
+    s = queue.stats()
+    print(f"Queue: {s['pending']} pending, {s['retrying']} retrying, {s['failed']} failed")
+
+
+def cmd_queue_retry(args: Any) -> None:
+    """Force immediate retry of a queued operation / 强制立即重试。"""
+    from team_memory.daemon.pending_queue import PendingQueue
+    db_path = _get_queue_db_path()
+    try:
+        queue = PendingQueue(db_path=db_path)
+    except Exception as e:
+        print(f"Error opening queue: {e}")
+        return
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    queue._db.execute(
+        "UPDATE pending_ops SET next_retry_at = ?, status = 'pending' WHERE id = ?",
+        (now, args.op_id),
+    )
+    queue._db.commit()
+    print(f"Reset retry timer for {args.op_id} — will be picked up on next tick")
+
+
+def cmd_queue_clear(args: Any) -> None:
+    """Clear queue entries / 清空队列条目。"""
+    from team_memory.daemon.pending_queue import PendingQueue
+    db_path = _get_queue_db_path()
+    try:
+        queue = PendingQueue(db_path=db_path)
+    except Exception as e:
+        print(f"Error opening queue: {e}")
+        return
+
+    if getattr(args, "op_id", None):
+        queue._db.execute("DELETE FROM pending_ops WHERE id = ?", (args.op_id,))
+        queue._db.commit()
+        print(f"Cleared {args.op_id}")
+    elif getattr(args, "clear_all", None):
+        count = queue._db.execute("SELECT COUNT(*) FROM pending_ops").fetchone()[0]
+        queue._db.execute("DELETE FROM pending_ops")
+        queue._db.commit()
+        print(f"Cleared {count} entries")
+    else:
+        print("Use --id <id> or --all")
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="tm-cli",

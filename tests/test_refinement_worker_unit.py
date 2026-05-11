@@ -93,13 +93,13 @@ class TestRefinementWorkerInit:
         assert worker._sink is sink
         assert worker._running is False
         assert worker._task is None
-        assert worker._retry_counts == {}
+        assert worker._queue is None
 
     def test_init_empty_retry_counts(self):
         cfg = _make_config()
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
-        assert isinstance(worker._retry_counts, dict)
-        assert len(worker._retry_counts) == 0
+        assert worker._queue is None
+        assert worker._buf is not None
 
 
 @pytest.mark.unit
@@ -265,43 +265,59 @@ class TestTickLogic:
         buf.mark_published.assert_awaited_once_with("d-001")
 
     @pytest.mark.asyncio
-    async def test_tick_max_retries_exceeded_marks_published(self):
-        cfg = _make_config()
+    async def test_tick_max_retries_marks_failed(self):
+        """When queue op hits max retries, mark_failed and fallback triggered."""
+        from team_memory.daemon.pending_queue import PendingQueue
+        cfg = _make_config(fallback_on_failure=True)
         buf = AsyncMock()
-        draft = _make_draft()
-        buf.get_needs_refinement = AsyncMock(return_value=[draft])
-        sink = MagicMock()
-        worker = RefinementWorker(cfg, buf, sink)
-        # Pre-fill retry counts to exceed max
-        worker._retry_counts["d-001"] = _MAX_REFINE_ATTEMPTS
+        buf.mark_refining = AsyncMock()
+        buf.mark_published = AsyncMock()
+        sink = AsyncMock()
+        queue = PendingQueue(db_path=":memory:")
+        op_id = queue.enqueue("refine", "d-001",
+            {"draft_id": "d-001", "content": "test", "project": "default"})
+        queue.bump_retry(op_id, "err", 0)
+        queue.bump_retry(op_id, "err", 0)
+        # Force next_retry_at to past so get_due_ops picks it up
+        queue._db.execute("UPDATE pending_ops SET next_retry_at = '2020-01-01T00:00:00' WHERE id = ?", (op_id,))
+        queue._db.commit()
+        worker = RefinementWorker(cfg, buf, sink, queue=queue)
+        worker._refine_one = AsyncMock(side_effect=Exception("fail"))
         await worker._tick()
-        buf.mark_published.assert_awaited_once_with("d-001")
-        assert "d-001" not in worker._retry_counts
+        assert queue.stats()["failed"] == 1
 
     @pytest.mark.asyncio
-    async def test_tick_increments_retry_count(self):
+    async def test_tick_failure_enqueues(self):
+        """When _refine_one fails, draft enqueued to PendingQueue."""
+        from team_memory.daemon.pending_queue import PendingQueue
         cfg = _make_config()
         buf = AsyncMock()
-        draft = _make_draft()
+        buf.mark_refining = AsyncMock()
+        draft = {"id": "d-001", "content": "test", "title": "T", "project": "default"}
         buf.get_needs_refinement = AsyncMock(return_value=[draft])
-        sink = MagicMock()
-        # Make _refine_one succeed so we test the happy path of incrementing
-        worker = RefinementWorker(cfg, buf, sink)
-        worker._refine_one = AsyncMock(return_value=None)
+        sink = AsyncMock()
+        queue = PendingQueue(db_path=":memory:")
+        worker = RefinementWorker(cfg, buf, sink, queue=queue)
+        worker._refine_one = AsyncMock(side_effect=Exception("fail"))
         await worker._tick()
-        # After success, retry count should be cleared
-        assert "d-001" not in worker._retry_counts
+        assert queue.stats()["pending"] == 1
 
     @pytest.mark.asyncio
-    async def test_tick_refine_failure_increments_retry(self):
-        cfg = _make_config(fallback_on_failure=False)
+    async def test_tick_failure_dedup(self):
+        """Second failure does not duplicate queue entry."""
+        from team_memory.daemon.pending_queue import PendingQueue
+        cfg = _make_config()
         buf = AsyncMock()
-        draft = _make_draft()
+        buf.mark_refining = AsyncMock()
+        draft = {"id": "d-001", "content": "test", "title": "T", "project": "default"}
         buf.get_needs_refinement = AsyncMock(return_value=[draft])
-        worker = RefinementWorker(cfg, buf, MagicMock())
-        worker._refine_one = AsyncMock(side_effect=RuntimeError("boom"))
+        sink = AsyncMock()
+        queue = PendingQueue(db_path=":memory:")
+        worker = RefinementWorker(cfg, buf, sink, queue=queue)
+        worker._refine_one = AsyncMock(side_effect=Exception("fail"))
         await worker._tick()
-        assert worker._retry_counts["d-001"] == 1
+        await worker._tick()
+        assert queue.stats()["pending"] == 1  # deduped
 
     @pytest.mark.asyncio
     async def test_tick_fallback_on_failure(self):
@@ -716,17 +732,12 @@ class TestFallbackPublish:
         sink = AsyncMock()
         sink.draft_save = AsyncMock(return_value={"id": "exp-fb"})
         sink.draft_publish = AsyncMock(return_value={})
-
         worker = RefinementWorker(cfg, buf, sink)
-        worker._retry_counts["d-001"] = 3
         draft = _make_draft()
-
         await worker._fallback_publish(draft)
-
         sink.draft_save.assert_awaited_once()
         sink.draft_publish.assert_awaited_once_with(draft_id="exp-fb")
         buf.mark_published.assert_awaited_once_with("d-001")
-        assert "d-001" not in worker._retry_counts
 
     @pytest.mark.asyncio
     async def test_fallback_save_error_returns_early(self):

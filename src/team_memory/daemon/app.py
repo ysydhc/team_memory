@@ -305,9 +305,21 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         refiner = DraftRefiner(sink=sink, draft_buffer=buf, wiki_compiler=wiki_compiler)
         application.state.refiner = refiner
 
+        # Startup recovery: reset any sessions stuck in "refining" status
+        # 启动恢复：重置卡在 refining 状态的 session
+        reset_count = await buf.reset_refining_sessions()
+        if reset_count:
+            logger.info("Reset %d refining sessions to needs_refinement (crash recovery)", reset_count)
+
+        # Pending queue for graceful degradation / 优雅降级队列
+        from team_memory.daemon.pending_queue import PendingQueue
+        pending_queue = PendingQueue(db_path=db_path)
+
         # LLM background refinement worker
         from team_memory.daemon.refinement_worker import RefinementWorker
-        refinement_worker = RefinementWorker(config=config, buf=buf, sink=sink)
+        refinement_worker = RefinementWorker(
+            config=config, buf=buf, sink=sink, queue=pending_queue
+        )
         refinement_task = refinement_worker.start()
         application.state.refinement_worker = refinement_worker
         application.state.refinement_task = refinement_task

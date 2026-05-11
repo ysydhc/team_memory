@@ -10,7 +10,7 @@
   2. Call _setup_cursor with mock cfg + venv_python
   3. Assert hooks.json has: sessionStart, beforeSubmitPrompt, afterAgentResponse, afterMCPExecution
 - Result: Test FAILS — only afterMCPExecution written ❌
-- Status: [ ] pending
+- Status: [x] done
 
 ## Task 2: Fix _setup_cursor — add 3 missing hooks
 - File: src/team_memory/cli.py, function _setup_cursor (line ~822)
@@ -22,7 +22,7 @@
   5. Each: hooks_section[event] = [{"matcher": "", "hooks": [{"type": "command", "command": venv_python -m ...}]}]
   6. Existing entry dedup: remove old entries with "team_memory" matcher before adding
 - Result: T1 test passes ✅
-- Status: [ ] pending
+- Status: [x] done
 
 ## Task 3: TDD — _setup_hermes test (FAIL first)
 - File: tests/test_cli_config_setup.py
@@ -32,7 +32,7 @@
   3. Assert config.yaml hooks section has: UserPromptSubmit, Stop, PostToolUse
   4. Assert non-hooks config preserved
 - Result: Test FAILS — only prints, no file written ❌
-- Status: [ ] pending
+- Status: [x] done
 
 ## Task 4: Fix _setup_hermes — auto-write config.yaml
 - File: src/team_memory/cli.py, function _setup_hermes (line ~904)
@@ -46,7 +46,7 @@
   4. yaml.dump back with allow_unicode=True
   5. Print: "[hermes] Written 3 hooks to config.yaml"
 - Result: T3 test passes ✅
-- Status: [ ] pending
+- Status: [x] done
 
 ## Task 5: Fix _check_platform("claude-code")
 - File: src/team_memory/cli.py, _check_platform branch at line ~756
@@ -57,7 +57,7 @@
   4. Check PostToolUse entry + claude_post_tool.py exists (keep existing check)
   5. Print per-hook: green_check / red_x
 - Tests: test_check_claude_all_four_hooks
-- Status: [ ] pending
+- Status: [x] done
 
 ## Task 6: Fix _check_platform("cursor")
 - File: src/team_memory/cli.py, _check_platform branch at line ~758
@@ -68,7 +68,7 @@
   4. Check afterMCPExecution entry + cursor_after_mcp.py exists (keep existing)
   5. Print per-hook: green_check / red_x
 - Tests: test_check_cursor_all_four_hooks
-- Status: [ ] pending
+- Status: [x] done
 
 ## Task 7: Fix _check_platform("hermes")
 - File: src/team_memory/cli.py, _check_platform branch at line ~760
@@ -78,7 +78,7 @@
   3. Check PostToolUse entry + hermes_post_tool_call.py exists
   4. Print per-hook: green_check / red_x
 - Tests: test_check_hermes_all_three_hooks
-- Status: [ ] pending
+- Status: [x] done
 
 ## Task 8: Run full verification
 - Action:
@@ -87,10 +87,10 @@
   3. Full test suite: pytest -m "not integration" -q
   4. tm-cli setup --check (should show all green)
   5. make e2e-verify (should pass)
-- Status: [ ] pending
+- Status: [x] done
 
 ## Task 9: Commit + update roadmap
 - Action:
   1. git add -A && git commit
   2. Mark P0-1 [x] done in roadmap.md
-- Status: [ ] pending
+- Status: [x] done

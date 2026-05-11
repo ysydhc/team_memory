@@ -127,7 +127,7 @@
 - [x] Acceptance tests (21 tests)
 - [x] made e2e-verify (完整链路)
 - [x] 5-role review
-- [ ] P0-1: Hook 一键安装
+- [x] P0-1: Hook 一键安装
 - [ ] P0-2: 优雅降级
 - [ ] P0-3: 数据一致性
 - [ ] P0-5: 即时反馈
