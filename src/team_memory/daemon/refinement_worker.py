@@ -380,6 +380,17 @@ class RefinementWorker:
                     await self._buf.mark_published(draft_id)
                     continue
 
+                # Check for crash-recovery: skip_llm bypasses refine
+                if draft.get("skip_llm") and draft.get("refined_payload"):
+                    payload = draft["refined_payload"]
+                    logger.info("skip_llm: replaying publish for %s", draft_id)
+                    await self._sink.draft_publish(draft_id=payload["experience_id"])
+                    await self._sink.update_experience(
+                        payload["experience_id"], payload["structured"]
+                    )
+                    await self._buf.mark_published(draft_id)
+                    continue
+
                 # Mark as refining before processing / 处理前标记 refining
                 await self._buf.mark_refining(draft_id)
 
@@ -492,6 +503,12 @@ class RefinementWorker:
 
         # Step 2: LLM refinement
         structured = await self._call_llm(content, project=project, similar_context=similar_context)
+
+        # Persist LLM output for crash recovery (before quality gate)
+        await self._buf.mark_publishing_in_progress(
+            draft_id,
+            {"experience_id": experience_id, "structured": structured},
+        )
 
         # Map "description" from new prompt output to "problem" for update_experience
         if "description" in structured and "problem" not in structured:
@@ -792,6 +809,15 @@ class RefinementWorker:
                 )
                 return
             await self._buf.mark_published(draft_id)
+            # Clear stale refined_payload after fallback
+            try:
+                await self._buf._db.execute(
+                    "UPDATE sessions SET refined_payload=NULL WHERE id=?",
+                    (draft_id,),
+                )
+                await self._buf._db.commit()
+            except Exception:
+                pass
             logger.warning(
                 "Fallback published draft %s without LLM refinement (experience_id=%s)",
                 draft_id,

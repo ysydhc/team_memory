@@ -1196,3 +1196,89 @@ class TestQualityScore:
             score = await worker._quality_score(_valid_llm_result())
 
         assert score == 100
+
+
+@pytest.mark.unit
+class TestPublishingIntegration:
+    '''Tests for publishing state machine integration.'''
+
+    @pytest.mark.asyncio
+    async def test_refine_one_marks_publishing_after_llm(self):
+        '''After _call_llm succeeds, mark_publishing_in_progress called with eid+structured.'''
+        from team_memory.daemon.pending_queue import PendingQueue
+        cfg = _make_config()
+        buf = AsyncMock()
+        buf.mark_refining = AsyncMock()
+        buf.mark_publishing_in_progress = AsyncMock()
+        buf.mark_published = AsyncMock()
+        sink = AsyncMock()
+        sink.draft_save = AsyncMock(return_value={"id": "exp-pub-001"})
+        sink.draft_publish = AsyncMock(return_value={})
+        sink.update_experience = AsyncMock(return_value={})
+        worker = RefinementWorker(cfg, buf, sink)
+        structured = {"title": "T", "problem": "P", "solution": "S"}
+        with patch.object(worker, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = structured
+            await worker._refine_one(_make_draft())
+        buf.mark_publishing_in_progress.assert_awaited_once()
+        call_args = buf.mark_publishing_in_progress.call_args[0]
+        assert call_args[1]["experience_id"] == "exp-pub-001"
+        assert call_args[1]["structured"]["title"] == "T"
+
+    @pytest.mark.asyncio
+    async def test_tick_skip_llm_when_payload_valid(self):
+        '''skip_llm=true session bypasses mark_refining and _call_llm.'''
+        cfg = _make_config()
+        buf = AsyncMock()
+        buf.mark_published = AsyncMock()
+        sink = AsyncMock()
+        sink.draft_publish = AsyncMock(return_value={})
+        sink.update_experience = AsyncMock(return_value={})
+        draft = {
+            "id": "skip-test", "content": "x", "project": "default",
+            "conversation_id": "skip-test", "status": "needs_refinement",
+            "refined_payload": {"experience_id": "exp-skip", "structured": {"title": "S"}},
+            "skip_llm": True,
+        }
+        buf.get_needs_refinement = AsyncMock(return_value=[draft])
+        worker = RefinementWorker(cfg, buf, sink)
+        worker._refine_one = AsyncMock()
+        await worker._tick()
+        worker._refine_one.assert_not_called()
+        sink.draft_publish.assert_awaited_once_with(draft_id="exp-skip")
+        sink.update_experience.assert_awaited_once()
+        buf.mark_published.assert_awaited_once_with("skip-test")
+
+    @pytest.mark.asyncio
+    async def test_tick_corrupt_payload_fallback(self):
+        '''Corrupt refined_payload → falls back to normal refine.'''
+        cfg = _make_config()
+        buf = AsyncMock()
+        buf.mark_refining = AsyncMock()
+        buf.mark_published = AsyncMock()
+        sink = AsyncMock()
+        draft = {
+            "id": "corrupt", "content": "x", "project": "default",
+            "conversation_id": "corrupt", "status": "needs_refinement",
+            "refined_payload": None,  # NULL → normal path
+            "skip_llm": False,
+        }
+        buf.get_needs_refinement = AsyncMock(return_value=[draft])
+        worker = RefinementWorker(cfg, buf, sink)
+        worker._refine_one = AsyncMock()
+        await worker._tick()
+        buf.mark_refining.assert_awaited_once_with("corrupt")
+        worker._refine_one.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_fallback_publish_clears_refined_payload(self):
+        '''_fallback_publish clears refined_payload after success.'''
+        cfg = _make_config()
+        buf = AsyncMock()
+        buf.mark_published = AsyncMock()
+        sink = AsyncMock()
+        sink.draft_save = AsyncMock(return_value={"id": "exp-fb"})
+        sink.draft_publish = AsyncMock(return_value={})
+        worker = RefinementWorker(cfg, buf, sink)
+        await worker._fallback_publish(_make_draft())
+        buf.mark_published.assert_awaited_once()

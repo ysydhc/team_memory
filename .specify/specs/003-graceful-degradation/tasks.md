@@ -21,7 +21,7 @@
   3. Tests pass
 - Test: 7 tests, all passing
 - Depends on: none
-- Status: [ ] pending
+- Status: [x] done
 
 ## Task 2: Add "refining" status to ConversationBuffer (TDD)
 - File(s): src/team_memory/daemon/conversation_buffer.py, tests/test_conversation_buffer.py
@@ -36,7 +36,7 @@
   4. Tests pass
 - Test: 3 tests, all passing; existing tests unaffected
 - Depends on: none
-- Status: [ ] pending
+- Status: [x] done
 
 ## Task 3: Integrate PendingQueue into RefinementWorker (TDD)
 - File(s): src/team_memory/daemon/refinement_worker.py, tests/test_refinement_worker.py
@@ -59,7 +59,7 @@
   6. Tests pass
 - Test: 4 tests, all passing; existing RefinementWorker tests unaffected
 - Depends on: Task 1, Task 2
-- Status: [ ] pending
+- Status: [x] done
 
 ## Task 4: Return errors from LocalTMSink on PG failure
 - File(s): src/team_memory/daemon/tm_sink.py, tests/test_tm_sink.py
@@ -70,7 +70,7 @@
   3. Tests pass
 - Test: 1 test, passing
 - Depends on: none
-- Status: [ ] pending
+- Status: [x] done
 
 ## Task 5: Wire PendingQueue in daemon/app.py
 - File(s): src/team_memory/daemon/app.py
@@ -81,7 +81,7 @@
   4. Store in application.state for potential access
 - Test: Manual — start daemon, check logs show "reset N refining sessions"
 - Depends on: Task 1, Task 2, Task 3
-- Status: [ ] pending
+- Status: [x] done
 
 ## Task 6: Add CLI queue commands
 - File(s): src/team_memory/cli.py, tests/test_cli_config_setup.py (or new test_cli_queue.py)
@@ -97,7 +97,7 @@
      test_queue_clear_removes
 - Test: 4 tests, passing; existing CLI tests unaffected
 - Depends on: Task 1
-- Status: [ ] pending
+- Status: [x] done
 
 ## Task 7: Update Makefile — queue in stats
 - File(s): Makefile
@@ -107,7 +107,7 @@
   3. Or: add as separate make queue-stats target
 - Test: make stats shows queue line
 - Depends on: Task 6
-- Status: [ ] pending
+- Status: [x] done
 
 ## Task 8: Write E2E verification script
 - File(s): scripts/e2e-verify-graceful.sh (new)
@@ -123,7 +123,7 @@
   9. Cleanup
 - Test: Run script, all steps pass
 - Depends on: Task 5, Task 6
-- Status: [ ] pending
+- Status: [x] done
 
 ## Task 9: Final verification + commit
 - Action:
@@ -133,4 +133,4 @@
   4. git commit
   5. Update roadmap.md: mark P0-2 [x]
 - Depends on: Task 8
-- Status: [ ] pending
+- Status: [x] done

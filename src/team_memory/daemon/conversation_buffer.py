@@ -9,10 +9,13 @@ Tables:
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import aiosqlite
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # SQL
@@ -92,6 +95,17 @@ class ConversationBuffer:
         await self._db.execute(_CREATE_INDEX)
         await self._db.execute(_CREATE_SEARCH_CORRELATIONS)
         await self._db.execute(_CREATE_SEARCH_CORR_INDEX)
+        # Enable WAL for crash safety (skip for in-memory DB)
+        if self._db_path != ":memory:":
+            await self._db.execute("PRAGMA journal_mode=WAL")
+        # Schema migration: add refined_payload column if missing
+        cursor = await self._db.execute("PRAGMA table_info(sessions)")
+        rows = await cursor.fetchall()
+        columns = {row[1] for row in rows}
+        if "refined_payload" not in columns:
+            await self._db.execute(
+                "ALTER TABLE sessions ADD COLUMN refined_payload TEXT"
+            )
         await self._db.commit()
         return self
 
@@ -191,6 +205,45 @@ class ConversationBuffer:
         db = self._require_db()
         cursor = await db.execute(
             "UPDATE sessions SET status = 'needs_refinement', updated_at = ? WHERE status = 'refining'",
+            (datetime.now(timezone.utc).isoformat(),),
+        )
+        await db.commit()
+        return cursor.rowcount
+
+    async def mark_publishing_in_progress(
+        self, session_id: str, payload: dict[str, object]
+    ) -> None:
+        """Mark session as publishing — LLM done, PG write pending.
+
+        Stores both experience_id and structured LLM output so crash
+        recovery can skip the LLM call and replay only the PG writes.
+        """
+        import json
+        try:
+            payload_json = json.dumps(payload)
+        except (TypeError, ValueError):
+            logger.error(
+                "Failed to serialize publishing payload for session=%s",
+                session_id,
+            )
+            payload_json = "{}"
+        db = self._require_db()
+        await db.execute(
+            "UPDATE sessions SET status='publishing', refined_payload=?, "
+            "updated_at=? WHERE id=?",
+            (payload_json, datetime.now(timezone.utc).isoformat(), session_id),
+        )
+        await db.commit()
+
+    async def reset_publishing_sessions(self) -> int:
+        """Reset all 'publishing' sessions to 'needs_refinement'.
+
+        Refined payload is preserved for skip_llm replay on next tick.
+        """
+        db = self._require_db()
+        cursor = await db.execute(
+            "UPDATE sessions SET status='needs_refinement', updated_at=? "
+            "WHERE status='publishing'",
             (datetime.now(timezone.utc).isoformat(),),
         )
         await db.commit()
@@ -409,15 +462,31 @@ class ConversationBuffer:
                 "SELECT * FROM sessions WHERE status = 'needs_refinement' ORDER BY updated_at DESC",
             )
         sessions = [self._row_to_dict(r) for r in await cursor.fetchall()]
+        import json
+
         result = []
         for s in sessions:
             content = await self.get_accumulated_content(s["id"], role="assistant")
+            # Check for preserved refined_payload from crash recovery
+            skip_llm = False
+            refined_payload = None
+            raw_payload = s.get("refined_payload")
+            if raw_payload:
+                try:
+                    parsed = json.loads(raw_payload)
+                    if isinstance(parsed, dict) and "experience_id" in parsed and "structured" in parsed:
+                        skip_llm = True
+                        refined_payload = parsed
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning("Corrupt refined_payload for session %s", s["id"])
             result.append({
                 "id": s["id"],
                 "content": content,
                 "project": s.get("project", "default"),
                 "conversation_id": s["id"],
                 "status": "needs_refinement",
+                "refined_payload": refined_payload,
+                "skip_llm": skip_llm,
             })
         return result
 

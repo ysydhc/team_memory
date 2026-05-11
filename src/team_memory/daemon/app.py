@@ -307,9 +307,13 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
 
         # Startup recovery: reset any sessions stuck in "refining" status
         # 启动恢复：重置卡在 refining 状态的 session
-        reset_count = await buf.reset_refining_sessions()
-        if reset_count:
-            logger.info("Reset %d refining sessions to needs_refinement (crash recovery)", reset_count)
+        ref_count = await buf.reset_refining_sessions()
+        pub_count = await buf.reset_publishing_sessions()
+        if ref_count or pub_count:
+            logger.info(
+                "Reset %d refining, %d publishing sessions (crash recovery)",
+                ref_count, pub_count,
+            )
 
         # Pending queue for graceful degradation / 优雅降级队列
         from team_memory.daemon.pending_queue import PendingQueue
