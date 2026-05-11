@@ -13,7 +13,6 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-
 # ============================================================
 # Helpers
 # ============================================================
@@ -411,7 +410,6 @@ class TestProjectInit:
         """_detect_project_name uses git repo name / _detect_project_name 使用 git 仓库名。"""
         monkeypatch.chdir(tmp_path)
 
-        import subprocess
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = "/path/to/my-awesome-project\n"
@@ -427,7 +425,6 @@ class TestProjectInit:
         """_detect_project_name falls back to directory name / 回退到目录名。"""
         monkeypatch.chdir(tmp_path)
 
-        import subprocess
         with patch("subprocess.run", side_effect=FileNotFoundError("no git")):
             from team_memory.cli import _detect_project_name
             name = _detect_project_name()
@@ -732,3 +729,179 @@ class TestSetupWizard:
         output = captured.getvalue()
         # Should have run connectivity check / 应该运行了连通性检查
         assert "connectivity" in output.lower() or "Server" in output or "check" in output.lower()
+
+
+# ============================================================
+# T1-T2: _setup_cursor tests / 测试
+# ============================================================
+
+class TestSetupCursor:
+    def test_setup_cursor_writes_all_four_hooks(self, tmp_path):
+        """Verify _setup_cursor writes all 4 hook entries, not just afterMCPExecution."""
+        from team_memory.cli import _setup_cursor
+
+        # Set up temp .cursor directory
+        cursor_dir = tmp_path / ".cursor"
+        cursor_dir.mkdir()
+
+        # Use tmp_path as cwd during setup
+        import os
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+
+        try:
+            _setup_cursor(cfg=None, venv_python="/usr/bin/python3")
+
+            # Read back hooks.json
+            import json
+            hooks_file = cursor_dir / "hooks.json"
+            assert hooks_file.exists(), f"hooks.json not created at {hooks_file}"
+
+            with open(hooks_file) as f:
+                data = json.load(f)
+
+            hooks_section = data.get("hooks", {})
+            assert isinstance(hooks_section, dict), f"Expected dict, got {type(hooks_section)}"
+
+            # Check all 4 hook events
+            expected = ["sessionStart", "beforeSubmitPrompt", "afterAgentResponse", "afterMCPExecution"]
+            for event in expected:
+                entries = hooks_section.get(event, [])
+                error_msg = f"Missing hook event '{event}' in hooks.json. Got: {list(hooks_section.keys())}"
+                assert len(entries) > 0, error_msg
+                assert isinstance(entries[0], dict), f"Entry for {event} is not dict"
+                hooks_list = entries[0].get("hooks", [])
+                assert len(hooks_list) > 0, f"No hooks in {event} entry"
+
+        finally:
+            os.chdir(old_cwd)
+
+    def test_setup_cursor_no_duplicates_on_rerun(self, tmp_path):
+        """Running setup twice should not create duplicate entries."""
+        from team_memory.cli import _setup_cursor
+
+        cursor_dir = tmp_path / ".cursor"
+        cursor_dir.mkdir()
+
+        import json
+        import os
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)
+
+        try:
+            # Run setup twice
+            _setup_cursor(cfg=None, venv_python="/usr/bin/python3")
+            _setup_cursor(cfg=None, venv_python="/usr/bin/python3")
+
+            # Read back
+            with open(cursor_dir / "hooks.json") as f:
+                data = json.load(f)
+
+            # Each hook event should have exactly 1 entry
+            for event in ["sessionStart", "beforeSubmitPrompt", "afterAgentResponse", "afterMCPExecution"]:
+                entries = data["hooks"].get(event, [])
+                assert len(entries) == 1, f"Expected 1 entry for {event}, got {len(entries)}: {entries}"
+
+        finally:
+            os.chdir(old_cwd)
+
+
+# ============================================================
+# T3-T4: _setup_hermes tests / 测试
+# ============================================================
+
+class TestSetupHermes:
+    def test_setup_hermes_writes_yaml_hooks(self, tmp_path):
+        """Verify _setup_hermes auto-writes config.yaml instead of just printing."""
+        from team_memory.cli import _setup_hermes
+
+        # Set up fake ~/.hermes directory
+        hermes_dir = tmp_path / ".hermes"
+        hermes_dir.mkdir()
+
+        import yaml
+
+        # Create existing config with some unrelated setting
+        existing_config = {
+            "model": {"default": "claude-sonnet-4.6"},
+            "agent": {"max_turns": 90},
+        }
+        config_path = hermes_dir / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(existing_config, f)
+
+        # Mock Path.home() to return tmp_path
+        from unittest.mock import patch
+
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            _setup_hermes(cfg=None, venv_python="/usr/bin/python3")
+
+        # Read back config.yaml
+        with open(config_path) as f:
+            result = yaml.safe_load(f)
+
+        # Verify hooks section exists with all 3 hooks
+        hooks = result.get("hooks", {})
+        expected_hooks = ["UserPromptSubmit", "Stop", "PostToolUse"]
+        for hook in expected_hooks:
+            assert hook in hooks, f"Missing hook '{hook}' in config.yaml. Got: {list(hooks.keys())}"
+            entries = hooks[hook]
+            assert len(entries) > 0, f"No entries for hook '{hook}'"
+
+        # Verify non-hooks config preserved
+        assert result.get("model", {}).get("default") == "claude-sonnet-4.6"
+        assert result.get("agent", {}).get("max_turns") == 90
+
+    def test_setup_hermes_preserves_formatting(self, tmp_path):
+        """Non-TM hooks in config.yaml should not be overwritten."""
+        from team_memory.cli import _setup_hermes
+
+        hermes_dir = tmp_path / ".hermes"
+        hermes_dir.mkdir()
+
+        import yaml
+
+        original = {
+            "model": {"default": "test-model"},
+            "agent": {"max_turns": 42},
+            "hooks": {
+                "SomeOtherHook": [],
+            },
+        }
+        config_path = hermes_dir / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(original, f)
+
+        from unittest.mock import patch
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            _setup_hermes(cfg=None, venv_python="/usr/bin/python3")
+
+        with open(config_path) as f:
+            result = yaml.safe_load(f)
+
+        # TM hooks added
+        assert "UserPromptSubmit" in result.get("hooks", {})
+        # Non-TM hooks preserved
+        assert "SomeOtherHook" in result.get("hooks", {}), "Non-TM hook was removed!"
+
+    def test_setup_hermes_no_duplicates(self, tmp_path):
+        """Running setup twice should not duplicate hook entries."""
+        from team_memory.cli import _setup_hermes
+
+        hermes_dir = tmp_path / ".hermes"
+        hermes_dir.mkdir()
+        import yaml
+
+        config_path = hermes_dir / "config.yaml"
+        config_path.write_text("{}")
+
+        from unittest.mock import patch
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            _setup_hermes(cfg=None, venv_python="/usr/bin/python3")
+            _setup_hermes(cfg=None, venv_python="/usr/bin/python3")
+
+        with open(config_path) as f:
+            result = yaml.safe_load(f)
+
+        assert len(result["hooks"]["UserPromptSubmit"]) == 1, "Duplicate UserPromptSubmit!"
+        assert len(result["hooks"]["Stop"]) == 1, "Duplicate Stop!"

@@ -841,69 +841,94 @@ def _uninstall_hermes() -> None:
 
 def _check_platform(platform: str, cfg: Any) -> None:
     """Check hook configuration status / 检查 hook 配置状态。"""
+    hook_dir = Path(__file__).resolve().parent.parent / "hooks"
+
     if platform == "claude-code":
-        settings = Path.home() / ".claude" / "settings.json"
-        if settings.exists():
-            # 检查 hook 条目是否存在 / check if hook entry exists
-            try:
-                with open(settings) as f:
-                    data = json.load(f)
-                hooks = data.get("hooks", {})
-                post_tool = hooks.get("PostToolUse", [])
-                has_tm = any(
-                    "team_memory" in h.get("matcher", "")
-                    or any("team_memory" in c.get("command", "") for c in h.get("hooks", []))
-                    for h in post_tool
-                )
-                if has_tm:
-                    print(f"[claude-code] ✅ {settings} exists, PostToolUse hook configured")
-                else:
-                    print(f"[claude-code] ⚠️  {settings} exists but PostToolUse hook not found")
-                    print("  Run: tm-cli setup --platform claude-code")
-            except (json.JSONDecodeError, OSError) as e:
-                print(f"[claude-code] ⚠️  {settings} exists but cannot parse: {e}")
-        else:
-            print(f"[claude-code] ❌ {settings} not found")
-            print("  Run: tm-cli setup --platform claude-code")
-
+        _check_claude(hook_dir)
     elif platform == "cursor":
-        hooks_file = Path.cwd() / ".cursor" / "hooks.json"
-        if hooks_file.exists():
-            # 检查 hook 条目是否存在 / check if hook entry exists
-            try:
-                with open(hooks_file) as f:
-                    data = json.load(f)
-                # Cursor format: {"hooks": {"afterMCPExecution":
-                # [{"matcher": "...", "hooks": [...]}]}}
-                hooks_section = data.get("hooks", {})
-                if isinstance(hooks_section, dict):
-                    after_mcp = hooks_section.get("afterMCPExecution", [])
-                    has_tm = any(
-                        "team_memory" in entry.get("matcher", "")
-                        for entry in after_mcp
-                        if isinstance(entry, dict)
-                    )
-                else:
-                    has_tm = False
-                if has_tm:
-                    print(f"[cursor] ✅ {hooks_file} exists, afterMCPExecution hook configured")
-                else:
-                    print(f"[cursor] ⚠️  {hooks_file} exists but afterMCPExecution hook not found")
-                    print("  Run: tm-cli setup --platform cursor")
-            except (json.JSONDecodeError, OSError) as e:
-                print(f"[cursor] ⚠️  {hooks_file} exists but cannot parse: {e}")
-        else:
-            print(f"[cursor] ❌ {hooks_file} not found")
-            print("  Run: tm-cli setup --platform cursor")
-
+        _check_cursor(hook_dir)
     elif platform == "hermes":
-        config_file = Path.home() / ".hermes" / "config.yaml"
-        if config_file.exists():
-            print(f"[hermes] ✅ {config_file} exists")
-            print("  Verify manually that post_tool_call hook is configured")
-        else:
-            print(f"[hermes] ❌ {config_file} not found")
-            print("  Run: tm-cli setup --platform hermes for instructions")
+        _check_hermes(hook_dir)
+
+
+def _check_claude(hook_dir: Path) -> None:
+    """Check all Claude Code hooks / 检查 Claude Code 全部 hook。"""
+    settings = Path.home() / ".claude" / "settings.json"
+    if not settings.exists():
+        print(f"[claude-code] ❌ {settings} not found")
+        return
+
+    try:
+        data = json.loads(settings.read_text())
+    except Exception as e:
+        print(f"[claude-code] ❌ parse error: {e}")
+        return
+
+    hooks_map = {
+        "SessionStart": "claude_session_start.py",
+        "UserPromptSubmit": "claude_user_prompt_submit.py",
+        "Stop": "claude_stop.py",
+        "PostToolUse": "claude_post_tool.py",
+    }
+    for event, script in hooks_map.items():
+        ok = _hook_ok(data, event, hook_dir / script)
+        print(f"[claude-code] {'✅' if ok else '❌'} {event}")
+
+
+def _check_cursor(hook_dir: Path) -> None:
+    """Check all Cursor hooks / 检查 Cursor 全部 hook。"""
+    hooks_file = Path.cwd() / ".cursor" / "hooks.json"
+    if not hooks_file.exists():
+        print(f"[cursor] ❌ {hooks_file} not found")
+        return
+
+    try:
+        data = json.loads(hooks_file.read_text())
+    except Exception as e:
+        print(f"[cursor] ❌ parse error: {e}")
+        return
+
+    hooks_map = {
+        "sessionStart": "cursor_session_start.py",
+        "beforeSubmitPrompt": "cursor_before_prompt.py",
+        "afterAgentResponse": "cursor_after_response.py",
+        "afterMCPExecution": "cursor_after_mcp.py",
+    }
+    for event, script in hooks_map.items():
+        ok = _hook_ok(data, event, hook_dir / script)
+        print(f"[cursor] {'✅' if ok else '❌'} {event}")
+
+
+def _check_hermes(hook_dir: Path) -> None:
+    """Check all Hermes hooks / 检查 Hermes 全部 hook。"""
+    import yaml
+
+    config_file = Path.home() / ".hermes" / "config.yaml"
+    if not config_file.exists():
+        print(f"[hermes] ❌ {config_file} not found")
+        return
+
+    try:
+        config = yaml.safe_load(config_file.read_text()) or {}
+    except Exception as e:
+        print(f"[hermes] ❌ parse error: {e}")
+        return
+
+    hooks_map = {
+        "UserPromptSubmit": "hermes_user_prompt_submit.py",
+        "Stop": "hermes_stop.py",
+        "PostToolUse": "hermes_post_tool_call.py",
+    }
+    for event, script in hooks_map.items():
+        ok = _hook_ok(config, event, hook_dir / script)
+        print(f"[hermes] {'✅' if ok else '❌'} {event}")
+
+
+def _hook_ok(data: dict, event: str, script_path: Path) -> bool:
+    """Check if hook event exists in config and script exists on disk."""
+    hooks = data.get("hooks", {})
+    entries = hooks.get(event, [])
+    return len(entries) > 0 and script_path.exists()
 
 
 def _setup_platform(platform: str, cfg: Any) -> None:
@@ -995,12 +1020,7 @@ def _setup_claude_code(cfg: Any, venv_python: str) -> None:
 
 
 def _setup_cursor(cfg: Any, venv_python: str) -> None:
-    """Configure Cursor afterMCPExecution hook.
-
-    Cursor hooks.json format:
-    {"hooks": {"afterMCPExecution":
-     [{"matcher": "...", "hooks": [{"type": "command", "command": "..."}]}]}}
-    """
+    """Configure Cursor hooks: sessionStart, beforeSubmitPrompt, afterAgentResponse, afterMCPExecution."""
     import json
 
     hooks_path = Path.cwd() / ".cursor" / "hooks.json"
@@ -1009,48 +1029,56 @@ def _setup_cursor(cfg: Any, venv_python: str) -> None:
         with open(hooks_path) as f:
             hooks_data = json.load(f)
 
-    # Ensure nested dict structure / 确保嵌套 dict 结构
     hooks_section = hooks_data.setdefault("hooks", {})
     if isinstance(hooks_section, list):
-        # Migrate old format → new format / 迁移旧格式到新格式
         hooks_section = {}
         hooks_data["hooks"] = hooks_section
 
-    after_mcp = hooks_section.setdefault("afterMCPExecution", [])
-
-    # Remove existing TM entry / 移除已有的 TM 条目
-    after_mcp = [
-        entry for entry in after_mcp
-        if not (isinstance(entry, dict) and "team_memory" in entry.get("matcher", ""))
+    cursor_hooks = [
+        ("sessionStart", "cursor_session_start", ""),
+        ("beforeSubmitPrompt", "cursor_before_prompt", ""),
+        ("afterAgentResponse", "cursor_after_response", ""),
+        ("afterMCPExecution", "cursor_after_mcp", "MCP:team_memory"),
     ]
-
-    # Add new entry in Cursor format / 用 Cursor 格式添加新条目
-    after_mcp.append({
-        "matcher": "MCP:team_memory",
-        "hooks": [
-            {
-                "type": "command",
-                "command": f"{venv_python} -m team_memory.hooks.cursor_after_mcp",
-            }
-        ],
-    })
-    hooks_section["afterMCPExecution"] = after_mcp
+    for event, script, matcher in cursor_hooks:
+        hooks_section[event] = [
+            {"matcher": matcher, "hooks": [{"type": "command",
+             "command": f"{venv_python} -m team_memory.hooks.{script}"}]}
+        ]
 
     hooks_path.parent.mkdir(parents=True, exist_ok=True)
     with open(hooks_path, "w") as f:
         json.dump(hooks_data, f, indent=2)
-
-    print(f"[cursor] ✅ afterMCPExecution hook added to {hooks_path}")
+    print(f"[cursor] ✅ 4 hooks written to {hooks_path}")
 
 
 def _setup_hermes(cfg: Any, venv_python: str) -> None:
-    """Configure Hermes post_tool_call hook."""
-    print("[hermes] ⚠️  Manual setup required:")
-    print("  Add to ~/.hermes/config.yaml:")
-    print("    hooks:")
-    print(f'      post_tool_call: "{venv_python} -m team_memory.hooks.hermes_post_tool_call"')
-    print("    hook_matchers:")
-    print('      post_tool_call: "recall|memory_recall"')
+    """Configure Hermes hooks: UserPromptSubmit, Stop, PostToolUse. Auto-writes config.yaml."""
+    import yaml
+
+    config_path = Path.home() / ".hermes" / "config.yaml"
+    config: dict[str, Any] = {}
+    if config_path.exists():
+        config = yaml.safe_load(config_path.read_text()) or {}
+
+    existing_hooks = config.get("hooks", {})
+    tm_hooks = {
+        "UserPromptSubmit": [{"matcher": "", "hooks": [{"type": "command",
+            "command": f"{venv_python} -m team_memory.hooks.hermes_user_prompt_submit",
+            "timeout": 10000}]}],
+        "Stop": [{"matcher": "", "hooks": [{"type": "command",
+            "command": f"{venv_python} -m team_memory.hooks.hermes_stop",
+            "timeout": 10000}]}],
+        "PostToolUse": [{"matcher": "recall|memory_recall", "hooks": [{"type": "command",
+            "command": f"{venv_python} -m team_memory.hooks.hermes_post_tool_call",
+            "timeout": 10000}]}],
+    }
+    config["hooks"] = {**existing_hooks, **tm_hooks}
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(yaml.dump(config, allow_unicode=True,
+                                      default_flow_style=False, sort_keys=False))
+    print(f"[hermes] ✅ 3 hooks written to {config_path}")
 
 
 def cmd_archive(args: argparse.Namespace) -> None:
