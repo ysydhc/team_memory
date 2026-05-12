@@ -737,25 +737,64 @@ embedding:
 ### 常用命令
 
 ```bash
-make setup         # 首次安装
+# 基础
+make setup         # 首次安装（Docker + 依赖 + 数据库）
 make dev           # 启动全部服务
 make web           # 仅启动 Web（9111）
 make health        # 一键健康检查
-make backup        # 备份数据库
-make verify        # 标准验收：lint + 全量测试
-make verify-web    # Web 验收：lint + web 测试 + health/stats smoke
-make test          # 运行测试
-make lint          # 代码检查（ruff）
-make stats         # 搜索质量统计（hit rate / use rate / faithfulness）
-make search-eval   # 搜索质量评估（precision / recall）
-make faithfulness-eval  # Faithfulness 批量评估（RAGAS LLM Judge）
-make wiki-compile  # Wiki 编译（实体/主题/矛盾检测）
-make detect-contradictions  # 矛盾经验检测
-make solution-backfill  # 补跑无 solution 的经验（LLM 提取）
-make embedding-backfill # 重新生成 embedding（切换模型后用）
+make backup        # 备份数据库 (PG + SQLite)
+make clean         # 清理 Python 缓存
+
+# 测试
+make test               # 运行全部单元测试
+make test-acceptance    # 管道验收测试 (21 tests, Tier 2+3)
+make test-regression    # 完整回归 (acceptance + e2e + pipeline)
+make test-llm           # 测试 LLM 连通性
+make e2e-verify         # 端到端链路验证 (模拟 AI 对话)
+
+# 代码质量
+make lint          # Ruff 代码检查
+make lint-fix      # Ruff 自动修复
+make verify        # 标准验收：import + lint + 全量测试
+make verify-web    # Web 验收：lint + web 测试 + smoke
+
+# 搜索与质量
+make stats         # 搜索质量报告
+make search-eval   # 搜索质量评估 (precision/recall)
+make faithfulness-eval  # Faithfulness 批量评估 (RAGAS)
+make verify-pipeline    # 人工验证数据链路 (15项检查)
+make diagnose-pipeline  # 诊断数据链路详细状态
+
+# Wiki
+make wiki-compile  # Wiki 编译
+make wiki-status   # Wiki 编译状态
 make entity-backfill    # 实体提取回填
-make daemon-start # 启动 TM Daemon（launchd）
-make daemon-stop  # 停止 TM Daemon
+make entity-dedup       # 实体去重合并
+make detect-contradictions  # 矛盾经验检测
+
+# 数据维护
+make migrate       # 数据库迁移
+make migrate-fts   # 补齐 FTS 字段
+make embedding-backfill # 重新生成 embedding
+make solution-backfill  # 补跑无 solution 的经验
+
+# Daemon
+make daemon-start  # 启动 Daemon (launchd)
+make daemon-stop   # 停止 Daemon
+make daemon-run    # 前台运行 Daemon (调试用)
+make daemon-reload # 代码变更自动重启
+make daemon-install   # 安装 launchd plist (开机自启)
+make daemon-uninstall # 卸载 launchd plist
+
+# Watchdog
+make watchdog-start  # 启动 Watchdog (launchd)
+make watchdog-stop   # 停止 Watchdog
+make watchdog-status # Watchdog 运行状态
+
+# 运维工具
+make logs              # 查看/过滤 daemon 日志
+make metrics-push      # 推送指标到飞书
+make hooks-install     # 安装 Git hooks
 ```
 
 ### Make 命令说明（等价手动命令）
