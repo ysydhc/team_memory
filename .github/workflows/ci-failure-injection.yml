@@ -1,0 +1,52 @@
+name: Failure Injection CI
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  failure-tests:
+    name: Failure Injection Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: developer
+          POSTGRES_PASSWORD: developer
+          POSTGRES_DB: team_memory
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Start daemon
+        run: make daemon-start
+        env:
+          TM_PIPELINE_DB_PATH: /tmp/tm-test.db
+
+      - name: Wait for daemon
+        run: bash scripts/failure-tests/ensure_daemon_ready.sh
+
+      - name: Run failure injection tests
+        run: pytest tests/failure_tests/ -v -m failure_injection --timeout=120
+        env:
+          TM_PIPELINE_DB_PATH: /tmp/tm-test.db
+
+      - name: Stop daemon
+        run: make daemon-stop
+        if: always()

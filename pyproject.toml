@@ -81,6 +81,7 @@ pythonpath = ["src"]
 markers = [
     "unit: Unit tests — no external dependencies, mock DB/LLM (单元测试)",
     "integration: Integration tests — require PostgreSQL, Ollama, or web server (集成测试)",
+    "failure_injection: Tests that simulate infrastructure failures (故障注入)",
 ]
 
 [tool.ruff]

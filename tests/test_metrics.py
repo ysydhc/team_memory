@@ -1,9 +1,10 @@
 """Tests for MetricsCollector — SQLite-backed metrics storage."""
 from __future__ import annotations
-import sqlite3
+
 from pathlib import Path
-from unittest.mock import patch
+
 import pytest
+
 from team_memory.daemon.metrics_collector import MetricsCollector
 
 
@@ -35,6 +36,7 @@ class TestMetricsCollector:
     def test_empty_summary(self, mc: MetricsCollector) -> None:
         assert mc.summary() == {}
 
+    @pytest.mark.failure_injection
     def test_record_and_query_multiple(self, mc: MetricsCollector) -> None:
         """Multiple records return correct counts."""
         for _ in range(3):
