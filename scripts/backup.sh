@@ -32,7 +32,16 @@ pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
 SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
 echo "Backup complete: ${BACKUP_FILE} (${SIZE})"
 
-# Keep only last 10 backups (POSIX-compatible, works on macOS and Linux)
+# SQLite backup (drafts.db)
+SQLITE_DB="${HOME}/.cache/tm-pipeline/drafts.db"
+if [ -f "$SQLITE_DB" ]; then
+    SQLITE_BACKUP="${OUTPUT_DIR}/drafts_${TIMESTAMP}.db"
+    cp "$SQLITE_DB" "$SQLITE_BACKUP"
+    SQLITE_SIZE=$(du -h "$SQLITE_BACKUP" | cut -f1)
+    echo "SQLite backup: ${SQLITE_BACKUP} (${SQLITE_SIZE})"
+fi
+
+# Keep only last 10 backups
 cd "$OUTPUT_DIR"
 ls -t team_memory_*.sql.gz 2>/dev/null | tail -n +11 | while read -r f; do rm -f "$f"; done
 echo "Cleanup done. Keeping last 10 backups."
