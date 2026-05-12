@@ -113,3 +113,55 @@ jobs:
             docker tag team_memory:${{ github.sha }} team_memory:latest
           fi
           echo "Docker image built successfully"
+
+  regression:
+    name: Regression Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [lint, test]
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: developer
+          POSTGRES_PASSWORD: developer
+          POSTGRES_DB: team_memory
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Setup database
+        run: |
+          PGPASSWORD=developer psql -h localhost -U developer -d team_memory -c "SELECT 1"
+          python -c "from team_memory.storage.models import Base; from team_memory.bootstrap import get_context; ctx = get_context(); import asyncio; asyncio.run(ctx.run_migrations())"
+
+      - name: Start daemon
+        run: PYTHONPATH=src python -c "import asyncio, sys; sys.argv=['tm-daemon']; from team_memory.daemon.__main__ import main; asyncio.run(main())" &
+        env:
+          TM_PIPELINE_DB_PATH: /tmp/tm-test.db
+
+      - name: Wait for daemon
+        run: |
+          for i in $(seq 1 30); do
+            curl -s http://localhost:3901/status && break
+            sleep 1
+          done
+
+      - name: Run regression tests
+        run: |
+          make test-acceptance
+          make e2e-verify
+          make verify-pipeline
