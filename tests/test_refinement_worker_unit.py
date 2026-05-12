@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import os
-from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from team_memory.daemon.config import DaemonConfig, RefinementSettings
-from team_memory.daemon.refinement_worker import RefinementWorker, _MAX_REFINE_ATTEMPTS
+from team_memory.daemon.refinement_worker import _MAX_REFINE_ATTEMPTS, RefinementWorker
 from team_memory.services.llm_parser import LLMParseError
 
 # ---------------------------------------------------------------------------
@@ -1205,7 +1204,6 @@ class TestPublishingIntegration:
     @pytest.mark.asyncio
     async def test_refine_one_marks_publishing_after_llm(self):
         '''After _call_llm succeeds, mark_publishing_in_progress called with eid+structured.'''
-        from team_memory.daemon.pending_queue import PendingQueue
         cfg = _make_config()
         buf = AsyncMock()
         buf.mark_refining = AsyncMock()
@@ -1282,3 +1280,54 @@ class TestPublishingIntegration:
         worker = RefinementWorker(cfg, buf, sink)
         await worker._fallback_publish(_make_draft())
         buf.mark_published.assert_awaited_once()
+
+
+@pytest.mark.unit
+class TestQualityMetrics:
+    """Tests for quality gate → metrics recording."""
+
+    @pytest.mark.asyncio
+    async def test_quality_record_called(self):
+        """Quality gate execution → metrics.record called."""
+        cfg = _make_config(quality_gate_enabled=True, quality_min_score=30)
+        cfg.refinement.quality_gate_enabled = True
+        cfg.refinement.quality_min_score = 30
+        buf = AsyncMock()
+        buf.mark_publishing_in_progress = AsyncMock()
+        buf.mark_published = AsyncMock()
+        sink = AsyncMock()
+        sink.draft_save = AsyncMock(return_value={"id": "exp-x"})
+        sink.draft_publish = AsyncMock(return_value={})
+        sink.update_experience = AsyncMock(return_value={})
+        metrics = MagicMock()
+        worker = RefinementWorker(cfg, buf, sink, metrics=metrics)
+        worker._dedup_search = AsyncMock(return_value=(None, []))
+        worker._call_llm = AsyncMock(return_value={"title":"T","problem":"P","solution":"S"})
+        worker._quality_score = AsyncMock(return_value=85)
+        worker._structural_check = MagicMock(return_value=(True, ""))
+        await worker._refine_one(_make_draft())
+        assert metrics.record.call_count > 0, f"Expected metrics.record called, got {metrics.record.call_args_list}"
+
+
+@pytest.mark.unit
+class TestTitleQuality:
+    """Tests for title quality metric."""
+
+    @pytest.mark.asyncio
+    async def test_title_quality_recorded(self):
+        """Good title → title_quality=1 recorded by metrics."""
+        cfg = _make_config(quality_gate_enabled=False)
+        cfg.refinement.quality_gate_enabled = False
+        buf = AsyncMock()
+        buf.mark_publishing_in_progress = AsyncMock()
+        buf.mark_published = AsyncMock()
+        sink = AsyncMock()
+        sink.draft_save = AsyncMock(return_value={"id": "exp-t"})
+        sink.draft_publish = AsyncMock(return_value={})
+        sink.update_experience = AsyncMock(return_value={})
+        metrics = MagicMock()
+        worker = RefinementWorker(cfg, buf, sink, metrics=metrics)
+        worker._dedup_search = AsyncMock(return_value=(None, []))
+        worker._call_llm = AsyncMock(return_value={"title":"Good Title","problem":"P","solution":"S"})
+        await worker._refine_one(_make_draft())
+        assert metrics.record.call_count > 0, f"Expected record called, got {metrics.record.call_args_list}"

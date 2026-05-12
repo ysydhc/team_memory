@@ -540,8 +540,11 @@ class RefinementWorker:
                     "Quality gate discarded draft %s (experience %s): %s",
                     draft_id, experience_id, reason,
                 )
-                # Still publish the draft (move it out of draft status) but skip
-                # the update_experience call so the DB keeps the unrefined version
+                if self._metrics:
+                    self._metrics.record(
+                        "quality_rejected", 1,
+                        {"project": project, "reason": "structure_failed"},
+                    )
                 await self._sink.draft_publish(draft_id=experience_id)
                 await self._buf.mark_published(draft_id)
                 return
@@ -554,9 +557,25 @@ class RefinementWorker:
                     draft_id, experience_id, score,
                     self._cfg.quality_min_score,
                 )
+                if self._metrics:
+                    self._metrics.record(
+                        "quality_score", float(score),
+                        {"project": project, "result": "rejected"},
+                    )
+                    self._metrics.record(
+                        "quality_rejected", 1,
+                        {"project": project, "reason": "below_threshold"},
+                    )
                 await self._sink.draft_publish(draft_id=experience_id)
                 await self._buf.mark_published(draft_id)
                 return
+
+            # Gate passed — record score
+            if self._metrics:
+                self._metrics.record(
+                    "quality_score", float(score),
+                    {"project": project, "result": "passed"},
+                )
 
         # Step 3: Publish the draft (status → published)
         publish_result = await self._sink.draft_publish(
@@ -587,7 +606,15 @@ class RefinementWorker:
             )
             raise RuntimeError(f"update_experience failed: {update_result.get('message')}")
 
-        # Step 5: mark local draft published
+        # Step 5: title quality check + mark published
+        if self._metrics:
+            title_str = structured.get("title", "")
+            is_good = bool(title_str) and not title_str.startswith("Draft ") and len(title_str) > 3
+            self._metrics.record(
+                "title_quality",
+                1.0 if is_good else 0.0,
+                {"project": project},
+            )
         await self._buf.mark_published(draft_id)
         from team_memory.daemon.structured_logger import StructuredLogger
         sl = StructuredLogger(logger)
