@@ -16,6 +16,15 @@ def _reset():
     reset_settings()
 
 
+@pytest.fixture(autouse=True)
+def _team_memory_db_url_for_yaml_skips(monkeypatch: pytest.MonkeyPatch):
+    """Bare/minimal YAML often omits database; hydrate like production via env."""
+    monkeypatch.setenv(
+        "TEAM_MEMORY_DB_URL",
+        "postgresql://cfg_defaults:cfg_defaults@localhost:5433/team_memory_cfg_tests",
+    )
+
+
 class TestSettings:
     """Test Settings model defaults."""
 
