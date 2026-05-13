@@ -13,10 +13,10 @@ Tables:
   - api_keys
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from pgvector.sqlalchemy import Vector
-from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB, TSVECTOR
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, UUID
 
 # revision identifiers, used by Alembic.
 revision = "001_initial_mvp"
@@ -33,7 +33,13 @@ def upgrade() -> None:
     op.create_table(
         "experiences",
         sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("parent_id", UUID(as_uuid=True), sa.ForeignKey("experiences.id", ondelete="CASCADE"), nullable=True, index=True),
+        sa.Column(
+            "parent_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("experiences.id", ondelete="CASCADE"),
+            nullable=True,
+            index=True,
+        ),
         sa.Column("title", sa.String(500), nullable=False),
         sa.Column("description", sa.Text, nullable=False),
         sa.Column("solution", sa.Text, nullable=True),
@@ -62,7 +68,9 @@ def upgrade() -> None:
     op.create_table(
         "experience_feedbacks",
         sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
-        sa.Column("experience_id", UUID(as_uuid=True), sa.ForeignKey("experiences.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "experience_id", UUID(as_uuid=True), sa.ForeignKey("experiences.id", ondelete="CASCADE"), nullable=False
+        ),
         sa.Column("rating", sa.Integer, nullable=False),
         sa.Column("fitness_score", sa.Integer, nullable=True),
         sa.Column("comment", sa.Text, nullable=True),
@@ -93,8 +101,20 @@ def upgrade() -> None:
     # -- archive_experience_links --
     op.create_table(
         "archive_experience_links",
-        sa.Column("archive_id", UUID(as_uuid=True), sa.ForeignKey("archives.id", ondelete="CASCADE"), nullable=False, primary_key=True),
-        sa.Column("experience_id", UUID(as_uuid=True), sa.ForeignKey("experiences.id", ondelete="CASCADE"), nullable=False, primary_key=True),
+        sa.Column(
+            "archive_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("archives.id", ondelete="CASCADE"),
+            nullable=False,
+            primary_key=True,
+        ),
+        sa.Column(
+            "experience_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("experiences.id", ondelete="CASCADE"),
+            nullable=False,
+            primary_key=True,
+        ),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
         sa.UniqueConstraint("archive_id", "experience_id", name="uq_archive_experience_links_archive_exp"),
     )
@@ -103,7 +123,13 @@ def upgrade() -> None:
     op.create_table(
         "archive_attachments",
         sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("archive_id", UUID(as_uuid=True), sa.ForeignKey("archives.id", ondelete="CASCADE"), nullable=False, index=True),
+        sa.Column(
+            "archive_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("archives.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
         sa.Column("kind", sa.String(30), nullable=False),
         sa.Column("path", sa.String(1000), nullable=True),
         sa.Column("content_snapshot", sa.Text, nullable=True),
@@ -117,7 +143,13 @@ def upgrade() -> None:
     op.create_table(
         "document_tree_nodes",
         sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("archive_id", UUID(as_uuid=True), sa.ForeignKey("archives.id", ondelete="CASCADE"), nullable=False, index=True),
+        sa.Column(
+            "archive_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("archives.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
         sa.Column("path", sa.String(100), nullable=False, index=True),
         sa.Column("node_title", sa.String(500), nullable=False),
         sa.Column("depth", sa.Integer, nullable=False, server_default=sa.text("1")),

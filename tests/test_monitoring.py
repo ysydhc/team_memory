@@ -1,38 +1,42 @@
 """Tests for monitoring modules — heartbeat, alerting, watchdog, config"""
+
 from __future__ import annotations
 
 import asyncio
-import json
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 # ── Config ──
 
+
 class TestMonitoringConfig:
     """Tests for MonitoringConfig / 监控配置测试"""
 
     def test_default_config(self):
         from team_memory.monitoring.config import MonitoringConfig
+
         cfg = MonitoringConfig()
         assert cfg.watchdog_interval == 60
         assert cfg.channels == []
 
     def test_load_config(self):
         from team_memory.monitoring.config import load_monitoring_config
+
         cfg = load_monitoring_config()
         assert cfg.web_url == "http://localhost:9111/health"
         assert cfg.daemon_url == "http://localhost:3901/status"
 
     def test_channel_config(self):
         from team_memory.monitoring.config import ChannelConfig
+
         ch = ChannelConfig(type="feishu", webhook="https://example.com", secret="abc")
         assert ch.type == "feishu"
         assert ch.secret == "abc"
 
     def test_channels_parsed_from_yaml(self):
         from team_memory.monitoring.config import load_monitoring_config
+
         cfg = load_monitoring_config()
         # Config has feishu channel with empty webhook
         feishu_channels = [c for c in cfg.channels if c.type == "feishu"]
@@ -41,11 +45,13 @@ class TestMonitoringConfig:
 
 # ── Heartbeat ──
 
+
 class TestHeartbeatState:
     """Tests for HeartbeatState / 心跳状态测试"""
 
     def test_initial_state(self):
         from team_memory.monitoring.heartbeat import HeartbeatState
+
         state = HeartbeatState()
         assert state.last_beat == 0
         assert state.uptime_seconds == 0
@@ -53,6 +59,7 @@ class TestHeartbeatState:
     @pytest.mark.asyncio
     async def test_start_stop(self):
         from team_memory.monitoring.heartbeat import start_heartbeat, stop_heartbeat
+
         state = start_heartbeat(interval=1)
         await asyncio.sleep(0.1)
         assert state.last_beat > 0
@@ -60,17 +67,20 @@ class TestHeartbeatState:
 
     def test_stop_idempotent(self):
         from team_memory.monitoring.heartbeat import HeartbeatState, stop_heartbeat
+
         state = HeartbeatState()
         stop_heartbeat(state)  # should not raise
 
 
 # ── Alerting ──
 
+
 class TestAlertMessage:
     """Tests for AlertMessage / 告警消息测试"""
 
     def test_to_plain_text(self):
         from team_memory.monitoring.alerting import AlertMessage, AlertSeverity
+
         msg = AlertMessage(title="Test", body="Something happened", severity=AlertSeverity.WARNING)
         text = msg.to_plain_text()
         assert "WARNING" in text
@@ -79,6 +89,7 @@ class TestAlertMessage:
 
     def test_auto_timestamp(self):
         from team_memory.monitoring.alerting import AlertMessage
+
         msg = AlertMessage(title="T", body="B")
         assert msg.timestamp  # auto-filled
 
@@ -87,7 +98,8 @@ class TestFeishuChannel:
     """Tests for FeishuChannel / 飞书渠道测试"""
 
     def test_build_payload_no_secret(self):
-        from team_memory.monitoring.alerting import FeishuChannel, AlertMessage, AlertSeverity
+        from team_memory.monitoring.alerting import AlertMessage, AlertSeverity, FeishuChannel
+
         ch = FeishuChannel(webhook="https://open.feishu.cn/open-apis/bot/v2/hook/test")
         msg = AlertMessage(title="Daemon", body="down", severity=AlertSeverity.CRITICAL)
         payload = ch._build_payload(msg)
@@ -96,7 +108,8 @@ class TestFeishuChannel:
         assert "sign" not in payload
 
     def test_build_payload_with_secret(self):
-        from team_memory.monitoring.alerting import FeishuChannel, AlertMessage
+        from team_memory.monitoring.alerting import AlertMessage, FeishuChannel
+
         ch = FeishuChannel(webhook="https://open.feishu.cn/open-apis/bot/v2/hook/test", secret="mysecret")
         msg = AlertMessage(title="Test", body="body")
         payload = ch._build_payload(msg)
@@ -105,7 +118,8 @@ class TestFeishuChannel:
 
     @pytest.mark.asyncio
     async def test_send_success(self):
-        from team_memory.monitoring.alerting import FeishuChannel, AlertMessage
+        from team_memory.monitoring.alerting import AlertMessage, FeishuChannel
+
         ch = FeishuChannel(webhook="https://example.com/hook")
         msg = AlertMessage(title="T", body="B")
         mock_resp = MagicMock()
@@ -122,7 +136,8 @@ class TestFeishuChannel:
 
     @pytest.mark.asyncio
     async def test_send_api_error(self):
-        from team_memory.monitoring.alerting import FeishuChannel, AlertMessage
+        from team_memory.monitoring.alerting import AlertMessage, FeishuChannel
+
         ch = FeishuChannel(webhook="https://example.com/hook")
         msg = AlertMessage(title="T", body="B")
         mock_resp = MagicMock()
@@ -142,7 +157,8 @@ class TestWeComChannel:
     """Tests for WeComChannel / 企微渠道测试"""
 
     def test_build_payload(self):
-        from team_memory.monitoring.alerting import WeComChannel, AlertMessage, AlertSeverity
+        from team_memory.monitoring.alerting import AlertMessage, AlertSeverity, WeComChannel
+
         ch = WeComChannel(webhook="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test")
         msg = AlertMessage(title="Web", body="unhealthy", severity=AlertSeverity.WARNING)
         payload = ch._build_payload(msg)
@@ -151,7 +167,8 @@ class TestWeComChannel:
 
     @pytest.mark.asyncio
     async def test_send_success(self):
-        from team_memory.monitoring.alerting import WeComChannel, AlertMessage
+        from team_memory.monitoring.alerting import AlertMessage, WeComChannel
+
         ch = WeComChannel(webhook="https://example.com/hook")
         msg = AlertMessage(title="T", body="B")
         mock_resp = MagicMock()
@@ -172,7 +189,8 @@ class TestAlertManager:
 
     @pytest.mark.asyncio
     async def test_cooldown_suppresses(self):
-        from team_memory.monitoring.alerting import AlertManager, LogChannel, AlertSeverity
+        from team_memory.monitoring.alerting import AlertManager, AlertSeverity, LogChannel
+
         ch = LogChannel(log_file="/tmp/test_tm_alert.log")
         mgr = AlertManager(channels=[ch], alert_cooldown=60)
         await mgr.send_alert("Test", "body", AlertSeverity.INFO)
@@ -181,7 +199,8 @@ class TestAlertManager:
 
     @pytest.mark.asyncio
     async def test_different_keys_no_cooldown(self):
-        from team_memory.monitoring.alerting import AlertManager, LogChannel, AlertSeverity
+        from team_memory.monitoring.alerting import AlertManager, AlertSeverity, LogChannel
+
         ch = LogChannel(log_file="/tmp/test_tm_alert2.log")
         mgr = AlertManager(channels=[ch], alert_cooldown=60)
         await mgr.send_alert("Key1", "body", AlertSeverity.INFO)
@@ -189,7 +208,8 @@ class TestAlertManager:
 
     def test_from_config(self):
         from team_memory.monitoring.alerting import AlertManager
-        from team_memory.monitoring.config import MonitoringConfig, ChannelConfig
+        from team_memory.monitoring.config import ChannelConfig, MonitoringConfig
+
         cfg = MonitoringConfig(
             channels=[
                 ChannelConfig(type="feishu", webhook="https://example.com/hook", secret="s"),
@@ -203,7 +223,8 @@ class TestAlertManager:
         assert mgr.alert_cooldown == 120
 
     def test_create_channel_factory(self):
-        from team_memory.monitoring.alerting import create_channel, FeishuChannel, WeComChannel, WebhookChannel
+        from team_memory.monitoring.alerting import FeishuChannel, WebhookChannel, WeComChannel, create_channel
+
         assert isinstance(create_channel("feishu", webhook="x"), FeishuChannel)
         assert isinstance(create_channel("wecom", webhook="x"), WeComChannel)
         assert isinstance(create_channel("webhook", url="x"), WebhookChannel)
@@ -211,13 +232,15 @@ class TestAlertManager:
 
 # ── Watchdog ──
 
+
 class TestServiceWatchdog:
     """Tests for ServiceWatchdog / 服务看门狗测试"""
 
     @pytest.mark.asyncio
     async def test_check_service_up(self):
-        from team_memory.monitoring.watchdog import ServiceWatchdog, ServiceState
         from team_memory.monitoring.config import MonitoringConfig
+        from team_memory.monitoring.watchdog import ServiceState, ServiceWatchdog
+
         cfg = MonitoringConfig(watchdog_max_failures=3)
         wd = ServiceWatchdog(config=cfg)
         svc = ServiceState(name="test", url="http://localhost:9111/health", timeout=5)
@@ -234,8 +257,9 @@ class TestServiceWatchdog:
 
     @pytest.mark.asyncio
     async def test_check_service_down(self):
-        from team_memory.monitoring.watchdog import ServiceWatchdog, ServiceState
         from team_memory.monitoring.config import MonitoringConfig
+        from team_memory.monitoring.watchdog import ServiceState, ServiceWatchdog
+
         cfg = MonitoringConfig(watchdog_max_failures=3)
         wd = ServiceWatchdog(config=cfg)
         svc = ServiceState(name="test", url="http://localhost:9999", timeout=1)

@@ -59,9 +59,7 @@ class TestDBVectorDimConstant:
 class TestValidateEmbeddingDimension:
     """Verify _validate_embedding_dimension startup check."""
 
-    def test_no_warning_when_dimensions_match(
-        self, caplog: pytest.LogCaptureFixture, _ensure_propagate: None
-    ) -> None:
+    def test_no_warning_when_dimensions_match(self, caplog: pytest.LogCaptureFixture, _ensure_propagate: None) -> None:
         """No warning should be emitted when config dimension == DB_VECTOR_DIM."""
         from team_memory.bootstrap import _validate_embedding_dimension
 
@@ -74,9 +72,7 @@ class TestValidateEmbeddingDimension:
 
         assert "dimension mismatch" not in caplog.text.lower()
 
-    def test_warns_on_dimension_mismatch(
-        self, caplog: pytest.LogCaptureFixture, _ensure_propagate: None
-    ) -> None:
+    def test_warns_on_dimension_mismatch(self, caplog: pytest.LogCaptureFixture, _ensure_propagate: None) -> None:
         """A warning should be emitted when config dimension != DB_VECTOR_DIM."""
         from team_memory.bootstrap import _validate_embedding_dimension
 
@@ -92,9 +88,7 @@ class TestValidateEmbeddingDimension:
         assert "1536" in caplog.text
         assert "1024" in caplog.text
 
-    def test_warns_on_local_dimension_mismatch(
-        self, caplog: pytest.LogCaptureFixture, _ensure_propagate: None
-    ) -> None:
+    def test_warns_on_local_dimension_mismatch(self, caplog: pytest.LogCaptureFixture, _ensure_propagate: None) -> None:
         """Warning should fire for local provider with non-1024 dimension."""
         from team_memory.bootstrap import _validate_embedding_dimension
 

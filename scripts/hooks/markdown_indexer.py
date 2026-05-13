@@ -12,10 +12,10 @@ from typing import Any
 
 import yaml
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     """Split *text* into (frontmatter_dict, body).
@@ -41,7 +41,7 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
         return {}, text
 
     fm_text = rest[:end]
-    body = rest[end + 4:]  # skip past \n---
+    body = rest[end + 4 :]  # skip past \n---
     if body.startswith("\n"):
         body = body[1:]
     elif body.startswith("\r\n"):
@@ -118,6 +118,7 @@ def _match_pattern(rel_path: str, pattern: str) -> bool:
 # ---------------------------------------------------------------------------
 # MarkdownIndexer
 # ---------------------------------------------------------------------------
+
 
 class MarkdownIndexer:
     """Stateless helper that parses Markdown files and applies vault rules."""

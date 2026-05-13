@@ -1,4 +1,5 @@
 """Watchdog — external health probe + auto-restart / 外部探活 + 自动重启"""
+
 from __future__ import annotations
 
 import asyncio
@@ -51,6 +52,7 @@ class ServiceWatchdog:
     async def check_service(self, svc: ServiceState) -> bool:
         """Probe a single service. Returns True if healthy."""
         import httpx
+
         try:
             async with httpx.AsyncClient(timeout=svc.timeout) as client:
                 resp = await client.get(svc.url)
@@ -95,7 +97,9 @@ class ServiceWatchdog:
             svc.is_up = False
             logger.warning(
                 "Service %s check failed (%d/%d)",
-                svc.name, svc.consecutive_failures, self.config.watchdog_max_failures,
+                svc.name,
+                svc.consecutive_failures,
+                self.config.watchdog_max_failures,
             )
             if svc.consecutive_failures >= self.config.watchdog_max_failures:
                 await self._handle_failure(svc)
@@ -200,6 +204,7 @@ class ServiceWatchdog:
 def main():
     """Entry point for standalone watchdog."""
     import sys
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",

@@ -7,7 +7,6 @@ Create Date: 2026-04-23
 """
 
 from alembic import op
-import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "012_add_promoted_status"
@@ -19,9 +18,7 @@ depends_on = None
 def upgrade() -> None:
     """Add CHECK constraint for exp_status allowing draft, published, promoted."""
     # Drop existing constraint if it exists (may not exist in older schemas)
-    op.execute(
-        "ALTER TABLE experiences DROP CONSTRAINT IF EXISTS ck_experiences_exp_status"
-    )
+    op.execute("ALTER TABLE experiences DROP CONSTRAINT IF EXISTS ck_experiences_exp_status")
     # Add CHECK constraint for valid exp_status values
     op.execute(
         "ALTER TABLE experiences ADD CONSTRAINT ck_experiences_exp_status "
@@ -31,11 +28,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Remove the promoted status CHECK constraint."""
-    op.execute(
-        "ALTER TABLE experiences DROP CONSTRAINT IF EXISTS ck_experiences_exp_status"
-    )
+    op.execute("ALTER TABLE experiences DROP CONSTRAINT IF EXISTS ck_experiences_exp_status")
     # Re-add constraint without promoted
     op.execute(
-        "ALTER TABLE experiences ADD CONSTRAINT ck_experiences_exp_status "
-        "CHECK (exp_status IN ('draft', 'published'))"
+        "ALTER TABLE experiences ADD CONSTRAINT ck_experiences_exp_status CHECK (exp_status IN ('draft', 'published'))"
     )

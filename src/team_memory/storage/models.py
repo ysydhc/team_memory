@@ -80,9 +80,7 @@ class Experience(Base):
     created_by: Mapped[str] = mapped_column(String(100), nullable=False)
 
     # Project isolation
-    project: Mapped[str] = mapped_column(
-        String(100), default="default", nullable=False, server_default="default"
-    )
+    project: Mapped[str] = mapped_column(String(100), default="default", nullable=False, server_default="default")
 
     # Visibility & status
     visibility: Mapped[str] = mapped_column(
@@ -93,16 +91,10 @@ class Experience(Base):
     )  # draft, published, promoted
 
     # Quality scoring and management
-    quality_score: Mapped[float] = mapped_column(
-        Float, default=100.0, nullable=False, server_default="100.0"
-    )
-    quality_tier: Mapped[str] = mapped_column(
-        String(20), default="Silver", nullable=False, server_default="Silver"
-    )
+    quality_score: Mapped[float] = mapped_column(Float, default=100.0, nullable=False, server_default="100.0")
+    quality_tier: Mapped[str] = mapped_column(String(20), default="Silver", nullable=False, server_default="Silver")
     last_scored_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    is_pinned: Mapped[bool] = mapped_column(
-        Boolean, default=False, nullable=False, server_default="false"
-    )
+    is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
 
     # Soft delete
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -111,15 +103,11 @@ class Experience(Base):
     # Recall counter (incremented when experience appears in search results)
     recall_count: Mapped[int] = mapped_column(Integer, default=0)
     # Used counter (incremented when agent actually references the experience)
-    used_count: Mapped[int] = mapped_column(
-        Integer, default=0, nullable=False, server_default="0"
-    )
+    used_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     # Relationships
     feedbacks: Mapped[list[ExperienceFeedback]] = relationship(
@@ -184,9 +172,7 @@ class ExperienceFeedback(Base):
         nullable=False,
     )
     rating: Mapped[int] = mapped_column(Integer, nullable=False)  # 1-5, 5=best
-    fitness_score: Mapped[int | None] = mapped_column(
-        Integer, nullable=True
-    )  # 1-5 post-use fitness
+    fitness_score: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1-5 post-use fitness
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     feedback_by: Mapped[str] = mapped_column(String(100), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
@@ -227,14 +213,10 @@ class Archive(Base):
     created_by: Mapped[str] = mapped_column(String(100), nullable=False)
     visibility: Mapped[str] = mapped_column(String(20), nullable=False, server_default="project")
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="draft")
-    content_type: Mapped[str] = mapped_column(
-        String(50), nullable=False, server_default="session_archive"
-    )
+    content_type: Mapped[str] = mapped_column(String(50), nullable=False, server_default="session_archive")
     value_summary: Mapped[str | None] = mapped_column(String(500), nullable=True)
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String), default=list)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
     )
@@ -329,9 +311,7 @@ class ArchiveUploadFailure(Base):
         nullable=False,
         index=True,
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     created_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     source: Mapped[str] = mapped_column(String(20), nullable=False, server_default="web")
     error_code: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -368,9 +348,7 @@ class DocumentTreeNode(Base):
     char_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_leaf: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     archive: Mapped[Archive] = relationship(back_populates="tree_nodes")
 
@@ -417,9 +395,7 @@ class PersonalMemory(Base):
     )  # 0-100, higher = load first
     embedding = mapped_column(Vector(DB_VECTOR_DIM), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     def to_dict(self) -> dict:
         return {
@@ -470,12 +446,8 @@ class BackgroundTask(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     task_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default="pending", index=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow
-    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -504,9 +476,7 @@ class SearchLog(Base):
     judgment_source: Mapped[str | None] = mapped_column(String(20), nullable=True)  # 'marker'|'fuzzy'|NULL
     agent_response_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
 
 # ============================================================
@@ -527,13 +497,9 @@ class Entity(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     aliases: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list)
     source_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
-    project: Mapped[str] = mapped_column(
-        String(100), nullable=False, server_default="default", index=True
-    )
+    project: Mapped[str] = mapped_column(String(100), nullable=False, server_default="default", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     # ORM relationships
     outgoing: Mapped[list["Relationship"]] = relationship(
@@ -554,9 +520,7 @@ class Entity(Base):
         cascade="all, delete-orphan",
     )
 
-    __table_args__ = (
-        UniqueConstraint("name", "project", name="uq_entity_name_project"),
-    )
+    __table_args__ = (UniqueConstraint("name", "project", name="uq_entity_name_project"),)
 
     def to_dict(self) -> dict:
         return {
@@ -598,12 +562,8 @@ class Relationship(Base):
     # evidence stores list of experience_id strings as supporting references
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
-    source: Mapped["Entity"] = relationship(
-        "Entity", foreign_keys=[source_entity_id], back_populates="outgoing"
-    )
-    target: Mapped["Entity"] = relationship(
-        "Entity", foreign_keys=[target_entity_id], back_populates="incoming"
-    )
+    source: Mapped["Entity"] = relationship("Entity", foreign_keys=[source_entity_id], back_populates="outgoing")
+    target: Mapped["Entity"] = relationship("Entity", foreign_keys=[target_entity_id], back_populates="incoming")
 
     __table_args__ = (
         UniqueConstraint(

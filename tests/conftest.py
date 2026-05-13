@@ -15,7 +15,7 @@ from team_memory.embedding.base import EmbeddingProvider
 # ============================================================
 
 LITE_PATCH_BASE = "team_memory.server"
-_OPS_PATCH_BASE = "team_memory.services.memory_operations"
+_OPS_PATCH_BASE = "team_memory.services.memory.memory_operations"
 _P = LITE_PATCH_BASE  # short alias
 _O = _OPS_PATCH_BASE  # MCP orchestration (memory_operations)
 
@@ -141,7 +141,7 @@ def api_key_auth() -> ApiKeyAuth:
 
 import pytest_asyncio  # noqa: E402, I001
 
-from team_memory.daemon.conversation_buffer import ConversationBuffer  # noqa: E402
+from team_memory.daemon.buffers.conversation_buffer import ConversationBuffer  # noqa: E402
 
 
 # Note: mock_embedding fixture already defined above (line 121)

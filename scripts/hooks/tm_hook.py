@@ -14,14 +14,15 @@ Hermes Agent 通过 terminal 工具调用此脚本，实现记忆自动读写。
 
 所有命令失败时静默退出（exit 0 + stderr 输出），不会阻断 Agent 流程。
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
-import urllib.error
 
 DAEMON_URL = "http://127.0.0.1:3901"
 
@@ -30,9 +31,7 @@ def _post(endpoint: str, payload: dict) -> dict | None:
     """POST JSON to daemon, return parsed response or None on failure."""
     url = f"{DAEMON_URL}{endpoint}"
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url, data=data, headers={"Content-Type": "application/json"}
-    )
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -157,7 +156,7 @@ def cmd_after_response(args: argparse.Namespace) -> None:
 
     # Only print if something interesting happened
     if convergence and action == "published":
-        print(f"[mem:publish] draft published (convergence detected)")
+        print("[mem:publish] draft published (convergence detected)")
     elif action == "draft_saved":
         pass  # Normal, silent
 
@@ -173,7 +172,7 @@ def cmd_session_end(args: argparse.Namespace) -> None:
 
     flushed = result.get("flushed", False)
     if flushed:
-        print(f"[mem:flush] remaining draft published")
+        print("[mem:flush] remaining draft published")
 
 
 def cmd_recall(args: argparse.Namespace) -> None:
@@ -241,7 +240,7 @@ def cmd_stats(args: argparse.Namespace) -> None:
     by_project = result.get("by_project", {})
 
     print(f"📊 TM Memory Evaluation (last {days} days)")
-    print(f"{'='*40}")
+    print(f"{'=' * 40}")
     print(f"  Total searches: {total}")
     print(f"  Hits (results found): {hit}")
     print(f"  Used by agent: {used}")

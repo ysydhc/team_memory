@@ -90,9 +90,7 @@ class TestOllamaEmbedding:
 
         provider = OllamaEmbedding(dim=3)
 
-        transport = httpx.MockTransport(
-            lambda request: httpx.Response(200, json=mock_response)
-        )
+        transport = httpx.MockTransport(lambda request: httpx.Response(200, json=mock_response))
         original_init = httpx.AsyncClient.__init__
 
         def patched_init(self_client, **kwargs):
@@ -111,9 +109,7 @@ class TestOllamaEmbedding:
         """Test that ConnectionError is raised when Ollama is not running."""
         provider = OllamaEmbedding(base_url="http://localhost:99999")
 
-        transport = httpx.MockTransport(
-            lambda request: (_ for _ in ()).throw(httpx.ConnectError("Connection refused"))
-        )
+        transport = httpx.MockTransport(lambda request: (_ for _ in ()).throw(httpx.ConnectError("Connection refused")))
         original_init = httpx.AsyncClient.__init__
 
         def patched_init(self_client, **kwargs):

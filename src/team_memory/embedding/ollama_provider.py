@@ -70,12 +70,12 @@ class OllamaEmbedding(EmbeddingProvider):
                 # 404 重试：模型可能刚卸载需要重新加载
                 if e.response.status_code in (404, 429, 500, 502, 503, 504) and attempt < 2:
                     import asyncio
-                    await asyncio.sleep(2 ** attempt)
+
+                    await asyncio.sleep(2**attempt)
                     continue
                 raise
             except httpx.ConnectError:
                 raise ConnectionError(
-                    f"Cannot connect to Ollama at {self._base_url}. "
-                    "Make sure Ollama is running: https://ollama.com"
+                    f"Cannot connect to Ollama at {self._base_url}. Make sure Ollama is running: https://ollama.com"
                 )
         raise last_error  # type: ignore[misc]

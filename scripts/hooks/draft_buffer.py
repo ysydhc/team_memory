@@ -3,6 +3,7 @@
 Stores conversation drafts locally before they are promoted to TeamMemory.
 Prevents data loss if hook scripts crash during execution.
 """
+
 from __future__ import annotations
 
 import uuid

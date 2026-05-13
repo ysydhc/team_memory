@@ -264,9 +264,7 @@ class DbApiKeyAuth(ApiKeyAuth):
     # ------------------------------------------------------------------
     # Approve user (admin action — generates API key)
     # ------------------------------------------------------------------
-    async def approve_user_db(
-        self, session: "AsyncSession", key_id: int, generate_key: bool = True
-    ) -> dict:
+    async def approve_user_db(self, session: "AsyncSession", key_id: int, generate_key: bool = True) -> dict:
         """Approve a pending user: set is_active=True; optionally generate API key."""
         from sqlalchemy import select
 
@@ -409,10 +407,7 @@ class DbApiKeyAuth(ApiKeyAuth):
         from team_memory.storage.models import ApiKey
 
         result = await session.execute(
-            update(ApiKey)
-            .where(ApiKey.id == key_id)
-            .values(is_active=False)
-            .returning(ApiKey.key_hash)
+            update(ApiKey).where(ApiKey.id == key_id).values(is_active=False).returning(ApiKey.key_hash)
         )
         row = result.first()
         if row and row[0]:
@@ -425,9 +420,7 @@ class DbApiKeyAuth(ApiKeyAuth):
 
         from team_memory.storage.models import ApiKey
 
-        result = await session.execute(
-            delete(ApiKey).where(ApiKey.id == key_id).returning(ApiKey.id)
-        )
+        result = await session.execute(delete(ApiKey).where(ApiKey.id == key_id).returning(ApiKey.id))
         return result.first() is not None
 
     async def update_password_db(self, username: str, old_password: str, new_password: str) -> bool:
@@ -468,9 +461,7 @@ class DbApiKeyAuth(ApiKeyAuth):
                 return None
             return f"{db_key.key_prefix}****{db_key.key_suffix}"
 
-    async def update_password_by_api_key_db(
-        self, username: str, api_key: str, new_password: str
-    ) -> bool:
+    async def update_password_by_api_key_db(self, username: str, api_key: str, new_password: str) -> bool:
         """Update password after verifying api_key belongs to username.
         Shared by forgot-password and settings change-password.
         """

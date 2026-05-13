@@ -34,10 +34,7 @@ def upgrade() -> None:
         "archives",
         sa.Column("tags", ARRAY(sa.String), nullable=True),
     )
-    op.execute(
-        "CREATE UNIQUE INDEX uq_archives_title_project "
-        "ON archives (title, project) WHERE title IS NOT NULL"
-    )
+    op.execute("CREATE UNIQUE INDEX uq_archives_title_project ON archives (title, project) WHERE title IS NOT NULL")
 
 
 def downgrade() -> None:

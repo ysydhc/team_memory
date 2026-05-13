@@ -87,8 +87,7 @@ def _get_session_secret() -> str:
     if settings.auth.session_secret:
         return settings.auth.session_secret
     raise RuntimeError(
-        "Session secret not configured. Set TEAM_MEMORY_SESSION_SECRET env var "
-        "or auth.session_secret in config."
+        "Session secret not configured. Set TEAM_MEMORY_SESSION_SECRET env var or auth.session_secret in config."
     )
 
 

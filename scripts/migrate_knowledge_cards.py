@@ -7,6 +7,7 @@ them in PG (is_deleted=true, deleted_at=NOW()).
 Idempotent: can be re-run safely — LLMWiki.add() upserts, and the PG
 query only selects is_deleted=false rows.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -108,7 +109,7 @@ async def main() -> None:
         print("MIGRATION COMPLETE")
         print("=" * 60)
         print(f"  Migrated: {len(migrated_ids)} entries")
-        print(f"  By project:")
+        print("  By project:")
         for proj, count in sorted(by_project.items()):
             print(f"    {proj}: {count}")
         print(f"\n  Wiki stats after migration: {stats}")

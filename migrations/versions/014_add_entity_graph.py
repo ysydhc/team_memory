@@ -64,9 +64,7 @@ def upgrade() -> None:
             sa.ForeignKey("entities.id", ondelete="CASCADE"),
             nullable=False,
         ),
-        sa.Column(
-            "relation_type", sa.String(100), nullable=False, server_default="related_to"
-        ),
+        sa.Column("relation_type", sa.String(100), nullable=False, server_default="related_to"),
         sa.Column("weight", sa.Float, nullable=False, server_default="1.0"),
         sa.Column("evidence", JSONB, nullable=True),
         sa.Column(
@@ -106,12 +104,8 @@ def upgrade() -> None:
         ),
         sa.Column("role", sa.String(50), nullable=False, server_default="mentioned"),
     )
-    op.create_index(
-        "ix_experience_entities_exp", "experience_entities", ["experience_id"]
-    )
-    op.create_index(
-        "ix_experience_entities_ent", "experience_entities", ["entity_id"]
-    )
+    op.create_index("ix_experience_entities_exp", "experience_entities", ["experience_id"])
+    op.create_index("ix_experience_entities_ent", "experience_entities", ["entity_id"])
 
 
 def downgrade() -> None:

@@ -42,12 +42,14 @@ async def main(limit: int) -> None:
             desc = (exp.description or "")[:120]
             tags = list(exp.tags)[:10] if exp.tags else []
             query_hint = title or (desc[:30] + "..." if len(desc) > 30 else desc)
-            out.append({
-                "id": str(exp.id),
-                "title": title,
-                "tags": tags,
-                "query_hint": query_hint,
-            })
+            out.append(
+                {
+                    "id": str(exp.id),
+                    "title": title,
+                    "tags": tags,
+                    "query_hint": query_hint,
+                }
+            )
     print(json.dumps(out, ensure_ascii=False, indent=2))
 
 

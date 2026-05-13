@@ -57,11 +57,7 @@ async def main(query: str, target_id: str) -> None:
             return False
         tid = str(tid).lower()
         t = target_id.lower().strip()
-        return (
-            tid == t
-            or t in tid
-            or (len(t) == 8 and tid.replace("-", "").startswith(t.replace("-", "")))
-        )
+        return tid == t or t in tid or (len(t) == 8 and tid.replace("-", "").startswith(t.replace("-", "")))
 
     in_vector = any(matches(tid) for tid in vector_ids)
     in_fts = any(matches(tid) for tid in fts_ids)

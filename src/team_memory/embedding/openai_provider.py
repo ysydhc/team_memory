@@ -44,8 +44,7 @@ class OpenAIEmbedding(EmbeddingProvider):
         """
         if not self._api_key:
             raise ValueError(
-                "OpenAI API key is not set. "
-                "Set OPENAI_API_KEY environment variable or configure it in config.yaml."
+                "OpenAI API key is not set. Set OPENAI_API_KEY environment variable or configure it in config.yaml."
             )
 
         async with httpx.AsyncClient(timeout=30.0) as client:

@@ -191,9 +191,7 @@ def check_file(file_path: Path, root: Path) -> list[tuple[int, str, str]]:
             "team_memory.server",
             "team_memory.bootstrap",
         ):
-            violations.append(
-                (lineno, RULE_L0_L2_IMPORTS_BOOTSTRAP_SERVER, f"L0-L2 must not import {imported}")
-            )
+            violations.append((lineno, RULE_L0_L2_IMPORTS_BOOTSTRAP_SERVER, f"L0-L2 must not import {imported}"))
         elif layer == "L2" and imported == "team_memory.web":
             violations.append((lineno, RULE_L2_IMPORTS_L3, "L2 must not import L3 (web)"))
         elif layer in ("L0", "L1") and imported == "team_memory.web":

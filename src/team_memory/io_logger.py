@@ -95,9 +95,7 @@ def is_io_enabled() -> bool:
                 return bool(settings.logging.log_io_enabled)
         except Exception:
             pass
-    v = os.environ.get("TEAM_MEMORY_LOGGING__LOG_IO_ENABLED") or os.environ.get(
-        "TEAM_MEMORY_LOG_IO_ENABLED", ""
-    )
+    v = os.environ.get("TEAM_MEMORY_LOGGING__LOG_IO_ENABLED") or os.environ.get("TEAM_MEMORY_LOG_IO_ENABLED", "")
     return str(v).lower() in ("1", "true", "yes", "on")
 
 
@@ -110,9 +108,7 @@ def get_detail_level() -> str:
                 return str(settings.logging.log_io_detail)
         except Exception:
             pass
-    v = os.environ.get("TEAM_MEMORY_LOGGING__LOG_IO_DETAIL") or os.environ.get(
-        "TEAM_MEMORY_LOG_IO_DETAIL", "mcp"
-    )
+    v = os.environ.get("TEAM_MEMORY_LOGGING__LOG_IO_DETAIL") or os.environ.get("TEAM_MEMORY_LOG_IO_DETAIL", "mcp")
     return v if v in _DETAIL_RANK else "mcp"
 
 
@@ -125,9 +121,7 @@ def get_truncate() -> int:
                 return int(settings.logging.log_io_truncate)
         except Exception:
             pass
-    v = os.environ.get("TEAM_MEMORY_LOGGING__LOG_IO_TRUNCATE") or os.environ.get(
-        "TEAM_MEMORY_LOG_IO_TRUNCATE", "300"
-    )
+    v = os.environ.get("TEAM_MEMORY_LOGGING__LOG_IO_TRUNCATE") or os.environ.get("TEAM_MEMORY_LOG_IO_TRUNCATE", "300")
     try:
         return max(0, int(v))
     except (ValueError, TypeError):

@@ -110,9 +110,7 @@ class OllamaLLMRerankerProvider(RerankerProvider):
             )
         return results
 
-    async def _score_batch(
-        self, query: str, documents: list[str]
-    ) -> list[float]:
+    async def _score_batch(self, query: str, documents: list[str]) -> list[float]:
         """Score a batch of documents using LLM.
 
         Returns a list of scores (0-10) in the same order as the input docs.
@@ -125,9 +123,7 @@ class OllamaLLMRerankerProvider(RerankerProvider):
             doc_lines.append(f"[文档 {i}]: {truncated}")
         documents_text = "\n\n".join(doc_lines)
 
-        prompt = self._prompt_template.format(
-            query=query, documents=documents_text
-        )
+        prompt = self._prompt_template.format(query=query, documents=documents_text)
 
         # Try OpenAI-compatible endpoint first, then Ollama native
         scores = await self._call_openai_compatible(prompt)
@@ -143,9 +139,7 @@ class OllamaLLMRerankerProvider(RerankerProvider):
 
         return scores[: len(documents)]
 
-    async def _call_openai_compatible(
-        self, prompt: str
-    ) -> list[float] | None:
+    async def _call_openai_compatible(self, prompt: str) -> list[float] | None:
         """Call OpenAI-compatible /v1/chat/completions endpoint."""
         url = f"{self._base_url}/v1/chat/completions"
         payload = {
@@ -201,11 +195,7 @@ class OllamaLLMRerankerProvider(RerankerProvider):
         if content.startswith("```"):
             lines = content.split("\n")
             # Remove first and last lines (```json and ```)
-            content = "\n".join(
-                line
-                for line in lines
-                if not line.strip().startswith("```")
-            )
+            content = "\n".join(line for line in lines if not line.strip().startswith("```"))
             content = content.strip()
 
         try:

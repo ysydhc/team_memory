@@ -26,10 +26,7 @@ def upgrade() -> None:
             updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
         )
     """)
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_personal_memories_user_id "
-        "ON personal_memories (user_id)"
-    )
+    op.execute("CREATE INDEX IF NOT EXISTS ix_personal_memories_user_id ON personal_memories (user_id)")
 
 
 def downgrade() -> None:

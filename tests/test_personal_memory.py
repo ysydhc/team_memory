@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from team_memory.services.personal_memory import PersonalMemoryService
+from team_memory.services.memory.personal_memory import PersonalMemoryService
 from team_memory.storage.models import Base
 from team_memory.storage.personal_memory_repository import (
     PERSONAL_MEMORY_OVERWRITE_THRESHOLD,
@@ -191,7 +191,7 @@ async def test_personal_memory_upsert_cross_kind_no_merge(session, mock_embeddin
 @pytest.mark.asyncio
 async def test_pull_generic_only_and_generic_plus_context(engine, session, mock_embedding):
     """No current_context => only generic; with context => generic + matching context."""
-    from team_memory.services.personal_memory import PersonalMemoryService
+    from team_memory.services.memory.personal_memory import PersonalMemoryService
 
     repo = PersonalMemoryRepository(session)
     # Add one generic and one context memory

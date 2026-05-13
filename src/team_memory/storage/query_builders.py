@@ -77,9 +77,7 @@ def build_vector_search(
     offset: int = 0,
 ) -> Select:
     """Build vector similarity search statement. Returns SQLAlchemy Select."""
-    similarity_expr = (1 - Experience.embedding.cosine_distance(query_embedding)).label(
-        "similarity"
-    )
+    similarity_expr = (1 - Experience.embedding.cosine_distance(query_embedding)).label("similarity")
 
     stmt = (
         select(Experience, similarity_expr)

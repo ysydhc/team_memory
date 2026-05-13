@@ -4,6 +4,7 @@
 Usage:
     TEAM_MEMORY_SEARCH_DEBUG=1 python scripts/debug_search_pipeline.py "query"
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -50,7 +51,7 @@ async def main(query: str) -> None:
         eid = r.get("group_id") or r.get("id")
         title = (r.get("title") or "")[:50]
         sim = r.get("similarity", 0)
-        print(f"  {i+1}. {eid} sim={sim:.4f} {title}")
+        print(f"  {i + 1}. {eid} sim={sim:.4f} {title}")
     has_target = any("4d44f14a" in str(r.get("group_id") or r.get("id")) for r in results)
     print(f"--- 4d44f14a in results: {has_target}")
 

@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from team_memory.auth.provider import ApiKeyAuth
-from team_memory.services.search_orchestrator import OrchestratedSearchResult
+from team_memory.services.search.search_orchestrator import OrchestratedSearchResult
 from team_memory.web import app as web_module
 from team_memory.web.app import app
 
@@ -232,12 +232,12 @@ class TestEventBusP0:
     """Test P0-related event constants."""
 
     def test_published_event_exists(self):
-        from team_memory.services.event_bus import Events
+        from team_memory.services.infra.event_bus import Events
 
         assert hasattr(Events, "EXPERIENCE_PUBLISHED")
         assert Events.EXPERIENCE_PUBLISHED == "experience.published"
 
     def test_reviewed_event_constant_exists(self):
-        from team_memory.services.event_bus import Events
+        from team_memory.services.infra.event_bus import Events
 
         assert hasattr(Events, "EXPERIENCE_REVIEWED")

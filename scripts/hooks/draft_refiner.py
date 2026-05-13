@@ -12,16 +12,27 @@ from __future__ import annotations
 import re
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Factual-keyword list (simple heuristic)
 # ---------------------------------------------------------------------------
 
 _FACT_KEYWORDS: list[str] = [
     # Chinese
-    "是", "因为", "所以", "需要", "使用", "配置", "原因", "方法", "解决",
+    "是",
+    "因为",
+    "所以",
+    "需要",
+    "使用",
+    "配置",
+    "原因",
+    "方法",
+    "解决",
     # English
-    "is", "because", "need", "use", "config",
+    "is",
+    "because",
+    "need",
+    "use",
+    "config",
 ]
 
 _MAX_FACTS = 10

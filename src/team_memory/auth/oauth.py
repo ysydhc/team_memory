@@ -25,6 +25,7 @@ logger = logging.getLogger("team_memory.auth.oauth")
 @dataclass
 class OAuthConfig:
     """OAuth provider configuration."""
+
     provider: str  # github, gitlab
     client_id: str
     client_secret: str
@@ -37,6 +38,7 @@ def is_oauth_available() -> bool:
     """Check if authlib is installed."""
     try:
         import authlib  # noqa: F401
+
         return True
     except ImportError:
         return False

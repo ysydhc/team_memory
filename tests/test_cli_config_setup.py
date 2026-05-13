@@ -56,9 +56,7 @@ class TestConfigCheck:
         _mock_client_config(monkeypatch)
 
     @patch("team_memory.cli.httpx")
-    def test_check_all_pass(
-        self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_check_all_pass(self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
         """All connectivity checks pass / 所有连通性检查通过。"""
         monkeypatch.delenv("TEAM_MEMORY_API_KEY", raising=False)
 
@@ -93,9 +91,7 @@ class TestConfigCheck:
         assert "All critical checks passed" in output
 
     @patch("team_memory.cli.httpx")
-    def test_check_server_fails(
-        self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_check_server_fails(self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
         """Server unreachable causes exit code 1 / 服务器不可达导致退出码 1。"""
         monkeypatch.delenv("TEAM_MEMORY_API_KEY", raising=False)
 
@@ -120,9 +116,7 @@ class TestConfigCheck:
         assert "Some critical checks failed" in output
 
     @patch("team_memory.cli.httpx")
-    def test_check_llm_non_critical(
-        self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_check_llm_non_critical(self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
         """LLM failure is non-critical (no exit) / LLM 失败是非关键的（不退出）。"""
         monkeypatch.delenv("TEAM_MEMORY_API_KEY", raising=False)
 
@@ -149,9 +143,7 @@ class TestConfigCheck:
         assert "All critical checks passed" in output
 
     @patch("team_memory.cli.httpx")
-    def test_check_ollama_non_critical(
-        self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_check_ollama_non_critical(self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
         """Ollama failure is non-critical / Ollama 失败是非关键的。"""
         monkeypatch.delenv("TEAM_MEMORY_API_KEY", raising=False)
 
@@ -190,9 +182,7 @@ class TestConfigSet:
     def _setup(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _mock_client_config(monkeypatch)
 
-    def test_set_string_value(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_set_string_value(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Setting a string value writes to config.toml / 设置字符串值写入 config.toml。"""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
@@ -217,9 +207,7 @@ class TestConfigSet:
             data = tomllib.load(f)
         assert data["server"]["url"] == "http://myserver:9111"
 
-    def test_set_integer_value(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_set_integer_value(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Setting an integer value converts type / 设置整数值会转换类型。"""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
@@ -241,9 +229,7 @@ class TestConfigSet:
             data = tomllib.load(f)
         assert data["llm"]["timeout"] == 60
 
-    def test_set_boolean_value(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_set_boolean_value(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Setting a boolean value converts type / 设置布尔值会转换类型。"""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
@@ -265,9 +251,7 @@ class TestConfigSet:
             data = tomllib.load(f)
         assert data["wiki"]["enabled"] is True
 
-    def test_set_preserves_existing(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_set_preserves_existing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Setting a new key preserves existing config / 设置新键保留现有配置。"""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
@@ -276,6 +260,7 @@ class TestConfigSet:
         config_dir.mkdir(parents=True)
         config_file = config_dir / "config.toml"
         import tomli_w
+
         with open(config_file, "wb") as f:
             tomli_w.dump({"server": {"url": "http://old:9111"}}, f)
 
@@ -299,9 +284,7 @@ class TestConfigSet:
         # New value added / 新值添加
         assert data["server"]["api_key"] == "mykey123"
 
-    def test_set_invalid_key_format(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_set_invalid_key_format(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Key without dot notation causes error / 无点号表示法的键导致错误。"""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
@@ -315,9 +298,7 @@ class TestConfigSet:
 
         assert exc_info.value.code == 1
 
-    def test_set_creates_config_if_missing(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_set_creates_config_if_missing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Config set creates config.toml if it doesn't exist / 配置 set 在文件不存在时创建它。"""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
@@ -354,9 +335,7 @@ class TestProjectInit:
     def _setup(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _mock_client_config(monkeypatch)
 
-    def test_init_creates_tm_toml(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_init_creates_tm_toml(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """project init creates .tm.toml with detected name / project init 创建 .tm.toml。"""
         monkeypatch.chdir(tmp_path)
 
@@ -385,9 +364,7 @@ class TestProjectInit:
         assert data["project"]["aliases"] == []
         assert "Created .tm.toml" in captured.getvalue()
 
-    def test_init_refuses_if_exists(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_init_refuses_if_exists(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """project init refuses if .tm.toml already exists / .tm.toml 已存在时拒绝。"""
         monkeypatch.chdir(tmp_path)
 
@@ -404,9 +381,7 @@ class TestProjectInit:
 
         assert exc_info.value.code == 1
 
-    def test_detect_project_name_from_git(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_detect_project_name_from_git(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """_detect_project_name uses git repo name / _detect_project_name 使用 git 仓库名。"""
         monkeypatch.chdir(tmp_path)
 
@@ -416,17 +391,17 @@ class TestProjectInit:
 
         with patch("subprocess.run", return_value=mock_result):
             from team_memory.cli import _detect_project_name
+
             name = _detect_project_name()
         assert name == "my_awesome_project"  # kebab → snake
 
-    def test_detect_project_name_fallback_dir(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_detect_project_name_fallback_dir(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """_detect_project_name falls back to directory name / 回退到目录名。"""
         monkeypatch.chdir(tmp_path)
 
         with patch("subprocess.run", side_effect=FileNotFoundError("no git")):
             from team_memory.cli import _detect_project_name
+
             name = _detect_project_name()
         # Should be the tmp_path basename / 应该是 tmp_path 的基本名
         assert isinstance(name, str) and len(name) > 0
@@ -444,14 +419,13 @@ class TestProjectShow:
     def _setup(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _mock_client_config(monkeypatch)
 
-    def test_show_with_tm_toml(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_show_with_tm_toml(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """project show displays info from .tm.toml / 显示 .tm.toml 中的信息。"""
         monkeypatch.chdir(tmp_path)
 
         # Create .tm.toml / 创建 .tm.toml
         import tomli_w
+
         tm_data = {"project": {"name": "test_project", "aliases": ["old_name"]}}
         with open(tmp_path / ".tm.toml", "wb") as _f:
             tomli_w.dump(tm_data, _f)
@@ -470,9 +444,7 @@ class TestProjectShow:
         assert "old_name" in output
         assert ".tm.toml" in output
 
-    def test_show_without_tm_toml(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_show_without_tm_toml(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """project show works without .tm.toml / 无 .tm.toml 也能工作。"""
         monkeypatch.chdir(tmp_path)
 
@@ -489,9 +461,7 @@ class TestProjectShow:
         assert "not found" in output
         assert "Inferred name" in output
 
-    def test_show_displays_git_repo_name(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_show_displays_git_repo_name(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """project show displays git repo name / 显示 git 仓库名。"""
         monkeypatch.chdir(tmp_path)
 
@@ -521,9 +491,7 @@ class TestSetupUninstall:
     def _setup(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _mock_client_config(monkeypatch)
 
-    def test_uninstall_claude_code(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_uninstall_claude_code(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Uninstall removes TM hooks from Claude Code settings / 从 Claude Code 设置移除 TM hooks。"""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
@@ -531,14 +499,18 @@ class TestSetupUninstall:
         settings_dir = tmp_path / ".claude"
         settings_dir.mkdir()
         settings = settings_dir / "settings.json"
-        settings.write_text(json.dumps({
-            "hooks": {
-                "PostToolUse": [
-                    {"matcher": "mcp__team_memory__recall", "command": "python hook.py"},
-                    {"matcher": "other_hook", "command": "other.py"},
-                ]
-            }
-        }))
+        settings.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PostToolUse": [
+                            {"matcher": "mcp__team_memory__recall", "command": "python hook.py"},
+                            {"matcher": "other_hook", "command": "other.py"},
+                        ]
+                    }
+                }
+            )
+        )
 
         from team_memory.cli import main
 
@@ -556,9 +528,7 @@ class TestSetupUninstall:
         assert any(h["matcher"] == "other_hook" for h in post_tool)
         assert "Removed TM hooks" in captured.getvalue()
 
-    def test_uninstall_cursor(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_uninstall_cursor(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Uninstall removes TM hooks from Cursor hooks.json / 从 Cursor hooks.json 移除 TM hooks。"""
         monkeypatch.chdir(tmp_path)
 
@@ -566,14 +536,18 @@ class TestSetupUninstall:
         hooks_dir = tmp_path / ".cursor"
         hooks_dir.mkdir()
         hooks_file = hooks_dir / "hooks.json"
-        hooks_file.write_text(json.dumps({
-            "hooks": {
-                "afterMCPExecution": [
-                    {"matcher": "MCP:team_memory", "hooks": [{"type": "command", "command": "hook.py"}]},
-                    {"matcher": "MCP:other", "hooks": [{"type": "command", "command": "other.py"}]},
-                ]
-            }
-        }))
+        hooks_file.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "afterMCPExecution": [
+                            {"matcher": "MCP:team_memory", "hooks": [{"type": "command", "command": "hook.py"}]},
+                            {"matcher": "MCP:other", "hooks": [{"type": "command", "command": "other.py"}]},
+                        ]
+                    }
+                }
+            )
+        )
 
         from team_memory.cli import main
 
@@ -590,9 +564,7 @@ class TestSetupUninstall:
         assert any("other" in e.get("matcher", "") for e in after_mcp)
         assert "Removed TM hooks" in captured.getvalue()
 
-    def test_uninstall_hermes(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_uninstall_hermes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Uninstall hermes prints manual instructions / Hermes 卸载打印手动说明。"""
         from team_memory.cli import main
 
@@ -607,18 +579,14 @@ class TestSetupUninstall:
         assert "Manual uninstall" in output
         assert "config.yaml" in output
 
-    def test_uninstall_no_hooks_found(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_uninstall_no_hooks_found(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Uninstall with no TM hooks shows warning / 无 TM hooks 时显示警告。"""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
         settings_dir = tmp_path / ".claude"
         settings_dir.mkdir()
         settings = settings_dir / "settings.json"
-        settings.write_text(json.dumps({
-            "hooks": {"PostToolUse": [{"matcher": "other_hook", "command": "other.py"}]}
-        }))
+        settings.write_text(json.dumps({"hooks": {"PostToolUse": [{"matcher": "other_hook", "command": "other.py"}]}}))
 
         from team_memory.cli import main
 
@@ -632,9 +600,7 @@ class TestSetupUninstall:
         output = captured.getvalue()
         assert "No TM hooks found" in output
 
-    def test_uninstall_no_settings_file(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_uninstall_no_settings_file(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Uninstall with no settings file shows warning / 无设置文件时显示警告。"""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
 
@@ -650,9 +616,7 @@ class TestSetupUninstall:
         output = captured.getvalue()
         assert "No settings.json found" in output
 
-    def test_uninstall_all_platforms(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_uninstall_all_platforms(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Uninstall --platform all removes from all platforms / 全平台卸载。"""
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         monkeypatch.chdir(tmp_path)
@@ -661,16 +625,16 @@ class TestSetupUninstall:
         settings_dir = tmp_path / ".claude"
         settings_dir.mkdir()
         settings = settings_dir / "settings.json"
-        settings.write_text(json.dumps({
-            "hooks": {"PostToolUse": [{"matcher": "mcp__team_memory__recall", "command": "hook.py"}]}
-        }))
+        settings.write_text(
+            json.dumps({"hooks": {"PostToolUse": [{"matcher": "mcp__team_memory__recall", "command": "hook.py"}]}})
+        )
 
         hooks_dir = tmp_path / ".cursor"
         hooks_dir.mkdir()
         hooks_file = hooks_dir / "hooks.json"
-        hooks_file.write_text(json.dumps({
-            "hooks": {"afterMCPExecution": [{"matcher": "MCP:team_memory", "hooks": []}]}
-        }))
+        hooks_file.write_text(
+            json.dumps({"hooks": {"afterMCPExecution": [{"matcher": "MCP:team_memory", "hooks": []}]}})
+        )
 
         from team_memory.cli import main
 
@@ -735,6 +699,7 @@ class TestSetupWizard:
 # T1-T2: _setup_cursor tests / 测试
 # ============================================================
 
+
 class TestSetupCursor:
     def test_setup_cursor_writes_all_four_hooks(self, tmp_path):
         """Verify _setup_cursor writes all 4 hook entries, not just afterMCPExecution."""
@@ -746,6 +711,7 @@ class TestSetupCursor:
 
         # Use tmp_path as cwd during setup
         import os
+
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
 
@@ -754,6 +720,7 @@ class TestSetupCursor:
 
             # Read back hooks.json
             import json
+
             hooks_file = cursor_dir / "hooks.json"
             assert hooks_file.exists(), f"hooks.json not created at {hooks_file}"
 
@@ -785,6 +752,7 @@ class TestSetupCursor:
 
         import json
         import os
+
         old_cwd = os.getcwd()
         os.chdir(tmp_path)
 
@@ -809,6 +777,7 @@ class TestSetupCursor:
 # ============================================================
 # T3-T4: _setup_hermes tests / 测试
 # ============================================================
+
 
 class TestSetupHermes:
     def test_setup_hermes_writes_yaml_hooks(self, tmp_path):
@@ -873,6 +842,7 @@ class TestSetupHermes:
             yaml.dump(original, f)
 
         from unittest.mock import patch
+
         with patch("pathlib.Path.home", return_value=tmp_path):
             _setup_hermes(cfg=None, venv_python="/usr/bin/python3")
 
@@ -896,6 +866,7 @@ class TestSetupHermes:
         config_path.write_text("{}")
 
         from unittest.mock import patch
+
         with patch("pathlib.Path.home", return_value=tmp_path):
             _setup_hermes(cfg=None, venv_python="/usr/bin/python3")
             _setup_hermes(cfg=None, venv_python="/usr/bin/python3")

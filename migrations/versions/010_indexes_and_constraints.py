@@ -33,9 +33,7 @@ def upgrade() -> None:
     )
 
     # D5: Unique constraint for archive upsert
-    op.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_archives_title_project ON archives (title, project)"
-    )
+    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_archives_title_project ON archives (title, project)")
 
     # D6-D9: Column indexes
     op.create_index("ix_experiences_created_by", "experiences", ["created_by"])
@@ -46,16 +44,10 @@ def upgrade() -> None:
     op.execute("ALTER TABLE background_tasks ALTER COLUMN id SET DEFAULT gen_random_uuid()")
 
     # D13: Partial index for soft delete
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_experiences_active "
-        "ON experiences(id) WHERE is_deleted = false"
-    )
+    op.execute("CREATE INDEX IF NOT EXISTS ix_experiences_active ON experiences(id) WHERE is_deleted = false")
 
     # D15: CHECK constraints on feedback
-    op.execute(
-        "ALTER TABLE experience_feedbacks "
-        "ADD CONSTRAINT ck_feedback_rating CHECK (rating >= 1 AND rating <= 5)"
-    )
+    op.execute("ALTER TABLE experience_feedbacks ADD CONSTRAINT ck_feedback_rating CHECK (rating >= 1 AND rating <= 5)")
     op.execute(
         "ALTER TABLE experience_feedbacks "
         "ADD CONSTRAINT ck_feedback_fitness "

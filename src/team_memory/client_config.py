@@ -158,57 +158,35 @@ class ClientConfig:
         # --- [server] ---
         srv = toml_data.get("server", {})
         config.server.url = (
-            os.environ.get("TM_SERVER_URL")
-            or os.environ.get("TM_BASE_URL")
-            or srv.get("url", config.server.url)
+            os.environ.get("TM_SERVER_URL") or os.environ.get("TM_BASE_URL") or srv.get("url", config.server.url)
         )
-        config.server.api_key = (
-            os.environ.get("TEAM_MEMORY_API_KEY")
-            or srv.get("api_key", "")
-        )
+        config.server.api_key = os.environ.get("TEAM_MEMORY_API_KEY") or srv.get("api_key", "")
 
         # --- [llm] ---
         llm = toml_data.get("llm", {})
-        config.llm.base_url = (
-            os.environ.get("TM_LLM_BASE_URL")
-            or llm.get("base_url", config.llm.base_url)
-        )
+        config.llm.base_url = os.environ.get("TM_LLM_BASE_URL") or llm.get("base_url", config.llm.base_url)
         config.llm.api_key = llm.get("api_key", "")
         config.llm.api_key_env = llm.get("api_key_env", "")
-        config.llm.model = (
-            os.environ.get("TM_LLM_MODEL")
-            or llm.get("model", config.llm.model)
-        )
+        config.llm.model = os.environ.get("TM_LLM_MODEL") or llm.get("model", config.llm.model)
         config.llm.timeout = llm.get("timeout", config.llm.timeout)
 
         # --- [conversation] ---
         conv = toml_data.get("conversation", {})
-        config.conversation.db_path = (
-            os.environ.get("TM_CONVERSATION_DB")
-            or conv.get("db_path", config.conversation.db_path)
+        config.conversation.db_path = os.environ.get("TM_CONVERSATION_DB") or conv.get(
+            "db_path", config.conversation.db_path
         )
 
         # --- [wiki] ---
         wiki = toml_data.get("wiki", {})
         config.wiki.enabled = wiki.get("enabled", config.wiki.enabled)
-        config.wiki.db_path = (
-            os.environ.get("TM_WIKI_DB")
-            or wiki.get("db_path", config.wiki.db_path)
-        )
+        config.wiki.db_path = os.environ.get("TM_WIKI_DB") or wiki.get("db_path", config.wiki.db_path)
 
         # --- [daemon] ---
         dmn = toml_data.get("daemon", {})
-        config.daemon.host = (
-            os.environ.get("TM_DAEMON_HOST")
-            or dmn.get("host", config.daemon.host)
-        )
-        config.daemon.port = int(
-            os.environ.get("TM_DAEMON_PORT", "")
-            or dmn.get("port", config.daemon.port)
-        )
-        config.daemon.log_level = (
-            os.environ.get("TEAM_MEMORY_LOG_LEVEL")
-            or dmn.get("log_level", config.daemon.log_level)
+        config.daemon.host = os.environ.get("TM_DAEMON_HOST") or dmn.get("host", config.daemon.host)
+        config.daemon.port = int(os.environ.get("TM_DAEMON_PORT", "") or dmn.get("port", config.daemon.port))
+        config.daemon.log_level = os.environ.get("TEAM_MEMORY_LOG_LEVEL") or dmn.get(
+            "log_level", config.daemon.log_level
         )
 
         return config
