@@ -14,37 +14,6 @@ class EvaluationService:
         self._db_url = db_url
         self._embedding = embedding_provider
 
-    def inject_markers(self, results: list[dict]) -> list[dict]:
-        """Inject [mem:xxx] markers into search results.
-
-        Appends marker to 'solution' field if present and non-empty,
-        otherwise to 'description'. Also stores marker in '_marker'
-        field for internal tracking.
-        """
-        for r in results:
-            exp_id = r.get("id", "")
-            if not exp_id:
-                continue
-            marker = f"[mem:{exp_id}]"
-            r["_marker"] = marker
-            # Append to solution if it exists and is non-empty
-            if "solution" in r and r["solution"] and marker not in r["solution"]:
-                r["solution"] += f" {marker}"
-            elif "description" in r and r["description"] and marker not in r["description"]:
-                r["description"] += f" {marker}"
-        return results
-
-    def check_was_used(self, agent_response: str, result_ids: list[str]) -> dict[str, bool]:
-        """Check if agent response contains [mem:xxx] markers.
-
-        Returns dict mapping result_id -> was_used (True/False).
-        """
-        used: dict[str, bool] = {}
-        for rid in result_ids:
-            marker = f"[mem:{rid}]"
-            used[rid] = marker in agent_response
-        return used
-
     async def check_was_used_fuzzy(
         self,
         agent_response: str,

@@ -13,6 +13,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from team_memory.reranker.base import RerankerProvider, RerankResult
@@ -77,7 +78,7 @@ class CrossEncoderRerankerProvider(RerankerProvider):
 
         try:
             # Cross-encoder predicts relevance scores for all pairs
-            scores = self._model.predict(pairs)
+            scores = await asyncio.to_thread(self._model.predict, pairs)
 
             # Combine with original indices
             scored = [(i, float(score), doc) for i, (score, doc) in enumerate(zip(scores, documents))]

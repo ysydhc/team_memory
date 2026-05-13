@@ -40,28 +40,34 @@ pytest -k "search" -v
 **TeamMemory** — 基于 MCP 的团队经验库，为 AI 提供跨会话记忆。
 
 ```
-┌─────────────────────────────────────────┐
-│  MCP Server / CLI (server.py, cli.py)   │  ← AI 入口，memory_* 工具
-│  Web Routes (web/routes/)               │  ← HTTP API 入口
-├─────────────────────────────────────────┤
-│  Services (services/)                   │  ← 业务逻辑
-│  Auth / Embedding / Reranker            │  ← 认证、向量、重排
-├─────────────────────────────────────────┤
-│  Storage (storage/)                     │  ← 数据访问（repository + DB）
-├─────────────────────────────────────────┤
-│  Models (storage/models.py, schemas.py) │  ← ORM + Pydantic
-├─────────────────────────────────────────┤
-│  Infrastructure (PostgreSQL + pgvector) │
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│  MCP Server / CLI (server.py, cli.py)        │  ← AI 入口，memory_* 工具
+│  Web Routes (web/routes/)                    │  ← HTTP API 入口
+├──────────────────────────────────────────────┤
+│  Services (services/)                        │  ← 业务逻辑
+│    search/   memory/   llm/   entity/        │
+│    archive/  maintenance/ analysis/ infra/   │
+│  Auth / Embedding (+ factory) / Reranker     │  ← 认证、向量、重排
+├──────────────────────────────────────────────┤
+│  Storage (storage/)                          │  ← 数据访问（repository + DB）
+├──────────────────────────────────────────────┤
+│  Models (storage/models.py, schemas.py)      │  ← ORM + Pydantic
+├──────────────────────────────────────────────┤
+│  Infrastructure (PostgreSQL + pgvector)      │
+└──────────────────────────────────────────────┘
 
 客户端组件（PYTHONPATH 只需 src/）:
-┌─────────────────────────────────────────┐
-│  client_config.py                       │  ← ClientConfig（~/.config/tm/config.toml）
-│  project_resolver.py                    │  ← 项目名零配置推断 + 别名注册
-│  daemon/  (原 scripts/daemon/)           │  ← TM Daemon（tm-daemon 入口）
-│  hooks/   (原 scripts/hooks/)            │  ← 平台 Hook（Claude/Cursor/Hermes）
-│  cli.py                                 │  ← tm-cli + config/setup 子命令
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│  client_config.py                            │  ← ClientConfig（~/.config/tm/config.toml）
+│  project_resolver.py                         │  ← 项目名零配置推断 + 别名注册
+│  daemon/                                     │  ← TM Daemon（tm-daemon 入口）
+│    runtime/ buffers/ refinement/ backfill/   │
+│    quality/ wiki/ observe/ integration/      │
+│  hooks/                                      │  ← 平台 Hook
+│    core/ platforms/{claude,cursor,hermes}/   │
+│    integrations/                             │
+│  cli.py                                      │  ← tm-cli + config/setup 子命令
+└──────────────────────────────────────────────┘
 ```
 
 **依赖方向（仅自上而下）**：Server/Web → Services → Storage → Models。禁止反向 import。
@@ -71,6 +77,39 @@ pytest -k "search" -v
 - **客户端**：`~/.config/tm/config.toml`（ClientConfig + TOML），优先级：环境变量 > `.env` > `config.toml` > 代码默认值
 
 **项目名推断 / Project Name Inference**：`.tm.toml` > git 仓库名 > 目录名。别名注册：`project_resolver.register_aliases()`。
+
+### 代码目录结构规范
+
+**新增文件必须放入正确的子包**，禁止在 `hooks/`、`daemon/`、`services/` 根目录直接创建业务模块。
+
+| 包 | 子包 | 职责 |
+|----|------|------|
+| `hooks/` | `core/` | 共享基础设施（daemon_http、stdin、mcp_callback、output） |
+| | `platforms/{claude,cursor,hermes}/` | 各平台 Hook 脚本 |
+| | `integrations/` | 跨平台集成（git_watcher、weekly_report 等） |
+| `daemon/` | `runtime/` | 启动、配置、热重载、健康检查 |
+| | `buffers/` | 会话/草稿/响应缓冲、待处理队列 |
+| | `refinement/` | 处理管线、草稿精炼 |
+| | `backfill/` | 向量/实体/方案回填、实体去重 |
+| | `quality/` | 忠实度判断、搜索评估、收敛检测 |
+| | `wiki/` | Wiki 编译、Markdown 索引 |
+| | `observe/` | 指标采集、搜索日志、统计、文件监控 |
+| | `integration/` | TM Sink、自动梦境、个人记忆提取 |
+| `services/` | `search/` | search_pipeline、search_orchestrator、cache |
+| | `memory/` | memory_operations、experience、personal_memory |
+| | `llm/` | llm_client、llm_parser、llm_provider |
+| | `entity/` | entity_extractor、entity_search |
+| | `archive/` | ArchiveService（`__init__.py` re-export） |
+| | `maintenance/` | janitor、janitor_scheduler、promotion_compiler |
+| | `analysis/` | evaluation、contradiction_detector、pattern_extractor |
+| | `infra/` | event_bus、task_runner、tokenizer、intent_router |
+| `embedding/` | `factory.py` | create_embedding_provider()（从 bootstrap 迁出） |
+
+**禁止事项**：
+- 禁止在子包父目录创建平铺模块（如 `daemon/xxx.py`，应为 `daemon/<subpkg>/xxx.py`）
+- 禁止创建 shim / re-export 兼容文件，保持项目简洁
+- 禁止跨层 import（Storage ↛ Services；Services ↛ Server/Web）
+- import 路径必须完整：`from team_memory.daemon.runtime.config import ...`，不允许 `from team_memory.daemon.config import ...`
 
 ### 核心领域
 

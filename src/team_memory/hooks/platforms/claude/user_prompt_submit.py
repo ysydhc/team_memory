@@ -58,8 +58,7 @@ def main() -> None:
             for r in results[:5]:
                 title = r.get("title", "Untitled")
                 content = r.get("content", "")[:500]
-                rid = r.get("id", "")[:8]
-                context_parts.append(f"[mem:{rid}] {title}\n{content}")
+                context_parts.append(f"{title}\n{content}")
             context = "\n---\n".join(context_parts)
             print_claude_context(context)
         else:

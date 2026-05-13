@@ -36,22 +36,102 @@ pytest -k "search" -v
 **TeamMemory** — 基于 MCP 的团队经验库，为 AI 提供跨会话记忆。
 
 ```
-┌─────────────────────────────────────────┐
-│  MCP Server / CLI (server.py, cli.py)   │  ← AI 入口，memory_* 工具
-│  Web Routes (web/routes/)               │  ← HTTP API 入口
-├─────────────────────────────────────────┤
-│  Services (services/)                   │  ← 业务逻辑
-│  Auth / Embedding / Reranker            │  ← 认证、向量、重排
-├─────────────────────────────────────────┤
-│  Storage (storage/)                     │  ← 数据访问（repository + DB）
-├─────────────────────────────────────────┤
-│  Models (storage/models.py, schemas.py) │  ← ORM + Pydantic
-├─────────────────────────────────────────┤
-│  Infrastructure (PostgreSQL + pgvector) │
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│  MCP Server / CLI (server.py, cli.py)        │  ← AI 入口，memory_* 工具
+│  Web Routes (web/routes/)                    │  ← HTTP API 入口
+├──────────────────────────────────────────────┤
+│  Services (services/)                        │  ← 业务逻辑
+│    search/   memory/   llm/   entity/        │
+│    archive/  maintenance/ analysis/ infra/   │
+│  Auth / Embedding (+ factory) / Reranker     │  ← 认证、向量、重排
+├──────────────────────────────────────────────┤
+│  Storage (storage/)                          │  ← 数据访问（repository + DB）
+├──────────────────────────────────────────────┤
+│  Models (storage/models.py, schemas.py)      │  ← ORM + Pydantic
+├──────────────────────────────────────────────┤
+│  Infrastructure (PostgreSQL + pgvector)      │
+└──────────────────────────────────────────────┘
 ```
 
 **依赖方向（仅自上而下）**：Server/Web → Services → Storage → Models。禁止反向 import。
+
+### 代码目录结构规范
+
+**新增文件必须放入正确的子包**，禁止在 `hooks/`、`daemon/`、`services/` 根目录直接创建业务模块。
+
+#### `hooks/` — 平台 Hook（按职责分层）
+
+```
+hooks/
+├── core/               # 共享基础设施（所有平台复用）
+│   ├── daemon_http.py  #   DAEMON_URL + post_hook() + fire_and_forget()
+│   ├── stdin.py        #   parse_stdin_json()
+│   ├── mcp_callback.py #   recall 检测 + callback 发送
+│   └── output.py       #   print_claude_context / print_cursor_action 等
+├── platforms/          # 按平台分目录，每平台一组 Hook
+│   ├── claude/         #   session_start / user_prompt_submit / stop / post_tool_use
+│   ├── cursor/         #   session_start / before_prompt / after_response / after_mcp
+│   └── hermes/         #   pipeline / user_prompt_submit / stop / post_tool_call
+├── integrations/       # 跨平台集成 Hook
+│   ├── git_watcher.py
+│   ├── weekly_report.py
+│   ├── initial_index.py
+│   └── retrieval_trigger.py
+├── common.py           # 遗留兼容（parse_hook_input）
+├── shared.py           # TMClient 等共享类
+└── session_timeout.py  # 会话超时管理
+```
+
+**规则**：新增平台 Hook → `platforms/<platform>/`；新增共享逻辑 → `core/`；新增集成 → `integrations/`。
+
+#### `daemon/` — TM Daemon（按功能域分包）
+
+```
+daemon/
+├── runtime/       # 应用启动、配置、热重载、健康检查
+├── buffers/       # 会话缓冲、草稿缓冲、响应缓冲、待处理队列
+├── refinement/    # 处理管线、草稿精炼、精炼工作器
+├── backfill/      # 向量回填、实体回填、方案回填、实体去重
+├── quality/       # 忠实度判断、搜索评估、收敛检测
+├── wiki/          # LLM Wiki、Wiki 编译、Markdown 索引
+├── observe/       # 指标采集、搜索日志写入、统计、文件监控
+├── integration/   # TM Sink、自动梦境、个人记忆提取、意图分类
+└── __main__.py    # 入口（委托 runtime/）
+```
+
+**规则**：新增 daemon 模块须放入对应功能域子包；`runtime/app.py` 是组合根，仅此处做依赖装配。
+
+#### `services/` — 业务逻辑（按领域分包）
+
+```
+services/
+├── search/        # search_pipeline, search_orchestrator, cache
+├── memory/        # memory_operations, experience, personal_memory
+├── llm/           # llm_client, llm_parser, llm_provider
+├── entity/        # entity_extractor, entity_search
+├── archive/       # archive（__init__.py re-export 公开名）
+├── maintenance/   # janitor, janitor_scheduler, promotion_compiler
+├── analysis/      # evaluation, contradiction_detector, pattern_extractor, topic_discovery
+└── infra/         # event_bus, task_runner, tokenizer, intent_router
+```
+
+**规则**：新增 service 须放入对应领域子包；跨领域工具放 `infra/`。
+
+#### `embedding/` — 向量嵌入
+
+```
+embedding/
+├── factory.py           # create_embedding_provider()（从 bootstrap 迁出）
+├── ollama_provider.py
+└── openai_provider.py
+```
+
+#### 禁止事项
+
+- **禁止在子包父目录创建平铺模块**：不允许 `daemon/xxx.py`（应为 `daemon/<subpkg>/xxx.py`）
+- **禁止 shim / re-export 文件**：不创建向后兼容代理文件，保持项目简洁
+- **禁止跨层 import**：`Storage` 不能 import `Services`；`Services` 不能 import `Server/Web`
+- **import 路径必须完整**：使用 `from team_memory.daemon.runtime.config import ...`，不使用 `from team_memory.daemon.config import ...`
 
 ### 核心领域
 
@@ -141,6 +221,7 @@ docker compose exec postgres psql -U developer -d team_memory  # DB 调试
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
+at `specs/014-phase2-rag-quality/plan.md`
 <!-- SPECKIT END -->
 
 # CLAUDE.md

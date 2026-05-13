@@ -340,21 +340,6 @@ class SearchPipeline:
 
         total_candidates = len(candidates)
 
-        # Stage 6: Adaptive Filtering
-        stage_begin = time.monotonic()
-        if self._search_config.adaptive_filter and candidates:
-            candidates = self._apply_adaptive_filter(candidates)
-        stage_metrics["adaptive_filter_ms"] = int((time.monotonic() - stage_begin) * 1000)
-        io_logger.log_internal(
-            "adaptive_filter",
-            {
-                "query": (request.query or "")[:50],
-                "before": total_candidates,
-                "after": len(candidates),
-            },
-            duration_ms=stage_metrics["adaptive_filter_ms"],
-        )
-
         reranked = False
         if self._rerank_enabled and candidates:
             stage_begin = time.monotonic()
@@ -370,11 +355,42 @@ class SearchPipeline:
                 duration_ms=stage_metrics.get("rerank_ms", 0),
             )
 
+        # Stage 6: Adaptive Filtering (moved AFTER reranking)
+        stage_begin = time.monotonic()
+        if self._search_config.adaptive_filter and candidates:
+            candidates = self._apply_adaptive_filter(candidates)
+        stage_metrics["adaptive_filter_ms"] = int((time.monotonic() - stage_begin) * 1000)
+        io_logger.log_internal(
+            "adaptive_filter",
+            {
+                "query": (request.query or "")[:50],
+                "before": total_candidates,
+                "after": len(candidates),
+            },
+            duration_ms=stage_metrics["adaptive_filter_ms"],
+        )
+
         # Confidence labels (after fusion / filter / optional rerank scores)
         candidates = self._label_confidence(candidates)
 
-        # Limit final results
-        candidates = candidates[: request.max_results]
+        # Stage 6.5: Grouping logic (US5)
+        if request.grouped:
+            grouped_results: dict[str, list[SearchResultItem]] = {}
+            for item in candidates:
+                gid = item.data.get("group_id") or item.data.get("parent_id") or item.data.get("id")
+                gid = str(gid)
+                if gid not in grouped_results:
+                    grouped_results[gid] = []
+                if len(grouped_results[gid]) < request.top_k_children:
+                    grouped_results[gid].append(item)
+
+            flattened = []
+            for group_items in grouped_results.values():
+                flattened.extend(group_items)
+            candidates = flattened[: request.max_results]
+        else:
+            # Limit final results
+            candidates = candidates[: request.max_results]
 
         # Build final result dicts
         result_dicts = []
@@ -407,11 +423,17 @@ class SearchPipeline:
         exp_id_strs = [d["id"] for d in result_dicts if d.get("id") and d.get("type") != "archive"]
         if exp_id_strs:
             archive_repo_enrich = ArchiveRepository(session)
-            exp_uuids = [uuid.UUID(eid) for eid in exp_id_strs]
-            archive_mapping = await archive_repo_enrich.get_archive_ids_for_experiences(exp_uuids)
-            for d in result_dicts:
-                if d.get("type") != "archive":
-                    d["archive_ids"] = archive_mapping.get(str(d.get("id", "")), [])
+            exp_uuids = []
+            for eid in exp_id_strs:
+                try:
+                    exp_uuids.append(uuid.UUID(eid))
+                except (ValueError, TypeError):
+                    pass
+            if exp_uuids:
+                archive_mapping = await archive_repo_enrich.get_archive_ids_for_experiences(exp_uuids)
+                for d in result_dicts:
+                    if d.get("type") != "archive":
+                        d["archive_ids"] = archive_mapping.get(str(d.get("id", "")), [])
 
         duration_ms = int((time.monotonic() - start) * 1000)
 
@@ -478,7 +500,7 @@ class SearchPipeline:
     ) -> list[SearchResultItem]:
         """Execute retrieval and RRF fusion."""
         q = (retrieval_query or request.query).strip()
-        over_fetch = request.max_results * 3
+        over_fetch = request.max_results * 5
         min_sim = effective_min_similarity if effective_min_similarity is not None else request.min_similarity
 
         if mode == "vector" and query_embedding:

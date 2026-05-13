@@ -43,8 +43,7 @@ def main() -> None:
         if experiences:
             for exp in experiences[:5]:
                 title = exp.get("title", "Untitled")
-                eid = exp.get("id", "")[:8]
-                parts.append(f"[mem:{eid}] {title}")
+                parts.append(title)
         if static:
             parts.append(f"Static context: {json.dumps(static)}")
         if dynamic:
@@ -52,7 +51,7 @@ def main() -> None:
 
         if parts:
             context = "\n".join(parts)
-            print_claude_context(f"[mem:context] project={result.get('project', '?')}\n{context}")
+            print_claude_context(f"TM context project={result.get('project', '?')}\n{context}")
         else:
             print_empty()
     except Exception:

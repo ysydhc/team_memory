@@ -1,0 +1,2334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TeamMemory Architecture</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+/* ============================================
+   CSS Variables - Light & Dark
+   ============================================ */
+:root {
+  --bg: #f8f9fa;
+  --bg-elev: #ffffff;
+  --bg-hover: #f1f3f5;
+  --fg: #1a1a2e;
+  --fg-muted: #5a6573;
+  --fg-dim: #8899aa;
+  --border: #e1e5e9;
+  --border-strong: #c5cdd6;
+  --accent: #3b82f6;
+  --accent-dim: #93c5fd;
+  --call-color: #3b82f6;
+  --async-color: #f59e0b;
+  --http-color: #10b981;
+  --db-color: #ef4444;
+  --event-color: #8b5cf6;
+  --tag-bg: #e8f0fe;
+  --tag-fg: #1a73e8;
+  --code-bg: #f4f6f8;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08);
+  --shadow-lg: 0 4px 12px rgba(0,0,0,0.12);
+  --layer-1: #dbeafe;
+  --layer-1-stroke: #2563eb;
+  --layer-2: #dcfce7;
+  --layer-2-stroke: #16a34a;
+  --layer-3: #fef3c7;
+  --layer-3-stroke: #d97706;
+  --layer-4: #f3e8ff;
+  --layer-4-stroke: #9333ea;
+  --layer-5: #f1f5f9;
+  --layer-5-stroke: #64748b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1117;
+    --bg-elev: #1a1d24;
+    --bg-hover: #252a33;
+    --fg: #e2e8f0;
+    --fg-muted: #94a3b8;
+    --fg-dim: #64748b;
+    --border: #2d333b;
+    --border-strong: #444c56;
+    --accent: #60a5fa;
+    --accent-dim: #3b82f6;
+    --call-color: #60a5fa;
+    --async-color: #fbbf24;
+    --http-color: #34d399;
+    --db-color: #f87171;
+    --event-color: #c4b5fd;
+    --tag-bg: #1e3a5f;
+    --tag-fg: #93c5fd;
+    --code-bg: #161b22;
+    --shadow: 0 1px 3px rgba(0,0,0,0.3);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,0.4);
+    --layer-1: #1e3a5f;
+    --layer-1-stroke: #60a5fa;
+    --layer-2: #1a3a2a;
+    --layer-2-stroke: #34d399;
+    --layer-3: #3a3214;
+    --layer-3-stroke: #fbbf24;
+    --layer-4: #2a1a4a;
+    --layer-4-stroke: #a78bfa;
+    --layer-5: #1e2228;
+    --layer-5-stroke: #6b7280;
+  }
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ===== Header ===== */
+header {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 12px;
+}
+header h1 { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+header h1::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.header-right { display: flex; align-items: center; gap: 12px; }
+.search-box {
+  width: 240px; height: 30px; border: 1px solid var(--border); border-radius: 6px;
+  padding: 0 10px; background: var(--bg); color: var(--fg); font-size: 13px;
+  outline: none; transition: border-color 0.2s;
+}
+.search-box:focus { border-color: var(--accent); }
+.search-box::placeholder { color: var(--fg-dim); }
+.theme-toggle {
+  width: 32px; height: 30px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--fg); cursor: pointer; display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+}
+.theme-toggle:hover { background: var(--bg-hover); }
+
+/* ===== Layout ===== */
+.main { display: flex; flex: 1; overflow: hidden; }
+
+/* ===== Left Panel ===== */
+.left-panel {
+  width: 280px; min-width: 200px; max-width: 400px;
+  background: var(--bg-elev); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.view-toggle {
+  display: flex; padding: 8px 12px; gap: 0; border-bottom: 1px solid var(--border);
+}
+.view-toggle button {
+  flex: 1; height: 28px; border: 1px solid var(--border); background: var(--bg);
+  color: var(--fg-muted); font-size: 12px; cursor: pointer; transition: all 0.2s;
+}
+.view-toggle button:first-child { border-radius: 5px 0 0 5px; border-right: none; }
+.view-toggle button:last-child { border-radius: 0 5px 5px 0; }
+.view-toggle button.active { background: var(--accent); color: white; border-color: var(--accent); }
+.tree-scroll { flex: 1; overflow-y: auto; padding: 8px 0; }
+.tree-scroll::-webkit-scrollbar { width: 6px; }
+.tree-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+.tree-group { margin-bottom: 2px; }
+.tree-header {
+  display: flex; align-items: center; gap: 6px; padding: 6px 12px;
+  font-size: 13px; font-weight: 600; cursor: pointer; user-select: none;
+  color: var(--fg); transition: background 0.15s; border-radius: 0;
+}
+.tree-header:hover { background: var(--bg-hover); }
+.tree-header .chevron { font-size: 10px; width: 12px; color: var(--fg-dim); transition: transform 0.2s; }
+.tree-header.expanded .chevron { transform: rotate(90deg); }
+.tree-header .icon { font-size: 14px; }
+.tree-count {
+  font-size: 10px; font-weight: 500; color: var(--fg-dim); margin-left: auto;
+  background: var(--tag-bg); padding: 1px 6px; border-radius: 10px;
+}
+.tree-children { display: none; padding-left: 12px; }
+.tree-children.expanded { display: block; }
+.tree-item {
+  display: flex; align-items: center; gap: 6px; padding: 5px 12px 5px 28px;
+  font-size: 12px; color: var(--fg-muted); cursor: pointer; transition: background 0.15s;
+}
+.tree-item span:first-of-type {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-item .badgeWrap { display: inline-flex; flex-wrap: wrap; gap: 3px; margin-left: auto; justify-content: flex-end; max-width: 42%; }
+.tree-item .badge {
+  font-size: 9px; padding: 1px 5px; border-radius: 8px;
+  background: var(--tag-bg); color: var(--tag-fg); font-weight: 500;
+}
+
+/* ===== Center Panel ===== */
+.center-panel { flex: 1; display: flex; flex-direction: column; position: relative; background: var(--bg); }
+.legend {
+  position: absolute; bottom: 12px; left: 12px; z-index: 10;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 14px; font-size: 11px; box-shadow: var(--shadow);
+}
+.legend-row { display: flex; align-items: center; gap: 6px; margin: 4px 0; color: var(--fg-muted); cursor: pointer; user-select: none; border-radius: 4px; padding: 2px 6px; transition: opacity 0.2s; }
+.legend-row:hover { background: var(--bg-hover, rgba(128,128,128,0.1)); }
+.legend-row.hidden-type { opacity: 0.35; text-decoration: line-through; }
+.legend-line { width: 24px; height: 0; border-top: 2px solid; }
+.legend-dashed { border-top-style: dashed; }
+.legend-dotted { border-top: 2px dotted; }
+.legend-db { height: 3px; border-top: 3px double; }
+
+/* ===== Right Panel ===== */
+.right-panel {
+  width: 340px; min-width: 280px; max-width: 480px;
+  background: var(--bg-elev); border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.detail-header {
+  padding: 14px 16px 10px; border-bottom: 1px solid var(--border);
+}
+.detail-name { font-size: 15px; font-weight: 600; color: var(--fg); word-break: break-all; }
+.detail-meta { font-size: 11px; color: var(--fg-dim); margin-top: 4px; }
+.detail-scroll { flex: 1; overflow-y: auto; padding: 12px 16px; }
+.detail-section { margin-bottom: 16px; }
+.detail-section-title {
+  font-size: 11px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase;
+  letter-spacing: 0.5px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;
+}
+.detail-section-title::before { content: ""; width: 3px; height: 12px; border-radius: 2px; background: var(--accent); }
+.detail-box {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px 12px; font-size: 12px; line-height: 1.6; color: var(--fg);
+}
+.detail-box p { margin: 0 0 6px; }
+.detail-box p:last-child { margin-bottom: 0; }
+.detail-params .param { margin: 4px 0; padding-left: 8px; border-left: 2px solid var(--border); }
+.detail-params .param-name { font-family: "SF Mono", "Fira Code", monospace; font-size: 11.5px; color: var(--accent); }
+.detail-params .param-type { color: var(--fg-dim); font-size: 11px; }
+.detail-params .param-desc { color: var(--fg-muted); font-size: 11px; margin-top: 1px; }
+.detail-code {
+  background: var(--code-bg); border: 1px solid var(--border); border-radius: 5px;
+  padding: 8px 10px; font-family: "SF Mono", "Fira Code", monospace; font-size: 11px;
+  color: var(--fg); overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+  line-height: 1.5;
+}
+.detail-table { font-size: 11px; }
+.detail-table .field { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px dotted var(--border); }
+.detail-table .field:last-child { border-bottom: none; }
+.detail-table .field-name { font-family: "SF Mono", monospace; color: var(--accent); min-width: 120px; }
+.detail-table .field-type { color: var(--fg-dim); }
+.ddl-toggle {
+  font-size: 11px; color: var(--accent); cursor: pointer; margin-top: 6px; display: inline-flex; align-items: center; gap: 4px;
+}
+.ddl-toggle:hover { text-decoration: underline; }
+.ddl-block { display: none; margin-top: 8px; }
+.ddl-block.show { display: block; }
+
+/* ===== Bottom Bar ===== */
+.bottom-bar {
+  height: 32px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 16px; background: var(--bg-elev); border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--fg-dim); flex-shrink: 0;
+}
+.bottom-bar .btn {
+  padding: 3px 10px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg); color: var(--fg-muted); cursor: pointer; font-size: 11px; margin-left: 6px;
+}
+.bottom-bar .btn:hover { background: var(--bg-hover); }
+
+/* ===== SVG Graph ===== */
+svg { display: block; }
+.node-group { cursor: pointer; }
+.node-rect { rx: 6; transition: all 0.2s; }
+.node-group:hover .node-rect { filter: brightness(0.95); }
+.node-text { font-size: 11px; font-weight: 500; pointer-events: none; fill: var(--fg); }
+.node-badge { font-size: 9px; fill: var(--fg-dim); }
+.group-box { fill: none; stroke-dasharray: 4 3; rx: 8; }
+.link { fill: none; stroke-width: 1.5; transition: stroke-width 0.2s, stroke 0.2s, opacity 0.2s; cursor: pointer; pointer-events: stroke; }
+.link:hover { stroke-width: 8; opacity: 0.92; filter: brightness(1.15); }
+.link.selected { stroke-width: 9; opacity: 1; filter: brightness(1.2); }
+.link-label { font-size: 9px; fill: var(--fg-dim); pointer-events: none; }
+
+/* ===== Resizer ===== */
+.resizer { width: 4px; cursor: col-resize; background: transparent; transition: background 0.2s; }
+.resizer:hover { background: var(--accent-dim); }
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--fg-dim); }
+
+html[data-theme="light"] {
+  --bg: #f8f9fa; --bg-elev: #ffffff; --bg-hover: #f1f3f5; --fg: #1a1a2e; --fg-muted: #5a6573; --fg-dim: #8899aa;
+  --border: #e1e5e9; --border-strong: #c5cdd6; --accent: #3b82f6; --accent-dim: #93c5fd;
+  --call-color: #3b82f6; --async-color: #f59e0b; --http-color: #10b981; --db-color: #ef4444; --event-color: #8b5cf6;
+  --tag-bg: #e8f0fe; --tag-fg: #1a73e8; --code-bg: #f4f6f8;
+  --layer-1: #dbeafe; --layer-1-stroke: #2563eb; --layer-2: #dcfce7; --layer-2-stroke: #16a34a;
+  --layer-3: #fef3c7; --layer-3-stroke: #d97706; --layer-4: #f3e8ff; --layer-4-stroke: #9333ea;
+  --layer-5: #f1f5f9; --layer-5-stroke: #64748b;
+}
+html[data-theme="dark"] {
+  --bg: #0f1117; --bg-elev: #1a1d24; --bg-hover: #252a33; --fg: #e2e8f0; --fg-muted: #94a3b8; --fg-dim: #64748b;
+  --border: #2d333b; --border-strong: #444c56; --accent: #60a5fa; --accent-dim: #3b82f6;
+  --call-color: #60a5fa; --async-color: #fbbf24; --http-color: #34d399; --db-color: #f87171; --event-color: #c4b5fd;
+  --tag-bg: #1e3a5f; --tag-fg: #93c5fd; --code-bg: #161b22;
+  --layer-1: #1e3a5f; --layer-1-stroke: #60a5fa; --layer-2: #1a3a2a; --layer-2-stroke: #34d399;
+  --layer-3: #3a3214; --layer-3-stroke: #fbbf24; --layer-4: #2a1a4a; --layer-4-stroke: #a78bfa;
+  --layer-5: #1e2228; --layer-5-stroke: #6b7280;
+}
+.graph-toolbar {
+  position: absolute; top: 10px; right: 12px; z-index: 12; display: flex; gap: 6px; align-items: center;
+}
+.graph-toolbar button {
+  padding: 4px 10px; font-size: 11px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg-elev); color: var(--fg-muted); cursor: pointer;
+}
+.graph-toolbar button:hover { background: var(--bg-hover); color: var(--fg); }
+.graph-hint { position: absolute; top: 10px; left: 12px; z-index: 11; font-size: 11px; color: var(--fg-dim); max-width: 58%; }
+.domain-region { rx: 10; ry: 10; stroke-width: 1.5; transition: opacity 0.2s; }
+.domain-drag-hit { cursor: grab; }
+.domain-drag-hit.domain-dragging { cursor: grabbing; }
+.domain-group.collapsed .domain-region { opacity: 0.55; }
+#graph-svg { width: 100%; height: 100%; min-height: 320px; }
+.graph-zoom-bg { pointer-events: none; }
+/* HTML 子组折叠按钮叠在 SVG 上，避免 SVG 命中/zoom 抢焦点问题 */
+#graph-subgroup-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9;
+}
+#graph-subgroup-overlay .sg-html-collapse {
+  position: absolute;
+  pointer-events: auto;
+  width: 20px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  box-shadow: var(--shadow);
+}
+#graph-subgroup-overlay .sg-html-collapse:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.node-group.dim .node-rect { opacity: 0.22; }
+.node-group.dim .node-text { opacity: 0.35; }
+.node-group.selected .node-rect { stroke: var(--accent); stroke-width: 2px; }
+.subgroup-box { fill: rgba(128,128,128,0.06); stroke: var(--border); stroke-dasharray: 3 3; }
+.subgroup-label { font-size: 11px; font-weight: 600; fill: var(--fg-muted); pointer-events: none; }
+.hooks-toggle-btn { cursor: pointer; }
+.hooks-toggle-btn rect { fill: var(--bg-elev); stroke: var(--border); }
+.hooks-toggle-btn:hover rect { fill: var(--bg-hover); }
+.hooks-toggle-btn text { font-size: 10px; fill: var(--fg-muted); pointer-events: none; }
+.hooks-toggle-btn.active rect { fill: var(--accent); stroke: var(--accent); }
+.hooks-toggle-btn.active text { fill: #fff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>TeamMemory 交互式架构图</h1>
+  <div class="header-right">
+    <input type="search" id="global-search" class="search-box" placeholder="筛选模块名称 / 路径 / 描述…" autocomplete="off" />
+    <button type="button" id="theme-btn" class="theme-toggle" title="切换明暗主题">◐</button>
+  </div>
+</header>
+<div class="main">
+  <aside class="left-panel" id="left-panel">
+    <div class="view-toggle">
+      <button type="button" id="mode-domain" class="active">功能域</button>
+      <button type="button" id="mode-layer">分层</button>
+    </div>
+    <div class="tree-scroll" id="tree-root"></div>
+  </aside>
+  <div class="resizer" id="resizer-left" aria-hidden="true"></div>
+  <section class="center-panel">
+    <div class="graph-hint">滚轮缩放 · 拖拽平移 · 拖拽节点微调 · 拖拽域标题栏移动域 · 轻点域标题左侧可折叠域 · 指定子组标题旁 ▸/▾ 折叠（生命周期四段 / Embedding·Reranker providers）· Hooks 域右上角切换分组 · Config 聚合节点展开 · 双击 L2 展开下级</div>
+    <div class="graph-toolbar">
+      <button type="button" id="zoom-in">放大</button>
+      <button type="button" id="zoom-out">缩小</button>
+      <button type="button" id="export-json">导出 JSON</button>
+    </div>
+    <svg id="graph-svg"><g id="graph-zoom-layer"><g id="graph-domains"></g><g id="graph-links"></g><g id="graph-nodes"></g></g></svg>
+    <div id="graph-subgroup-overlay" aria-hidden="true"></div>
+    <div class="legend" id="edge-legend">
+      <div style="font-size:10px;color:var(--fg-muted);margin-bottom:4px;">点击切换显隐</div>
+      <div class="legend-row" data-edge-type="call"><span class="legend-line" style="border-color:var(--call-color)"></span> 同步调用 · call</div>
+      <div class="legend-row" data-edge-type="async"><span class="legend-line legend-dashed" style="border-color:var(--async-color)"></span> 异步 · async</div>
+      <div class="legend-row" data-edge-type="db"><span class="legend-line legend-db" style="border-color:var(--db-color)"></span> 数据库 · db</div>
+      <div class="legend-row" data-edge-type="event"><span class="legend-line legend-dotted" style="border-color:var(--event-color)"></span> 事件 / 投递 · event</div>
+    </div>
+  </section>
+  <div class="resizer" id="resizer-right" aria-hidden="true"></div>
+  <aside class="right-panel" id="right-panel">
+    <div class="detail-header">
+      <div class="detail-name" id="detail-title">请选择模块</div>
+      <div class="detail-meta" id="detail-meta"></div>
+    </div>
+    <div class="detail-scroll" id="detail-body"></div>
+  </aside>
+</div>
+<footer class="bottom-bar">
+  <span id="status-text"></span>
+  <span><button type="button" class="btn" id="btn-reset-graph">重置视图</button></span>
+</footer>
+<script>
+(function () {
+"use strict";
+const LAYER_Y = { entry: 80, services: 220, daemon: 380, data: 520, external: 660 };
+
+const DOMAIN_META = [
+  ["entry", "顶层入口", "🚀"],
+  ["web", "Web", "🌐"],
+  ["hooks", "平台 Hook", "🪝"],
+  ["daemon", "Daemon", "🔧"],
+  ["services", "Services", "📦"],
+  ["embedding", "Embedding", "🧬"],
+  ["reranker", "Reranker", "📐"],
+  ["config", "Config", "⚙️"],
+  ["auth", "Auth", "🔐"],
+  ["storage", "Storage", "🗄️"],
+  ["monitoring", "Monitoring", "📡"],
+  ["external", "外部依赖", "☁️"],
+];
+
+const BAND_LABELS = { entry: "入口层", services: "Services", daemon: "Daemon", data: "Storage", external: "外部" };
+const BAND_ORDER = { entry: 0, services: 1, daemon: 2, data: 3, external: 4 };
+
+const HOOKS_PLATFORM_ORDER = ["Claude", "Cursor", "Hermes", "公共"];
+const HOOKS_LIFECYCLE_ORDER = ["会话开始", "提示词/输入", "工具/响应后", "会话结束", "完整流水线", "公共"];
+
+/** 仅这 6 类子组可折叠（同功能多实现聚合） */
+const HOOKS_LIFECYCLE_COLLAPSIBLE = new Set(["会话开始", "提示词/输入", "工具/响应后", "会话结束"]);
+
+/**
+ * DAG 混合布局：3 列栅格，6 行。列宽取该列在所有行中出现域的最大 boxW。
+ * 每行 [左,中,右] 为 domain key 或 null。
+ */
+const DAG_LAYOUT_ROWS = [
+  [null, "entry", null],
+  ["hooks", "web", "auth"],
+  ["daemon", "embedding", "services"],
+  ["config", "reranker", null],
+  ["monitoring", "storage", "external"],
+];
+
+/** domain -> 子组显示顺序 */
+const SUBDOMAIN_ORDER = {
+  entry: ["入口"],
+  web: ["核心", "Routes"],
+  daemon: ["核心运行", "缓冲/队列", "精炼/加工", "补全/批处理", "搜索评估", "Wiki/知识", "监控/统计", "实验"],
+  services: ["搜索", "经验管理", "LLM", "实体/模式", "归档", "维护", "基础"],
+  embedding: ["core", "providers"],
+  reranker: ["core", "providers"],
+  config: ["模块"],
+  auth: ["provider", "permissions", "oauth", "init_admin"],
+  storage: ["database", "models", "repository", "archive_repo", "personal_memory_repo", "search_log_repo", "query_builders"],
+  monitoring: ["runtime"],
+  external: ["infra"],
+};
+
+const GRAPH_LAYOUT = {
+  topPad: 40,
+  domainGapY: 44,
+  sidePad: 36,
+  titleH: 30,
+  hooksToggleH: 26,
+  subgroupTitleH: 16,
+  innerPadX: 14,
+  innerPadY: 12,
+  subgroupGapY: 18,
+  subgroupInnerPadX: 10,
+  subgroupInnerPadY: 8,
+  nodeGapX: 12,
+  nodeGapY: 12,
+  nodeH: 34,
+  configCollapsedH: 52,
+  minDomainCollapsedH: 44,
+  minDomainInnerW: 340,
+  maxCols: 4,
+  /** DAG 栅格列最小宽度：避免占位过窄时在视觉上像在「大块」中层叠 */
+  dagMinColW: 320,
+};
+
+function domainChrome(domainKey) {
+  const p = {
+    entry: { fill: "rgba(37,99,235,0.09)", stroke: "var(--layer-1-stroke)" },
+    web: { fill: "rgba(59,130,246,0.07)", stroke: "var(--layer-1-stroke)" },
+    hooks: { fill: "rgba(37,99,235,0.08)", stroke: "var(--layer-1-stroke)" },
+    daemon: { fill: "rgba(217,119,6,0.1)", stroke: "var(--layer-3-stroke)" },
+    services: { fill: "rgba(22,163,74,0.08)", stroke: "var(--layer-2-stroke)" },
+    embedding: { fill: "rgba(6,182,212,0.08)", stroke: "var(--layer-2-stroke)" },
+    reranker: { fill: "rgba(139,92,246,0.08)", stroke: "var(--layer-4-stroke)" },
+    config: { fill: "rgba(100,116,139,0.1)", stroke: "var(--layer-5-stroke)" },
+    auth: { fill: "rgba(180,83,9,0.08)", stroke: "var(--layer-2-stroke)" },
+    storage: { fill: "rgba(147,51,234,0.09)", stroke: "var(--layer-4-stroke)" },
+    monitoring: { fill: "rgba(14,165,233,0.08)", stroke: "var(--layer-1-stroke)" },
+    external: { fill: "rgba(100,116,139,0.12)", stroke: "var(--layer-5-stroke)" },
+  };
+  return p[domainKey] || { fill: "rgba(100,116,139,0.1)", stroke: "var(--border-strong)" };
+}
+
+function domainLabelMeta(domainKey) {
+  const row = DOMAIN_META.find((x) => x[0] === domainKey);
+  return row ? { title: row[1], icon: row[2] } : { title: domainKey, icon: "▦" };
+}
+
+function M(spec) {
+  const d = spec.dependencies || { in: [], out: [] };
+  return {
+    inputs: spec.inputs || [],
+    outputs: spec.outputs || [],
+    db_tables: spec.db_tables || [],
+    cli_make: spec.cli_make || [],
+    dependencies: { in: d.in || [], out: d.out || [] },
+    tags: spec.tags || [],
+    graphExpand: spec.graphExpand || [],
+    ...spec,
+  };
+}
+const MODULES = {
+  "mcp-server": M({"id":"mcp-server","name":"server.py","path":"src/team_memory/server.py","domain":"entry","subgroup":"入口","layer":"entry","level":"L3","band":"entry","description":"FastMCP：memory_* 工具；远程 HTTP。","tags":["MCP"],"dependencies":{"in":[],"out":["memory-operations","search-orchestrator"]}}),
+  "cli": M({"id":"cli","name":"cli.py","path":"src/team_memory/cli.py","domain":"entry","subgroup":"入口","layer":"entry","level":"L3","band":"entry","description":"tm-cli。","tags":["CLI"],"dependencies":{"in":[],"out":["remote-client"]}}),
+  "bootstrap": M({"id":"bootstrap","name":"bootstrap.py","path":"src/team_memory/bootstrap.py","domain":"entry","subgroup":"入口","layer":"services","level":"L2","band":"services","description":"AppContext。","graphExpand":["cfg-settings","llm-client"],"dependencies":{"in":[],"out":["web-app","database","event-bus"]}}),
+  "client-config": M({"id":"client-config","name":"client_config.py","path":"src/team_memory/client_config.py","domain":"entry","subgroup":"入口","layer":"services","level":"L3","band":"services","description":"客户端 TOML。","cli_make":["tm-cli config show"],"dependencies":{"in":[],"out":[]}}),
+  "project-resolver": M({"id":"project-resolver","name":"project_resolver.py","path":"src/team_memory/project_resolver.py","domain":"entry","subgroup":"入口","layer":"services","level":"L3","band":"services","description":"项目名推断。","dependencies":{"in":[],"out":[]}}),
+  "remote-client": M({"id":"remote-client","name":"remote_client.py","path":"src/team_memory/remote_client.py","domain":"entry","subgroup":"入口","layer":"services","level":"L3","band":"services","description":"HTTP 远程客户端。","tags":["HTTP"],"dependencies":{"in":["cli"],"out":["web-app"]}}),
+  "web-app": M({"id":"web-app","name":"web/app.py","path":"src/team_memory/web/app.py","domain":"web","subgroup":"核心","layer":"entry","level":"L2","band":"entry","description":"FastAPI。","tags":["Web"],"graphExpand":["routes-search","middleware-stack"],"dependencies":{"in":["bootstrap"],"out":["routes-search","routes-experiences","routes-auth","routes-archives","routes-janitor","routes-entities","routes-personal-memory","routes-config","routes-dedup","routes-mcp-compat"]}}),
+  "middleware-stack": M({"id":"middleware-stack","name":"web/middleware.py","path":"src/team_memory/web/middleware.py","domain":"web","subgroup":"核心","layer":"services","level":"L3","band":"services","description":"全局中间件。","dependencies":{"in":["web-app"],"out":[]}}),
+  "web-dependencies": M({"id":"web-dependencies","name":"dependencies.py","path":"src/team_memory/web/dependencies.py","domain":"web","subgroup":"核心","layer":"services","level":"L3","band":"services","description":"依赖注入。","dependencies":{"in":["web-app"],"out":[]}}),
+  "web-mcp-auth": M({"id":"web-mcp-auth","name":"mcp_auth_middleware.py","path":"src/team_memory/web/mcp_auth_middleware.py","domain":"web","subgroup":"核心","layer":"services","level":"L3","band":"services","tags":["MCP"],"dependencies":{"in":["auth-provider"],"out":["web-app"]}}),
+  "auth-session": M({"id":"auth-session","name":"auth_session.py","path":"src/team_memory/web/auth_session.py","domain":"web","subgroup":"核心","layer":"services","level":"L3","band":"services","dependencies":{"in":["routes-auth"],"out":["web-app"]}}),
+  "web-schemas": M({"id":"web-schemas","name":"schemas.py","path":"src/team_memory/web/schemas.py","domain":"web","subgroup":"核心","layer":"services","level":"L3","band":"services","description":"Web Pydantic。","dependencies":{"in":[],"out":["routes-experiences"]}}),
+  "routes-search": M({"id":"routes-search","name":"search.py","path":"src/team_memory/web/routes/search.py","domain":"web","subgroup":"Routes","layer":"services","level":"L3","band":"services","tags":["API"],"dependencies":{"in":["web-app"],"out":["search-orchestrator"]}}),
+  "routes-experiences": M({"id":"routes-experiences","name":"experiences.py","path":"src/team_memory/web/routes/experiences.py","domain":"web","subgroup":"Routes","layer":"services","level":"L3","band":"services","tags":["API"],"dependencies":{"in":["web-app"],"out":["experience-service"]}}),
+  "routes-auth": M({"id":"routes-auth","name":"auth.py","path":"src/team_memory/web/routes/auth.py","domain":"web","subgroup":"Routes","layer":"services","level":"L3","band":"services","tags":["API"],"dependencies":{"in":["web-app"],"out":["auth-provider","auth-session"]}}),
+  "routes-archives": M({"id":"routes-archives","name":"archives.py","path":"src/team_memory/web/routes/archives.py","domain":"web","subgroup":"Routes","layer":"services","level":"L3","band":"services","tags":["API"],"dependencies":{"in":["web-app"],"out":["archive-service"]}}),
+  "routes-janitor": M({"id":"routes-janitor","name":"janitor.py","path":"src/team_memory/web/routes/janitor.py","domain":"web","subgroup":"Routes","layer":"services","level":"L3","band":"services","tags":["API"],"dependencies":{"in":["web-app"],"out":["janitor"]}}),
+  "routes-entities": M({"id":"routes-entities","name":"entities.py","path":"src/team_memory/web/routes/entities.py","domain":"web","subgroup":"Routes","layer":"services","level":"L3","band":"services","tags":["API"],"dependencies":{"in":["web-app"],"out":["entity-extractor"]}}),
+  "routes-personal-memory": M({"id":"routes-personal-memory","name":"personal_memory.py","path":"src/team_memory/web/routes/personal_memory.py","domain":"web","subgroup":"Routes","layer":"services","level":"L3","band":"services","tags":["API"],"dependencies":{"in":["web-app"],"out":["personal-memory-service"]}}),
+  "routes-config": M({"id":"routes-config","name":"config.py","path":"src/team_memory/web/routes/config.py","domain":"web","subgroup":"Routes","layer":"services","level":"L3","band":"services","tags":["API"],"dependencies":{"in":["web-app"],"out":["bootstrap"]}}),
+  "routes-dedup": M({"id":"routes-dedup","name":"dedup.py","path":"src/team_memory/web/routes/dedup.py","domain":"web","subgroup":"Routes","layer":"services","level":"L3","band":"services","tags":["API"],"dependencies":{"in":["web-app"],"out":["repository"]}}),
+  "routes-mcp-compat": M({"id":"routes-mcp-compat","name":"mcp_compat.py","path":"src/team_memory/web/routes/mcp_compat.py","domain":"web","subgroup":"Routes","layer":"services","level":"L3","band":"services","tags":["API"],"dependencies":{"in":["web-app"],"out":["memory-operations"]}}),
+  "hook-claude-session-start": M({"id":"hook-claude-session-start","name":"claude_session_start.py","path":"src/team_memory/hooks/claude_session_start.py","domain":"hooks","subgroup":"Claude","subhooksPlatform":"Claude","subhooksLifecycle":"会话开始","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":["daemon-pipeline"]}}),
+  "hook-claude-user-prompt-submit": M({"id":"hook-claude-user-prompt-submit","name":"claude_user_prompt_submit.py","path":"src/team_memory/hooks/claude_user_prompt_submit.py","domain":"hooks","subgroup":"Claude","subhooksPlatform":"Claude","subhooksLifecycle":"提示词/输入","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":["daemon-pipeline"]}}),
+  "hook-claude-post-tool-use": M({"id":"hook-claude-post-tool-use","name":"claude_post_tool_use.py","path":"src/team_memory/hooks/claude_post_tool_use.py","domain":"hooks","subgroup":"Claude","subhooksPlatform":"Claude","subhooksLifecycle":"工具/响应后","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":["daemon-pipeline"]}}),
+  "hook-claude-stop": M({"id":"hook-claude-stop","name":"claude_stop.py","path":"src/team_memory/hooks/claude_stop.py","domain":"hooks","subgroup":"Claude","subhooksPlatform":"Claude","subhooksLifecycle":"会话结束","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":["daemon-pipeline"]}}),
+  "hook-cursor-session-start": M({"id":"hook-cursor-session-start","name":"cursor_session_start.py","path":"src/team_memory/hooks/cursor_session_start.py","domain":"hooks","subgroup":"Cursor","subhooksPlatform":"Cursor","subhooksLifecycle":"会话开始","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":["daemon-pipeline"]}}),
+  "hook-cursor-before-prompt": M({"id":"hook-cursor-before-prompt","name":"cursor_before_prompt.py","path":"src/team_memory/hooks/cursor_before_prompt.py","domain":"hooks","subgroup":"Cursor","subhooksPlatform":"Cursor","subhooksLifecycle":"提示词/输入","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":["daemon-pipeline"]}}),
+  "hook-cursor-after-response": M({"id":"hook-cursor-after-response","name":"cursor_after_response.py","path":"src/team_memory/hooks/cursor_after_response.py","domain":"hooks","subgroup":"Cursor","subhooksPlatform":"Cursor","subhooksLifecycle":"工具/响应后","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":["daemon-pipeline"]}}),
+  "hook-cursor-after-mcp": M({"id":"hook-cursor-after-mcp","name":"cursor_after_mcp.py","path":"src/team_memory/hooks/cursor_after_mcp.py","domain":"hooks","subgroup":"Cursor","subhooksPlatform":"Cursor","subhooksLifecycle":"工具/响应后","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":["daemon-pipeline"]}}),
+  "hook-hermes-user-prompt-submit": M({"id":"hook-hermes-user-prompt-submit","name":"hermes_user_prompt_submit.py","path":"src/team_memory/hooks/hermes_user_prompt_submit.py","domain":"hooks","subgroup":"Hermes","subhooksPlatform":"Hermes","subhooksLifecycle":"提示词/输入","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":["daemon-pipeline"]}}),
+  "hook-hermes-post-tool-call": M({"id":"hook-hermes-post-tool-call","name":"hermes_post_tool_call.py","path":"src/team_memory/hooks/hermes_post_tool_call.py","domain":"hooks","subgroup":"Hermes","subhooksPlatform":"Hermes","subhooksLifecycle":"工具/响应后","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":["daemon-pipeline"]}}),
+  "hook-hermes-stop": M({"id":"hook-hermes-stop","name":"hermes_stop.py","path":"src/team_memory/hooks/hermes_stop.py","domain":"hooks","subgroup":"Hermes","subhooksPlatform":"Hermes","subhooksLifecycle":"会话结束","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":["daemon-pipeline"]}}),
+  "hook-hermes-pipeline": M({"id":"hook-hermes-pipeline","name":"hermes_pipeline.py","path":"src/team_memory/hooks/hermes_pipeline.py","domain":"hooks","subgroup":"Hermes","subhooksPlatform":"Hermes","subhooksLifecycle":"完整流水线","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":["daemon-pipeline"]}}),
+  "hook-common": M({"id":"hook-common","name":"common.py","path":"src/team_memory/hooks/common.py","domain":"hooks","subgroup":"公共","subhooksPlatform":"公共","subhooksLifecycle":"公共","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":[]}}),
+  "hook-shared": M({"id":"hook-shared","name":"shared.py","path":"src/team_memory/hooks/shared.py","domain":"hooks","subgroup":"公共","subhooksPlatform":"公共","subhooksLifecycle":"公共","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":[]}}),
+  "hook-git-watcher": M({"id":"hook-git-watcher","name":"git_watcher.py","path":"src/team_memory/hooks/git_watcher.py","domain":"hooks","subgroup":"公共","subhooksPlatform":"公共","subhooksLifecycle":"公共","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":["daemon-pipeline"]}}),
+  "hook-initial-index": M({"id":"hook-initial-index","name":"initial_index.py","path":"src/team_memory/hooks/initial_index.py","domain":"hooks","subgroup":"公共","subhooksPlatform":"公共","subhooksLifecycle":"公共","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":["daemon-markdown-indexer"]}}),
+  "hook-retrieval-trigger": M({"id":"hook-retrieval-trigger","name":"retrieval_trigger.py","path":"src/team_memory/hooks/retrieval_trigger.py","domain":"hooks","subgroup":"公共","subhooksPlatform":"公共","subhooksLifecycle":"公共","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":["daemon-pipeline"]}}),
+  "hook-session-timeout": M({"id":"hook-session-timeout","name":"session_timeout.py","path":"src/team_memory/hooks/session_timeout.py","domain":"hooks","subgroup":"公共","subhooksPlatform":"公共","subhooksLifecycle":"公共","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":["daemon-pipeline"]}}),
+  "hook-weekly-report": M({"id":"hook-weekly-report","name":"weekly_report.py","path":"src/team_memory/hooks/weekly_report.py","domain":"hooks","subgroup":"公共","subhooksPlatform":"公共","subhooksLifecycle":"公共","layer":"entry","level":"L3","band":"entry","tags":["Hook"],"dependencies":{"in":[],"out":["daemon-pipeline"]}}),
+  "daemon-__main__": M({"id":"daemon-__main__","name":"__main__.py","path":"src/team_memory/daemon/__main__.py","domain":"daemon","subgroup":"核心运行","layer":"daemon","level":"L3","band":"daemon","description":"tm-daemon CLI。","dependencies":{"in":[],"out":["daemon-app"]}}),
+  "daemon-app": M({"id":"daemon-app","name":"app.py","path":"src/team_memory/daemon/app.py","domain":"daemon","subgroup":"核心运行","layer":"daemon","level":"L2","band":"daemon","description":"守护进程 HTTP。","graphExpand":["daemon-draft-buffer","daemon-refinement-worker","daemon-metrics"],"dependencies":{"in":[],"out":["daemon-pipeline","daemon-watcher","daemon-health-check","daemon-pending-queue","daemon-metrics","daemon-markdown-indexer","daemon-reloader","daemon-payload-capture","daemon-response-buffer"]}}),
+  "daemon-config": M({"id":"daemon-config","name":"config.py","path":"src/team_memory/daemon/config.py","domain":"daemon","subgroup":"核心运行","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":["client-config"],"out":["daemon-app"]}}),
+  "daemon-pipeline": M({"id":"daemon-pipeline","name":"pipeline.py","path":"src/team_memory/daemon/pipeline.py","domain":"daemon","subgroup":"核心运行","layer":"daemon","level":"L2","band":"daemon","description":"Hook 事件管线。","graphExpand":["daemon-draft-refiner","daemon-convergence"],"dependencies":{"in":["daemon-app"],"out":["daemon-conversation-buffer","daemon-tm-sink","daemon-draft-buffer","daemon-draft-refiner","daemon-convergence","daemon-refinement-worker","daemon-search-log-writer","daemon-personal-memory-extractor"]}}),
+  "daemon-reloader": M({"id":"daemon-reloader","name":"reloader.py","path":"src/team_memory/daemon/reloader.py","domain":"daemon","subgroup":"核心运行","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":["daemon-app"],"out":[]}}),
+  "daemon-health-check": M({"id":"daemon-health-check","name":"health_check.py","path":"src/team_memory/daemon/health_check.py","domain":"daemon","subgroup":"核心运行","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":["daemon-app"],"out":[]}}),
+  "daemon-conversation-buffer": M({"id":"daemon-conversation-buffer","name":"conversation_buffer.py","path":"src/team_memory/daemon/conversation_buffer.py","domain":"daemon","subgroup":"缓冲/队列","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":["daemon-pipeline"],"out":[]}}),
+  "daemon-draft-buffer": M({"id":"daemon-draft-buffer","name":"draft_buffer.py","path":"src/team_memory/daemon/draft_buffer.py","domain":"daemon","subgroup":"缓冲/队列","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":["daemon-pipeline"],"out":[]}}),
+  "daemon-response-buffer": M({"id":"daemon-response-buffer","name":"response_buffer.py","path":"src/team_memory/daemon/response_buffer.py","domain":"daemon","subgroup":"缓冲/队列","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":["daemon-app"],"out":[]}}),
+  "daemon-pending-queue": M({"id":"daemon-pending-queue","name":"pending_queue.py","path":"src/team_memory/daemon/pending_queue.py","domain":"daemon","subgroup":"缓冲/队列","layer":"daemon","level":"L3","band":"daemon","description":"","tags":["Event"],"dependencies":{"in":["daemon-app"],"out":[]}}),
+  "daemon-payload-capture": M({"id":"daemon-payload-capture","name":"payload_capture.py","path":"src/team_memory/daemon/payload_capture.py","domain":"daemon","subgroup":"缓冲/队列","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":["daemon-app"],"out":[]}}),
+  "daemon-draft-refiner": M({"id":"daemon-draft-refiner","name":"draft_refiner.py","path":"src/team_memory/daemon/draft_refiner.py","domain":"daemon","subgroup":"精炼/加工","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":["daemon-pipeline"],"out":["llm-client"]}}),
+  "daemon-refinement-worker": M({"id":"daemon-refinement-worker","name":"refinement_worker.py","path":"src/team_memory/daemon/refinement_worker.py","domain":"daemon","subgroup":"精炼/加工","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":["daemon-pipeline"],"out":[]}}),
+  "daemon-intent-classifier": M({"id":"daemon-intent-classifier","name":"intent_classifier.py","path":"src/team_memory/daemon/intent_classifier.py","domain":"daemon","subgroup":"精炼/加工","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":["daemon-pipeline"],"out":[]}}),
+  "daemon-convergence": M({"id":"daemon-convergence","name":"convergence_detector.py","path":"src/team_memory/daemon/convergence_detector.py","domain":"daemon","subgroup":"精炼/加工","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":["daemon-pipeline"],"out":[]}}),
+  "daemon-personal-memory-extractor": M({"id":"daemon-personal-memory-extractor","name":"personal_memory_extractor.py","path":"src/team_memory/daemon/personal_memory_extractor.py","domain":"daemon","subgroup":"精炼/加工","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":["daemon-pipeline"],"out":["personal-memory-service"]}}),
+  "daemon-embedding-backfill": M({"id":"daemon-embedding-backfill","name":"embedding_backfill.py","path":"src/team_memory/daemon/embedding_backfill.py","domain":"daemon","subgroup":"补全/批处理","layer":"daemon","level":"L3","band":"daemon","description":"","tags":["批处理"],"dependencies":{"in":["bootstrap"],"out":["repository","embedding-ollama","embedding-openai","embedding-generic","embedding-local"]}}),
+  "daemon-entity-backfill": M({"id":"daemon-entity-backfill","name":"entity_backfill.py","path":"src/team_memory/daemon/entity_backfill.py","domain":"daemon","subgroup":"补全/批处理","layer":"daemon","level":"L3","band":"daemon","description":"","tags":["批处理"],"dependencies":{"in":[],"out":["entity-extractor","repository"]}}),
+  "daemon-entity-dedup": M({"id":"daemon-entity-dedup","name":"entity_dedup.py","path":"src/team_memory/daemon/entity_dedup.py","domain":"daemon","subgroup":"补全/批处理","layer":"daemon","level":"L3","band":"daemon","description":"","tags":["批处理"],"dependencies":{"in":[],"out":["repository"]}}),
+  "daemon-solution-backfill": M({"id":"daemon-solution-backfill","name":"solution_backfill.py","path":"src/team_memory/daemon/solution_backfill.py","domain":"daemon","subgroup":"补全/批处理","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":[],"out":["repository"]}}),
+  "daemon-faithfulness-batch": M({"id":"daemon-faithfulness-batch","name":"faithfulness_batch.py","path":"src/team_memory/daemon/faithfulness_batch.py","domain":"daemon","subgroup":"补全/批处理","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":[],"out":["repository"]}}),
+  "daemon-faithfulness-judge": M({"id":"daemon-faithfulness-judge","name":"faithfulness_judge.py","path":"src/team_memory/daemon/faithfulness_judge.py","domain":"daemon","subgroup":"补全/批处理","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":[],"out":["llm-client"]}}),
+  "daemon-search-eval": M({"id":"daemon-search-eval","name":"search_eval.py","path":"src/team_memory/daemon/search_eval.py","domain":"daemon","subgroup":"搜索评估","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":[],"out":["search-pipeline"]}}),
+  "daemon-search-log-writer": M({"id":"daemon-search-log-writer","name":"search_log_writer.py","path":"src/team_memory/daemon/search_log_writer.py","domain":"daemon","subgroup":"搜索评估","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":[],"out":["search-log-repo"]}}),
+  "daemon-llm-wiki": M({"id":"daemon-llm-wiki","name":"llm_wiki.py","path":"src/team_memory/daemon/llm_wiki.py","domain":"daemon","subgroup":"Wiki/知识","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":[],"out":["llm-client"]}}),
+  "daemon-wiki-cli": M({"id":"daemon-wiki-cli","name":"wiki_cli.py","path":"src/team_memory/daemon/wiki_cli.py","domain":"daemon","subgroup":"Wiki/知识","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":[],"out":[]}}),
+  "daemon-wiki-compiler": M({"id":"daemon-wiki-compiler","name":"wiki_compiler.py","path":"src/team_memory/daemon/wiki_compiler.py","domain":"daemon","subgroup":"Wiki/知识","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":[],"out":["repository"]}}),
+  "daemon-markdown-indexer": M({"id":"daemon-markdown-indexer","name":"markdown_indexer.py","path":"src/team_memory/daemon/markdown_indexer.py","domain":"daemon","subgroup":"Wiki/知识","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":["daemon-app"],"out":["repository"]}}),
+  "daemon-metrics": M({"id":"daemon-metrics","name":"metrics_collector.py","path":"src/team_memory/daemon/metrics_collector.py","domain":"daemon","subgroup":"监控/统计","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":["daemon-app"],"out":[]}}),
+  "daemon-tm-stats": M({"id":"daemon-tm-stats","name":"tm_stats.py","path":"src/team_memory/daemon/tm_stats.py","domain":"daemon","subgroup":"监控/统计","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":[],"out":[]}}),
+  "daemon-tm-sink": M({"id":"daemon-tm-sink","name":"tm_sink.py","path":"src/team_memory/daemon/tm_sink.py","domain":"daemon","subgroup":"监控/统计","layer":"daemon","level":"L3","band":"daemon","description":"POST Web API","dependencies":{"in":["daemon-pipeline"],"out":["web-app"]}}),
+  "daemon-structured-logger": M({"id":"daemon-structured-logger","name":"structured_logger.py","path":"src/team_memory/daemon/structured_logger.py","domain":"daemon","subgroup":"监控/统计","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":[],"out":[]}}),
+  "daemon-watcher": M({"id":"daemon-watcher","name":"watcher.py","path":"src/team_memory/daemon/watcher.py","domain":"daemon","subgroup":"监控/统计","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":["daemon-app"],"out":["daemon-pipeline"]}}),
+  "daemon-auto-dream": M({"id":"daemon-auto-dream","name":"auto_dream.py","path":"src/team_memory/daemon/auto_dream.py","domain":"daemon","subgroup":"实验","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":[],"out":[]}}),
+  "daemon-test-llm": M({"id":"daemon-test-llm","name":"test_llm.py","path":"src/team_memory/daemon/test_llm.py","domain":"daemon","subgroup":"实验","layer":"daemon","level":"L3","band":"daemon","description":"","dependencies":{"in":[],"out":["llm-client"]}}),
+  "search-orchestrator": M({"id":"search-orchestrator","name":"search_orchestrator.py","path":"src/team_memory/services/search_orchestrator.py","domain":"services","subgroup":"搜索","layer":"services","level":"L2","band":"services","description":"搜索编排。","tags":["RRF"],"graphExpand":["search-pipeline","entity-search","tokenizer","reranker-factory"],"db_tables":["search_logs"],"dependencies":{"in":["memory-operations","routes-search"],"out":["search-pipeline","evaluation"]}}),
+  "search-pipeline": M({"id":"search-pipeline","name":"search_pipeline.py","path":"src/team_memory/services/search_pipeline.py","domain":"services","subgroup":"搜索","layer":"services","level":"L3","band":"services","description":"RRF + rerank。","tags":["RRF","向量"],"dependencies":{"in":["search-orchestrator"],"out":["repository","cache-service","reranker-factory","embedding-ollama"]}}),
+  "entity-search": M({"id":"entity-search","name":"entity_search.py","path":"src/team_memory/services/entity_search.py","domain":"services","subgroup":"搜索","layer":"services","level":"L3","band":"services","description":"","dependencies":{"in":["search-orchestrator"],"out":["repository"]}}),
+  "tokenizer": M({"id":"tokenizer","name":"tokenizer.py","path":"src/team_memory/services/tokenizer.py","domain":"services","subgroup":"搜索","layer":"services","level":"L3","band":"services","description":"","dependencies":{"in":["search-pipeline"],"out":[]}}),
+  "cache-service": M({"id":"cache-service","name":"cache.py","path":"src/team_memory/services/cache.py","domain":"services","subgroup":"搜索","layer":"services","level":"L3","band":"services","description":"检索缓存。","dependencies":{"in":["search-pipeline"],"out":["redis"]}}),
+  "evaluation": M({"id":"evaluation","name":"evaluation.py","path":"src/team_memory/services/evaluation.py","domain":"services","subgroup":"搜索","layer":"services","level":"L3","band":"services","description":"","db_tables":["experiences"],"dependencies":{"in":["search-orchestrator"],"out":["experience-service"]}}),
+  "memory-operations": M({"id":"memory-operations","name":"memory_operations.py","path":"src/team_memory/services/memory_operations.py","domain":"services","subgroup":"经验管理","layer":"services","level":"L2","band":"services","description":"MCP 共享编排。","tags":["MCP"],"dependencies":{"in":["mcp-server","routes-mcp-compat"],"out":["experience-service","archive-service","search-orchestrator","personal-memory-service","search-log-repo"]}}),
+  "experience-service": M({"id":"experience-service","name":"experience.py","path":"src/team_memory/services/experience.py","domain":"services","subgroup":"经验管理","layer":"services","level":"L2","band":"services","description":"","graphExpand":["janitor","intent-router"],"db_tables":["experiences","experience_feedbacks","experience_entities"],"dependencies":{"in":["memory-operations","routes-experiences"],"out":["repository","embedding-ollama"]}}),
+  "personal-memory-service": M({"id":"personal-memory-service","name":"personal_memory.py","path":"src/team_memory/services/personal_memory.py","domain":"services","subgroup":"经验管理","layer":"services","level":"L3","band":"services","description":"","db_tables":["personal_memories"],"dependencies":{"in":["memory-operations"],"out":["personal-memory-repo"]}}),
+  "promotion-compiler": M({"id":"promotion-compiler","name":"promotion_compiler.py","path":"src/team_memory/services/promotion_compiler.py","domain":"services","subgroup":"经验管理","layer":"services","level":"L3","band":"services","description":"","dependencies":{"in":["experience-service"],"out":["repository"]}}),
+  "intent-router": M({"id":"intent-router","name":"intent_router.py","path":"src/team_memory/services/intent_router.py","domain":"services","subgroup":"经验管理","layer":"services","level":"L3","band":"services","description":"","dependencies":{"in":["search-orchestrator"],"out":[]}}),
+  "llm-client": M({"id":"llm-client","name":"llm_client.py","path":"src/team_memory/services/llm_client.py","domain":"services","subgroup":"LLM","layer":"services","level":"L3","band":"services","description":"","dependencies":{"in":["bootstrap"],"out":["openai-api"]}}),
+  "llm-provider": M({"id":"llm-provider","name":"llm_provider.py","path":"src/team_memory/services/llm_provider.py","domain":"services","subgroup":"LLM","layer":"services","level":"L3","band":"services","description":"","dependencies":{"in":["bootstrap"],"out":[]}}),
+  "llm-parser": M({"id":"llm-parser","name":"llm_parser.py","path":"src/team_memory/services/llm_parser.py","domain":"services","subgroup":"LLM","layer":"services","level":"L3","band":"services","description":"","dependencies":{"in":[],"out":[]}}),
+  "entity-extractor": M({"id":"entity-extractor","name":"entity_extractor.py","path":"src/team_memory/services/entity_extractor.py","domain":"services","subgroup":"实体/模式","layer":"services","level":"L3","band":"services","description":"","dependencies":{"in":[],"out":["repository"]}}),
+  "pattern-extractor": M({"id":"pattern-extractor","name":"pattern_extractor.py","path":"src/team_memory/services/pattern_extractor.py","domain":"services","subgroup":"实体/模式","layer":"services","level":"L3","band":"services","description":"","dependencies":{"in":["llm-client"],"out":["repository"]}}),
+  "topic-discovery": M({"id":"topic-discovery","name":"topic_discovery.py","path":"src/team_memory/services/topic_discovery.py","domain":"services","subgroup":"实体/模式","layer":"services","level":"L3","band":"services","description":"","dependencies":{"in":[],"out":[]}}),
+  "contradiction-detector": M({"id":"contradiction-detector","name":"contradiction_detector.py","path":"src/team_memory/services/contradiction_detector.py","domain":"services","subgroup":"实体/模式","layer":"services","level":"L3","band":"services","description":"","dependencies":{"in":["llm-client"],"out":["repository"]}}),
+  "archive-service": M({"id":"archive-service","name":"archive.py","path":"src/team_memory/services/archive.py","domain":"services","subgroup":"归档","layer":"services","level":"L3","band":"services","description":"","db_tables":["archives"],"dependencies":{"in":["memory-operations","routes-archives"],"out":["archive-repository"]}}),
+  "janitor": M({"id":"janitor","name":"janitor.py","path":"src/team_memory/services/janitor.py","domain":"services","subgroup":"维护","layer":"services","level":"L3","band":"services","description":"","dependencies":{"in":["experience-service"],"out":["repository"]}}),
+  "janitor-scheduler": M({"id":"janitor-scheduler","name":"janitor_scheduler.py","path":"src/team_memory/services/janitor_scheduler.py","domain":"services","subgroup":"维护","layer":"services","level":"L3","band":"services","description":"","tags":["Event"],"dependencies":{"in":["janitor"],"out":["event-bus"]}}),
+  "event-bus": M({"id":"event-bus","name":"event_bus.py","path":"src/team_memory/services/event_bus.py","domain":"services","subgroup":"维护","layer":"services","level":"L3","band":"services","description":"","tags":["Event"],"dependencies":{"in":["bootstrap"],"out":[]}}),
+  "task-runner": M({"id":"task-runner","name":"task_runner.py","path":"src/team_memory/services/task_runner.py","domain":"services","subgroup":"基础","layer":"services","level":"L3","band":"services","description":"","dependencies":{"in":["bootstrap"],"out":[]}}),
+  "io-logger": M({"id":"io-logger","name":"io_logger.py","path":"src/team_memory/io_logger.py","domain":"services","subgroup":"基础","layer":"services","level":"L3","band":"services","description":"","dependencies":{"in":[],"out":[]}}),
+  "embedding-base": M({"id":"embedding-base","name":"base.py","path":"src/team_memory/embedding/base.py","domain":"embedding","subgroup":"core","layer":"services","level":"L3","band":"services","tags":["Embed"],"dependencies":{"in":[],"out":[]}}),
+  "embedding-ollama": M({"id":"embedding-ollama","name":"ollama_provider.py","path":"src/team_memory/embedding/ollama_provider.py","domain":"embedding","subgroup":"providers","layer":"services","level":"L3","band":"services","tags":["Embed"],"dependencies":{"in":[],"out":[]}}),
+  "embedding-openai": M({"id":"embedding-openai","name":"openai_provider.py","path":"src/team_memory/embedding/openai_provider.py","domain":"embedding","subgroup":"providers","layer":"services","level":"L3","band":"services","tags":["Embed"],"dependencies":{"in":[],"out":[]}}),
+  "embedding-local": M({"id":"embedding-local","name":"local_provider.py","path":"src/team_memory/embedding/local_provider.py","domain":"embedding","subgroup":"providers","layer":"services","level":"L3","band":"services","tags":["Embed"],"dependencies":{"in":[],"out":[]}}),
+  "embedding-generic": M({"id":"embedding-generic","name":"generic_provider.py","path":"src/team_memory/embedding/generic_provider.py","domain":"embedding","subgroup":"providers","layer":"services","level":"L3","band":"services","tags":["Embed"],"dependencies":{"in":[],"out":[]}}),
+  "reranker-base": M({"id":"reranker-base","name":"base.py","path":"src/team_memory/reranker/base.py","domain":"reranker","subgroup":"core","layer":"services","level":"L3","band":"services","tags":["Rerank"],"dependencies":{"in":[],"out":[]}}),
+  "reranker-factory": M({"id":"reranker-factory","name":"factory.py","path":"src/team_memory/reranker/factory.py","domain":"reranker","subgroup":"core","layer":"services","level":"L3","band":"services","description":"Reranker 工厂。","graphExpand":["reranker-jina","reranker-cross","reranker-ollama","reranker-noop"],"out":["reranker-jina","reranker-cross","reranker-ollama","reranker-noop"],"tags":["Rerank"],"dependencies":{"in":["search-pipeline"],"out":[]}}),
+  "reranker-cross": M({"id":"reranker-cross","name":"cross_encoder_provider.py","path":"src/team_memory/reranker/cross_encoder_provider.py","domain":"reranker","subgroup":"providers","layer":"services","level":"L3","band":"services","tags":["Rerank"],"dependencies":{"in":[],"out":[]}}),
+  "reranker-jina": M({"id":"reranker-jina","name":"jina_provider.py","path":"src/team_memory/reranker/jina_provider.py","domain":"reranker","subgroup":"providers","layer":"services","level":"L3","band":"services","tags":["Rerank"],"dependencies":{"in":[],"out":[]}}),
+  "reranker-noop": M({"id":"reranker-noop","name":"noop_provider.py","path":"src/team_memory/reranker/noop_provider.py","domain":"reranker","subgroup":"providers","layer":"services","level":"L3","band":"services","tags":["Rerank"],"dependencies":{"in":[],"out":[]}}),
+  "reranker-ollama": M({"id":"reranker-ollama","name":"ollama_llm_provider.py","path":"src/team_memory/reranker/ollama_llm_provider.py","domain":"reranker","subgroup":"providers","layer":"services","level":"L3","band":"services","tags":["Rerank"],"dependencies":{"in":[],"out":[]}}),
+  "cfg-settings": M({"id":"cfg-settings","name":"settings.py","path":"src/team_memory/config/settings.py","domain":"config","subgroup":"模块","layer":"services","level":"L3","band":"services","description":"config/settings.py","dependencies":{"in":[],"out":["bootstrap"]}}),
+  "cfg-auth": M({"id":"cfg-auth","name":"auth.py","path":"src/team_memory/config/auth.py","domain":"config","subgroup":"模块","layer":"services","level":"L3","band":"services","description":"config/auth.py","dependencies":{"in":[],"out":[]}}),
+  "cfg-database": M({"id":"cfg-database","name":"database.py","path":"src/team_memory/config/database.py","domain":"config","subgroup":"模块","layer":"services","level":"L3","band":"services","description":"config/database.py","dependencies":{"in":[],"out":[]}}),
+  "cfg-embedding": M({"id":"cfg-embedding","name":"embedding.py","path":"src/team_memory/config/embedding.py","domain":"config","subgroup":"模块","layer":"services","level":"L3","band":"services","description":"config/embedding.py","dependencies":{"in":[],"out":[]}}),
+  "cfg-llm": M({"id":"cfg-llm","name":"llm.py","path":"src/team_memory/config/llm.py","domain":"config","subgroup":"模块","layer":"services","level":"L3","band":"services","description":"config/llm.py","dependencies":{"in":[],"out":[]}}),
+  "cfg-mcp": M({"id":"cfg-mcp","name":"mcp.py","path":"src/team_memory/config/mcp.py","domain":"config","subgroup":"模块","layer":"services","level":"L3","band":"services","description":"config/mcp.py","dependencies":{"in":[],"out":[]}}),
+  "cfg-reranker": M({"id":"cfg-reranker","name":"reranker.py","path":"src/team_memory/config/reranker.py","domain":"config","subgroup":"模块","layer":"services","level":"L3","band":"services","description":"config/reranker.py","dependencies":{"in":[],"out":[]}}),
+  "cfg-search": M({"id":"cfg-search","name":"search.py","path":"src/team_memory/config/search.py","domain":"config","subgroup":"模块","layer":"services","level":"L3","band":"services","description":"config/search.py","dependencies":{"in":[],"out":[]}}),
+  "cfg-web": M({"id":"cfg-web","name":"web.py","path":"src/team_memory/config/web.py","domain":"config","subgroup":"模块","layer":"services","level":"L3","band":"services","description":"config/web.py","dependencies":{"in":[],"out":[]}}),
+  "cfg-janitor": M({"id":"cfg-janitor","name":"janitor.py","path":"src/team_memory/config/janitor.py","domain":"config","subgroup":"模块","layer":"services","level":"L3","band":"services","description":"config/janitor.py","dependencies":{"in":[],"out":[]}}),
+  "cfg-lifecycle": M({"id":"cfg-lifecycle","name":"lifecycle.py","path":"src/team_memory/config/lifecycle.py","domain":"config","subgroup":"模块","layer":"services","level":"L3","band":"services","description":"config/lifecycle.py","dependencies":{"in":[],"out":[]}}),
+  "cfg-logging": M({"id":"cfg-logging","name":"logging_config.py","path":"src/team_memory/config/logging_config.py","domain":"config","subgroup":"模块","layer":"services","level":"L3","band":"services","description":"config/logging_config.py","dependencies":{"in":[],"out":[]}}),
+  "config-root": M({"id":"config-root","name":"⚙ 配置系统","path":"src/team_memory/config/","domain":"config","subgroup":"_aggregate","layer":"services","level":"L1","band":"services","description":"点击展开 12 个子模块（DAG）。","isConfigAggregate":true,"dependencies":{"in":[],"out":[]}}),
+  "auth-provider": M({"id":"auth-provider","name":"provider.py","path":"src/team_memory/auth/provider.py","domain":"auth","subgroup":"provider","layer":"services","level":"L3","band":"services","db_tables":["api_keys"],"dependencies":{"in":["bootstrap"],"out":["routes-auth"]}}),
+  "auth-permissions": M({"id":"auth-permissions","name":"permissions.py","path":"src/team_memory/auth/permissions.py","domain":"auth","subgroup":"permissions","layer":"services","level":"L3","band":"services","dependencies":{"in":["auth-provider"],"out":[]}}),
+  "auth-oauth": M({"id":"auth-oauth","name":"oauth.py","path":"src/team_memory/auth/oauth.py","domain":"auth","subgroup":"oauth","layer":"services","level":"L3","band":"services","dependencies":{"in":["routes-auth"],"out":["auth-provider"]}}),
+  "init-admin": M({"id":"init-admin","name":"init_admin.py","path":"src/team_memory/auth/init_admin.py","domain":"auth","subgroup":"init_admin","layer":"services","level":"L3","band":"services","dependencies":{"in":["bootstrap"],"out":["postgres"]}}),
+  "database": M({"id":"database","name":"database.py","path":"src/team_memory/storage/database.py","domain":"storage","subgroup":"database","layer":"data","level":"L3","band":"data","dependencies":{"in":["bootstrap"],"out":["postgres"]}}),
+  "models-orm": M({"id":"models-orm","name":"models.py","path":"src/team_memory/storage/models.py","domain":"storage","subgroup":"models","layer":"data","level":"L3","band":"data","description":"SQLAlchemy ORM。","db_tables":["experiences","archives","search_logs"],"ddlPreview":"experiences / archives / entities …","dependencies":{"in":[],"out":["postgres"]}}),
+  "repository": M({"id":"repository","name":"repository.py","path":"src/team_memory/storage/repository.py","domain":"storage","subgroup":"repository","layer":"data","level":"L3","band":"data","dependencies":{"in":["experience-service","search-pipeline","daemon-wiki-compiler","daemon-markdown-indexer"],"out":["postgres"]}}),
+  "archive-repository": M({"id":"archive-repository","name":"archive_repository.py","path":"src/team_memory/storage/archive_repository.py","domain":"storage","subgroup":"archive_repo","layer":"data","level":"L3","band":"data","dependencies":{"in":["archive-service"],"out":["postgres"]}}),
+  "personal-memory-repo": M({"id":"personal-memory-repo","name":"personal_memory_repository.py","path":"src/team_memory/storage/personal_memory_repository.py","domain":"storage","subgroup":"personal_memory_repo","layer":"data","level":"L3","band":"data","db_tables":["personal_memories"],"dependencies":{"in":["personal-memory-service"],"out":["postgres"]}}),
+  "search-log-repo": M({"id":"search-log-repo","name":"search_log_repository.py","path":"src/team_memory/storage/search_log_repository.py","domain":"storage","subgroup":"search_log_repo","layer":"data","level":"L3","band":"data","db_tables":["search_logs"],"dependencies":{"in":["memory-operations","daemon-search-log-writer"],"out":["postgres"]}}),
+  "query-builders": M({"id":"query-builders","name":"query_builders.py","path":"src/team_memory/storage/query_builders.py","domain":"storage","subgroup":"query_builders","layer":"data","level":"L3","band":"data","dependencies":{"in":[],"out":[]}}),
+  "mon-alerting": M({"id":"mon-alerting","name":"alerting.py","path":"src/team_memory/monitoring/alerting.py","domain":"monitoring","subgroup":"runtime","layer":"services","level":"L3","band":"services","dependencies":{"in":[],"out":[]}}),
+  "mon-heartbeat": M({"id":"mon-heartbeat","name":"heartbeat.py","path":"src/team_memory/monitoring/heartbeat.py","domain":"monitoring","subgroup":"runtime","layer":"services","level":"L3","band":"services","dependencies":{"in":[],"out":[]}}),
+  "mon-watchdog": M({"id":"mon-watchdog","name":"watchdog.py","path":"src/team_memory/monitoring/watchdog.py","domain":"monitoring","subgroup":"runtime","layer":"services","level":"L3","band":"services","dependencies":{"in":[],"out":[]}}),
+  "mon-config": M({"id":"mon-config","name":"config.py","path":"src/team_memory/monitoring/config.py","domain":"monitoring","subgroup":"runtime","layer":"services","level":"L3","band":"services","dependencies":{"in":[],"out":[]}}),
+  "postgres": M({"id":"postgres","name":"PostgreSQL + pgvector","path":"Docker","domain":"external","subgroup":"infra","layer":"external","level":"L2","band":"external","tags":["DB"],"dependencies":{"in":[],"out":[]}}),
+  "redis": M({"id":"redis","name":"Redis","path":"config.search.cache","domain":"external","subgroup":"infra","layer":"external","level":"L3","band":"external","tags":["Cache"],"dependencies":{"in":[],"out":[]}}),
+  "ollama-embed": M({"id":"ollama-embed","name":"Ollama","path":"localhost:11434","domain":"external","subgroup":"infra","layer":"external","level":"L3","band":"external","tags":["Embed"],"dependencies":{"in":[],"out":[]}}),
+  "openai-api": M({"id":"openai-api","name":"OpenAI 兼容 HTTP","path":"LiteLLM","domain":"external","subgroup":"infra","layer":"external","level":"L3","band":"external","tags":["LLM"],"dependencies":{"in":[],"out":[]}}),
+};
+
+const EDGE_EXTRA = [];
+const MODULE_DESCRIPTION_ZH = {
+  "archive-repository": "档案馆表的存储与向量检索。",
+  "archive-service": "档案馆业务：写入、检索与向量查询。",
+  "auth-oauth": "OAuth 2.0 登录与令牌交换（Web 侧）。",
+  "auth-permissions": "RBAC 权限检查与角色判定。",
+  "auth-provider": "鉴权 Provider：校验 API Key 与上下文身份。",
+  "auth-session": "Web 层鉴权会话辅助（Cookie/Session）。",
+  "contradiction-detector": "检测经验之间的语义冲突。",
+  "daemon-auto-dream": "Auto Dream：周期性合并近似重复经验的实验性后台任务。",
+  "daemon-config": "TM Daemon 的配置：从客户端配置与环境加载并校验。",
+  "daemon-convergence": "收敛检测：判断对话是否进入可落档/收敛状态。",
+  "daemon-conversation-buffer": "管线用的结构化会话缓冲（多轮上下文）。",
+  "daemon-draft-buffer": "本地 SQLite 草稿缓冲，支撑记忆草稿管线。",
+  "daemon-draft-refiner": "DraftRefiner：Daemon 侧草稿精炼适配层。",
+  "daemon-embedding-backfill": "经验缺失向量时的批量回填 CLI。",
+  "daemon-entity-backfill": "批量为缺失实体关联的经验补全实体抽取。",
+  "daemon-entity-dedup": "跨项目合并重复实体（实体去重 CLI）。",
+  "daemon-faithfulness-batch": "忠实度批处理：消费 response_buffer 中待评记录。",
+  "daemon-faithfulness-judge": "基于 LLM 的回复–上下文忠实度判定。",
+  "daemon-health-check": "进程内健康检查与退避策略告警。",
+  "daemon-intent-classifier": "意图→人设分类（基于关键词，无需 LLM）。",
+  "daemon-llm-wiki": "本地 SQLite 知识库与 FTS5 全文检索（LLMWiki）。",
+  "daemon-markdown-indexer": "Obsidian/Markdown 文件索引入库存储。",
+  "daemon-metrics": "SQLite 落地的 Daemon 指标采集与汇总。",
+  "daemon-payload-capture": "记录原始 Hook 负载，便于契约推导与调试。",
+  "daemon-pending-queue": "SQLite 持久化重试队列，处理失败操作的再次投递。",
+  "daemon-personal-memory-extractor": "从会话中抽取用户偏好，写入个人记忆。",
+  "daemon-refinement-worker": "后台精炼 Worker：异步处理 TM 精炼任务。",
+  "daemon-reloader": "轻量 Daemon 自动热重载。",
+  "daemon-response-buffer": "响应缓冲：暂存待忠实度评估的助手回复。",
+  "daemon-search-eval": "搜索质量离线评测：对照已知查询集 Precision 等。",
+  "daemon-search-log-writer": "将检索日志与用量写入 TM 库（search_logs）。",
+  "daemon-solution-backfill": "从仅有问题描述的经验中补全 solution 字段。",
+  "daemon-structured-logger": "包装标准 logger，输出 JSON 结构化日志。",
+  "daemon-test-llm": "连通性自检：LLM/嵌入/Ollama 等依赖探测。",
+  "daemon-tm-stats": "TM 搜索质量与统计 CLI 报表。",
+  "daemon-watcher": "基于 watchfiles 的 Vault 文件监听，驱动增量索引/管线。",
+  "daemon-wiki-cli": "Wiki 编译 CLI：将 PG 中经验编译为结构化 Markdown 站。",
+  "daemon-wiki-compiler": "将经验记录编译为多文件 Markdown Wiki。",
+  "database": "SQLAlchemy 引擎、会话工厂与连接管理。",
+  "embedding-base": "向量嵌入 Provider 抽象基类。",
+  "embedding-generic": "通用 OpenAI 兼容 HTTP 嵌入端点。",
+  "embedding-local": "本地模型嵌入 Provider（Phase 2）。",
+  "embedding-ollama": "Ollama 本地嵌入模型实现。",
+  "embedding-openai": "OpenAI 兼容嵌入 API 实现。",
+  "entity-extractor": "实体抽取服务（L2.5），写入实体与关联。",
+  "entity-search": "实体侧搜索服务（L2.5），从编排层接入。",
+  "evaluation": "检索结果标注 [mem:…] 与 was_used 等评测注入。",
+  "event-bus": "进程内异步事件总线，解耦模块。",
+  "experience-service": "经验写入路径的核心业务逻辑（创建/更新/晋升等）。",
+  "hook-claude-post-tool-use": "Claude PostToolUse 钩子，将 MCP recall 结果上报 Daemon。",
+  "hook-claude-session-start": "Claude SessionStart 钩子，将会话事件转发到 TM Daemon。",
+  "hook-claude-stop": "Claude Stop 钩子，抓取助手回复用于 TM 草稿管线。",
+  "hook-claude-user-prompt-submit": "Claude UserPromptSubmit 钩子，为用户提示检索相关记忆。",
+  "hook-common": "各平台 Hook 脚本共用的内存管线工具函数。",
+  "hook-cursor-after-mcp": "Cursor afterMCPExecution：上报 MCP recall 结果到 Daemon。",
+  "hook-cursor-after-response": "Cursor afterAgentResponse 钩子，转发到 TM Daemon。",
+  "hook-cursor-before-prompt": "Cursor beforeSubmitPrompt：转发 Daemon 并注入上下文。",
+  "hook-cursor-session-start": "Cursor sessionStart 钩子，转发到 TM Daemon。",
+  "hook-git-watcher": "GitWatcher：监听 add/commit/rm/mv，触发 TM 索引。",
+  "hook-hermes-pipeline": "HermesPipeline 薄封装，调用 TM Daemon HTTP API。",
+  "hook-hermes-post-tool-call": "Hermes post_tool_call：上报 MCP recall 到 Daemon。",
+  "hook-hermes-stop": "Hermes Stop：将助手回复转发到 Daemon after_response。",
+  "hook-hermes-user-prompt-submit": "Hermes UserPromptSubmit，转发到 Daemon before_prompt。",
+  "hook-initial-index": "Obsidian 库初次全量索引脚本。",
+  "hook-retrieval-trigger": "beforeSubmitPrompt 用的关键词触发检索。",
+  "hook-session-timeout": "SessionTimeoutManager：约 30 分钟草稿安全网。",
+  "hook-shared": "TMClient：调用 TeamMemory MCP 端点的异步 HTTP 客户端。",
+  "hook-weekly-report": "WeeklyReport：生成记忆系统使用周报摘要。",
+  "init-admin": "在 db_api_key 等模式下初始化默认管理员/API Key。",
+  "intent-router": "按查询意图分类并路由（检索策略辅助）。",
+  "io-logger": "MCP/服务/管线层的 I/O 与关键步骤可配置日志（细粒度开关）。",
+  "janitor": "记忆管家：自动清理、质量与维护任务。",
+  "janitor-scheduler": "Janitor 定时/事件驱动的后台调度入口。",
+  "llm-client": "统一的 LLM HTTP 客户端，封装所有大模型调用。",
+  "llm-parser": "基于 LLM 从正文提取结构化经验字段。",
+  "llm-provider": "LLM Provider 抽象与实现选择（配置驱动）。",
+  "mon-alerting": "多渠道告警通知（Webhook 等）。",
+  "mon-config": "监控子系统配置加载。",
+  "mon-heartbeat": "进程级心跳上报。",
+  "mon-watchdog": "外部探活与失败时自动拉起/退出。",
+  "ollama-embed": "Ollama 本地推理服务（嵌入/补全等）。",
+  "openai-api": "OpenAI 兼容端点（含 LiteLLM 转发场景）。",
+  "pattern-extractor": "从对话抽行为模式并落库。",
+  "personal-memory-repo": "个人记忆表 CRUD 与语义覆盖写入。",
+  "personal-memory-service": "个人记忆：按用户语义覆盖写入与查询。",
+  "postgres": "PostgreSQL + pgvector：主数据与向量存储。",
+  "promotion-compiler": "将 L2 经验编译为结构化 Markdown（晋升输出）。",
+  "query-builders": "纯 SQL 片段构造器，无 I/O，仅供仓储层组合查询。",
+  "redis": "检索结果等缓存（由 search 配置指向）。",
+  "repository": "经验主仓库：CRUD、向量与全文检索。",
+  "reranker-base": "重排序 Provider 抽象基类。",
+  "reranker-cross": "Cross-Encoder 精排（sentence-transformers）。",
+  "reranker-jina": "Jina Reranker 云端 API 精排。",
+  "reranker-noop": "空操作重排：保持候选顺序不变。",
+  "reranker-ollama": "用 Ollama Chat/Completion 做相关性打分的重排。",
+  "routes-archives": "档案馆浏览 API：列表、L2 详情、写入、分段上传与失败记录。",
+  "routes-auth": "登录注册、API Key 等认证与账户相关路由。",
+  "routes-config": "运行时检索/搜索等配置 API（内存态，重启恢复 YAML）。",
+  "routes-dedup": "语义去重扫描与分组重嵌入（Web UI 侧）。",
+  "routes-entities": "实体图（L2.5）相关 HTTP API。",
+  "routes-experiences": "经验 CRUD、反馈与状态流转的 API。",
+  "routes-janitor": "Janitor 维护任务与清理状态的路由。",
+  "routes-mcp-compat": "镜像 MCP memory_* 的 HTTP 端点，与 MCP 共用 memory_operations 编排。",
+  "routes-personal-memory": "个人记忆：Agent 拉取与 Web 端 CRUD（列/读/写/删）。",
+  "routes-search": "搜索相关 HTTP 路由，转发到搜索编排服务。",
+  "search-log-repo": "search_logs 的写入与检索评测统计。",
+  "task-runner": "轮询并执行持久化后台任务。",
+  "tokenizer": "面向中文等的分词/粗切分，服务 FTS 与检索。",
+  "topic-discovery": "轻量主题聚类，用于高层级检索/导航。",
+  "web-mcp-auth": "MCP HTTP 端点的 ASGI 认证中间件。",
+};
+for (const [_id, _desc] of Object.entries(MODULE_DESCRIPTION_ZH)) {
+  if (MODULES[_id]) MODULES[_id].description = _desc;
+}
+const EDGE_TYPES = ["call", "async", "db", "event"];
+
+
+function uniqEdges(rows) {
+  const seen = new Set();
+  const out = [];
+  for (const e of rows) {
+    const k = e.from + "\0" + e.to + "\0" + e.type;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(e);
+  }
+  return out;
+}
+
+function edgeTypeFor(m, targetId, target) {
+  if (!target) return "call";
+  if (m.band === "data" && target.band === "external") return "db";
+  if (m.domain === "hooks") return "async";
+  if (m.id.startsWith("daemon-")) {
+    if (["services", "storage", "embedding", "reranker", "config"].includes(target.domain)) return "call";
+    return "async";
+  }
+  return "call";
+}
+
+function edgesFromModules() {
+  const rows = [];
+  for (const m of Object.values(MODULES)) {
+    for (const t of m.dependencies.out || []) {
+      const tp = MODULES[t];
+      const type = edgeTypeFor(m, t, tp);
+      rows.push({ from: m.id, to: t, type });
+    }
+  }
+  rows.push(
+    { from: "janitor-scheduler", to: "event-bus", type: "event" },
+    { from: "daemon-pending-queue", to: "daemon-app", type: "event" },
+    { from: "search-pipeline", to: "redis", type: "db" },
+    { from: "memory-operations", to: "search-log-repo", type: "async" },
+  );
+  return uniqEdges(rows.concat(EDGE_EXTRA));
+}
+
+const EDGES = edgesFromModules();
+const MODULE_COUNT = Object.keys(MODULES).length;
+const EDGE_COUNT = EDGES.length;
+
+const CHILD_OF = {};
+for (const m of Object.values(MODULES)) {
+  for (const c of m.graphExpand || []) CHILD_OF[c] = m.id;
+}
+
+const state = {
+  theme: localStorage.getItem("tm-arch-theme"),
+  treeMode: "domain",
+  query: "",
+  expandedTree: new Set(DOMAIN_META.map((x) => x[0])),
+  expandedDAG: new Set(),
+  selectedId: null,
+  collapsedDomains: new Set(),
+  zoomBehavior: null,
+  dragPositions: {},
+  hooksView: localStorage.getItem("tm-arch-hooks-view") || "platform",
+  configExpanded: false,
+  hiddenEdgeTypes: new Set(),
+  collapsedSubgroups: new Set(),
+  domainOffsets: {},
+  /** 选中连线用 join key，与 path.data 一致 */
+  selectedEdgeKey: null,
+  /** 子组折叠 HTML 按钮位置（graph 坐标，供 zoom 时重算） */
+  subgroupOverlayItems: [],
+};
+
+(function initExpandedDAG() {
+  for (const id of Object.keys(MODULES)) {
+    if (MODULES[id].level === "L2") state.expandedDAG.add(id);
+  }
+})();
+
+function effectiveTheme() {
+  if (state.theme === "dark" || state.theme === "light") return state.theme;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function applyTheme() {
+  const t = effectiveTheme();
+  document.documentElement.setAttribute("data-theme", t);
+}
+
+function toggleTheme() {
+  const cur = effectiveTheme();
+  state.theme = cur === "dark" ? "light" : "dark";
+  localStorage.setItem("tm-arch-theme", state.theme);
+  applyTheme();
+  drawGraph();
+}
+
+function effectiveConfigExpanded() {
+  const q = state.query.trim().toLowerCase();
+  if (state.configExpanded) return true;
+  if (!q) return false;
+  for (const id of Object.keys(MODULES)) {
+    if (!id.startsWith("cfg-")) continue;
+    const m = MODULES[id];
+    const blob = [id, m.name, m.path || "", m.description || ""].join("\n").toLowerCase();
+    if (blob.includes(q)) return true;
+  }
+  return false;
+}
+
+function getLayoutSubgroup(m) {
+  if (m.domain === "hooks") {
+    return state.hooksView === "platform" ? m.subhooksPlatform : m.subhooksLifecycle;
+  }
+  return m.subgroup || "其他";
+}
+
+function subgroupCollapseKey(domainKey, sk) {
+  return domainKey + "\0" + sk;
+}
+
+function aggregateNodeId(domainKey, sk) {
+  return "agg:" + domainKey + ":" + encodeURIComponent(sk);
+}
+
+/** 是否允许该子组出现折叠按钮 / 聚合节点（含 stale key 过滤） */
+function canCollapseSubgroup(domainKey, sk) {
+  if (domainKey === "hooks") {
+    if (state.hooksView !== "lifecycle") return false;
+    return HOOKS_LIFECYCLE_COLLAPSIBLE.has(sk);
+  }
+  if (domainKey === "embedding" && sk === "providers") return true;
+  if (domainKey === "reranker" && sk === "providers") return true;
+  return false;
+}
+
+function parseAggId(aggId) {
+  if (!aggId || !aggId.startsWith("agg:")) return null;
+  const rest = aggId.slice(4);
+  const idx = rest.indexOf(":");
+  if (idx < 0) return null;
+  const domainKey = rest.slice(0, idx);
+  try {
+    return { domainKey, subgroup: decodeURIComponent(rest.slice(idx + 1)) };
+  } catch (_e) {
+    return null;
+  }
+}
+
+function membersOfSubgroup(domainKey, sk) {
+  return Object.keys(MODULES)
+    .filter((mid) => {
+      const m = MODULES[mid];
+      return m.domain === domainKey && getLayoutSubgroup(m) === sk;
+    })
+    .sort((a, b) => MODULES[a].name.localeCompare(MODULES[b].name, "zh-CN"));
+}
+
+function buildSubgroupAggregateMeta(domainKey, sk, memberIds) {
+  const first = MODULES[memberIds[0]];
+  const label = sk + " (" + memberIds.length + ")";
+  return {
+    id: aggregateNodeId(domainKey, sk),
+    name: label,
+    shortLabel: label,
+    description: "子组在图中已折叠。包含 " + memberIds.length + " 个模块；双击节点或点击子组旁 ▸ 可展开。",
+    domain: domainKey,
+    subgroup: sk,
+    band: first.band,
+    level: "L3",
+    isSubgroupAggregate: true,
+    memberIds: memberIds.slice(),
+    graphExpand: [],
+  };
+}
+
+function graphLinkEndpoint(rawModuleId) {
+  const id = resolveEdgeEndpoint(rawModuleId);
+  const m = MODULES[id];
+  if (!m) return id;
+  const sk = getLayoutSubgroup(m);
+  const ck = subgroupCollapseKey(m.domain, sk);
+  if (state.collapsedSubgroups.has(ck) && canCollapseSubgroup(m.domain, sk)) return aggregateNodeId(m.domain, sk);
+  return id;
+}
+
+function subgroupSortOrder(domainKey) {
+  if (domainKey === "hooks") {
+    return state.hooksView === "platform" ? HOOKS_PLATFORM_ORDER : HOOKS_LIFECYCLE_ORDER;
+  }
+  return SUBDOMAIN_ORDER[domainKey] || [];
+}
+
+function sortSubgroupKeys(domainKey, keys) {
+  const ord = subgroupSortOrder(domainKey);
+  return [...keys].sort((a, b) => {
+    const ia = ord.indexOf(a);
+    const ib = ord.indexOf(b);
+    if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+    return String(a).localeCompare(String(b), "zh");
+  });
+}
+
+function treeSortKey(id) {
+  const m = MODULES[id];
+  const sg = getLayoutSubgroup(m);
+  const ord = m.domain === "hooks" ? (state.hooksView === "platform" ? HOOKS_PLATFORM_ORDER : HOOKS_LIFECYCLE_ORDER) : SUBDOMAIN_ORDER[m.domain] || [];
+  const idx = ord.indexOf(sg);
+  return (idx === -1 ? 999 : idx) + "\0" + m.name;
+}
+
+function configModuleVisible(id) {
+  const ce = effectiveConfigExpanded();
+  if (id === "config-root") return !ce;
+  if (id.startsWith("cfg-")) return ce;
+  return true;
+}
+
+function moduleMatchesQuery(id) {
+  const q = state.query.trim().toLowerCase();
+  if (!q) return true;
+  const m = MODULES[id];
+  const blob = [id, m.name, m.path || "", m.description || "", m.domain || "", (m.tags || []).join(",")].join("\n").toLowerCase();
+  return blob.includes(q);
+}
+
+function graphIdPassesFilter(id) {
+  if (!graphNodeVisible(id) || !moduleMatchesQuery(id)) return false;
+  if (MODULES[id].domain === "config" && (id.startsWith("cfg-") || id === "config-root")) {
+    return configModuleVisible(id);
+  }
+  return true;
+}
+
+function graphNodeVisible(id) {
+  const p = CHILD_OF[id];
+  if (p && (MODULES[p].graphExpand || []).includes(id)) {
+    return state.expandedDAG.has(p);
+  }
+  return true;
+}
+
+function dispatchSelect(id) {
+  state.selectedEdgeKey = null;
+  state.selectedId = id;
+  window.dispatchEvent(new CustomEvent("arch-select", { detail: { id } }));
+}
+
+function bandColorClass(band) {
+  switch (band) {
+    case "entry":
+      return { fill: "var(--layer-1)", stroke: "var(--layer-1-stroke)" };
+    case "services":
+      return { fill: "var(--layer-2)", stroke: "var(--layer-2-stroke)" };
+    case "daemon":
+      return { fill: "var(--layer-3)", stroke: "var(--layer-3-stroke)" };
+    case "data":
+      return { fill: "var(--layer-4)", stroke: "var(--layer-4-stroke)" };
+    default:
+      return { fill: "var(--layer-5)", stroke: "var(--layer-5-stroke)" };
+  }
+}
+
+function resolveEdgeEndpoint(id) {
+  if (effectiveConfigExpanded()) return id;
+  if (id.startsWith("cfg-")) return "config-root";
+  return id;
+}
+
+function renderTree() {
+  const root = document.getElementById("tree-root");
+  root.innerHTML = "";
+
+  let groups = [];
+  if (state.treeMode === "domain") {
+    groups = DOMAIN_META.map(([key, title, icon]) => ({ key, title, icon, ids: [] }));
+    for (const id of Object.keys(MODULES)) {
+      const m = MODULES[id];
+      if (m.domain === "config" && (id.startsWith("cfg-") || id === "config-root")) {
+        if (!configModuleVisible(id)) continue;
+      }
+      const g = groups.find((x) => x.key === m.domain);
+      if (g) g.ids.push(id);
+    }
+  } else {
+    groups = Object.keys(LAYER_Y).map((band) => ({
+      key: band,
+      title: BAND_LABELS[band] || band,
+      icon: "▣",
+      ids: [],
+    }));
+    for (const id of Object.keys(MODULES)) {
+      const m = MODULES[id];
+      const g = groups.find((x) => x.key === m.band);
+      if (g) g.ids.push(id);
+    }
+    groups.sort((a, b) => (LAYER_Y[a.key] || 0) - (LAYER_Y[b.key] || 0));
+  }
+
+  for (const grp of groups) {
+    grp.ids.sort((a, b) => treeSortKey(a).localeCompare(treeSortKey(b), "zh"));
+    const filtered = grp.ids.filter((id) => moduleMatchesQuery(id));
+    if (filtered.length === 0 && state.query.trim()) continue;
+
+    const wrap = document.createElement("div");
+    wrap.className = "tree-group";
+    const open = state.expandedTree.has(grp.key);
+    const header = document.createElement("div");
+    header.className = "tree-header" + (open ? " expanded" : "");
+    const extraHooks =
+      grp.key === "hooks"
+        ? ` <span style="font-size:10px;color:var(--fg-dim)">(${state.hooksView === "platform" ? "按平台" : "按生命周期"})</span>`
+        : "";
+    header.innerHTML = `<span class="chevron">▸</span><span class="icon">${grp.icon}</span><span>${grp.title}${extraHooks}</span><span class="tree-count">${state.query.trim() ? filtered.length + "/" + grp.ids.length : grp.ids.length}</span>`;
+    if (grp.key === "hooks") {
+      header.onclick = (ev) => {
+        if (ev.target.closest(".tree-hooks-flip")) return;
+        if (state.expandedTree.has(grp.key)) state.expandedTree.delete(grp.key);
+        else state.expandedTree.add(grp.key);
+        renderTree();
+      };
+      const flip = document.createElement("button");
+      flip.type = "button";
+      flip.className = "tree-hooks-flip";
+      flip.style.cssText =
+        "margin-left:6px;padding:2px 6px;font-size:10px;border:1px solid var(--border);border-radius:4px;background:var(--bg);cursor:pointer;color:var(--fg-muted);";
+      flip.textContent = state.hooksView === "platform" ? "切生命周期" : "切平台";
+      flip.onclick = (e) => {
+        e.stopPropagation();
+        state.hooksView = state.hooksView === "platform" ? "lifecycle" : "platform";
+        localStorage.setItem("tm-arch-hooks-view", state.hooksView);
+        state.collapsedSubgroups = new Set(
+          [...state.collapsedSubgroups].filter((ck) => {
+            const i = ck.indexOf("\0");
+            if (i < 0) return false;
+            return canCollapseSubgroup(ck.slice(0, i), ck.slice(i + 1));
+          }),
+        );
+        renderTree();
+        drawGraph();
+        updateStatus();
+      };
+      header.appendChild(flip);
+    } else {
+      header.onclick = () => {
+        if (state.expandedTree.has(grp.key)) state.expandedTree.delete(grp.key);
+        else state.expandedTree.add(grp.key);
+        renderTree();
+      };
+    }
+    wrap.appendChild(header);
+
+    const ch = document.createElement("div");
+    ch.className = "tree-children" + (open ? " expanded" : "");
+    const list = state.query.trim() ? filtered : grp.ids;
+    for (const id of list) {
+      const m = MODULES[id];
+      const row = document.createElement("div");
+      row.className = "tree-item" + (state.selectedId === id ? " active" : "");
+      const badges = (m.tags || []).slice(0, 3).map((t) => `<span class="badge">${t}</span>`).join("");
+      row.innerHTML = `<span>${m.name}</span><span class="badgeWrap">${badges}</span>`;
+      row.onclick = (e) => {
+        e.stopPropagation();
+        dispatchSelect(id);
+        renderTree();
+        drawGraph();
+      };
+      ch.appendChild(row);
+    }
+    wrap.appendChild(ch);
+    root.appendChild(wrap);
+  }
+}
+
+function renderDetail(id) {
+  state.selectedEdgeKey = null;
+  const title = document.getElementById("detail-title");
+  const meta = document.getElementById("detail-meta");
+  const body = document.getElementById("detail-body");
+  if (!id) {
+    title.textContent = "请选择模块";
+    meta.textContent = "";
+    body.innerHTML = "";
+    return;
+  }
+  const agg = parseAggId(id);
+  if (agg && !MODULES[id]) {
+    const mids = membersOfSubgroup(agg.domainKey, agg.subgroup);
+    title.textContent = agg.subgroup + "（" + mids.length + "）";
+    meta.textContent = "子组聚合 · " + agg.domainKey;
+    let html = "";
+    html += `<div class="detail-section"><div class="detail-section-title">作用</div><div class="detail-box"><p>子组在图中折叠为单个节点。包含模块：</p><ul style="margin:8px 0 0 18px;padding:0;">`;
+    for (const mid of mids) {
+      html += `<li>${MODULES[mid].name}</li>`;
+    }
+    html += `</ul><p style="margin-top:10px;font-size:11px;color:var(--fg-muted);">双击图中该节点或点击子组框右上角 ▸/▾ 可展开。</p></div></div>`;
+    body.innerHTML = html;
+    return;
+  }
+  if (!MODULES[id]) {
+    title.textContent = "请选择模块";
+    meta.textContent = "";
+    body.innerHTML = "";
+    return;
+  }
+  const m = MODULES[id];
+  title.textContent = m.name;
+  const sub = m.subgroup && m.subgroup !== "_aggregate" ? m.subgroup : "";
+  meta.textContent = `${m.path || ""} · ${m.level} · ${m.domain}${sub ? " · " + sub : ""}`;
+
+  const expandN = (m.graphExpand || []).length;
+  const isSummary = m.level === "L1";
+
+  let html = "";
+  html += `<div class="detail-section"><div class="detail-section-title">作用</div><div class="detail-box">${m.description || "（无描述）"}${expandN ? `<p><strong>图中可双击展开：</strong>${expandN} 个子模块</p>` : ""}</div></div>`;
+
+  if (!isSummary) {
+    if (m.inputs && m.inputs.length) {
+      html += `<div class="detail-section"><div class="detail-section-title">输入</div><div class="detail-params">`;
+      for (const p of m.inputs) {
+        html += `<div class="param"><span class="param-name">${p.name}</span> <span class="param-type">${p.type}</span><div class="param-desc">${p.desc || ""}</div></div>`;
+      }
+      html += `</div></div>`;
+    }
+    if (m.outputs && m.outputs.length) {
+      html += `<div class="detail-section"><div class="detail-section-title">输出</div><div class="detail-params">`;
+      for (const p of m.outputs) {
+        html += `<div class="param"><span class="param-name">${p.name}</span> <span class="param-type">${p.type}</span><div class="param-desc">${p.desc || ""}</div></div>`;
+      }
+      html += `</div></div>`;
+    }
+    if (m.db_tables && m.db_tables.length) {
+      html += `<div class="detail-section"><div class="detail-section-title">数据库表</div><div class="detail-box">${m.db_tables.join(", ")}</div></div>`;
+    }
+    if (m.cli_make && m.cli_make.length) {
+      html += `<div class="detail-section"><div class="detail-section-title">CLI / Make</div><div class="detail-code">${m.cli_make.join("\n")}</div></div>`;
+    }
+    const din = m.dependencies.in || [];
+    const dout = m.dependencies.out || [];
+    if (din.length || dout.length) {
+      html += `<div class="detail-section"><div class="detail-section-title">依赖</div><div class="detail-box">`;
+      if (din.length) html += `<p><strong>上游</strong>：${din.map((x) => MODULES[x]?.name || x).join("，")}</p>`;
+      if (dout.length) html += `<p><strong>下游</strong>：${dout.map((x) => MODULES[x]?.name || x).join("，")}</p>`;
+      html += `</div></div>`;
+    }
+  }
+
+  if (m.ddlPreview) {
+    html += `<div class="detail-section"><span class="ddl-toggle" id="ddl-tog">▸ 查看完整 DDL 摘要</span><div class="ddl-block detail-code" id="ddl-block">${m.ddlPreview}</div></div>`;
+  }
+
+  body.innerHTML = html;
+  const tog = document.getElementById("ddl-tog");
+  const blk = document.getElementById("ddl-block");
+  if (tog && blk) {
+    tog.onclick = () => {
+      blk.classList.toggle("show");
+      tog.textContent = blk.classList.contains("show") ? "▾ 收起 DDL 摘要" : "▸ 查看完整 DDL 摘要";
+    };
+  }
+}
+
+function edgeTypeLabelZh(t) {
+  if (t === "async") return "异步 (async)";
+  if (t === "db") return "数据库 (db)";
+  if (t === "event") return "事件 / 投递 (event)";
+  return "同步调用 (call)";
+}
+
+function edgeRelationBlurb(t) {
+  if (t === "async") return "异步或后台链路：调用方不阻塞等待完成。";
+  if (t === "db") return "数据访问：读写到持久化存储或缓存。";
+  if (t === "event") return "事件或投递：松耦合通知、调度或内部信号。";
+  return "同步调用：典型的直接函数/导入依赖关系。";
+}
+
+function formatParamsOneLine(params) {
+  if (!params || !params.length) return "（无）";
+  return params.map((p) => `${p.name} (${p.type})${p.desc ? " - " + p.desc : ""}`).join("； ");
+}
+
+function renderEdgeDetail(edge) {
+  state.selectedId = null;
+  state.selectedEdgeKey = edge.edgeKey;
+  const title = document.getElementById("detail-title");
+  const meta = document.getElementById("detail-meta");
+  const body = document.getElementById("detail-body");
+  const fromId = edge.from;
+  const toId = edge.to;
+  const fromM = MODULES[fromId];
+  const toM = MODULES[toId];
+  const t = edge.type;
+  title.textContent = "连线详情";
+  meta.textContent = `${fromM ? fromM.name : fromId} → ${toM ? toM.name : toId} · ${edgeTypeLabelZh(t)}`;
+
+  const srcName = fromM ? fromM.name : fromId;
+  const srcPath = fromM && fromM.path ? fromM.path : "—";
+  const srcDesc = fromM && fromM.description ? fromM.description : "—";
+  const tgtName = toM ? toM.name : toId;
+  const tgtPath = toM && toM.path ? toM.path : "—";
+  const tgtDesc = toM && toM.description ? toM.description : "—";
+
+  const block = [
+    "━━ 连线详情 ━━━━━━━━━━━━━━",
+    "类型: " + edgeTypeLabelZh(t),
+    "━━━━━━━━━━━━━━━━━━━━━━━",
+    "",
+    "📤 源: " + srcName,
+    "路径: " + srcPath,
+    "作用: " + srcDesc,
+    "输出: " + formatParamsOneLine(fromM && fromM.outputs),
+    "",
+    "  ─── " + t + " ───▶",
+    "",
+    "📥 目标: " + tgtName,
+    "路径: " + tgtPath,
+    "作用: " + tgtDesc,
+    "输入: " + formatParamsOneLine(toM && toM.inputs),
+  ].join("\n");
+
+  let html = "";
+  html += `<div class="detail-section"><div class="detail-code">${escapeHtml(block)}</div></div>`;
+  html += `<div class="detail-section"><div class="detail-section-title">调用关系说明</div><div class="detail-box"><p>${edgeRelationBlurb(t)}</p></div></div>`;
+
+  body.innerHTML = html;
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function edgeStrokeDash(t) {
+  if (t === "async") return "6,4";
+  if (t === "event") return "2,5";
+  return null;
+}
+
+function edgeColor(t) {
+  if (t === "async") return "var(--async-color)";
+  if (t === "db") return "var(--db-color)";
+  if (t === "event") return "var(--event-color)";
+  return "var(--call-color)";
+}
+
+function totalModuleEdgeDegree(id) {
+  let d = 0;
+  for (const e of EDGES) {
+    if (e.from === id) d++;
+    if (e.to === id) d++;
+  }
+  return d;
+}
+
+/** 子组展开时：高度数节点优先放网格中间列 */
+function orderSubgroupGridIds(gids, cols) {
+  const n = gids.length;
+  if (n <= 1) return gids.slice();
+  const sorted = [...gids].sort((a, b) => {
+    const db = totalModuleEdgeDegree(b) - totalModuleEdgeDegree(a);
+    if (db !== 0) return db;
+    return MODULES[a].name.localeCompare(MODULES[b].name, "zh-CN");
+  });
+  const slotOrder = Array.from({ length: n }, (_, i) => i);
+  const colMid = (cols - 1) / 2;
+  slotOrder.sort((a, b) => {
+    const ra = Math.floor(a / cols);
+    const ca = a % cols;
+    const rb = Math.floor(b / cols);
+    const cb = b % cols;
+    const da = Math.abs(ca - colMid);
+    const db = Math.abs(cb - colMid);
+    if (da !== db) return da - db;
+    if (ra !== rb) return ra - rb;
+    return a - b;
+  });
+  const out = new Array(n);
+  sorted.forEach((id, rank) => {
+    out[slotOrder[rank]] = id;
+  });
+  return out;
+}
+
+function graphPointToPanelPx(gx, gy) {
+  const svg = document.getElementById("graph-svg");
+  const layer = document.getElementById("graph-zoom-layer");
+  if (!svg || !layer) return { left: 0, top: 0 };
+  const pt = svg.createSVGPoint();
+  pt.x = gx;
+  pt.y = gy;
+  const scr = pt.matrixTransform(layer.getScreenCTM());
+  const panel = document.querySelector(".center-panel");
+  if (!panel) return { left: scr.x, top: scr.y };
+  const pr = panel.getBoundingClientRect();
+  return { left: scr.x - pr.left, top: scr.y - pr.top };
+}
+
+function renderSubgroupOverlay(items) {
+  const el = document.getElementById("graph-subgroup-overlay");
+  if (!el) return;
+  el.innerHTML = "";
+  if (!items || !items.length) return;
+  for (const it of items) {
+    const p = graphPointToPanelPx(it.gx, it.gy);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "sg-html-collapse";
+    btn.setAttribute("aria-label", "折叠或展开子组");
+    btn.dataset.skKey = it.skKey;
+    btn.textContent = state.collapsedSubgroups.has(it.skKey) ? "▸" : "▾";
+    btn.style.left = Math.round(p.left) + "px";
+    btn.style.top = Math.round(p.top) + "px";
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (state.collapsedSubgroups.has(it.skKey)) state.collapsedSubgroups.delete(it.skKey);
+      else state.collapsedSubgroups.add(it.skKey);
+      drawGraph();
+      updateStatus();
+    });
+    el.appendChild(btn);
+  }
+}
+
+function rectBoundaryPoint(rectX, rectY, rectW, rectH, towardX, towardY) {
+  const cx = rectX + rectW / 2;
+  const cy = rectY + rectH / 2;
+  const dx = towardX - cx;
+  const dy = towardY - cy;
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    const x = dx >= 0 ? rectX + rectW : rectX;
+    return { x, y: cy };
+  }
+  const y = dy >= 0 ? rectY + rectH : rectY;
+  return { x: cx, y };
+}
+
+function linkPathWithSpread(e, nodeById, par) {
+  const s = nodeById.get(e.source);
+  const t = nodeById.get(e.target);
+  if (!s || !t) return "";
+  const tcx = t.x + t.width / 2;
+  const tcy = t.y + t.height / 2;
+  const scx = s.x + s.width / 2;
+  const scy = s.y + s.height / 2;
+  const p0 = rectBoundaryPoint(s.x, s.y, s.width, s.height, tcx, tcy);
+  const p1 = rectBoundaryPoint(t.x, t.y, t.width, t.height, scx, scy);
+  const sx = p0.x;
+  const sy = p0.y;
+  const tx = p1.x;
+  const ty = p1.y;
+  const dx = tx - sx;
+  const dy = ty - sy;
+  const nPar = par.n;
+  const idx = par.idx;
+  const spread = (idx - (nPar - 1) / 2) * 20;
+  const typeBias = e.type === "db" ? 42 : e.type === "event" ? 20 : e.type === "async" ? 26 : 18;
+  const horiz = Math.abs(dx) >= Math.abs(dy) * 1.12;
+  if (horiz) {
+    const midX = (sx + tx) / 2;
+    const bend = (ty >= sy ? 1 : -1) * (20 + Math.min(14, Math.abs(spread) * 0.4));
+    const vx = spread * 0.65;
+    return `M${sx},${sy} C ${midX + vx},${sy + bend} ${midX - vx},${ty - bend} ${tx},${ty}`;
+  }
+  const midY = (sy + ty) / 2 + (ty >= sy ? typeBias : -typeBias);
+  return `M${sx},${sy} C ${sx + spread},${midY} ${tx + spread},${midY} ${tx},${ty}`;
+}
+function drawGraph() {
+  const svgEl = document.getElementById("graph-svg");
+  const zw = document.getElementById("graph-zoom-layer");
+  const GL = GRAPH_LAYOUT;
+  const side = GL.sidePad;
+
+  let visibleIds = Object.keys(MODULES).filter((id) => graphIdPassesFilter(id));
+
+  if (state.query.trim()) {
+    const keep = new Set(visibleIds);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const e of EDGES) {
+        const fa = resolveEdgeEndpoint(e.from);
+        const ta = resolveEdgeEndpoint(e.to);
+        if (!keep.has(e.from) && !keep.has(e.to)) continue;
+        if (keep.has(e.from) && MODULES[e.to] && !keep.has(e.to)) {
+          keep.add(e.to);
+          changed = true;
+        }
+        if (keep.has(e.to) && MODULES[e.from] && !keep.has(e.from)) {
+          keep.add(e.from);
+          changed = true;
+        }
+      }
+    }
+    visibleIds = [...keep].filter((id) => graphIdPassesFilter(id));
+  }
+
+  if (!visibleIds.length) {
+    d3.select("#graph-domains").selectAll("*").remove();
+    d3.select("#graph-nodes").selectAll("*").remove();
+    d3.select("#graph-links").selectAll("*").remove();
+    state.subgroupOverlayItems = [];
+    renderSubgroupOverlay([]);
+    return;
+  }
+
+  state.collapsedSubgroups = new Set(
+    [...state.collapsedSubgroups].filter((ck) => {
+      const i = ck.indexOf("\0");
+      if (i < 0) return false;
+      return canCollapseSubgroup(ck.slice(0, i), ck.slice(i + 1));
+    }),
+  );
+
+  const domainRank = {};
+  DOMAIN_META.forEach(([key], idx) => {
+    domainRank[key] = idx;
+  });
+
+  function avgBand(ids) {
+    let s = 0;
+    for (const id of ids) {
+      const b = MODULES[id].band;
+      s += BAND_ORDER[b] !== undefined ? BAND_ORDER[b] : 1;
+    }
+    return ids.length ? s / ids.length : 99;
+  }
+
+  const grouped = new Map();
+  for (const id of visibleIds) {
+    const dk = MODULES[id].domain || "external";
+    if (!grouped.has(dk)) grouped.set(dk, []);
+    grouped.get(dk).push(id);
+  }
+
+  const domainKeys = [...grouped.keys()].sort((ka, kb) => {
+    const aa = avgBand(grouped.get(ka));
+    const ab = avgBand(grouped.get(kb));
+    if (aa !== ab) return aa - ab;
+    return (domainRank[ka] ?? 99) - (domainRank[kb] ?? 99);
+  });
+
+  function dragDelta(id) {
+    const p = state.dragPositions[id];
+    if (!p) return { dx: 0, dy: 0 };
+    if ("dx" in p || "dy" in p) return { dx: p.dx || 0, dy: p.dy || 0 };
+    return { dx: 0, dy: 0 };
+  }
+
+  function nodeOuterWidth(id) {
+    const m = MODULES[id];
+    const isAgg = m.isConfigAggregate && !effectiveConfigExpanded();
+    const label = isAgg ? m.name : m.shortLabel || m.name;
+    return Math.min(240, Math.max(104, label.length * 7 + 28));
+  }
+
+  function layoutDomainBlock(dKey, ids) {
+    const innerPadX = GL.innerPadX;
+    const innerPadY = GL.innerPadY;
+    const titleH = GL.titleH;
+    const hooksExtra = dKey === "hooks" ? GL.hooksToggleH : 0;
+
+    if (dKey === "config" && !effectiveConfigExpanded() && ids.includes("config-root") && ids.length === 1) {
+      const innerPadX = GL.innerPadX;
+      const innerPadY = GL.innerPadY;
+      const titleH = GL.titleH;
+      const w = Math.max(GL.minDomainInnerW, 280);
+      const h = titleH + innerPadY * 2 + GL.configCollapsedH;
+      return {
+        boxW: w,
+        boxH: h,
+        cols: 1,
+        rows: 1,
+        cellW: w - innerPadX * 2,
+        ids,
+        gridInnerW: w - innerPadX * 2,
+        innerBodyH: GL.configCollapsedH,
+        subgroups: [],
+        hooksExtra: 0,
+        innerPadX,
+        innerPadY,
+        titleH,
+      };
+    }
+
+    const subMap = new Map();
+    for (const id of ids) {
+      const m = MODULES[id];
+      const sk = getLayoutSubgroup(m);
+      if (!subMap.has(sk)) subMap.set(sk, []);
+      subMap.get(sk).push(id);
+    }
+    const sortedSk = sortSubgroupKeys(dKey, [...subMap.keys()]);
+    const subgroups = [];
+    let maxGridW = GL.minDomainInnerW - innerPadX * 2;
+    let totalBodyH = 0;
+
+    for (const sk of sortedSk) {
+      const gidsAlpha = (subMap.get(sk) || []).sort((a, b) => MODULES[a].name.localeCompare(MODULES[b].name, "zh-CN"));
+      if (!gidsAlpha.length) continue;
+      const ckey = subgroupCollapseKey(dKey, sk);
+      if (state.collapsedSubgroups.has(ckey) && canCollapseSubgroup(dKey, sk)) {
+        const n = gidsAlpha.length;
+        const label = sk + " (" + n + ")";
+        const cellW = Math.min(240, Math.max(120, label.length * 7 + 36));
+        const gridInnerW = cellW;
+        const bodyH = GL.nodeH;
+        totalBodyH += GL.subgroupTitleH + bodyH + GL.subgroupGapY + GL.subgroupInnerPadY;
+        subgroups.push({
+          key: sk,
+          ids: gidsAlpha,
+          collapsed: true,
+          cols: 1,
+          rows: 1,
+          cellW,
+          gridInnerW,
+          bodyH,
+        });
+        continue;
+      }
+      const n = gidsAlpha.length;
+      const cols = Math.min(GL.maxCols, Math.max(1, Math.ceil(Math.sqrt(n))));
+      const gids = orderSubgroupGridIds(gidsAlpha, cols);
+      const rows = Math.ceil(n / cols);
+      const cellW = Math.max(...gids.map(nodeOuterWidth), 120);
+      const gridInnerW = cols * cellW + (cols - 1) * GL.nodeGapX;
+      maxGridW = Math.max(maxGridW, gridInnerW);
+      const bodyH = rows * GL.nodeH + (rows > 1 ? (rows - 1) * GL.nodeGapY : 0);
+      totalBodyH += GL.subgroupTitleH + bodyH + GL.subgroupGapY + GL.subgroupInnerPadY;
+      subgroups.push({ key: sk, ids: gids, cols, rows, cellW, gridInnerW, bodyH, collapsed: false });
+    }
+    if (totalBodyH) totalBodyH -= GL.subgroupGapY;
+
+    const boxW = Math.max(GL.minDomainInnerW, innerPadX * 2 + maxGridW);
+    const boxH = titleH + hooksExtra + innerPadY * 2 + totalBodyH;
+    return {
+      boxW,
+      boxH,
+      subgroups,
+      innerPadX,
+      innerPadY,
+      titleH,
+      hooksExtra,
+      gridInnerW: maxGridW,
+    };
+  }
+
+  const domainBoxes = [];
+  for (const dKey of domainKeys) {
+    const rawIds = grouped.get(dKey);
+    let ids = [...rawIds].filter((id) => {
+      if (dKey === "config" && !effectiveConfigExpanded()) return id === "config-root";
+      if (dKey === "config" && effectiveConfigExpanded()) return id !== "config-root";
+      return true;
+    });
+    ids.sort((a, b) => MODULES[a].name.localeCompare(MODULES[b].name, "zh-CN"));
+
+    const collapsed = state.collapsedDomains.has(dKey);
+    if (collapsed) {
+      const meta = domainLabelMeta(dKey);
+      const label = `${meta.icon} ${meta.title}`;
+      const boxW = Math.max(GL.minDomainInnerW, label.length * 8 + GL.innerPadX * 4);
+      domainBoxes.push({
+        domainKey: dKey,
+        collapsed: true,
+        ids: [],
+        allIds: rawIds,
+        boxW,
+        boxH: GL.minDomainCollapsedH,
+        layout: null,
+      });
+      continue;
+    }
+
+    const layout = layoutDomainBlock(dKey, ids);
+    domainBoxes.push({
+      domainKey: dKey,
+      collapsed: false,
+      ids,
+      allIds: rawIds,
+      layout,
+      boxW: layout.boxW,
+      boxH: layout.boxH,
+    });
+  }
+
+  const boxByKey = new Map(domainBoxes.map((b) => [b.domainKey, b]));
+  let col0W = 0;
+  let col1W = 0;
+  let col2W = 0;
+  for (const row of DAG_LAYOUT_ROWS) {
+    for (let ci = 0; ci < 3; ci++) {
+      const dk = row[ci];
+      if (!dk || !boxByKey.has(dk)) continue;
+      const bw = boxByKey.get(dk).boxW;
+      if (ci === 0) col0W = Math.max(col0W, bw);
+      else if (ci === 1) col1W = Math.max(col1W, bw);
+      else col2W = Math.max(col2W, bw);
+    }
+  }
+  const dmc = GL.dagMinColW ?? 280;
+  col0W = Math.max(col0W, dmc);
+  col1W = Math.max(col1W, dmc);
+  col2W = Math.max(col2W, dmc);
+  const colGapX = 28;
+  const innerGridW = col0W + col1W + col2W + 2 * colGapX;
+  const xCol0 = side;
+  const xCol1 = xCol0 + col0W + colGapX;
+  const xCol2 = xCol1 + col1W + colGapX;
+
+  function colCenterX(colIdx, boxW) {
+    if (colIdx === 0) return xCol0 + (col0W - boxW) / 2;
+    if (colIdx === 1) return xCol1 + (col1W - boxW) / 2;
+    return xCol2 + (col2W - boxW) / 2;
+  }
+
+  let yCursor = GL.topPad;
+  for (const row of DAG_LAYOUT_ROWS) {
+    let rowH = 0;
+    const placed = [];
+    for (let ci = 0; ci < 3; ci++) {
+      const dk = row[ci];
+      if (!dk || !boxByKey.has(dk)) continue;
+      const b = boxByKey.get(dk);
+      rowH = Math.max(rowH, b.boxH);
+      placed.push({ dk, b, col: ci });
+    }
+    if (!placed.length) continue;
+    for (const { dk, b, col } of placed) {
+      b.x0 = colCenterX(col, b.boxW);
+      /* 行内顶对齐：避免「居中」后与同行超高域纵向重叠显得像插队到上一行（如 Config 叠在 Daemon 视觉带内） */
+      b.y0 = yCursor;
+    }
+    yCursor += rowH + GL.domainGapY;
+  }
+
+  for (const b of domainBoxes) {
+    const o = state.domainOffsets[b.domainKey];
+    if (o) {
+      b.x0 += o.dx || 0;
+      b.y0 += o.dy || 0;
+    }
+  }
+
+  const contentHeight = yCursor + GL.topPad;
+  const contentWidth = side * 2 + innerGridW;
+  svgEl.setAttribute("viewBox", `0 0 ${contentWidth} ${contentHeight}`);
+  svgEl.setAttribute("preserveAspectRatio", "xMidYMin meet");
+
+  const nodes = [];
+  for (const b of domainBoxes) {
+    if (b.collapsed) continue;
+    const L = b.layout;
+    if (!L) continue;
+    const innerLeft = b.x0 + L.innerPadX;
+    let ySub = b.y0 + L.titleH + L.hooksExtra + L.innerPadY;
+
+    if (!L.subgroups || !L.subgroups.length) {
+      const innerAvailW = b.boxW - L.innerPadX * 2;
+      const gridStartX = innerLeft + Math.max(0, (innerAvailW - L.gridInnerW) / 2);
+      L.ids.forEach((id, i) => {
+        const col = i % L.cols;
+        const row = Math.floor(i / L.cols);
+        const w = Math.min(nodeOuterWidth(id), L.cellW);
+        const { dx, dy } = dragDelta(id);
+        const slotX = gridStartX + col * (L.cellW + GL.nodeGapX);
+        const slotY = b.y0 + L.titleH + (L.hooksExtra || 0) + L.innerPadY + row * (GL.nodeH + GL.nodeGapY);
+        const x = slotX + (L.cellW - w) / 2 + dx;
+        const y = slotY + dy;
+        const m = MODULES[id];
+        const nh = m.isConfigAggregate && !effectiveConfigExpanded() ? GL.configCollapsedH : GL.nodeH;
+        nodes.push({
+          id,
+          x,
+          y,
+          width: w,
+          height: nh,
+          m,
+          colors: bandColorClass(m.band),
+        });
+      });
+    } else {
+      for (const sg of L.subgroups) {
+        ySub += GL.subgroupInnerPadY;
+        const labelY = ySub;
+        ySub += GL.subgroupTitleH;
+        const innerAvailW = b.boxW - L.innerPadX * 2;
+        const gridStartX = innerLeft + Math.max(0, (innerAvailW - sg.gridInnerW) / 2);
+        if (sg.collapsed) {
+          const dk = b.domainKey;
+          const aggId = aggregateNodeId(dk, sg.key);
+          const w = Math.min(240, Math.max(104, (sg.key + " (" + sg.ids.length + ")").length * 7 + 28));
+          const slotX = gridStartX + (sg.gridInnerW - w) / 2;
+          const x = slotX;
+          const y = ySub;
+          const meta = buildSubgroupAggregateMeta(dk, sg.key, sg.ids);
+          const first = MODULES[sg.ids[0]];
+          nodes.push({
+            id: aggId,
+            x,
+            y,
+            width: w,
+            height: GL.nodeH,
+            m: meta,
+            colors: bandColorClass(first.band),
+            subgroupLabel: sg.key,
+            sgLabelY: labelY,
+            innerLeft,
+            boxW: b.boxW,
+            memberIds: sg.ids,
+          });
+        } else {
+          sg.ids.forEach((id, i) => {
+            const col = i % sg.cols;
+            const row = Math.floor(i / sg.cols);
+            const w = Math.min(nodeOuterWidth(id), sg.cellW);
+            const { dx, dy } = dragDelta(id);
+            const slotX = gridStartX + col * (sg.cellW + GL.nodeGapX);
+            const slotY = ySub + row * (GL.nodeH + GL.nodeGapY);
+            const x = slotX + (sg.cellW - w) / 2 + dx;
+            const y = slotY + dy;
+            const m = MODULES[id];
+            nodes.push({
+              id,
+              x,
+              y,
+              width: w,
+              height: GL.nodeH,
+              m,
+              colors: bandColorClass(m.band),
+              subgroupLabel: sg.key,
+              sgLabelY: labelY,
+              innerLeft,
+              boxW: b.boxW,
+            });
+          });
+        }
+        ySub += sg.bodyH + GL.subgroupGapY;
+      }
+    }
+  }
+
+  const nodeById = new Map(nodes.map((nn) => [nn.id, nn]));
+  nodes.forEach((nn) => {
+    nn.cx = nn.x + nn.width / 2;
+    nn.cy = nn.y + nn.height / 2;
+  });
+
+  const linkRows = EDGES.map((e) => ({
+    ...e,
+    source: graphLinkEndpoint(e.from),
+    target: graphLinkEndpoint(e.to),
+    edgeKey: e.from + "\0" + e.to + "\0" + e.type,
+  })).filter((e) => {
+    if (e.source === e.target) return false;
+    if (state.hiddenEdgeTypes.has(e.type)) return false;
+    return nodeById.has(e.source) && nodeById.has(e.target);
+  });
+  const seenLink = new Set();
+  const links = linkRows.filter((e) => {
+    const k = e.source + "\0" + e.target + "\0" + e.type;
+    if (seenLink.has(k)) return false;
+    seenLink.add(k);
+    return true;
+  });
+
+  const pairGroups = new Map();
+  for (const e of links) {
+    const a = e.source;
+    const b = e.target;
+    const key = a < b ? a + "\0" + b : b + "\0" + a;
+    if (!pairGroups.has(key)) pairGroups.set(key, []);
+    pairGroups.get(key).push(e);
+  }
+  for (const arr of pairGroups.values()) {
+    arr.sort((x, y) => String(x.type).localeCompare(String(y.type)) || x.edgeKey.localeCompare(y.edgeKey));
+  }
+  const parallelEdgeInfo = new Map();
+  for (const arr of pairGroups.values()) {
+    const n = arr.length;
+    arr.forEach((e, i) => parallelEdgeInfo.set(e.edgeKey, { idx: i, n }));
+  }
+
+  const dragBeh = d3
+    .drag()
+    .container(zw)
+    .on("start", (event, d) => {
+      event.sourceEvent.stopPropagation();
+    })
+    .on("drag", (event, d) => {
+      const prev = dragDelta(d.id);
+      state.dragPositions[d.id] = { dx: prev.dx + event.dx, dy: prev.dy + event.dy };
+      drawGraph();
+    });
+
+  const domainDragBeh = d3
+    .drag()
+    .container(zw)
+    .on("start", (event) => {
+      event.sourceEvent.stopPropagation();
+      const dg = event.sourceEvent.target.closest(".domain-group");
+      if (dg) d3.select(dg).select("rect.domain-drag-hit").classed("domain-dragging", true);
+    })
+    .on("drag", (event, row) => {
+      const cur = state.domainOffsets[row.domainKey] || { dx: 0, dy: 0 };
+      state.domainOffsets[row.domainKey] = {
+        dx: cur.dx + event.dx,
+        dy: cur.dy + event.dy,
+      };
+      drawGraph();
+    })
+    .on("end", (event) => {
+      const dg = event.sourceEvent.target.closest(".domain-group");
+      if (dg) d3.select(dg).select("rect.domain-drag-hit").classed("domain-dragging", false);
+    });
+
+  const domJoin = d3
+    .select("#graph-domains")
+    .selectAll("g.domain-group")
+    .data(domainBoxes, (d) => d.domainKey)
+    .join((enter) => {
+      const g = enter.append("g").attr("class", "domain-group");
+      g.append("rect").attr("class", "domain-region");
+      g.append("rect").attr("class", "domain-collapse-zone");
+      g.append("rect").attr("class", "domain-drag-hit");
+      g.append("text").attr("class", "domain-heading");
+      g.append("g").attr("class", "hooks-toggle-wrap");
+      g.append("g").attr("class", "subgroup-frames");
+      return g;
+    });
+
+  domJoin
+    .classed("collapsed", (d) => d.collapsed)
+    .attr("transform", (d) => `translate(${d.x0},${d.y0})`)
+    .each(function (d) {
+      const g = d3.select(this);
+      g.select("rect.domain-region")
+        .attr("width", d.boxW)
+        .attr("height", d.boxH)
+        .attr("rx", 10)
+        .attr("ry", 10)
+        .style("fill", domainChrome(d.domainKey).fill)
+        .style("stroke", domainChrome(d.domainKey).stroke);
+
+      const meta = domainLabelMeta(d.domainKey);
+      const ch = d.collapsed ? "▸" : "▾";
+      const suffix = d.collapsed ? `（${d.allIds.length}）` : ` · ${d.ids.length}`;
+      g.select("text.domain-heading")
+        .attr("x", 14)
+        .attr("y", 22)
+        .attr("font-size", 13)
+        .style("font-weight", "600")
+        .style("fill", "var(--fg)")
+        .style("pointer-events", "none")
+        .text(`${ch} ${meta.icon} ${meta.title}${suffix}`);
+
+      g.select("rect.domain-collapse-zone")
+        .attr("x", 4)
+        .attr("y", 2)
+        .attr("width", 26)
+        .attr("height", GL.titleH + 2)
+        .attr("rx", 4)
+        .attr("ry", 4)
+        .style("fill", "transparent")
+        .style("cursor", "pointer")
+        .on("click", (ev, row) => {
+          ev.stopPropagation();
+          if (state.collapsedDomains.has(row.domainKey)) state.collapsedDomains.delete(row.domainKey);
+          else state.collapsedDomains.add(row.domainKey);
+          drawGraph();
+        });
+
+      g.select("rect.domain-drag-hit")
+        .attr("x", 32)
+        .attr("y", 2)
+        .attr("width", Math.max(8, d.boxW - 40))
+        .attr("height", GL.titleH + 2)
+        .attr("rx", 6)
+        .attr("ry", 6)
+        .style("fill", "transparent")
+        .call(domainDragBeh);
+
+      const ht = g.select("g.hooks-toggle-wrap");
+      ht.selectAll("*").remove();
+      if (!d.collapsed && d.domainKey === "hooks") {
+        const tg = ht.attr("transform", `translate(${d.boxW - 188},6)`);
+        const modes = [
+          ["platform", "按平台"],
+          ["lifecycle", "按生命周期"],
+        ];
+        modes.forEach(([k, lab], i) => {
+          const btn = tg.append("g").attr("class", "hooks-toggle-btn").classed("active", state.hooksView === k);
+          btn.append("rect").attr("width", 76).attr("height", 18).attr("rx", 4).attr("x", i * 80);
+          btn.append("text").attr("x", 8 + i * 80).attr("y", 13).text(lab);
+          btn.on("click", (ev) => {
+            ev.stopPropagation();
+            state.hooksView = k;
+            localStorage.setItem("tm-arch-hooks-view", k);
+            state.collapsedSubgroups = new Set(
+              [...state.collapsedSubgroups].filter((ck) => {
+                const i = ck.indexOf("\0");
+                if (i < 0) return false;
+                return canCollapseSubgroup(ck.slice(0, i), ck.slice(i + 1));
+              }),
+            );
+            drawGraph();
+            updateStatus();
+          });
+        });
+      }
+
+      const sf = g.select("g.subgroup-frames");
+      sf.selectAll("*").remove();
+      if (!d.collapsed && d.layout && d.layout.subgroups && d.layout.subgroups.length) {
+        const frames = sf.selectAll("g.sg-frame").data(d.layout.subgroups).join("g").attr("class", "sg-frame");
+        frames.each(function (sg, _j) {
+          const fg = d3.select(this);
+          const nn0 = nodes.find((n) => {
+            if (n.subgroupLabel !== sg.key) return false;
+            if (MODULES[n.id]) return MODULES[n.id].domain === d.domainKey;
+            return !!(n.m && n.m.domain === d.domainKey);
+          });
+          if (!nn0) return;
+          const pad = 4;
+          const fx = nn0.innerLeft - pad;
+          const fy = nn0.sgLabelY - 2;
+          const fw = d.boxW - (nn0.innerLeft - d.x0) * 2 + pad * 2;
+          const fh = sg.bodyH + GL.subgroupTitleH + 8;
+          fg.append("rect")
+            .attr("class", "subgroup-box")
+            .attr("x", fx - d.x0)
+            .attr("y", fy - d.y0)
+            .attr("width", fw)
+            .attr("height", fh)
+            .attr("rx", 6)
+            .attr("ry", 6);
+          fg.append("text")
+            .attr("class", "subgroup-label")
+            .attr("x", fx - d.x0 + 6)
+            .attr("y", fy - d.y0 + 12)
+            .text(sg.key);
+        });
+      }
+    });
+
+  d3.select("#graph-links")
+    .selectAll("path.link")
+    .data(links, (e) => e.edgeKey)
+    .join(
+      (enter) => enter.append("path").attr("class", "link").attr("fill", "none"),
+      (update) => update,
+      (exit) => exit.remove(),
+    )
+    .classed("selected", (e) => state.selectedEdgeKey === e.edgeKey)
+    .style("stroke", (e) => edgeColor(e.type))
+    .attr("stroke-width", (e) => (state.selectedEdgeKey === e.edgeKey ? 9 : e.type === "db" ? 2.8 : 1.55))
+    .attr("stroke-dasharray", (e) => {
+      const dsh = edgeStrokeDash(e.type);
+      if (dsh) return dsh;
+      return e.type === "db" ? "8,4" : null;
+    })
+    .attr("d", (e) => {
+      const par = parallelEdgeInfo.get(e.edgeKey) || { idx: 0, n: 1 };
+      return linkPathWithSpread(e, nodeById, par);
+    })
+    .on("click", (ev, d) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      renderEdgeDetail(d);
+      renderTree();
+      drawGraph();
+    })
+    .on("dblclick", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+    });
+
+  const gsel = d3
+    .select("#graph-nodes")
+    .selectAll("g.node-group")
+    .data(nodes, (d) => d.id)
+    .join(
+      (enter) => {
+        const ng = enter.append("g").attr("class", "node-group").style("cursor", "grab");
+        ng.append("rect").attr("class", "node-rect").attr("rx", 6).attr("ry", 6);
+        ng.append("text").attr("class", "node-text").attr("x", 10).attr("y", 22);
+        ng.append("text").attr("class", "node-badge").attr("text-anchor", "end").attr("y", 15);
+        return ng;
+      },
+      (update) => update,
+      (exit) => exit.remove(),
+    );
+
+  gsel
+    .classed("selected", (d) => state.selectedId === d.id)
+    .classed("dim", (d) => {
+      if (!state.query.trim()) return false;
+      if (d.m.isSubgroupAggregate && d.memberIds) return !d.memberIds.some((mid) => moduleMatchesQuery(mid));
+      return !moduleMatchesQuery(d.id);
+    })
+    .each(function bindDrag(d) {
+      const blockCfg = d.m.domain === "config" && d.m.isConfigAggregate;
+      if (!blockCfg && !d.m.isSubgroupAggregate) d3.select(this).call(dragBeh);
+    });
+
+  gsel
+    .select("rect.node-rect")
+    .attr("width", (d) => d.width)
+    .attr("height", (d) => d.height)
+    .style("fill", (d) => d.colors.fill)
+    .style("stroke", (d) => d.colors.stroke)
+    .attr("stroke-width", 1);
+
+  gsel
+    .select("text.node-text")
+    .attr("y", (d) => (d.height > GL.nodeH ? 30 : 22))
+    .text((d) => {
+      if (d.m.isConfigAggregate && !effectiveConfigExpanded()) return d.m.name;
+      return d.m.shortLabel || d.m.name;
+    });
+
+  gsel.select("text.node-badge").attr("x", (d) => d.width - 8).text((d) => ((d.m.graphExpand || []).length ? "＋" : ""));
+
+  gsel
+    .attr("transform", (d) => `translate(${d.x},${d.y})`)
+    .on("click", (ev, d) => {
+      ev.stopPropagation();
+      if (d.m.isConfigAggregate && d.m.domain === "config") {
+        state.configExpanded = !state.configExpanded;
+        drawGraph();
+        updateStatus();
+        return;
+      }
+      dispatchSelect(d.id);
+      renderTree();
+      renderDetail(d.id);
+      drawGraph();
+    })
+    .on("dblclick", (ev, d) => {
+      ev.stopPropagation();
+      if (d.m.isSubgroupAggregate && d.m.domain !== "config") {
+        const parsed = parseAggId(d.id);
+        if (parsed) state.collapsedSubgroups.delete(subgroupCollapseKey(parsed.domainKey, parsed.subgroup));
+        drawGraph();
+        updateStatus();
+        return;
+      }
+      const mod = MODULES[d.id];
+      const exp = (mod && mod.graphExpand) || [];
+      if (!exp.length) return;
+      if (state.expandedDAG.has(d.id)) state.expandedDAG.delete(d.id);
+      else state.expandedDAG.add(d.id);
+      drawGraph();
+      updateStatus();
+    });
+
+  const sgToggleData = [];
+  for (const b of domainBoxes) {
+    if (b.collapsed || !b.layout || !b.layout.subgroups) continue;
+    for (const sg of b.layout.subgroups) {
+      if (!canCollapseSubgroup(b.domainKey, sg.key)) continue;
+      const nn0 = nodes.find((n) => {
+        if (n.subgroupLabel !== sg.key) return false;
+        if (MODULES[n.id]) return MODULES[n.id].domain === b.domainKey;
+        return !!(n.m && n.m.domain === b.domainKey);
+      });
+      if (!nn0) continue;
+      const pad = 4;
+      const fx = nn0.innerLeft - pad;
+      const fy = nn0.sgLabelY - 2;
+      const labelWApprox = sg.key.length * 7 + 4;
+      const btnX = fx + 6 + labelWApprox + 2;
+      const skKey = subgroupCollapseKey(b.domainKey, sg.key);
+      sgToggleData.push({ x: btnX, y: fy + 1, skKey });
+    }
+  }
+  state.subgroupOverlayItems = sgToggleData.map((d) => ({ gx: d.x, gy: d.y, skKey: d.skKey }));
+  renderSubgroupOverlay(state.subgroupOverlayItems);
+}
+
+function updateStatus() {
+  const tier = [...state.expandedDAG].slice(0, 5).join("、") + (state.expandedDAG.size > 5 ? "…" : "");
+  const visible = Object.keys(MODULES).filter((id) => graphIdPassesFilter(id)).length;
+  const hiddenTypes = state.hiddenEdgeTypes.size ? ` · 已隐藏: ${[...state.hiddenEdgeTypes].join("/")}` : "";
+  document.getElementById("status-text").textContent =
+    `模块字典 ${MODULE_COUNT} · 有向边 ${EDGE_COUNT} · 当前图中可见节点${visible} · Hooks:${state.hooksView === "platform" ? "平台" : "生命周期"} · Config:${effectiveConfigExpanded() ? "展开" : "聚合"}${hiddenTypes}`;
+}
+
+function attachGraphInteractions() {
+  const svgEl = document.getElementById("graph-svg");
+  const zw = document.getElementById("graph-zoom-layer");
+
+  const zoom = d3
+    .zoom()
+    .scaleExtent([0.05, 20])
+    .filter((event) => {
+      const pass = (!event.ctrlKey || event.type === "wheel") && !event.button;
+      if (!pass) return false;
+      const t = event.target;
+      if (t && t.closest && t.closest(".sg-html-collapse")) return false;
+      return true;
+    })
+    .on("zoom", (ev) => {
+      zw.setAttribute("transform", ev.transform);
+      renderSubgroupOverlay(state.subgroupOverlayItems);
+    });
+
+  state.zoomBehavior = zoom;
+  d3.select(svgEl).call(zoom);
+  d3.select(svgEl).on("dblclick.zoom", null);
+}
+
+function resetGraphView() {
+  state.dragPositions = {};
+  state.collapsedDomains.clear();
+  state.collapsedSubgroups.clear();
+  state.domainOffsets = {};
+  state.expandedDAG.clear();
+  state.configExpanded = false;
+  state.hiddenEdgeTypes.clear();
+  state.selectedEdgeKey = null;
+  document.querySelectorAll("#edge-legend .legend-row[data-edge-type]").forEach((r) => r.classList.remove("hidden-type"));
+  for (const id of Object.keys(MODULES)) {
+    if (MODULES[id].level === "L2") state.expandedDAG.add(id);
+  }
+  const svgEl = document.getElementById("graph-svg");
+  const zw = document.getElementById("graph-zoom-layer");
+  zw.setAttribute("transform", d3.zoomIdentity);
+  if (state.zoomBehavior) d3.select(svgEl).call(state.zoomBehavior.transform, d3.zoomIdentity);
+  drawGraph();
+  updateStatus();
+}
+
+function exportJson() {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    moduleCount: MODULE_COUNT,
+    edgeCount: EDGE_COUNT,
+    modules: MODULES,
+    edges: EDGES,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "team-memory-architecture.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function setupResizer(id, panelEl, minW, maxW, side) {
+  const r = document.getElementById(id);
+  const panel = document.getElementById(panelEl);
+  let startX;
+  let startW;
+  r.addEventListener("mousedown", (e) => {
+    startX = e.clientX;
+    startW = panel.getBoundingClientRect().width;
+    const onMove = (ev) => {
+      const dx = ev.clientX - startX;
+      const nw = side === "left" ? startW + dx : startW - dx;
+      panel.style.width = Math.min(maxW, Math.max(minW, nw)) + "px";
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      drawGraph();
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  });
+}
+
+function onResizeSvg() {
+  const svgEl = document.getElementById("graph-svg");
+  const panel = svgEl.closest(".center-panel");
+  const h = panel.clientHeight;
+  svgEl.style.height = h + "px";
+  drawGraph();
+}
+
+document.getElementById("theme-btn").onclick = toggleTheme;
+document.getElementById("mode-domain").onclick = () => {
+  state.treeMode = "domain";
+  document.getElementById("mode-domain").classList.add("active");
+  document.getElementById("mode-layer").classList.remove("active");
+  renderTree();
+};
+document.getElementById("mode-layer").onclick = () => {
+  state.treeMode = "layer";
+  document.getElementById("mode-layer").classList.add("active");
+  document.getElementById("mode-domain").classList.remove("active");
+  renderTree();
+};
+document.getElementById("global-search").addEventListener("input", (e) => {
+  state.query = e.target.value;
+  renderTree();
+  drawGraph();
+});
+document.getElementById("btn-reset-graph").onclick = resetGraphView;
+document.getElementById("zoom-in").onclick = () => {
+  if (!state.zoomBehavior) return;
+  d3.select("#graph-svg").transition().duration(180).call(state.zoomBehavior.scaleBy, 1.2);
+};
+document.getElementById("zoom-out").onclick = () => {
+  if (!state.zoomBehavior) return;
+  d3.select("#graph-svg").transition().duration(180).call(state.zoomBehavior.scaleBy, 1 / 1.2);
+};
+document.getElementById("export-json").onclick = exportJson;
+
+document.querySelectorAll("#edge-legend .legend-row[data-edge-type]").forEach((row) => {
+  row.onclick = () => {
+    const t = row.dataset.edgeType;
+    if (state.hiddenEdgeTypes.has(t)) {
+      state.hiddenEdgeTypes.delete(t);
+      row.classList.remove("hidden-type");
+    } else {
+      state.hiddenEdgeTypes.add(t);
+      row.classList.add("hidden-type");
+    }
+    drawGraph();
+    updateStatus();
+  };
+});
+
+window.addEventListener("arch-select", (e) => {
+  renderDetail(e.detail.id);
+});
+
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if (!localStorage.getItem("tm-arch-theme")) applyTheme();
+});
+
+setupResizer("resizer-left", "left-panel", 200, 420, "left");
+setupResizer("resizer-right", "right-panel", 280, 520, "right");
+
+applyTheme();
+
+const svgNs = "http://www.w3.org/2000/svg";
+const zwEl = document.getElementById("graph-zoom-layer");
+const bgRect = document.createElementNS(svgNs, "rect");
+bgRect.classList.add("graph-zoom-bg");
+bgRect.setAttribute("width", "100%");
+bgRect.setAttribute("height", "100%");
+bgRect.setAttribute("fill", "transparent");
+zwEl.insertBefore(bgRect, zwEl.firstChild);
+
+dispatchSelect("mcp-server");
+renderTree();
+renderDetail("mcp-server");
+attachGraphInteractions();
+window.addEventListener("resize", onResizeSvg);
+setTimeout(onResizeSvg, 0);
+
+updateStatus();
+
+})();
+</script>
+</body>
+</html>

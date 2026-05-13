@@ -46,9 +46,7 @@ class TestCursorAfterResponse:
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "draft_saved", "convergence": False})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "draft_saved", "convergence": False}))
 
     def test_daemon_not_running(self) -> None:
         from team_memory.hooks.platforms.cursor.after_response import main
@@ -62,9 +60,7 @@ class TestCursorAfterResponse:
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "ok", "message": "daemon not running"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "ok", "message": "daemon not running"}))
 
     def test_invalid_stdin(self) -> None:
         from team_memory.hooks.platforms.cursor.after_response import main
@@ -73,9 +69,7 @@ class TestCursorAfterResponse:
             with patch("builtins.print") as mock_print:
                 main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "error", "message": "invalid input"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "error", "message": "invalid input"}))
 
     def test_generic_exception(self) -> None:
         from team_memory.hooks.platforms.cursor.after_response import main
@@ -89,9 +83,7 @@ class TestCursorAfterResponse:
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "error", "message": "something broke"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "error", "message": "something broke"}))
 
     def test_timeout_exception(self) -> None:
         from team_memory.hooks.platforms.cursor.after_response import main
@@ -105,9 +97,7 @@ class TestCursorAfterResponse:
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "error", "message": "timed out"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "error", "message": "timed out"}))
 
 
 # -----------------------------------------------------------------------
@@ -136,9 +126,7 @@ class TestCursorSessionStart:
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"additionalContext": "some context"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"additionalContext": "some context"}))
 
     def test_daemon_not_running(self) -> None:
         from team_memory.hooks.platforms.cursor.session_start import main
@@ -152,9 +140,7 @@ class TestCursorSessionStart:
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "ok", "message": "daemon not running"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "ok", "message": "daemon not running"}))
 
     def test_invalid_stdin(self) -> None:
         from team_memory.hooks.platforms.cursor.session_start import main
@@ -163,9 +149,7 @@ class TestCursorSessionStart:
             with patch("builtins.print") as mock_print:
                 main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "error", "message": "invalid input"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "error", "message": "invalid input"}))
 
 
 # -----------------------------------------------------------------------
@@ -194,9 +178,7 @@ class TestCursorBeforePrompt:
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"additionalContext": "retrieved context"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"additionalContext": "retrieved context"}))
 
     def test_daemon_not_running(self) -> None:
         from team_memory.hooks.platforms.cursor.before_prompt import main
@@ -210,9 +192,7 @@ class TestCursorBeforePrompt:
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "ok", "message": "daemon not running"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "ok", "message": "daemon not running"}))
 
     def test_invalid_stdin(self) -> None:
         from team_memory.hooks.platforms.cursor.before_prompt import main
@@ -221,9 +201,7 @@ class TestCursorBeforePrompt:
             with patch("builtins.print") as mock_print:
                 main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "error", "message": "invalid input"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "error", "message": "invalid input"}))
 
     def test_timeout_exception(self) -> None:
         from team_memory.hooks.platforms.cursor.before_prompt import main
@@ -237,9 +215,7 @@ class TestCursorBeforePrompt:
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "error", "message": "timed out"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "error", "message": "timed out"}))
 
 
 # -----------------------------------------------------------------------
@@ -281,7 +257,7 @@ class TestClaudeSessionStart:
         mock_print.assert_called_once()
         printed = json.loads(mock_print.call_args[0][0])
         assert "additionalContext" in printed
-        assert "abcd1234" in printed["additionalContext"]
+        assert "Test experience" in printed["additionalContext"]
 
     def test_daemon_not_running(self) -> None:
         from team_memory.hooks.platforms.claude.session_start import main
@@ -340,9 +316,7 @@ class TestHermesPipelineThin:
 
         pipeline = HermesPipeline()
 
-        with patch.object(
-            pipeline._client, "post", side_effect=httpx.ConnectError("refused")
-        ):
+        with patch.object(pipeline._client, "post", side_effect=httpx.ConnectError("refused")):
             result = await pipeline.on_turn_start("hello", project="team_doc")
 
         assert result == {"action": "ok", "message": "daemon not running"}
@@ -361,9 +335,7 @@ class TestHermesPipelineThin:
         )
 
         with patch.object(pipeline._client, "post", return_value=mock_response):
-            result = await pipeline.on_turn_end(
-                "sess-1", "response text", project="team_doc"
-            )
+            result = await pipeline.on_turn_end("sess-1", "response text", project="team_doc")
 
         assert result == {"action": "draft_saved", "draft_id": "d1"}
         await pipeline.close()
@@ -374,9 +346,7 @@ class TestHermesPipelineThin:
 
         pipeline = HermesPipeline()
 
-        with patch.object(
-            pipeline._client, "post", side_effect=httpx.ConnectError("refused")
-        ):
+        with patch.object(pipeline._client, "post", side_effect=httpx.ConnectError("refused")):
             result = await pipeline.on_turn_end("sess-1", "response text")
 
         assert result == {"action": "ok", "message": "daemon not running"}
@@ -406,9 +376,7 @@ class TestHermesPipelineThin:
 
         pipeline = HermesPipeline()
 
-        with patch.object(
-            pipeline._client, "post", side_effect=httpx.ConnectError("refused")
-        ):
+        with patch.object(pipeline._client, "post", side_effect=httpx.ConnectError("refused")):
             result = await pipeline.on_session_end("sess-1")
 
         assert result is None
@@ -420,9 +388,7 @@ class TestHermesPipelineThin:
 
         pipeline = HermesPipeline()
 
-        with patch.object(
-            pipeline._client, "post", side_effect=RuntimeError("something broke")
-        ):
+        with patch.object(pipeline._client, "post", side_effect=RuntimeError("something broke")):
             result = await pipeline.on_session_end("sess-1")
 
         assert result == {"action": "error", "message": "something broke"}
@@ -436,9 +402,7 @@ class TestHermesPipelineThin:
             mock_response = httpx.Response(
                 200,
                 json={"action": "ok"},
-                request=httpx.Request(
-                    "POST", "http://127.0.0.1:3901/hooks/before_prompt"
-                ),
+                request=httpx.Request("POST", "http://127.0.0.1:3901/hooks/before_prompt"),
             )
             with patch.object(pipeline._client, "post", return_value=mock_response):
                 result = await pipeline.on_turn_start("test")

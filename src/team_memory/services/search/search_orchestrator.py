@@ -132,9 +132,6 @@ class SearchOrchestrator:
                     pipeline_result.results, include_promoted=include_promoted
                 )
 
-                # Inject [mem:xxx] markers if evaluation_service is configured
-                processed_results = self._maybe_inject_markers(processed_results)
-
                 return OrchestratedSearchResult(
                     results=processed_results,
                     reranked=pipeline_result.reranked,
@@ -168,9 +165,6 @@ class SearchOrchestrator:
             # Apply status-based post-processing to legacy results
             processed_legacy = self._apply_status_filter(results, include_promoted=include_promoted)
 
-            # Inject [mem:xxx] markers if evaluation_service is configured
-            processed_legacy = self._maybe_inject_markers(processed_legacy)
-
             return OrchestratedSearchResult(
                 results=processed_legacy,
                 reranked=False,
@@ -179,12 +173,6 @@ class SearchOrchestrator:
             )
 
     _DRAFT_SCORE_MULTIPLIER = 0.7
-
-    def _maybe_inject_markers(self, results: list[dict]) -> list[dict]:
-        """Inject [mem:xxx] markers if evaluation_service is configured."""
-        if self._evaluation_service is not None:
-            return self._evaluation_service.inject_markers(results)
-        return results
 
     def _apply_status_filter(
         self,

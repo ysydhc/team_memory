@@ -159,6 +159,20 @@ class TestBuildFtsSearch:
         compiled = str(stmt.compile())
         assert "OFFSET" in compiled.upper()
 
+    def test_special_characters_are_escaped(self) -> None:
+        from team_memory.storage.query_builders import _build_hybrid_tsquery
+
+        # Test that special characters don't break tsquery generation
+        query = "Error: 500 & timeout! (db|cache)*"
+        ts_query = _build_hybrid_tsquery(query)
+        # Should be able to compile without errors
+        assert ts_query is not None
+        # We can also check that the FTS query builds without errors
+        stmt = build_fts_search(query)
+        assert isinstance(stmt, Select)
+        compiled = str(stmt.compile())
+        assert "experiences" in compiled
+
 
 class TestBuildDuplicateDetection:
     """Tests for build_duplicate_detection."""
