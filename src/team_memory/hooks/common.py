@@ -25,6 +25,7 @@ _config_cache: dict | None = None
 # parse_hook_input
 # ---------------------------------------------------------------------------
 
+
 def parse_hook_input() -> dict:
     """Read JSON payload from stdin (Cursor/Claude Code hooks send data via stdin).
 
@@ -40,6 +41,7 @@ def parse_hook_input() -> dict:
 # ---------------------------------------------------------------------------
 # load_config
 # ---------------------------------------------------------------------------
+
 
 def load_config() -> dict:
     """Load config.yaml from the same directory as this module.
@@ -60,6 +62,7 @@ def load_config() -> dict:
 # ---------------------------------------------------------------------------
 # get_project_from_path
 # ---------------------------------------------------------------------------
+
 
 def get_project_from_path(workspace_root: str, config: dict | None = None) -> str | None:
     """Map a workspace path to a TM project name using config patterns.
@@ -96,6 +99,7 @@ def get_project_from_path(workspace_root: str, config: dict | None = None) -> st
 # ---------------------------------------------------------------------------
 # call_mcp_tool
 # ---------------------------------------------------------------------------
+
 
 def call_mcp_tool(tool_name: str, arguments: dict) -> dict:
     """Call a TeamMemory MCP tool via HTTP POST.

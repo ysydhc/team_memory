@@ -4,14 +4,15 @@ If a draft hasn't been updated for 30 minutes, force-publish it regardless
 of convergence signals. This prevents memory loss from sessions that end
 without explicit closure.
 """
+
 from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
-from team_memory.daemon.draft_buffer import DraftBuffer
-from team_memory.daemon.draft_refiner import DraftRefiner
+from team_memory.daemon.buffers.draft_buffer import DraftBuffer
+from team_memory.daemon.refinement.draft_refiner import DraftRefiner
 
 
 def _utcnow() -> datetime:

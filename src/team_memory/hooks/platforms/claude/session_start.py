@@ -6,27 +6,24 @@ Input (from Claude Code):
 Output:
   {"additionalContext": "<retrieved context>"} or {}
 """
+
 import json
-import sys
 
-import httpx
-
-DAEMON_URL = "http://127.0.0.1:3901"
+from team_memory.hooks.core.daemon_http import post_hook
+from team_memory.hooks.core.output import print_claude_context, print_empty
+from team_memory.hooks.core.stdin import parse_stdin_json
 
 
 def main() -> None:
-    try:
-        input_data = json.load(sys.stdin)
-    except Exception:
-        # No valid input, silently pass
-        sys.exit(0)
+    input_data = parse_stdin_json()
+    if not input_data:
+        return
 
-    # Extract workspace from Claude Code input
     workspace = input_data.get("workspace", "") or input_data.get("workingDirectory", "")
     session_id = input_data.get("session_id", "")
 
     if not workspace:
-        sys.exit(0)
+        return
 
     payload = {
         "workspace_roots": [workspace] if workspace else [],
@@ -34,9 +31,8 @@ def main() -> None:
     }
 
     try:
-        resp = httpx.post(f"{DAEMON_URL}/hooks/session_start", json=payload, timeout=10.0)
+        resp = post_hook("session_start", payload)
         result = resp.json()
-        # Daemon returns additional_context with profile + experiences
         add_ctx = result.get("additional_context", {})
         experiences = add_ctx.get("relevant_experiences", [])
         profile = add_ctx.get("profile", {})
@@ -56,13 +52,11 @@ def main() -> None:
 
         if parts:
             context = "\n".join(parts)
-            print(json.dumps({"additionalContext": f"[mem:context] project={result.get('project', '?')}\n{context}"}))
+            print_claude_context(f"[mem:context] project={result.get('project', '?')}\n{context}")
         else:
-            print("{}")
-    except httpx.ConnectError:
-        print("{}")
+            print_empty()
     except Exception:
-        print("{}")
+        print_empty()
 
 
 if __name__ == "__main__":

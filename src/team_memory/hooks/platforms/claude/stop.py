@@ -1,7 +1,6 @@
 """Claude Code Stop hook — captures agent response for TM draft.
 
-Fires when Claude finishes responding. We use this instead of PostToolUse
-because we want the full response text, not individual tool outputs.
+Fires when Claude finishes responding.
 
 Input (from Claude Code 2.1.112):
   {
@@ -14,28 +13,22 @@ Input (from Claude Code 2.1.112):
 Output:
   {} (no blocking)
 """
-import json
-import sys
 
-import httpx
-
-DAEMON_URL = "http://127.0.0.1:3901"
+from team_memory.hooks.core.daemon_http import post_hook_fire_and_forget
+from team_memory.hooks.core.output import print_empty
+from team_memory.hooks.core.stdin import parse_stdin_json
 
 
 def main() -> None:
-    try:
-        input_data = json.load(sys.stdin)
-    except Exception:
-        print("{}")
+    input_data = parse_stdin_json()
+    if not input_data:
+        print_empty()
         return
 
     session_id = input_data.get("session_id", "")
-    # Claude Code 2.1.112 uses "cwd" not "workspace"
     workspace = input_data.get("cwd", "") or input_data.get("workspace", "") or input_data.get("workingDirectory", "")
-    # Claude Code 2.1.112 uses "last_assistant_message" not "transcript"
     response_text = input_data.get("last_assistant_message", "")
 
-    # Fallback: try to extract from transcript array if present
     if not response_text:
         transcript = input_data.get("transcript", [])
         for msg in reversed(transcript):
@@ -44,7 +37,7 @@ def main() -> None:
                 break
 
     if not response_text:
-        print("{}")
+        print_empty()
         return
 
     payload = {
@@ -53,12 +46,8 @@ def main() -> None:
         "workspace_roots": [workspace] if workspace else [],
     }
 
-    try:
-        httpx.post(f"{DAEMON_URL}/hooks/after_response", json=payload, timeout=10.0)
-    except Exception:
-        pass
-
-    print("{}")
+    post_hook_fire_and_forget("after_response", payload)
+    print_empty()
 
 
 if __name__ == "__main__":

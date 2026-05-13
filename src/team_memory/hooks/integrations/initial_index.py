@@ -11,7 +11,7 @@ import os
 import subprocess
 from glob import glob
 
-from team_memory.daemon.markdown_indexer import MarkdownIndexer
+from team_memory.daemon.wiki.markdown_indexer import MarkdownIndexer
 from team_memory.hooks.shared import TMClient
 
 logger = logging.getLogger(__name__)

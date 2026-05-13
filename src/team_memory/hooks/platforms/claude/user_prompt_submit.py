@@ -10,16 +10,15 @@ Input (from Claude Code):
 Output:
   {"additionalContext": "<retrieved context>"} or {}
 """
+
 import json
 import sys
 
-import httpx
-
-DAEMON_URL = "http://127.0.0.1:3901"
+from team_memory.hooks.core.daemon_http import post_hook
+from team_memory.hooks.core.output import print_claude_context, print_empty
 
 
 def main() -> None:
-    # Trace: confirm hook is actually executed by Claude Code
     with open("/tmp/tm-hook-trace.log", "a") as f:
         f.write(f"[{__file__.split('/')[-1]}] started at {__import__('datetime').datetime.now().isoformat()}\n")
 
@@ -32,19 +31,16 @@ def main() -> None:
     except Exception as e:
         with open("/tmp/tm-hook-trace.log", "a") as f:
             f.write(f"  JSON_PARSE_ERROR: {e}\n")
-        print("{}")
-        sys.stdout.flush()
+        print_empty()
         return
 
     prompt = input_data.get("prompt", "")
     session_id = input_data.get("session_id", "")
-    # Claude Code 2.1.112 uses "cwd" not "workspace"
     workspace = input_data.get("cwd", "") or input_data.get("workspace", "") or input_data.get("workingDirectory", "")
 
     with open("/tmp/tm-hook-trace.log", "a") as f:
         f.write(f"  prompt={prompt[:50]!r} workspace={workspace!r}\n")
 
-    # Always call daemon to record T1 for MCP recall correlation
     payload = {
         "prompt": prompt,
         "workspace_roots": [workspace] if workspace else [],
@@ -52,7 +48,7 @@ def main() -> None:
     }
 
     try:
-        resp = httpx.post(f"{DAEMON_URL}/hooks/before_prompt", json=payload, timeout=10.0)
+        resp = post_hook("before_prompt", payload)
         result = resp.json()
         results = result.get("results", [])
         with open("/tmp/tm-hook-trace.log", "a") as f:
@@ -65,19 +61,13 @@ def main() -> None:
                 rid = r.get("id", "")[:8]
                 context_parts.append(f"[mem:{rid}] {title}\n{content}")
             context = "\n---\n".join(context_parts)
-            out = json.dumps({"additionalContext": context})
-            print(out)
+            print_claude_context(context)
         else:
-            print("{}")
-    except httpx.ConnectError as e:
-        with open("/tmp/tm-hook-trace.log", "a") as f:
-            f.write(f"  DAEMON_CONNECT_ERROR: {e}\n")
-        print("{}")
+            print_empty()
     except Exception as e:
         with open("/tmp/tm-hook-trace.log", "a") as f:
-            f.write(f"  DAEMON_OTHER_ERROR: {type(e).__name__}: {e}\n")
-        print("{}")
-    sys.stdout.flush()
+            f.write(f"  DAEMON_ERROR: {type(e).__name__}: {e}\n")
+        print_empty()
 
 
 if __name__ == "__main__":

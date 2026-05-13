@@ -15,6 +15,7 @@ import httpx
 # Data models
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class HookInput:
     """Parsed input from a Cursor / Claude Code hook (stdin JSON).
@@ -57,6 +58,7 @@ class PipelineConfig:
 # ---------------------------------------------------------------------------
 # TMClient
 # ---------------------------------------------------------------------------
+
 
 class TMClient:
     """Async HTTP client for TeamMemory MCP tools.

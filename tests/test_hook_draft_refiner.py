@@ -3,19 +3,15 @@
 from __future__ import annotations
 
 import os
-import sys
 import tempfile
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
+from team_memory.daemon.buffers.draft_buffer import DraftBuffer  # noqa: E402
+
 # Ensure team_memory hooks are importable
-
-from team_memory.daemon.draft_refiner import DraftRefiner  # noqa: E402
-from team_memory.daemon.draft_buffer import DraftBuffer  # noqa: E402
-from team_memory.daemon.draft_refiner import DraftRefiner  # noqa: E402
-
+from team_memory.daemon.refinement.draft_refiner import DraftRefiner  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -326,9 +322,11 @@ class TestRefineAndPublishExtractsFacts:
 
         # Check that draft_publish was called with refined_content containing facts
         call_args = tm.draft_publish.call_args
-        refined_content = call_args.kwargs.get("refined_content") or call_args[1].get(
-            "refined_content"
-        ) or call_args[0][1] if len(call_args[0]) > 1 else call_args.kwargs["refined_content"]
+        refined_content = (
+            call_args.kwargs.get("refined_content") or call_args[1].get("refined_content") or call_args[0][1]
+            if len(call_args[0]) > 1
+            else call_args.kwargs["refined_content"]
+        )
 
         assert "因为" in refined_content
         assert "所以" in refined_content

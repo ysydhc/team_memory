@@ -14,7 +14,7 @@ import os
 import subprocess
 from typing import Any
 
-from team_memory.daemon.markdown_indexer import MarkdownIndexer
+from team_memory.daemon.wiki.markdown_indexer import MarkdownIndexer
 from team_memory.hooks.shared import TMClient
 
 logger = logging.getLogger(__name__)
@@ -96,10 +96,7 @@ class GitWatcher:
         if committed_files is None:
             committed_files = self.get_committed_files(repo_path)
             # Convert relative paths from git output to absolute
-            committed_files = [
-                repo_path + "/" + f if not os.path.isabs(f) else f
-                for f in committed_files
-            ]
+            committed_files = [repo_path + "/" + f if not os.path.isabs(f) else f for f in committed_files]
 
         results: list[dict] = []
         for f in committed_files:
@@ -167,27 +164,29 @@ class GitWatcher:
 
             if exps:
                 for exp in exps:
-                    results.append({
-                        "action": "soft_delete",
-                        "id": exp["id"],
-                        "message": "TM has no delete API; soft-delete pending",
-                    })
+                    results.append(
+                        {
+                            "action": "soft_delete",
+                            "id": exp["id"],
+                            "message": "TM has no delete API; soft-delete pending",
+                        }
+                    )
                     logger.info("on_git_rm: soft_delete %s → %s", f, exp["id"])
             else:
-                results.append({
-                    "action": "not_found",
-                    "file": f,
-                    "message": "No Experience found for deleted file",
-                })
+                results.append(
+                    {
+                        "action": "not_found",
+                        "file": f,
+                        "message": "No Experience found for deleted file",
+                    }
+                )
                 logger.info("on_git_rm: no experience found for %s", f)
 
         return results
 
     # -- git mv --------------------------------------------------------------
 
-    async def on_git_mv(
-        self, repo_path: str, old_path: str, new_path: str
-    ) -> dict:
+    async def on_git_mv(self, repo_path: str, old_path: str, new_path: str) -> dict:
         """Handle ``git mv``: rm the old path + add the new path.
 
         Returns a dict with ``rm`` and ``add`` keys containing the
@@ -232,8 +231,13 @@ class GitWatcher:
         try:
             proc = subprocess.run(
                 [
-                    "git", "-C", repo_path, "log",
-                    "--name-only", "-1", "--pretty=format:",
+                    "git",
+                    "-C",
+                    repo_path,
+                    "log",
+                    "--name-only",
+                    "-1",
+                    "--pretty=format:",
                 ],
                 capture_output=True,
                 text=True,
@@ -250,6 +254,7 @@ class GitWatcher:
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
+
 
 def _extract_drafts(recall_result: dict | None, file_path: str) -> list[dict]:
     """Extract matching experiences from a recall result by group_key.

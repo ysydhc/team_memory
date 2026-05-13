@@ -1,11 +1,12 @@
 """Tests for WeeklyReport hook — formatting and generation."""
+
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
-from team_memory.hooks.weekly_report import WeeklyReport
+from team_memory.hooks.integrations.weekly_report import WeeklyReport
 
 
 class TestFormatReport:

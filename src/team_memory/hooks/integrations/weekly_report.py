@@ -3,13 +3,14 @@
 Calls the TeamMemory API for search_log stats and formats a human-readable
 report showing retrieval counts, hit rates, and system health assessment.
 """
+
 from __future__ import annotations
 
 import logging
 
 from team_memory.hooks.shared import TMClient
 
-logger = logging.getLogger("team_memory.hooks.weekly_report")
+logger = logging.getLogger("team_memory.hooks.integrations.weekly_report")
 
 
 class WeeklyReport:
@@ -75,9 +76,9 @@ class WeeklyReport:
 记忆系统周报
 ══════════════════════════
 
-检索：{stats.get('total', 0)} 次
-命中：{stats.get('hit', 0)} 次
-使用：{stats.get('used', 0)} 次
+检索：{stats.get("total", 0)} 次
+命中：{stats.get("hit", 0)} 次
+使用：{stats.get("used", 0)} 次
 使用率：{use_rate:.1%}
 
 本周新增：{new_count} 条痕迹

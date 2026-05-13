@@ -1,21 +1,19 @@
 """Tests for team_memory hooks session_timeout — 30-minute draft safety net."""
+
 from __future__ import annotations
 
 import os
-import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 
+from team_memory.daemon.buffers.draft_buffer import DraftBuffer  # noqa: E402
+from team_memory.daemon.refinement.draft_refiner import DraftRefiner  # noqa: E402
+
 # Ensure scripts/hooks/ is importable
-
 from team_memory.hooks.session_timeout import SessionTimeoutManager  # noqa: E402
-from team_memory.daemon.draft_buffer import DraftBuffer  # noqa: E402
-from team_memory.daemon.draft_refiner import DraftRefiner  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Helpers

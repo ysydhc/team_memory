@@ -2,15 +2,15 @@
 
 The HermesPipeline now delegates all heavy logic to the TM Daemon HTTP API.
 """
+
 from __future__ import annotations
 
-import json
 from unittest.mock import patch
 
 import httpx
 import pytest
 
-from team_memory.hooks.hermes_pipeline import HermesPipeline
+from team_memory.hooks.platforms.hermes.pipeline import HermesPipeline
 
 
 class TestHermesPipelineOnTurnStart:
@@ -123,7 +123,9 @@ class TestHermesPipelineOnTurnEnd:
 
         with patch.object(pipeline._client, "post", return_value=mock_response) as mock_post:
             await pipeline.on_turn_end(
-                "sess-42", "agent response", project="my_proj",
+                "sess-42",
+                "agent response",
+                project="my_proj",
                 recent_tools=[{"name": "edit"}],
             )
 

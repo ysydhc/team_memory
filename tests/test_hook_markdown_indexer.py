@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-import os
 import textwrap
-import tempfile
 
 import pytest
 
 # ---------------------------------------------------------------------------
 # Import target
 # ---------------------------------------------------------------------------
-from team_memory.daemon.markdown_indexer import MarkdownIndexer
-
+from team_memory.daemon.wiki.markdown_indexer import MarkdownIndexer
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def sample_config(tmp_path):
@@ -50,6 +48,7 @@ def sample_config(tmp_path):
 def config_file(tmp_path, sample_config):
     """Write sample_config as YAML and return the path."""
     import yaml
+
     p = tmp_path / "obsidian_config.yaml"
     p.write_text(yaml.dump(sample_config, allow_unicode=True), encoding="utf-8")
     return str(p)
@@ -59,12 +58,14 @@ def config_file(tmp_path, sample_config):
 # parse_file
 # ---------------------------------------------------------------------------
 
+
 class TestParseFile:
     """MarkdownIndexer.parse_file"""
 
     def test_with_frontmatter(self, tmp_path):
         md = tmp_path / "note.md"
-        md.write_text(textwrap.dedent("""\
+        md.write_text(
+            textwrap.dedent("""\
             ---
             title: My Note
             tags:
@@ -72,7 +73,9 @@ class TestParseFile:
               - obsidian
             ---
             This is the body content.
-        """), encoding="utf-8")
+        """),
+            encoding="utf-8",
+        )
 
         result = MarkdownIndexer.parse_file(str(md))
         assert result["title"] == "My Note"
@@ -92,14 +95,17 @@ class TestParseFile:
 
     def test_chinese_content(self, tmp_path):
         md = tmp_path / "中文笔记.md"
-        md.write_text(textwrap.dedent("""\
+        md.write_text(
+            textwrap.dedent("""\
             ---
             title: 学习笔记
             tags:
               - 学习
             ---
             这是中文正文内容，用于测试中文解析功能。
-        """), encoding="utf-8")
+        """),
+            encoding="utf-8",
+        )
 
         result = MarkdownIndexer.parse_file(str(md))
         assert result["title"] == "学习笔记"
@@ -118,13 +124,16 @@ class TestParseFile:
 
     def test_frontmatter_tags_as_string(self, tmp_path):
         md = tmp_path / "comma_tags.md"
-        md.write_text(textwrap.dedent("""\
+        md.write_text(
+            textwrap.dedent("""\
             ---
             title: Comma Tags
             tags: "python, rust, go"
             ---
             Body here.
-        """), encoding="utf-8")
+        """),
+            encoding="utf-8",
+        )
 
         result = MarkdownIndexer.parse_file(str(md))
         assert "python" in result["tags"]
@@ -144,6 +153,7 @@ class TestParseFile:
 # ---------------------------------------------------------------------------
 # resolve_project
 # ---------------------------------------------------------------------------
+
 
 class TestResolveProject:
     """MarkdownIndexer.resolve_project"""
@@ -168,6 +178,7 @@ class TestResolveProject:
 # ---------------------------------------------------------------------------
 # should_index
 # ---------------------------------------------------------------------------
+
 
 class TestShouldIndex:
     """MarkdownIndexer.should_index"""
@@ -210,6 +221,7 @@ class TestShouldIndex:
 # ---------------------------------------------------------------------------
 # load_config
 # ---------------------------------------------------------------------------
+
 
 class TestLoadConfig:
     """MarkdownIndexer.load_config"""

@@ -12,23 +12,20 @@ Daemon expects:
 
 Cursor 字段映射: agent_response → response_text
 """
-import json
+
 import os
-import sys
 
-import httpx
-
-DAEMON_URL = "http://127.0.0.1:3901"
+from team_memory.hooks.core.daemon_http import post_hook
+from team_memory.hooks.core.output import print_cursor_action
+from team_memory.hooks.core.stdin import parse_stdin_json
 
 
 def main() -> None:
-    try:
-        input_data = json.load(sys.stdin)
-    except Exception:
-        print(json.dumps({"action": "error", "message": "invalid input"}))
+    input_data = parse_stdin_json()
+    if not input_data:
+        print_cursor_action({"action": "error", "message": "invalid input"})
         return
 
-    # Map Cursor fields to daemon fields / 映射 Cursor 字段到 daemon 字段
     response_text = (
         input_data.get("response_text", "")
         or input_data.get("agent_response", "")
@@ -54,12 +51,15 @@ def main() -> None:
     }
 
     try:
-        resp = httpx.post(f"{DAEMON_URL}/hooks/after_response", json=payload, timeout=10.0)
+        resp = post_hook("after_response", payload)
         print(resp.text)
-    except httpx.ConnectError:
-        print(json.dumps({"action": "ok", "message": "daemon not running"}))
     except Exception as e:
-        print(json.dumps({"action": "error", "message": str(e)}))
+        from httpx import ConnectError
+
+        if isinstance(e, ConnectError):
+            print_cursor_action({"action": "ok", "message": "daemon not running"})
+        else:
+            print_cursor_action({"action": "error", "message": str(e)})
 
 
 if __name__ == "__main__":

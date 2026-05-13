@@ -43,10 +43,12 @@ import httpx
 # Config resolution: env > .env file > default
 # ---------------------------------------------------------------------------
 
+
 def _load_dotenv() -> None:
     """Load .env from current directory or parents (best-effort)."""
     try:
         from dotenv import load_dotenv
+
         # Walk up from cwd to find .env
         load_dotenv(verbose=False)
     except ImportError:
@@ -60,6 +62,7 @@ _load_dotenv()
 def _get_base_url() -> str:
     try:
         from team_memory.client_config import ClientConfig
+
         return ClientConfig.load().server.url
     except Exception:
         return os.environ.get("TM_BASE_URL", "http://localhost:9111")
@@ -68,6 +71,7 @@ def _get_base_url() -> str:
 def _get_api_key() -> str:
     try:
         from team_memory.client_config import ClientConfig
+
         key = ClientConfig.load().server.api_key
     except Exception:
         key = os.environ.get("TEAM_MEMORY_API_KEY", "")
@@ -92,6 +96,7 @@ def _get_project(cli_project: str | None) -> str | None:
         return cli_project
     try:
         from team_memory.project_resolver import infer_project_name
+
         return infer_project_name()
     except Exception:
         return None
@@ -100,6 +105,7 @@ def _get_project(cli_project: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 # HTTP helpers
 # ---------------------------------------------------------------------------
+
 
 def _print_response_json(resp: httpx.Response) -> None:
     print(json.dumps(resp.json(), indent=2, ensure_ascii=False))
@@ -119,9 +125,7 @@ def _post_mcp_json(path: str, body: dict[str, Any], *, timeout: float = 60.0) ->
         sys.exit(1)
 
 
-def _get_mcp_json(
-    path: str, *, params: dict[str, str] | None = None, timeout: float = 30.0
-) -> None:
+def _get_mcp_json(path: str, *, params: dict[str, str] | None = None, timeout: float = 30.0) -> None:
     url = f"{_get_base_url()}{path}"
     try:
         resp = httpx.get(url, headers=_headers(), params=params or None, timeout=timeout)
@@ -138,6 +142,7 @@ def _get_mcp_json(
 # ---------------------------------------------------------------------------
 # Subcommands
 # ---------------------------------------------------------------------------
+
 
 def cmd_save(args: argparse.Namespace) -> None:
     """POST /api/v1/mcp/save — direct fields or long-form content."""
@@ -384,8 +389,7 @@ def cmd_config_set(args: argparse.Namespace) -> None:
     parts = key.split(".")
     if len(parts) < 2:
         print(
-            "Error: Key must be in section.field format,"
-            " e.g. server.url / 键必须为 section.field 格式",
+            "Error: Key must be in section.field format, e.g. server.url / 键必须为 section.field 格式",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -400,8 +404,7 @@ def cmd_config_set(args: argparse.Namespace) -> None:
                 config_data = tomllib.load(f)
         except Exception as e:
             print(
-                f"Warning: Cannot read existing config: {e}"
-                " / 警告：无法读取现有配置",
+                f"Warning: Cannot read existing config: {e} / 警告：无法读取现有配置",
                 file=sys.stderr,
             )
 
@@ -448,8 +451,7 @@ def cmd_project_init(args: argparse.Namespace) -> None:
     tm_path = Path.cwd() / ".tm.toml"
     if tm_path.exists():
         print(
-            f"Warning: .tm.toml already exists at {tm_path}"
-            " / 警告：.tm.toml 已存在",
+            f"Warning: .tm.toml already exists at {tm_path} / 警告：.tm.toml 已存在",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -524,6 +526,7 @@ def cmd_project_show(_args: argparse.Namespace) -> None:
 
     # Inferred name / 推断名称
     from team_memory.project_resolver import infer_project_name
+
     inferred = infer_project_name(cwd)
     print(f"  Inferred name: {inferred}")
 
@@ -559,8 +562,7 @@ def cmd_project_list(args: argparse.Namespace) -> None:
         if resp.status_code == 200:
             data = resp.json()
             project_counts: dict[str, int] = {}
-            items = (data if isinstance(data, list)
-                else data.get("items", data.get("experiences", [])))
+            items = data if isinstance(data, list) else data.get("items", data.get("experiences", []))
             for item in items:
                 proj = item.get("project", "default")
                 project_counts[proj] = project_counts.get(proj, 0) + 1
@@ -676,18 +678,14 @@ def cmd_setup(args: argparse.Namespace) -> None:
 
     # Handle uninstall / 处理卸载
     if args.uninstall:
-        platforms = (
-            ["claude-code", "cursor", "hermes"] if args.platform == "all" else [args.platform]
-        )
+        platforms = ["claude-code", "cursor", "hermes"] if args.platform == "all" else [args.platform]
         for platform in platforms:
             _uninstall_platform(platform)
         return
 
     # Handle check / 处理检查
     if args.check:
-        platforms = (
-            ["claude-code", "cursor", "hermes"] if args.platform == "all" else [args.platform]
-        )
+        platforms = ["claude-code", "cursor", "hermes"] if args.platform == "all" else [args.platform]
         for platform in platforms:
             _check_platform(platform, cfg)
         return
@@ -698,9 +696,7 @@ def cmd_setup(args: argparse.Namespace) -> None:
         return
 
     # Specific platform / 指定平台
-    platforms = (
-        ["claude-code", "cursor", "hermes"] if args.platform == "all" else [args.platform]
-    )
+    platforms = ["claude-code", "cursor", "hermes"] if args.platform == "all" else [args.platform]
     for platform in platforms:
         _setup_platform(platform, cfg)
 
@@ -812,8 +808,7 @@ def _uninstall_cursor() -> None:
         after_mcp = hooks_section.get("afterMCPExecution", [])
         original_len = len(after_mcp)
         after_mcp = [
-            entry for entry in after_mcp
-            if not (isinstance(entry, dict) and "team_memory" in entry.get("matcher", ""))
+            entry for entry in after_mcp if not (isinstance(entry, dict) and "team_memory" in entry.get("matcher", ""))
         ]
 
         if len(after_mcp) == original_len:
@@ -962,11 +957,13 @@ def _setup_claude_code(cfg: Any, venv_python: str) -> None:
     hooks["SessionStart"] = [
         {
             "matcher": "",
-            "hooks": [{
-                "type": "command",
-                "command": f"{venv_python} -m team_memory.hooks.claude_session_start",
-                "timeout": 10000,
-            }],
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": f"{venv_python} -m team_memory.hooks.platforms.claude.session_start",
+                    "timeout": 10000,
+                }
+            ],
         }
     ]
 
@@ -974,11 +971,13 @@ def _setup_claude_code(cfg: Any, venv_python: str) -> None:
     hooks["UserPromptSubmit"] = [
         {
             "matcher": "",
-            "hooks": [{
-                "type": "command",
-                "command": f"{venv_python} -m team_memory.hooks.claude_user_prompt_submit",
-                "timeout": 10000,
-            }],
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": f"{venv_python} -m team_memory.hooks.platforms.claude.user_prompt_submit",
+                    "timeout": 10000,
+                }
+            ],
         }
     ]
 
@@ -986,29 +985,32 @@ def _setup_claude_code(cfg: Any, venv_python: str) -> None:
     hooks["Stop"] = [
         {
             "matcher": "",
-            "hooks": [{
-                "type": "command",
-                "command": f"{venv_python} -m team_memory.hooks.claude_stop",
-                "timeout": 10000,
-            }],
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": f"{venv_python} -m team_memory.hooks.platforms.claude.stop",
+                    "timeout": 10000,
+                }
+            ],
         }
     ]
 
     # PostToolUse hook (TM recall only; preserve existing entries like ruff)
     post_tool = hooks.get("PostToolUse", [])
     # Remove old TM PostToolUse entries
-    post_tool = [
-        h for h in post_tool
-        if "team_memory" not in json.dumps(h) and "scripts/hooks" not in json.dumps(h)
-    ]
-    post_tool.append({
-        "matcher": "mcp__team_memory__recall|mcp__team_memory__memory_recall",
-        "hooks": [{
-            "type": "command",
-            "command": f"{venv_python} -m team_memory.hooks.claude_post_tool_use",
-            "timeout": 10000,
-        }],
-    })
+    post_tool = [h for h in post_tool if "team_memory" not in json.dumps(h) and "scripts/hooks" not in json.dumps(h)]
+    post_tool.append(
+        {
+            "matcher": "mcp__team_memory__recall|mcp__team_memory__memory_recall",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": f"{venv_python} -m team_memory.hooks.platforms.claude.post_tool_use",
+                    "timeout": 10000,
+                }
+            ],
+        }
+    )
     hooks["PostToolUse"] = post_tool
 
     settings["hooks"] = hooks
@@ -1035,15 +1037,17 @@ def _setup_cursor(cfg: Any, venv_python: str) -> None:
         hooks_data["hooks"] = hooks_section
 
     cursor_hooks = [
-        ("sessionStart", "cursor_session_start", ""),
-        ("beforeSubmitPrompt", "cursor_before_prompt", ""),
-        ("afterAgentResponse", "cursor_after_response", ""),
-        ("afterMCPExecution", "cursor_after_mcp", "MCP:team_memory"),
+        ("sessionStart", "team_memory.hooks.platforms.cursor.session_start", ""),
+        ("beforeSubmitPrompt", "team_memory.hooks.platforms.cursor.before_prompt", ""),
+        ("afterAgentResponse", "team_memory.hooks.platforms.cursor.after_response", ""),
+        ("afterMCPExecution", "team_memory.hooks.platforms.cursor.after_mcp", "MCP:team_memory"),
     ]
-    for event, script, matcher in cursor_hooks:
+    for event, module_path, matcher in cursor_hooks:
         hooks_section[event] = [
-            {"matcher": matcher, "hooks": [{"type": "command",
-             "command": f"{venv_python} -m team_memory.hooks.{script}"}]}
+            {
+                "matcher": matcher,
+                "hooks": [{"type": "command", "command": f"{venv_python} -m {module_path}"}],
+            }
         ]
 
     hooks_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1063,21 +1067,47 @@ def _setup_hermes(cfg: Any, venv_python: str) -> None:
 
     existing_hooks = config.get("hooks", {})
     tm_hooks = {
-        "UserPromptSubmit": [{"matcher": "", "hooks": [{"type": "command",
-            "command": f"{venv_python} -m team_memory.hooks.hermes_user_prompt_submit",
-            "timeout": 10000}]}],
-        "Stop": [{"matcher": "", "hooks": [{"type": "command",
-            "command": f"{venv_python} -m team_memory.hooks.hermes_stop",
-            "timeout": 10000}]}],
-        "PostToolUse": [{"matcher": "recall|memory_recall", "hooks": [{"type": "command",
-            "command": f"{venv_python} -m team_memory.hooks.hermes_post_tool_call",
-            "timeout": 10000}]}],
+        "UserPromptSubmit": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": f"{venv_python} -m team_memory.hooks.platforms.hermes.user_prompt_submit",
+                        "timeout": 10000,
+                    }
+                ],
+            }
+        ],
+        "Stop": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": f"{venv_python} -m team_memory.hooks.platforms.hermes.stop",
+                        "timeout": 10000,
+                    }
+                ],
+            }
+        ],
+        "PostToolUse": [
+            {
+                "matcher": "recall|memory_recall",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": f"{venv_python} -m team_memory.hooks.platforms.hermes.post_tool_call",
+                        "timeout": 10000,
+                    }
+                ],
+            }
+        ],
     }
     config["hooks"] = {**existing_hooks, **tm_hooks}
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(yaml.dump(config, allow_unicode=True,
-                                      default_flow_style=False, sort_keys=False))
+    config_path.write_text(yaml.dump(config, allow_unicode=True, default_flow_style=False, sort_keys=False))
     print(f"[hermes] ✅ 3 hooks written to {config_path}")
 
 
@@ -1102,9 +1132,7 @@ def cmd_archive(args: argparse.Namespace) -> None:
     if args.summary:
         body["conversation_summary"] = args.summary
     if args.linked_experience_ids:
-        body["linked_experience_ids"] = [
-            s.strip() for s in args.linked_experience_ids.split(",") if s.strip()
-        ]
+        body["linked_experience_ids"] = [s.strip() for s in args.linked_experience_ids.split(",") if s.strip()]
     project = _get_project(args.project)
     if project:
         body["project"] = project
@@ -1176,20 +1204,24 @@ def cmd_upload(args: argparse.Namespace) -> None:
 # Argument parser
 # ---------------------------------------------------------------------------
 
+
 def _get_queue_db_path() -> str:
     """Resolve the drafts.db path for queue access / 解析队列数据库路径。"""
     import os
+
     env_path = os.environ.get("TM_PIPELINE_DB_PATH")
     if env_path:
         return env_path
     from pathlib import Path
+
     default = Path.home() / ".cache" / "tm-pipeline" / "drafts.db"
     return str(default)
 
 
 def cmd_queue_list(args: Any) -> None:
     """List pending retry operations / 列出待重试操作。"""
-    from team_memory.daemon.pending_queue import PendingQueue
+    from team_memory.daemon.buffers.pending_queue import PendingQueue
+
     db_path = _get_queue_db_path()
     try:
         queue = PendingQueue(db_path=db_path)
@@ -1206,13 +1238,16 @@ def cmd_queue_list(args: Any) -> None:
     print("-" * 80)
     for op in ops:
         next_retry = (op.get("next_retry_at") or "")[:19]
-        print(f"{op['id']:<14} {op['op_type']:<12} {(op.get('session_id') or '')[:12]:<14} "
-              f"{op['retries']:<8} {op['status']:<10} {next_retry}")
+        print(
+            f"{op['id']:<14} {op['op_type']:<12} {(op.get('session_id') or '')[:12]:<14} "
+            f"{op['retries']:<8} {op['status']:<10} {next_retry}"
+        )
 
 
 def cmd_queue_stats(args: Any) -> None:
     """Print queue statistics / 打印队列统计。"""
-    from team_memory.daemon.pending_queue import PendingQueue
+    from team_memory.daemon.buffers.pending_queue import PendingQueue
+
     db_path = _get_queue_db_path()
     try:
         queue = PendingQueue(db_path=db_path)
@@ -1226,7 +1261,8 @@ def cmd_queue_stats(args: Any) -> None:
 
 def cmd_queue_retry(args: Any) -> None:
     """Force immediate retry of a queued operation / 强制立即重试。"""
-    from team_memory.daemon.pending_queue import PendingQueue
+    from team_memory.daemon.buffers.pending_queue import PendingQueue
+
     db_path = _get_queue_db_path()
     try:
         queue = PendingQueue(db_path=db_path)
@@ -1235,6 +1271,7 @@ def cmd_queue_retry(args: Any) -> None:
         return
 
     from datetime import datetime, timezone
+
     now = datetime.now(timezone.utc).isoformat()
     queue._db.execute(
         "UPDATE pending_ops SET next_retry_at = ?, status = 'pending' WHERE id = ?",
@@ -1246,7 +1283,8 @@ def cmd_queue_retry(args: Any) -> None:
 
 def cmd_queue_clear(args: Any) -> None:
     """Clear queue entries / 清空队列条目。"""
-    from team_memory.daemon.pending_queue import PendingQueue
+    from team_memory.daemon.buffers.pending_queue import PendingQueue
+
     db_path = _get_queue_db_path()
     try:
         queue = PendingQueue(db_path=db_path)
@@ -1266,9 +1304,11 @@ def cmd_queue_clear(args: Any) -> None:
     else:
         print("Use --id <id> or --all")
 
+
 def cmd_metrics_show(args: Any) -> None:
     """Show current metrics / 显示当前指标."""
-    from team_memory.daemon.metrics_collector import MetricsCollector
+    from team_memory.daemon.observe.metrics_collector import MetricsCollector
+
     mc = MetricsCollector(db_path=_get_queue_db_path())
     rows = mc.query(name=getattr(args, "name", None))
     if not rows:
@@ -1280,6 +1320,7 @@ def cmd_metrics_show(args: Any) -> None:
         labels = r.get("labels", "{}")
         if isinstance(labels, str):
             import json as _json
+
             try:
                 labels = _json.loads(labels)
             except Exception:
@@ -1293,7 +1334,8 @@ def cmd_metrics_show(args: Any) -> None:
 
 def cmd_metrics_summary(args: Any) -> None:
     """Print aggregated metrics summary / 打印聚合指标摘要."""
-    from team_memory.daemon.metrics_collector import MetricsCollector
+    from team_memory.daemon.observe.metrics_collector import MetricsCollector
+
     mc = MetricsCollector(db_path=_get_queue_db_path())
     s = mc.summary(hours=getattr(args, "hours", 24))
     if not s:
@@ -1303,6 +1345,7 @@ def cmd_metrics_summary(args: Any) -> None:
         print(f"{name}:")
         for label_key, val in sorted(labels_dict.items()):
             print(f"  {label_key}: {val:.2f}")
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -1421,8 +1464,7 @@ def main() -> None:
     p_cfg_set.add_argument("value", help="Config value")
     p_cfg_set.set_defaults(func=cmd_config_set)
 
-    p_cfg_init = cfg_sub.add_parser(
-        "init", help="Initialize config interactively / 交互式初始化配置")
+    p_cfg_init = cfg_sub.add_parser("init", help="Initialize config interactively / 交互式初始化配置")
     p_cfg_init.add_argument("--server-url", help="TM server URL")
     p_cfg_init.add_argument("--api-key", help="TM API key")
     p_cfg_init.add_argument(

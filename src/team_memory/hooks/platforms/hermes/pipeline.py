@@ -5,12 +5,15 @@ Instead, it calls this pipeline directly for retrieval and draft management.
 
 This thin version delegates all heavy logic to the TM Daemon HTTP API.
 """
+
 from __future__ import annotations
 
 import os
 from typing import Any
 
 import httpx
+
+from team_memory.hooks.core.daemon_http import DAEMON_URL
 
 
 class HermesPipeline:
@@ -29,8 +32,8 @@ class HermesPipeline:
         result = await pipeline.on_session_end("sess-1")
     """
 
-    def __init__(self, daemon_url: str = "http://127.0.0.1:3901") -> None:
-        self._daemon_url = daemon_url.rstrip("/")
+    def __init__(self, daemon_url: str | None = None) -> None:
+        self._daemon_url = (daemon_url or DAEMON_URL).rstrip("/")
         self._client = httpx.AsyncClient(base_url=self._daemon_url, timeout=10.0)
 
     @staticmethod

@@ -1,20 +1,16 @@
 """Tests for scripts/hooks/common.py — shared utility functions."""
+
 import io
 import json
-import sys
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 # Ensure scripts/hooks/ is importable
-
 from team_memory.hooks import common
-
 
 # ---------------------------------------------------------------------------
 # parse_hook_input
 # ---------------------------------------------------------------------------
+
 
 class TestParseHookInput:
     """parse_hook_input reads JSON from stdin and returns a dict."""
@@ -47,6 +43,7 @@ class TestParseHookInput:
 # get_project_from_path
 # ---------------------------------------------------------------------------
 
+
 class TestGetProjectFromPath:
     """get_project_from_path maps a workspace path to a TM project name."""
 
@@ -74,6 +71,7 @@ class TestGetProjectFromPath:
 # ---------------------------------------------------------------------------
 # load_config
 # ---------------------------------------------------------------------------
+
 
 class TestLoadConfig:
     """load_config reads config.yaml from the same directory as common.py."""
@@ -117,17 +115,22 @@ class TestLoadConfig:
 # call_mcp_tool
 # ---------------------------------------------------------------------------
 
+
 class TestCallMcpTool:
     """call_mcp_tool POSTs to TM's MCP-over-HTTP endpoint."""
 
     @staticmethod
     def _mock_response(data: dict):
         """Build a lightweight mock httpx.Response."""
-        return type("Resp", (), {
-            "status_code": 200,
-            "json": lambda self: data,
-            "raise_for_status": lambda self: None,
-        })()
+        return type(
+            "Resp",
+            (),
+            {
+                "status_code": 200,
+                "json": lambda self: data,
+                "raise_for_status": lambda self: None,
+            },
+        )()
 
     def test_posts_correct_payload(self):
         with patch("httpx.post", return_value=self._mock_response({"ok": True})) as mock_post:
