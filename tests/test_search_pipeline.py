@@ -12,8 +12,8 @@ from team_memory.config import (
     SearchConfig,
 )
 from team_memory.reranker.base import RerankerProvider, RerankResult
-from team_memory.services.cache import SearchCache
-from team_memory.services.search_pipeline import (
+from team_memory.services.search.cache import SearchCache
+from team_memory.services.search.search_pipeline import (
     _EXPANSION_CACHE_TTL,
     SearchPipeline,
     SearchRequest,
@@ -278,7 +278,7 @@ class TestLLMExpansionCache:
         mock_client = AsyncMock()
         mock_client.chat = AsyncMock(return_value="expanded keywords here")
 
-        with patch("team_memory.services.llm_client.LLMClient") as mock_llm_cls:
+        with patch("team_memory.services.llm.llm_client.LLMClient") as mock_llm_cls:
             mock_llm_cls.from_config.return_value = mock_client
 
             llm_config = LLMConfig()
@@ -299,7 +299,7 @@ class TestLLMExpansionCache:
         mock_client = AsyncMock()
         mock_client.chat = AsyncMock(return_value="expanded")
 
-        with patch("team_memory.services.llm_client.LLMClient") as mock_llm_cls:
+        with patch("team_memory.services.llm.llm_client.LLMClient") as mock_llm_cls:
             mock_llm_cls.from_config.return_value = mock_client
 
             llm_config = LLMConfig()
@@ -315,7 +315,7 @@ class TestLLMExpansionCache:
         mock_client = AsyncMock()
         mock_client.chat = AsyncMock(return_value="result")
 
-        with patch("team_memory.services.llm_client.LLMClient") as mock_llm_cls:
+        with patch("team_memory.services.llm.llm_client.LLMClient") as mock_llm_cls:
             mock_llm_cls.from_config.return_value = mock_client
 
             llm_config = LLMConfig()
@@ -338,7 +338,7 @@ class TestLLMExpansionCache:
         mock_client = AsyncMock()
         mock_client.chat = AsyncMock(side_effect=RuntimeError("LLM down"))
 
-        with patch("team_memory.services.llm_client.LLMClient") as mock_llm_cls:
+        with patch("team_memory.services.llm.llm_client.LLMClient") as mock_llm_cls:
             mock_llm_cls.from_config.return_value = mock_client
 
             llm_config = LLMConfig()

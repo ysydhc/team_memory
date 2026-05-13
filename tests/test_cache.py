@@ -1,11 +1,16 @@
 """Tests for search result and embedding caching (D1 refactored)."""
 
 import asyncio
+import json
+from dataclasses import asdict
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
-from team_memory.services.cache import MemoryCacheBackend, SearchCache, create_cache_backend
+from team_memory.services.search.cache import MemoryCacheBackend, RedisCacheBackend, SearchCache, create_cache_backend
+from team_memory.services.search.search_pipeline import SearchPipelineResult, coerce_cached_search_pipeline_result
 
 # ======================== MemoryCacheBackend ========================
 
@@ -81,7 +86,7 @@ class TestCacheFactory:
 
     def test_create_redis_backend(self):
         # Should not raise even if Redis is unavailable (lazy connection)
-        from team_memory.services.cache import RedisCacheBackend
+        from team_memory.services.search.cache import RedisCacheBackend
 
         backend = create_cache_backend(
             backend="redis",
@@ -94,7 +99,69 @@ class TestCacheFactory:
         assert isinstance(backend, MemoryCacheBackend)
 
 
-# ======================== SearchCache ========================
+# ======================== Redis serialization / SearchPipelineResult ========================
+
+
+class TestRedisSearchPipelineResultSerialization:
+    @pytest.mark.asyncio
+    async def test_redis_backend_roundtrip_asdict_via_json(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SearchPipelineResult as dict survives JSON encode/decode used by RedisCacheBackend."""
+        store: dict[str, str] = {}
+
+        fake_client = AsyncMock()
+
+        async def fake_setex(key: str, _ttl: int, val: str) -> None:
+            store[key] = val
+
+        fake_client.setex = AsyncMock(side_effect=fake_setex)
+        fake_client.get = AsyncMock(side_effect=lambda k: store.get(k))
+
+        async def fake_get_client(_self: RedisCacheBackend) -> AsyncMock:
+            return fake_client
+
+        monkeypatch.setattr(RedisCacheBackend, "_get_client", fake_get_client)
+
+        backend = RedisCacheBackend(redis_url="redis://mock:6379/0", ttl_seconds=300, prefix="tst:")
+
+        uid = uuid4()
+        ts = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        original = SearchPipelineResult(
+            results=[{"id": uid, "title": "hello", "created_at": ts}],
+            total_candidates=3,
+            search_type="hybrid",
+            reranked=True,
+            cached=False,
+            duration_ms=10,
+            stage_metrics={"embedding_ms": 5},
+        )
+
+        await backend.put("roundtrip-key", asdict(original))
+
+        wired_key = backend._key("roundtrip-key")
+        assert wired_key in store
+        assert json.loads(store[wired_key])["total_candidates"] == 3
+
+        loaded = await backend.get("roundtrip-key")
+        assert isinstance(loaded, dict)
+        restored = coerce_cached_search_pipeline_result(loaded)
+
+        assert restored.total_candidates == original.total_candidates
+        assert restored.search_type == original.search_type
+        assert restored.reranked is original.reranked
+        assert restored.duration_ms == original.duration_ms
+        assert restored.stage_metrics == {"embedding_ms": 5}
+        assert restored.results[0]["title"] == "hello"
+        assert restored.results[0]["id"] == str(uid)
+        assert restored.results[0]["created_at"] == ts.isoformat()
+
+    @pytest.mark.asyncio
+    async def test_memory_backend_keeps_search_pipeline_dataclass_reference(self) -> None:
+        """Memory backend continues to store the live object (no JSON round-trip)."""
+        backend = MemoryCacheBackend(max_size=10, ttl_seconds=300)
+        obj = SearchPipelineResult(results=[{"title": "m"}])
+        await backend.put("mem-key", obj)
+        out = await backend.get("mem-key")
+        assert out is obj
 
 
 class TestSearchCache:
