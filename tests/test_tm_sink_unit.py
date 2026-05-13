@@ -17,13 +17,14 @@ Unit tests cover:
 Integration tests cover:
 - Full CRUD with real MCP/Web server
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from team_memory.daemon.tm_sink import LocalTMSink, RemoteTMSink, TMSink
+from team_memory.daemon.integration.tm_sink import LocalTMSink, RemoteTMSink
 
 pytestmark = pytest.mark.unit
 
@@ -78,7 +79,8 @@ class TestEnsureOps:
 
     def test_ensure_ops_imports_successfully(self):
         """_ensure_ops should be importable / _ensure_ops 应可导入"""
-        from team_memory.daemon.tm_sink import _ensure_ops
+        from team_memory.daemon.integration.tm_sink import _ensure_ops
+
         # Just verify it's callable, not that it succeeds without MCP
         assert callable(_ensure_ops)
 
@@ -87,6 +89,7 @@ class TestEnsureOps:
 # LocalTMSink method coverage tests
 # ---------------------------------------------------------------------------
 
+
 class TestLocalTMSinkRecall:
     """Tests for LocalTMSink.recall edge cases."""
 
@@ -94,7 +97,7 @@ class TestLocalTMSinkRecall:
     async def test_recall_returns_empty_list_when_raw_is_list(self):
         """When _op_recall returns a list (not dict, not str), recall returns []."""
         sink = LocalTMSink(user="test_user")
-        with patch("team_memory.daemon.tm_sink._op_recall", new_callable=AsyncMock) as mock_recall:
+        with patch("team_memory.daemon.integration.tm_sink._op_recall", new_callable=AsyncMock) as mock_recall:
             mock_recall.return_value = [{"id": "1"}, {"id": "2"}]
             result = await sink.recall(query="test")
             assert result == []
@@ -103,7 +106,7 @@ class TestLocalTMSinkRecall:
     async def test_recall_returns_empty_list_when_raw_is_none(self):
         """When _op_recall returns None, recall returns []."""
         sink = LocalTMSink(user="test_user")
-        with patch("team_memory.daemon.tm_sink._op_recall", new_callable=AsyncMock) as mock_recall:
+        with patch("team_memory.daemon.integration.tm_sink._op_recall", new_callable=AsyncMock) as mock_recall:
             mock_recall.return_value = None
             result = await sink.recall(query="test")
             assert result == []
@@ -117,7 +120,7 @@ class TestLocalTMSinkUpdateExperience:
         """update_experience should call op_experience_update with correct args."""
         sink = LocalTMSink(user="test_user")
         mock_op = AsyncMock(return_value={"id": "exp1", "title": "Updated"})
-        with patch("team_memory.services.memory_operations.op_experience_update", mock_op):
+        with patch("team_memory.services.memory.memory_operations.op_experience_update", mock_op):
             result = await sink.update_experience(
                 experience_id="exp1",
                 title="Updated",
@@ -169,6 +172,7 @@ class TestLocalTMSinkIncrementUsedCount:
 # RemoteTMSink method coverage tests
 # ---------------------------------------------------------------------------
 
+
 class TestRemoteTMSinkRequest:
     """Tests for RemoteTMSink._request with path_params and GET."""
 
@@ -187,8 +191,10 @@ class TestRemoteTMSinkRequest:
 
         with patch("httpx.AsyncClient", return_value=mock_client):
             result = await sink._request(
-                "PUT", "/api/v1/experiences/{experience_id}",
-                body={"title": "t"}, path_params={"experience_id": "exp42"},
+                "PUT",
+                "/api/v1/experiences/{experience_id}",
+                body={"title": "t"},
+                path_params={"experience_id": "exp42"},
             )
         # The path should have been formatted
         mock_client.request.assert_awaited_once()
@@ -226,9 +232,13 @@ class TestRemoteTMSinkDraftSave:
         with patch.object(sink, "_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = {"id": "draft1"}
             result = await sink.draft_save(
-                title="t", content="c",
-                tags=["a"], project="p",
-                group_key="gk", conversation_id="conv1", skip_dedup=True,
+                title="t",
+                content="c",
+                tags=["a"],
+                project="p",
+                group_key="gk",
+                conversation_id="conv1",
+                skip_dedup=True,
             )
         call_kwargs = mock_req.call_args
         body = call_kwargs[0][2] if len(call_kwargs[0]) > 2 else call_kwargs[1].get("body")
@@ -253,10 +263,15 @@ class TestRemoteTMSinkSave:
         with patch.object(sink, "_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = {"id": "exp1"}
             await sink.save(
-                title="t", problem="p", solution="s",
-                content="full content", tags=["a"],
-                scope="global", experience_type="lesson",
-                project="proj", group_key="gk",
+                title="t",
+                problem="p",
+                solution="s",
+                content="full content",
+                tags=["a"],
+                scope="global",
+                experience_type="lesson",
+                project="proj",
+                group_key="gk",
             )
         args, _ = mock_req.call_args
         body = args[2]
@@ -281,9 +296,14 @@ class TestRemoteTMSinkRecall:
         with patch.object(sink, "_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = {"results": [{"id": "1"}]}
             result = await sink.recall(
-                query="q", problem="pr", file_path="/f",
-                language="py", framework="django",
-                tags=["t"], max_results=10, project="proj",
+                query="q",
+                problem="pr",
+                file_path="/f",
+                language="py",
+                framework="django",
+                tags=["t"],
+                max_results=10,
+                project="proj",
             )
         args, _ = mock_req.call_args
         body = args[2]
@@ -338,8 +358,12 @@ class TestRemoteTMSinkUpdateExperience:
             mock_req.return_value = {"id": "exp1"}
             await sink.update_experience(
                 experience_id="exp1",
-                title="t", problem="p", solution="s",
-                tags=["a"], experience_type="lesson", exp_status="active",
+                title="t",
+                problem="p",
+                solution="s",
+                tags=["a"],
+                experience_type="lesson",
+                exp_status="active",
             )
         args, kwargs = mock_req.call_args
         method, path, body = args[0], args[1], args[2]
@@ -400,6 +424,7 @@ class TestRemoteTMSinkIncrementUsedCount:
 # LocalTMSink method delegation tests (cover actual method bodies)
 # ---------------------------------------------------------------------------
 
+
 class TestLocalTMSinkMethods:
     """Tests for LocalTMSink method delegation to op_* functions."""
 
@@ -408,16 +433,25 @@ class TestLocalTMSinkMethods:
         """draft_save should call _op_draft_save."""
         sink = LocalTMSink(user="u1")
         mock_op = AsyncMock(return_value={"id": "d1"})
-        with patch("team_memory.daemon.tm_sink._op_draft_save", mock_op):
+        with patch("team_memory.daemon.integration.tm_sink._op_draft_save", mock_op):
             result = await sink.draft_save(
-                title="t", content="c", tags=["a"],
-                project="p", group_key="gk",
-                conversation_id="conv1", skip_dedup=True,
+                title="t",
+                content="c",
+                tags=["a"],
+                project="p",
+                group_key="gk",
+                conversation_id="conv1",
+                skip_dedup=True,
             )
         mock_op.assert_awaited_once_with(
-            "u1", title="t", content="c", tags=["a"],
-            project="p", group_key="gk",
-            conversation_id="conv1", skip_dedup=True,
+            "u1",
+            title="t",
+            content="c",
+            tags=["a"],
+            project="p",
+            group_key="gk",
+            conversation_id="conv1",
+            skip_dedup=True,
         )
         assert result == {"id": "d1"}
 
@@ -426,12 +460,15 @@ class TestLocalTMSinkMethods:
         """draft_publish should call _op_draft_publish."""
         sink = LocalTMSink(user="u1")
         mock_op = AsyncMock(return_value={"id": "d1"})
-        with patch("team_memory.daemon.tm_sink._op_draft_publish", mock_op):
+        with patch("team_memory.daemon.integration.tm_sink._op_draft_publish", mock_op):
             result = await sink.draft_publish(
-                draft_id="d1", refined_content="rc",
+                draft_id="d1",
+                refined_content="rc",
             )
         mock_op.assert_awaited_once_with(
-            "u1", draft_id="d1", refined_content="rc",
+            "u1",
+            draft_id="d1",
+            refined_content="rc",
         )
         assert result == {"id": "d1"}
 
@@ -440,17 +477,28 @@ class TestLocalTMSinkMethods:
         """save should call _op_save."""
         sink = LocalTMSink(user="u1")
         mock_op = AsyncMock(return_value={"id": "e1"})
-        with patch("team_memory.daemon.tm_sink._op_save", mock_op):
+        with patch("team_memory.daemon.integration.tm_sink._op_save", mock_op):
             result = await sink.save(
-                title="t", problem="p", solution="s",
-                content="c", tags=["a"], scope="global",
-                experience_type="lesson", project="proj",
+                title="t",
+                problem="p",
+                solution="s",
+                content="c",
+                tags=["a"],
+                scope="global",
+                experience_type="lesson",
+                project="proj",
                 group_key="gk",
             )
         mock_op.assert_awaited_once_with(
-            "u1", title="t", problem="p", solution="s",
-            content="c", tags=["a"], scope="global",
-            experience_type="lesson", project="proj",
+            "u1",
+            title="t",
+            problem="p",
+            solution="s",
+            content="c",
+            tags=["a"],
+            scope="global",
+            experience_type="lesson",
+            project="proj",
             group_key="gk",
         )
         assert result == {"id": "e1"}
@@ -459,10 +507,11 @@ class TestLocalTMSinkMethods:
     async def test_recall_with_string_return(self):
         """recall should parse JSON string returns."""
         import json
+
         sink = LocalTMSink(user="u1")
         data = {"results": [{"id": "1"}]}
         mock_op = AsyncMock(return_value=json.dumps(data))
-        with patch("team_memory.daemon.tm_sink._op_recall", mock_op):
+        with patch("team_memory.daemon.integration.tm_sink._op_recall", mock_op):
             result = await sink.recall(query="q")
         assert result == [{"id": "1"}]
 
@@ -471,7 +520,7 @@ class TestLocalTMSinkMethods:
         """recall should extract 'results' from dict returns."""
         sink = LocalTMSink(user="u1")
         mock_op = AsyncMock(return_value={"results": [{"id": "1"}, {"id": "2"}]})
-        with patch("team_memory.daemon.tm_sink._op_recall", mock_op):
+        with patch("team_memory.daemon.integration.tm_sink._op_recall", mock_op):
             result = await sink.recall(query="q")
         assert result == [{"id": "1"}, {"id": "2"}]
 
@@ -480,12 +529,17 @@ class TestLocalTMSinkMethods:
         """context should call _op_context."""
         sink = LocalTMSink(user="u1")
         mock_op = AsyncMock(return_value={"ctx": "data"})
-        with patch("team_memory.daemon.tm_sink._op_context", mock_op):
+        with patch("team_memory.daemon.integration.tm_sink._op_context", mock_op):
             result = await sink.context(
-                file_paths=["/f"], task_description="d", project="p",
+                file_paths=["/f"],
+                task_description="d",
+                project="p",
             )
         mock_op.assert_awaited_once_with(
-            "u1", file_paths=["/f"], task_description="d", project="p",
+            "u1",
+            file_paths=["/f"],
+            task_description="d",
+            project="p",
         )
         assert result == {"ctx": "data"}
 
@@ -500,7 +554,8 @@ class TestRemoteTMSinkDraftPublish:
         with patch.object(sink, "_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = {"id": "d1"}
             await sink.draft_publish(
-                draft_id="d1", refined_content="refined text",
+                draft_id="d1",
+                refined_content="refined text",
             )
         args, _ = mock_req.call_args
         body = args[2]
@@ -556,20 +611,23 @@ class TestCreateSink:
 
     def test_create_local_sink(self):
         """create_sink with mode='local' returns LocalTMSink."""
-        from team_memory.daemon.tm_sink import create_sink
+        from team_memory.daemon.integration.tm_sink import create_sink
+
         sink = create_sink({"mode": "local", "user": "u1"})
         assert isinstance(sink, LocalTMSink)
         assert sink._user == "u1"
 
     def test_create_local_sink_default(self):
         """create_sink with no mode defaults to local."""
-        from team_memory.daemon.tm_sink import create_sink
+        from team_memory.daemon.integration.tm_sink import create_sink
+
         sink = create_sink({})
         assert isinstance(sink, LocalTMSink)
 
     def test_create_remote_sink(self):
         """create_sink with mode='remote' returns RemoteTMSink."""
-        from team_memory.daemon.tm_sink import create_sink
+        from team_memory.daemon.integration.tm_sink import create_sink
+
         sink = create_sink({"mode": "remote", "base_url": "http://x", "user": "u2"})
         assert isinstance(sink, RemoteTMSink)
         assert sink._user == "u2"
@@ -577,12 +635,14 @@ class TestCreateSink:
 
     def test_create_remote_sink_no_url_raises(self):
         """create_sink with mode='remote' and no base_url raises ValueError."""
-        from team_memory.daemon.tm_sink import create_sink
+        from team_memory.daemon.integration.tm_sink import create_sink
+
         with pytest.raises(ValueError, match="requires 'base_url'"):
             create_sink({"mode": "remote"})
 
     def test_create_unknown_mode_raises(self):
         """create_sink with unknown mode raises ValueError."""
-        from team_memory.daemon.tm_sink import create_sink
+        from team_memory.daemon.integration.tm_sink import create_sink
+
         with pytest.raises(ValueError, match="Unsupported tm mode"):
             create_sink({"mode": "unknown"})

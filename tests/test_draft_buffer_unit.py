@@ -11,12 +11,13 @@ Unit tests cover:
 Integration tests cover:
 - Full CRUD with real SQLite (in-memory or tmp file)
 """
+
 from __future__ import annotations
 
 import pytest
 import pytest_asyncio
 
-from team_memory.daemon.draft_buffer import DraftBuffer, _CREATE_TABLE
+from team_memory.daemon.buffers.draft_buffer import _CREATE_TABLE, DraftBuffer
 
 # ---------------------------------------------------------------------------
 # Markers
@@ -139,9 +140,7 @@ class TestDraftBufferContextManager:
         async with buf:
             assert buf._db is not None
             # Check table exists
-            cursor = await buf._db.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='drafts'"
-            )
+            cursor = await buf._db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='drafts'")
             row = await cursor.fetchone()
             assert row is not None
 
@@ -403,14 +402,22 @@ class TestGetOlderThan:
     @pytest.mark.asyncio
     async def test_get_older_than_with_old_draft(self, buf):
         """Drafts inserted with old timestamps should be returned / 用旧时间戳插入的草稿应被返回"""
-        import sqlite3
+
         # Insert a draft with a very old created_at directly
         db = buf._db
         await db.execute(
             "INSERT INTO drafts (id, title, project, conversation_id, content, status, source, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)",
-            ("old-id", "Old Draft", "team_doc", "c1", "old content", "pipeline",
-             "2020-01-01T00:00:00+00:00", "2020-01-01T00:00:00+00:00"),
+            (
+                "old-id",
+                "Old Draft",
+                "team_doc",
+                "c1",
+                "old content",
+                "pipeline",
+                "2020-01-01T00:00:00+00:00",
+                "2020-01-01T00:00:00+00:00",
+            ),
         )
         await db.commit()
         # Also insert a fresh one

@@ -16,23 +16,23 @@ Covers previously uncovered lines:
 - Lines 921-938: _update_index_with_topics
 - Lines 949-993: _generate_contradictions
 """
+
 from __future__ import annotations
 
 import os
-import sys
 import struct
-from dataclasses import dataclass
+import sys
 from datetime import datetime, timezone
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from team_memory.daemon.wiki_compiler import WikiCompiler, CompileResult
 
+from team_memory.daemon.wiki.wiki_compiler import WikiCompiler
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def wiki_dir(tmp_path):
@@ -58,6 +58,7 @@ def compiler(wiki_dir, db_path):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_experience(
     id: str = "cov-1",
@@ -87,6 +88,7 @@ def _make_experience(
 # Lines 817: _format_date(None)
 # ---------------------------------------------------------------------------
 
+
 class TestFormatDate:
     def test_none_returns_empty(self):
         assert WikiCompiler._format_date(None) == ""
@@ -103,6 +105,7 @@ class TestFormatDate:
 # Line 494: get_uncompiled with empty list
 # ---------------------------------------------------------------------------
 
+
 class TestGetUncompiled:
     async def test_empty_list_returns_empty(self, compiler):
         async with compiler:
@@ -113,6 +116,7 @@ class TestGetUncompiled:
 # ---------------------------------------------------------------------------
 # Lines 654-655: _find_related embedding exception
 # ---------------------------------------------------------------------------
+
 
 class TestFindRelatedEmbeddingException:
     def test_embedding_exception_does_not_crash(self):
@@ -133,6 +137,7 @@ class TestFindRelatedEmbeddingException:
 # ---------------------------------------------------------------------------
 # Lines 350-352: compile_batch exception handling
 # ---------------------------------------------------------------------------
+
 
 class TestCompileBatchException:
     async def test_batch_skips_individual_failures(self, compiler):
@@ -166,6 +171,7 @@ class TestCompileBatchException:
 # ---------------------------------------------------------------------------
 # Lines 373, 388-389, 395-396: compile_incremental with pg_url and errors
 # ---------------------------------------------------------------------------
+
 
 class TestCompileIncrementalPgAndErrors:
     async def test_compile_incremental_with_pg_url(self, compiler):
@@ -211,6 +217,7 @@ class TestCompileIncrementalPgAndErrors:
 # Line 444, 463-464: full_rebuild with pg_url and errors
 # ---------------------------------------------------------------------------
 
+
 class TestFullRebuildPgAndErrors:
     async def test_full_rebuild_with_pg_url(self, compiler):
         """Line 444: if pg_url: await self._load_pg_data(pg_url)"""
@@ -235,6 +242,7 @@ class TestFullRebuildPgAndErrors:
 # Lines 832-908: _update_topics
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateTopics:
     async def test_update_topics_no_pg_url(self, compiler):
         """Lines 829-830: early return when no pg_url."""
@@ -256,15 +264,15 @@ class TestUpdateTopics:
             compiler._pg_url = "postgresql://test"
             compiler._exp_embeddings = {"1": "fake_emb"}
             # Remove topic_discovery from sys.modules to force ImportError
-            saved = sys.modules.pop("team_memory.services.topic_discovery", None)
-            sys.modules["team_memory.services.topic_discovery"] = None
+            saved = sys.modules.pop("team_memory.services.analysis.topic_discovery", None)
+            sys.modules["team_memory.services.analysis.topic_discovery"] = None
             try:
                 await compiler._update_topics()
             finally:
                 if saved is not None:
-                    sys.modules["team_memory.services.topic_discovery"] = saved
+                    sys.modules["team_memory.services.analysis.topic_discovery"] = saved
                 else:
-                    sys.modules.pop("team_memory.services.topic_discovery", None)
+                    sys.modules.pop("team_memory.services.analysis.topic_discovery", None)
 
     async def test_update_topics_success(self, compiler):
         """Lines 832-908: full topic discovery path."""
@@ -272,6 +280,7 @@ class TestUpdateTopics:
             compiler._pg_url = "postgresql://test"
             try:
                 import numpy as np
+
                 compiler._exp_embeddings = {
                     "t1": np.array([1.0, 0.0], dtype=np.float32),
                     "t2": np.array([0.9, 0.1], dtype=np.float32),
@@ -303,9 +312,9 @@ class TestUpdateTopics:
             mock_config_module = MagicMock()
             mock_config_module.load_settings = MagicMock(return_value=mock_settings)
 
-            saved_td = sys.modules.pop("team_memory.services.topic_discovery", None)
+            saved_td = sys.modules.pop("team_memory.services.analysis.topic_discovery", None)
             saved_cfg = sys.modules.pop("team_memory.config", None)
-            sys.modules["team_memory.services.topic_discovery"] = mock_td_module
+            sys.modules["team_memory.services.analysis.topic_discovery"] = mock_td_module
             sys.modules["team_memory.config"] = mock_config_module
 
             try:
@@ -316,9 +325,9 @@ class TestUpdateTopics:
                 await compiler._update_topics()
             finally:
                 if saved_td is not None:
-                    sys.modules["team_memory.services.topic_discovery"] = saved_td
+                    sys.modules["team_memory.services.analysis.topic_discovery"] = saved_td
                 else:
-                    sys.modules.pop("team_memory.services.topic_discovery", None)
+                    sys.modules.pop("team_memory.services.analysis.topic_discovery", None)
                 if saved_cfg is not None:
                     sys.modules["team_memory.config"] = saved_cfg
                 else:
@@ -335,6 +344,7 @@ class TestUpdateTopics:
             compiler._pg_url = "postgresql://test"
             try:
                 import numpy as np
+
                 compiler._exp_embeddings = {"t1": np.array([1.0], dtype=np.float32)}
             except ImportError:
                 pytest.skip("numpy not available")
@@ -347,16 +357,16 @@ class TestUpdateTopics:
             mock_td_module = MagicMock()
             mock_td_module.discover_topics = mock_discover
 
-            saved_td = sys.modules.pop("team_memory.services.topic_discovery", None)
-            sys.modules["team_memory.services.topic_discovery"] = mock_td_module
+            saved_td = sys.modules.pop("team_memory.services.analysis.topic_discovery", None)
+            sys.modules["team_memory.services.analysis.topic_discovery"] = mock_td_module
 
             try:
                 await compiler._update_topics()
             finally:
                 if saved_td is not None:
-                    sys.modules["team_memory.services.topic_discovery"] = saved_td
+                    sys.modules["team_memory.services.analysis.topic_discovery"] = saved_td
                 else:
-                    sys.modules.pop("team_memory.services.topic_discovery", None)
+                    sys.modules.pop("team_memory.services.analysis.topic_discovery", None)
 
     async def test_update_topics_with_existing_files(self, compiler):
         """Lines 854-857: clear existing topic files before regenerating."""
@@ -364,6 +374,7 @@ class TestUpdateTopics:
             compiler._pg_url = "postgresql://test"
             try:
                 import numpy as np
+
                 compiler._exp_embeddings = {"t1": np.array([1.0, 0.0], dtype=np.float32)}
             except ImportError:
                 pytest.skip("numpy not available")
@@ -388,16 +399,16 @@ class TestUpdateTopics:
             mock_td_module = MagicMock()
             mock_td_module.discover_topics = mock_discover
 
-            saved_td = sys.modules.pop("team_memory.services.topic_discovery", None)
-            sys.modules["team_memory.services.topic_discovery"] = mock_td_module
+            saved_td = sys.modules.pop("team_memory.services.analysis.topic_discovery", None)
+            sys.modules["team_memory.services.analysis.topic_discovery"] = mock_td_module
 
             try:
                 await compiler._update_topics()
             finally:
                 if saved_td is not None:
-                    sys.modules["team_memory.services.topic_discovery"] = saved_td
+                    sys.modules["team_memory.services.analysis.topic_discovery"] = saved_td
                 else:
-                    sys.modules.pop("team_memory.services.topic_discovery", None)
+                    sys.modules.pop("team_memory.services.analysis.topic_discovery", None)
 
             assert not os.path.exists(old_file)
 
@@ -407,6 +418,7 @@ class TestUpdateTopics:
             compiler._pg_url = "postgresql://test"
             try:
                 import numpy as np
+
                 compiler._exp_embeddings = {"t1": np.array([1.0, 0.0], dtype=np.float32)}
             except ImportError:
                 pytest.skip("numpy not available")
@@ -431,9 +443,9 @@ class TestUpdateTopics:
             mock_config_module = MagicMock()
             mock_config_module.load_settings = MagicMock(return_value=mock_settings)
 
-            saved_td = sys.modules.pop("team_memory.services.topic_discovery", None)
+            saved_td = sys.modules.pop("team_memory.services.analysis.topic_discovery", None)
             saved_cfg = sys.modules.pop("team_memory.config", None)
-            sys.modules["team_memory.services.topic_discovery"] = mock_td_module
+            sys.modules["team_memory.services.analysis.topic_discovery"] = mock_td_module
             sys.modules["team_memory.config"] = mock_config_module
 
             try:
@@ -441,9 +453,9 @@ class TestUpdateTopics:
                 await compiler._update_topics()
             finally:
                 if saved_td is not None:
-                    sys.modules["team_memory.services.topic_discovery"] = saved_td
+                    sys.modules["team_memory.services.analysis.topic_discovery"] = saved_td
                 else:
-                    sys.modules.pop("team_memory.services.topic_discovery", None)
+                    sys.modules.pop("team_memory.services.analysis.topic_discovery", None)
                 if saved_cfg is not None:
                     sys.modules["team_memory.config"] = saved_cfg
                 else:
@@ -455,6 +467,7 @@ class TestUpdateTopics:
             compiler._pg_url = "postgresql://test"
             try:
                 import numpy as np
+
                 compiler._exp_embeddings = {"t1": np.array([1.0, 0.0], dtype=np.float32)}
             except ImportError:
                 pytest.skip("numpy not available")
@@ -474,9 +487,9 @@ class TestUpdateTopics:
             mock_config_module = MagicMock()
             mock_config_module.load_settings = MagicMock(side_effect=Exception("config broken"))
 
-            saved_td = sys.modules.pop("team_memory.services.topic_discovery", None)
+            saved_td = sys.modules.pop("team_memory.services.analysis.topic_discovery", None)
             saved_cfg = sys.modules.pop("team_memory.config", None)
-            sys.modules["team_memory.services.topic_discovery"] = mock_td_module
+            sys.modules["team_memory.services.analysis.topic_discovery"] = mock_td_module
             sys.modules["team_memory.config"] = mock_config_module
 
             try:
@@ -484,9 +497,9 @@ class TestUpdateTopics:
                 await compiler._update_topics()
             finally:
                 if saved_td is not None:
-                    sys.modules["team_memory.services.topic_discovery"] = saved_td
+                    sys.modules["team_memory.services.analysis.topic_discovery"] = saved_td
                 else:
-                    sys.modules.pop("team_memory.services.topic_discovery", None)
+                    sys.modules.pop("team_memory.services.analysis.topic_discovery", None)
                 if saved_cfg is not None:
                     sys.modules["team_memory.config"] = saved_cfg
                 else:
@@ -498,6 +511,7 @@ class TestUpdateTopics:
             compiler._pg_url = "postgresql://test"
             try:
                 import numpy as np
+
                 compiler._exp_embeddings = {"t1": np.array([1.0, 0.0], dtype=np.float32)}
             except ImportError:
                 pytest.skip("numpy not available")
@@ -515,16 +529,16 @@ class TestUpdateTopics:
             mock_td_module = MagicMock()
             mock_td_module.discover_topics = mock_discover
 
-            saved_td = sys.modules.pop("team_memory.services.topic_discovery", None)
-            sys.modules["team_memory.services.topic_discovery"] = mock_td_module
+            saved_td = sys.modules.pop("team_memory.services.analysis.topic_discovery", None)
+            sys.modules["team_memory.services.analysis.topic_discovery"] = mock_td_module
 
             try:
                 await compiler._update_topics()
             finally:
                 if saved_td is not None:
-                    sys.modules["team_memory.services.topic_discovery"] = saved_td
+                    sys.modules["team_memory.services.analysis.topic_discovery"] = saved_td
                 else:
-                    sys.modules.pop("team_memory.services.topic_discovery", None)
+                    sys.modules.pop("team_memory.services.analysis.topic_discovery", None)
 
             topics_dir = os.path.join(compiler._wiki_root, "topics")
             topic_files = [f for f in os.listdir(topics_dir) if f.endswith(".md")]
@@ -538,6 +552,7 @@ class TestUpdateTopics:
 # ---------------------------------------------------------------------------
 # Lines 912-917: _get_cache_by_experience_id
 # ---------------------------------------------------------------------------
+
 
 class TestGetCacheByExperienceId:
     async def test_get_cache_by_experience_id_found(self, compiler):
@@ -557,6 +572,7 @@ class TestGetCacheByExperienceId:
 # ---------------------------------------------------------------------------
 # Lines 921-938: _update_index_with_topics
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateIndexWithTopics:
     async def test_update_index_with_topics_no_index(self, compiler):
@@ -589,6 +605,7 @@ class TestUpdateIndexWithTopics:
 # Lines 949-993: _generate_contradictions
 # ---------------------------------------------------------------------------
 
+
 class TestGenerateContradictions:
     async def test_no_pg_url(self, compiler):
         """Lines 946-947: early return when no pg_url."""
@@ -600,15 +617,15 @@ class TestGenerateContradictions:
         """Lines 953-954: ImportError from contradiction_detector."""
         async with compiler:
             compiler._pg_url = "postgresql://test"
-            saved = sys.modules.pop("team_memory.services.contradiction_detector", None)
-            sys.modules["team_memory.services.contradiction_detector"] = None
+            saved = sys.modules.pop("team_memory.services.analysis.contradiction_detector", None)
+            sys.modules["team_memory.services.analysis.contradiction_detector"] = None
             try:
                 await compiler._generate_contradictions()
             finally:
                 if saved is not None:
-                    sys.modules["team_memory.services.contradiction_detector"] = saved
+                    sys.modules["team_memory.services.analysis.contradiction_detector"] = saved
                 else:
-                    sys.modules.pop("team_memory.services.contradiction_detector", None)
+                    sys.modules.pop("team_memory.services.analysis.contradiction_detector", None)
 
     async def test_no_pairs_found(self, compiler):
         """Lines 968-969: early return when no contradictions."""
@@ -619,16 +636,16 @@ class TestGenerateContradictions:
             mock_cd_module = MagicMock()
             mock_cd_module.detect_contradictions = mock_detect
 
-            saved_cd = sys.modules.pop("team_memory.services.contradiction_detector", None)
-            sys.modules["team_memory.services.contradiction_detector"] = mock_cd_module
+            saved_cd = sys.modules.pop("team_memory.services.analysis.contradiction_detector", None)
+            sys.modules["team_memory.services.analysis.contradiction_detector"] = mock_cd_module
 
             try:
                 await compiler._generate_contradictions()
             finally:
                 if saved_cd is not None:
-                    sys.modules["team_memory.services.contradiction_detector"] = saved_cd
+                    sys.modules["team_memory.services.analysis.contradiction_detector"] = saved_cd
                 else:
-                    sys.modules.pop("team_memory.services.contradiction_detector", None)
+                    sys.modules.pop("team_memory.services.analysis.contradiction_detector", None)
 
             # contradictions.md should not exist
             assert not os.path.exists(os.path.join(compiler._wiki_root, "contradictions.md"))
@@ -651,16 +668,16 @@ class TestGenerateContradictions:
             mock_cd_module = MagicMock()
             mock_cd_module.detect_contradictions = mock_detect
 
-            saved_cd = sys.modules.pop("team_memory.services.contradiction_detector", None)
-            sys.modules["team_memory.services.contradiction_detector"] = mock_cd_module
+            saved_cd = sys.modules.pop("team_memory.services.analysis.contradiction_detector", None)
+            sys.modules["team_memory.services.analysis.contradiction_detector"] = mock_cd_module
 
             try:
                 await compiler._generate_contradictions()
             finally:
                 if saved_cd is not None:
-                    sys.modules["team_memory.services.contradiction_detector"] = saved_cd
+                    sys.modules["team_memory.services.analysis.contradiction_detector"] = saved_cd
                 else:
-                    sys.modules.pop("team_memory.services.contradiction_detector", None)
+                    sys.modules.pop("team_memory.services.analysis.contradiction_detector", None)
 
             contradictions_path = os.path.join(compiler._wiki_root, "contradictions.md")
             assert os.path.exists(contradictions_path)
@@ -688,18 +705,18 @@ class TestGenerateContradictions:
             mock_config_module = MagicMock()
             mock_config_module.load_settings = MagicMock(return_value=mock_settings)
 
-            saved_cd = sys.modules.pop("team_memory.services.contradiction_detector", None)
+            saved_cd = sys.modules.pop("team_memory.services.analysis.contradiction_detector", None)
             saved_cfg = sys.modules.pop("team_memory.config", None)
-            sys.modules["team_memory.services.contradiction_detector"] = mock_cd_module
+            sys.modules["team_memory.services.analysis.contradiction_detector"] = mock_cd_module
             sys.modules["team_memory.config"] = mock_config_module
 
             try:
                 await compiler._generate_contradictions()
             finally:
                 if saved_cd is not None:
-                    sys.modules["team_memory.services.contradiction_detector"] = saved_cd
+                    sys.modules["team_memory.services.analysis.contradiction_detector"] = saved_cd
                 else:
-                    sys.modules.pop("team_memory.services.contradiction_detector", None)
+                    sys.modules.pop("team_memory.services.analysis.contradiction_detector", None)
                 if saved_cfg is not None:
                     sys.modules["team_memory.config"] = saved_cfg
                 else:
@@ -717,18 +734,18 @@ class TestGenerateContradictions:
             mock_config_module = MagicMock()
             mock_config_module.load_settings = MagicMock(side_effect=Exception("config broken"))
 
-            saved_cd = sys.modules.pop("team_memory.services.contradiction_detector", None)
+            saved_cd = sys.modules.pop("team_memory.services.analysis.contradiction_detector", None)
             saved_cfg = sys.modules.pop("team_memory.config", None)
-            sys.modules["team_memory.services.contradiction_detector"] = mock_cd_module
+            sys.modules["team_memory.services.analysis.contradiction_detector"] = mock_cd_module
             sys.modules["team_memory.config"] = mock_config_module
 
             try:
                 await compiler._generate_contradictions()
             finally:
                 if saved_cd is not None:
-                    sys.modules["team_memory.services.contradiction_detector"] = saved_cd
+                    sys.modules["team_memory.services.analysis.contradiction_detector"] = saved_cd
                 else:
-                    sys.modules.pop("team_memory.services.contradiction_detector", None)
+                    sys.modules.pop("team_memory.services.analysis.contradiction_detector", None)
                 if saved_cfg is not None:
                     sys.modules["team_memory.config"] = saved_cfg
                 else:
@@ -738,6 +755,7 @@ class TestGenerateContradictions:
 # ---------------------------------------------------------------------------
 # Line 779: _append_log with title
 # ---------------------------------------------------------------------------
+
 
 class TestAppendLogWithTitle:
     async def test_append_log_with_title(self, compiler):
@@ -754,6 +772,7 @@ class TestAppendLogWithTitle:
 # ---------------------------------------------------------------------------
 # _load_pg_data embedding paths (lines 246, 253-266)
 # ---------------------------------------------------------------------------
+
 
 class TestLoadPgDataEmbeddings:
     async def test_load_pg_data_emb_none_skips(self, compiler):
@@ -1123,6 +1142,7 @@ class TestLoadPgDataEmbeddings:
             compiler._pg_url = "postgresql://test"
 
             import json
+
             mock_entity_result = MagicMock()
             mock_entity_result.fetchall.return_value = []
 

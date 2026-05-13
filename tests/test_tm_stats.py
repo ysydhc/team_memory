@@ -7,11 +7,12 @@ Unit tests cover:
 Integration tests (marked @pytest.mark.integration) cover:
 - Full stats report with real DB
 """
+
 from __future__ import annotations
 
 import pytest
 
-from team_memory.daemon.tm_stats import _bar, _resolve_dsn
+from team_memory.daemon.observe.tm_stats import _bar, _resolve_dsn
 
 pytestmark = pytest.mark.unit
 

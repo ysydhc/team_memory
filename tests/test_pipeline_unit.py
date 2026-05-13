@@ -8,12 +8,14 @@ Unit tests cover:
 - process_session_start() / 会话开始
 - process_session_end() / 会话结束
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from team_memory.daemon.pipeline import (
+
+from team_memory.daemon.refinement.pipeline import (
     _resolve_project,
     process_before_prompt,
     process_session_end,
@@ -21,7 +23,6 @@ from team_memory.daemon.pipeline import (
 )
 
 pytestmark = pytest.mark.unit
-
 
 
 class TestResolveProject:
@@ -36,12 +37,8 @@ class TestResolveProject:
     @pytest.fixture(autouse=True)
     def _mock_auto_infer(self, monkeypatch):
         """Mock auto-inference so tests only exercise path_patterns."""
-        monkeypatch.setattr(
-            "team_memory.project_resolver.read_tm_toml", lambda _: None
-        )
-        monkeypatch.setattr(
-            "team_memory.project_resolver.infer_project_name", lambda _cwd="": "default"
-        )
+        monkeypatch.setattr("team_memory.project_resolver.read_tm_toml", lambda _: None)
+        monkeypatch.setattr("team_memory.project_resolver.infer_project_name", lambda _cwd="": "default")
 
     def test_matching_path(self):
         """Matching workspace path should return project name / 匹配的路径应返回项目名"""
@@ -103,7 +100,8 @@ class TestProcessSessionStart:
         sink = AsyncMock()
         result = await process_session_start(
             {"conversation_id": "test-123", "workspace_roots": ["/home"]},
-            config, sink,
+            config,
+            sink,
         )
         assert isinstance(result, dict)
 
@@ -120,7 +118,10 @@ class TestProcessSessionEnd:
         refiner = AsyncMock()
         result = await process_session_end(
             {"conversation_id": "test-123"},
-            config, sink, buf, refiner,
+            config,
+            sink,
+            buf,
+            refiner,
         )
         assert isinstance(result, dict)
 
@@ -138,7 +139,8 @@ class TestProcessBeforePrompt:
 
         result = await process_before_prompt(
             {"prompt": "test query", "conversation_id": "c1", "workspace_roots": ["/home"]},
-            config, sink,
+            config,
+            sink,
         )
         assert isinstance(result, dict)
 
@@ -151,6 +153,7 @@ class TestProcessBeforePrompt:
 
         result = await process_before_prompt(
             {"prompt": "", "conversation_id": "c2", "workspace_roots": []},
-            config, sink,
+            config,
+            sink,
         )
         assert isinstance(result, dict)

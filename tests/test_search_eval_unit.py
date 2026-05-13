@@ -8,16 +8,15 @@ edge cases in evaluation logic, and the run_evaluation flow.
 Uses @pytest.mark.unit for pure-logic and mocked-DB tests.
 Uses @pytest.mark.integration for tests that hit a real DB/search pipeline.
 """
+
 from __future__ import annotations
 
-import json
-import re
 from io import StringIO
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from team_memory.daemon.search_eval import DEFAULT_TEST_QUERIES, print_report
+from team_memory.daemon.quality.search_eval import DEFAULT_TEST_QUERIES, print_report
 
 pytestmark = pytest.mark.unit
 
@@ -25,6 +24,7 @@ pytestmark = pytest.mark.unit
 # ===================================================================
 # DEFAULT_TEST_QUERIES structure validation
 # ===================================================================
+
 
 class TestDefaultTestQueries:
     """Tests for DEFAULT_TEST_QUERIES structure and content."""
@@ -79,6 +79,7 @@ class TestDefaultTestQueries:
 # print_report — pure function that prints formatted output
 # ===================================================================
 
+
 class TestPrintReport:
     """Tests for print_report output formatting."""
 
@@ -86,6 +87,7 @@ class TestPrintReport:
         """Helper to capture print_report stdout."""
         buf = StringIO()
         import sys
+
         old_stdout = sys.stdout
         sys.stdout = buf
         try:
@@ -120,7 +122,7 @@ class TestPrintReport:
         }
         output = self._capture_output(metrics)
         assert "10" in output  # total_queries
-        assert "8" in output   # successful_queries
+        assert "8" in output  # successful_queries
         assert "90.0%" in output  # hit_rate as percentage
 
     def test_prints_ok_detail_rows(self):
@@ -185,6 +187,7 @@ class TestPrintReport:
 # ===================================================================
 # Precision / recall calculation logic (extracted from run_evaluation)
 # ===================================================================
+
 
 class TestPrecisionRecallLogic:
     """Tests for the precision/recall calculation logic.
@@ -351,24 +354,16 @@ class TestPrecisionRecallLogic:
 # Aggregate metrics computation (from run_evaluation lines 136-149)
 # ===================================================================
 
+
 class TestAggregateMetrics:
     """Tests for the aggregate metrics computation logic."""
 
     def _compute_aggregates(self, results: list[dict]):
         """Reproduce the aggregate logic from run_evaluation."""
         ok_results = [r for r in results if r["status"] == "ok"]
-        avg_precision = (
-            sum(r["precision"] for r in ok_results) / len(ok_results)
-            if ok_results else 0.0
-        )
-        avg_recall = (
-            sum(r["recall"] for r in ok_results) / len(ok_results)
-            if ok_results else 0.0
-        )
-        hit_rate = (
-            sum(1 for r in ok_results if r["total_results"] > 0) / len(ok_results)
-            if ok_results else 0.0
-        )
+        avg_precision = sum(r["precision"] for r in ok_results) / len(ok_results) if ok_results else 0.0
+        avg_recall = sum(r["recall"] for r in ok_results) / len(ok_results) if ok_results else 0.0
+        hit_rate = sum(1 for r in ok_results if r["total_results"] > 0) / len(ok_results) if ok_results else 0.0
         return {
             "avg_precision": round(avg_precision, 3),
             "avg_recall": round(avg_recall, 3),
@@ -438,13 +433,14 @@ class TestAggregateMetrics:
 # run_evaluation flow (mocked)
 # ===================================================================
 
+
 class TestRunEvaluationFlow:
     """Tests for the run_evaluation async function with mocked dependencies."""
 
     @pytest.mark.asyncio
     async def test_returns_metrics_dict(self):
         """run_evaluation should return a dict with expected keys."""
-        from team_memory.daemon.search_eval import run_evaluation
+        from team_memory.daemon.quality.search_eval import run_evaluation
 
         mock_recall_result = {
             "results": [
@@ -459,8 +455,10 @@ class TestRunEvaluationFlow:
 
         mock_recall = AsyncMock(return_value=mock_recall_result)
 
-        with patch("team_memory.services.memory_operations.op_recall", mock_recall), \
-             patch("team_memory.bootstrap.bootstrap"):
+        with (
+            patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch("team_memory.bootstrap.bootstrap"),
+        ):
             metrics = await run_evaluation("postgresql://fake:***@localhost/db")
 
         assert "timestamp" in metrics
@@ -475,12 +473,14 @@ class TestRunEvaluationFlow:
     @pytest.mark.asyncio
     async def test_handles_recall_exception(self):
         """When op_recall raises, the query should be recorded as error."""
-        from team_memory.daemon.search_eval import run_evaluation
+        from team_memory.daemon.quality.search_eval import run_evaluation
 
         mock_recall = AsyncMock(side_effect=Exception("search failed"))
 
-        with patch("team_memory.services.memory_operations.op_recall", mock_recall), \
-             patch("team_memory.bootstrap.bootstrap"):
+        with (
+            patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch("team_memory.bootstrap.bootstrap"),
+        ):
             metrics = await run_evaluation("postgresql://fake:***@localhost/db")
 
         # All queries should be errors
@@ -491,7 +491,7 @@ class TestRunEvaluationFlow:
     @pytest.mark.asyncio
     async def test_successful_queries_count(self):
         """successful_queries should count only ok results."""
-        from team_memory.daemon.search_eval import run_evaluation
+        from team_memory.daemon.quality.search_eval import run_evaluation
 
         # Return results that match keywords for all queries
         mock_recall_result = {
@@ -500,21 +500,43 @@ class TestRunEvaluationFlow:
                     "title": "Docker PostgreSQL connection setup",
                     "description": "Guide to docker and postgresql connection",
                     "solution": "Use docker compose with asyncpg",
-                    "tags": ["docker", "postgresql", "asyncpg", "wkwebview",
-                             "cookie", "embedding", "model", "config",
-                             "entity", "extraction", "task", "group",
-                             "completion", "asyncpg", "pgvector", "makefile",
-                             "target", "refinement", "worker", "wiki",
-                             "compilation", "search", "pipeline", "rrf",
-                             "fusion"],
+                    "tags": [
+                        "docker",
+                        "postgresql",
+                        "asyncpg",
+                        "wkwebview",
+                        "cookie",
+                        "embedding",
+                        "model",
+                        "config",
+                        "entity",
+                        "extraction",
+                        "task",
+                        "group",
+                        "completion",
+                        "asyncpg",
+                        "pgvector",
+                        "makefile",
+                        "target",
+                        "refinement",
+                        "worker",
+                        "wiki",
+                        "compilation",
+                        "search",
+                        "pipeline",
+                        "rrf",
+                        "fusion",
+                    ],
                 }
             ]
         }
 
         mock_recall = AsyncMock(return_value=mock_recall_result)
 
-        with patch("team_memory.services.memory_operations.op_recall", mock_recall), \
-             patch("team_memory.bootstrap.bootstrap"):
+        with (
+            patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch("team_memory.bootstrap.bootstrap"),
+        ):
             metrics = await run_evaluation("postgresql://fake:***@localhost/db")
 
         assert metrics["successful_queries"] == metrics["total_queries"]
@@ -522,13 +544,15 @@ class TestRunEvaluationFlow:
     @pytest.mark.asyncio
     async def test_empty_results_gives_zero_precision(self):
         """Empty recall results should give 0 precision and 0 recall."""
-        from team_memory.daemon.search_eval import run_evaluation
+        from team_memory.daemon.quality.search_eval import run_evaluation
 
         mock_recall_result = {"results": []}
         mock_recall = AsyncMock(return_value=mock_recall_result)
 
-        with patch("team_memory.services.memory_operations.op_recall", mock_recall), \
-             patch("team_memory.bootstrap.bootstrap"):
+        with (
+            patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch("team_memory.bootstrap.bootstrap"),
+        ):
             metrics = await run_evaluation("postgresql://fake:***@localhost/db")
 
         for detail in metrics["details"]:
@@ -539,7 +563,7 @@ class TestRunEvaluationFlow:
     @pytest.mark.asyncio
     async def test_top_result_field(self):
         """top_result should be set from the first result's title."""
-        from team_memory.daemon.search_eval import run_evaluation
+        from team_memory.daemon.quality.search_eval import run_evaluation
 
         mock_recall_result = {
             "results": [
@@ -553,8 +577,10 @@ class TestRunEvaluationFlow:
         }
         mock_recall = AsyncMock(return_value=mock_recall_result)
 
-        with patch("team_memory.services.memory_operations.op_recall", mock_recall), \
-             patch("team_memory.bootstrap.bootstrap"):
+        with (
+            patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch("team_memory.bootstrap.bootstrap"),
+        ):
             metrics = await run_evaluation("postgresql://fake:***@localhost/db")
 
         # At least one query should have "My Top Result" as top_result
@@ -564,13 +590,15 @@ class TestRunEvaluationFlow:
     @pytest.mark.asyncio
     async def test_top_result_empty_when_no_results(self):
         """top_result should be empty string when there are no results."""
-        from team_memory.daemon.search_eval import run_evaluation
+        from team_memory.daemon.quality.search_eval import run_evaluation
 
         mock_recall_result = {"results": []}
         mock_recall = AsyncMock(return_value=mock_recall_result)
 
-        with patch("team_memory.services.memory_operations.op_recall", mock_recall), \
-             patch("team_memory.bootstrap.bootstrap"):
+        with (
+            patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch("team_memory.bootstrap.bootstrap"),
+        ):
             metrics = await run_evaluation("postgresql://fake:***@localhost/db")
 
         for detail in metrics["details"]:
@@ -581,6 +609,7 @@ class TestRunEvaluationFlow:
 # ===================================================================
 # Keyword matching edge cases
 # ===================================================================
+
 
 class TestKeywordMatchingEdgeCases:
     """Additional edge cases for keyword matching logic."""

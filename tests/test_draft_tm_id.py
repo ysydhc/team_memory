@@ -3,24 +3,24 @@
 Verifies that save_draft writes PG id back to buffer (tm_id),
 and refine_and_publish uses tm_id instead of local buffer id.
 """
-import asyncio
+
 import os
+import sys
 import tempfile
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from team_memory.daemon.draft_buffer import DraftBuffer
-from team_memory.daemon.draft_refiner import DraftRefiner
-from team_memory.daemon.tm_sink import TMSink
-
+from team_memory.daemon.buffers.draft_buffer import DraftBuffer
+from team_memory.daemon.refinement.draft_refiner import DraftRefiner
+from team_memory.daemon.integration.tm_sink import TMSink
 
 # ---------------------------------------------------------------------------
 # DraftBuffer: tm_id column
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_buffer_tm_id_column_exists():
@@ -49,6 +49,7 @@ async def test_buffer_tm_id_migration():
     try:
         # Create DB with original schema (no tm_id)
         import aiosqlite
+
         async with aiosqlite.connect(db_path) as db:
             await db.execute("""
                 CREATE TABLE drafts (
@@ -94,15 +95,12 @@ async def test_buffer_tm_id_default_null():
 # DraftRefiner: tm_id chain
 # ---------------------------------------------------------------------------
 
+
 def _make_refiner():
     """Create a DraftRefiner with mocked sink and real buffer."""
     sink = MagicMock(spec=TMSink)
-    sink.draft_save = AsyncMock(return_value={
-        "id": "pg-exp-001", "status": "draft"
-    })
-    sink.draft_publish = AsyncMock(return_value={
-        "id": "pg-exp-001", "status": "published"
-    })
+    sink.draft_save = AsyncMock(return_value={"id": "pg-exp-001", "status": "draft"})
+    sink.draft_publish = AsyncMock(return_value={"id": "pg-exp-001", "status": "published"})
 
     buf_path = tempfile.mktemp(suffix=".db")
     buf = DraftBuffer(buf_path)
@@ -153,8 +151,7 @@ async def test_refine_and_publish_uses_tm_id():
             # Verify draft_publish was called with tm_id (PG id), not local id
             sink.draft_publish.assert_called_once()
             call_kwargs = sink.draft_publish.call_args[1]
-            assert call_kwargs["draft_id"] == "pg-exp-001", \
-                f"Expected pg-exp-001, got {call_kwargs['draft_id']}"
+            assert call_kwargs["draft_id"] == "pg-exp-001", f"Expected pg-exp-001, got {call_kwargs['draft_id']}"
 
             assert result is not None
             assert result["status"] == "published"
@@ -185,7 +182,6 @@ async def test_refine_and_publish_fallback_to_local_id():
 
             sink.draft_publish.assert_called_once()
             call_kwargs = sink.draft_publish.call_args[1]
-            assert call_kwargs["draft_id"] == local_id, \
-                f"Expected local id {local_id}, got {call_kwargs['draft_id']}"
+            assert call_kwargs["draft_id"] == local_id, f"Expected local id {local_id}, got {call_kwargs['draft_id']}"
     finally:
         os.unlink(buf_path)

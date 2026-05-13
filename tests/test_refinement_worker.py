@@ -5,11 +5,12 @@ Covers:
 - _is_learning_card content detection / 内容检测
 - Non-learning cards should NOT be skipped / 非学习卡片不应跳过
 """
+
 from __future__ import annotations
 
 import pytest
 
-from team_memory.daemon.refinement_worker import RefinementWorker
+from team_memory.daemon.refinement.refinement_worker import RefinementWorker
 
 pytestmark = pytest.mark.unit
 
@@ -58,17 +59,19 @@ class TestIsLearningCard:
 
     def test_normal_experience_not_learning(self):
         """Normal experience should NOT be detected as learning / 普通经验不应被检测为学习卡片"""
-        assert RefinementWorker._is_learning_card(
-            "Docker PostgreSQL连接失败",
-            "使用host.docker.internal连接PostgreSQL"
-        ) is False
+        assert (
+            RefinementWorker._is_learning_card("Docker PostgreSQL连接失败", "使用host.docker.internal连接PostgreSQL")
+            is False
+        )
 
     def test_problem_solution_not_learning(self):
         """Problem-solution format should NOT be learning / 问题-解决方案格式不应为学习卡片"""
-        assert RefinementWorker._is_learning_card(
-            "OOM crash fix",
-            "Problem: App crashes with OOM\nSolution: Use lazy loading"
-        ) is False
+        assert (
+            RefinementWorker._is_learning_card(
+                "OOM crash fix", "Problem: App crashes with OOM\nSolution: Use lazy loading"
+            )
+            is False
+        )
 
     def test_empty_title_and_content(self):
         """Empty title and content should NOT be learning / 空标题和内容不应为学习卡片"""
@@ -76,7 +79,4 @@ class TestIsLearningCard:
 
     def test_partial_match_not_learning(self):
         """Partial match without clear pattern should NOT be learning / 部分匹配但无明确模式不应为学习卡片"""
-        assert RefinementWorker._is_learning_card(
-            "Docker学习笔记",
-            "Docker容器使用指南"
-        ) is False
+        assert RefinementWorker._is_learning_card("Docker学习笔记", "Docker容器使用指南") is False

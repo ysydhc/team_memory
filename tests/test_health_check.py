@@ -1,10 +1,13 @@
 """Tests for HealthCheck — in-process health monitoring."""
+
 from __future__ import annotations
-import asyncio
+
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+
 import pytest
-from team_memory.daemon.health_check import HealthCheck
+
+from team_memory.daemon.runtime.health_check import HealthCheck
 
 
 def _make_alert_callback():
@@ -21,8 +24,10 @@ class TestHealthCheck:
         db_path = str(tmp_path / "test.db")
         Path(db_path).write_text("x" * 100)
         return HealthCheck(
-            db_path=db_path, pg_url=None,
-            worker_task=None, alert_callback=alert_cb,
+            db_path=db_path,
+            pg_url=None,
+            worker_task=None,
+            alert_callback=alert_cb,
         )
 
     @pytest.mark.asyncio

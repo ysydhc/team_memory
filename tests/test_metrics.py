@@ -1,11 +1,12 @@
 """Tests for MetricsCollector — SQLite-backed metrics storage."""
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 
-from team_memory.daemon.metrics_collector import MetricsCollector
+from team_memory.daemon.observe.metrics_collector import MetricsCollector
 
 
 class TestMetricsCollector:
@@ -47,10 +48,12 @@ class TestMetricsCollector:
     def test_cleanup_old_records(self, mc: MetricsCollector) -> None:
         mc._db.execute(
             "INSERT INTO metrics (name, value, recorded_at) VALUES (?, ?, ?)",
-            ("old_metric", 1.0, "2020-01-01T00:00:00"))
+            ("old_metric", 1.0, "2020-01-01T00:00:00"),
+        )
         mc._db.execute(
             "INSERT INTO metrics (name, value, recorded_at) VALUES (?, ?, ?)",
-            ("new_metric", 2.0, "2099-01-01T00:00:00"))
+            ("new_metric", 2.0, "2099-01-01T00:00:00"),
+        )
         mc._db.commit()
         mc.cleanup()
         rows = mc.query()

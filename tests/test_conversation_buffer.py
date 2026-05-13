@@ -1,9 +1,12 @@
 """Tests for ConversationBuffer — publishing state machine and schema."""
+
 from __future__ import annotations
-import pytest
+
 import json
 
-from team_memory.daemon.conversation_buffer import ConversationBuffer
+import pytest
+
+from team_memory.daemon.buffers.conversation_buffer import ConversationBuffer
 
 
 @pytest.fixture
@@ -26,9 +29,7 @@ class TestPublishingState:
         await buf.mark_publishing_in_progress("pub-001", payload)
 
         # Verify status
-        row = await buf._db.execute_fetchall(
-            "SELECT status, refined_payload FROM sessions WHERE id = 'pub-001'"
-        )
+        row = await buf._db.execute_fetchall("SELECT status, refined_payload FROM sessions WHERE id = 'pub-001'")
         assert row[0][0] == "publishing"
         parsed = json.loads(row[0][1])
         assert parsed["experience_id"] == "exp-123"
@@ -39,9 +40,7 @@ class TestPublishingState:
         await buf.ensure_session("pub-reset-1", project="test")
         await buf.ensure_session("pub-reset-2", project="test")
         # Manually set status to publishing (method doesn't exist yet)
-        await buf._db.execute(
-            "UPDATE sessions SET status='publishing' WHERE id IN ('pub-reset-1', 'pub-reset-2')"
-        )
+        await buf._db.execute("UPDATE sessions SET status='publishing' WHERE id IN ('pub-reset-1', 'pub-reset-2')")
         await buf._db.commit()
 
         count = await buf.reset_publishing_sessions()
@@ -49,17 +48,13 @@ class TestPublishingState:
 
         # Verify status changed
         for sid in ["pub-reset-1", "pub-reset-2"]:
-            row = await buf._db.execute_fetchall(
-                "SELECT status FROM sessions WHERE id = ?", (sid,)
-            )
+            row = await buf._db.execute_fetchall("SELECT status FROM sessions WHERE id = ?", (sid,))
             assert row[0][0] == "needs_refinement"
 
     async def test_existing_sessions_null_refined_payload(self, buf):
         """Sessions created before column exists have NULL payload."""
         await buf.ensure_session("null-001", project="test")
-        row = await buf._db.execute_fetchall(
-            "SELECT refined_payload FROM sessions WHERE id = 'null-001'"
-        )
+        row = await buf._db.execute_fetchall("SELECT refined_payload FROM sessions WHERE id = 'null-001'")
         assert row[0][0] is None
 
     async def test_get_needs_refinement_skip_llm_flag(self, buf):

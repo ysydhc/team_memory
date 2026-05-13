@@ -16,32 +16,28 @@ Marked:
 
 from __future__ import annotations
 
-import argparse
-import asyncio
 import sys
-from io import StringIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Import the module under test
 # ---------------------------------------------------------------------------
-from team_memory.daemon.tm_stats import (
+from team_memory.daemon.observe.tm_stats import (
     _bar,
-    _resolve_dsn,
-    _render_plain,
-    main,
-    run_stats,
     _faithfulness_breakdown,
     _get_low_faithfulness_entries,
+    _render_plain,
+    _resolve_dsn,
+    main,
+    run_stats,
 )
-
 
 # ===========================================================================
 # Unit tests — pure logic, no external deps
 # ===========================================================================
+
 
 class TestBar:
     """_bar() bar-chart string generation."""
@@ -89,13 +85,16 @@ class TestBar:
         result = _bar(1, 100, width=50)
         assert result.count("█") == 0
 
-    @pytest.mark.parametrize("v,m,w,expected_filled", [
-        (0, 10, 10, 0),
-        (10, 10, 10, 10),
-        (5, 10, 10, 5),
-        (3, 10, 20, 6),
-        (1, 3, 30, 10),
-    ])
+    @pytest.mark.parametrize(
+        "v,m,w,expected_filled",
+        [
+            (0, 10, 10, 0),
+            (10, 10, 10, 10),
+            (5, 10, 10, 5),
+            (3, 10, 20, 6),
+            (1, 3, 30, 10),
+        ],
+    )
     def test_parametrized(self, v, m, w, expected_filled):
         result = _bar(v, m, width=w)
         assert result.count("█") == expected_filled
@@ -105,6 +104,7 @@ class TestBar:
 # ---------------------------------------------------------------------------
 # _resolve_dsn — mock every import path
 # ---------------------------------------------------------------------------
+
 
 class TestResolveDsn:
     """_resolve_dsn() fallback chain with mocked imports."""
@@ -127,9 +127,12 @@ class TestResolveDsn:
         mock_settings = MagicMock()
         mock_settings.database.url = "postgresql+asyncpg://u:p@host:5433/team_memory"
         mock_load = MagicMock(return_value=mock_settings)
-        with patch.dict(sys.modules, {
-            "team_memory.config": MagicMock(load_settings=mock_load),
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "team_memory.config": MagicMock(load_settings=mock_load),
+            },
+        ):
             dsn = _resolve_dsn()
         assert dsn == "postgresql://u:p@host:5433/team_memory"
 
@@ -157,20 +160,25 @@ class TestResolveDsn:
                     dsn = _resolve_dsn()
         assert "alembic" in dsn.lower() or "postgresql" in dsn
 
-    def test_hardcoded_fallback(self):
-        """Last resort: hardcoded localhost DSN."""
+    def test_team_memory_db_url_fallback(self):
+        """When earlier sources fail, TEAM_MEMORY_DB_URL is used."""
         mock_mod = MagicMock()
         mock_mod.load_settings.side_effect = ImportError("nope")
         with patch.dict(sys.modules, {"team_memory.config": mock_mod}):
-            with patch.dict("os.environ", {"DATABASE_URL": ""}, clear=False):
+            with patch.dict(
+                "os.environ",
+                {"DATABASE_URL": "", "TEAM_MEMORY_DB_URL": "postgresql://tm:pwd@fallback:5544/tm_fallback"},
+                clear=False,
+            ):
                 with patch("builtins.open", side_effect=OSError("no file")):
                     dsn = _resolve_dsn()
-        assert "localhost" in dsn or "postgresql" in dsn
+        assert "fallback" in dsn and "5544" in dsn
 
 
 # ---------------------------------------------------------------------------
 # _render_plain — test the plain-text renderer
 # ---------------------------------------------------------------------------
+
 
 class TestRenderPlain:
     """_render_plain() stdout output — with ResponseBuffer fully mocked."""
@@ -211,22 +219,31 @@ class TestRenderPlain:
     def _mock_response_buffer(self):
         """Mock ResponseBuffer so _render_plain doesn't touch real DB."""
         mock_buf = MagicMock()
-        mock_buf.get_stats = AsyncMock(return_value={
-            "total": 10, "evaluated": 5, "pending": 5, "avg_faithfulness": 0.8,
-        })
+        mock_buf.get_stats = AsyncMock(
+            return_value={
+                "total": 10,
+                "evaluated": 5,
+                "pending": 5,
+                "avg_faithfulness": 0.8,
+            }
+        )
         mock_buf.close = AsyncMock()
-        with patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=mock_buf):
-            with patch("team_memory.daemon.tm_stats._resolve_dsn", return_value="postgresql://test"):
+        with patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=mock_buf):
+            with patch("team_memory.daemon.observe.tm_stats._resolve_dsn", return_value="postgresql://test"):
                 yield
 
-    def test_prints_header(self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use):
+    def test_prints_header(
+        self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use
+    ):
         """Should print the report header."""
         _render_plain(sample_stats, sample_trends, sample_miss, sample_low_use, 7, "day")
         out = capsys.readouterr().out
         assert "TM Search Quality Report" in out
         assert "7d" in out
 
-    def test_prints_funnel_numbers(self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use):
+    def test_prints_funnel_numbers(
+        self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use
+    ):
         """Should include total/hit/used numbers."""
         _render_plain(sample_stats, sample_trends, sample_miss, sample_low_use, 30, "day")
         out = capsys.readouterr().out
@@ -234,20 +251,26 @@ class TestRenderPlain:
         assert "80" in out
         assert "40" in out
 
-    def test_prints_trend_section(self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use):
+    def test_prints_trend_section(
+        self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use
+    ):
         """Should include trend data when trends provided."""
         _render_plain(sample_stats, sample_trends, sample_miss, sample_low_use, 7, "day")
         out = capsys.readouterr().out
         assert "Trend" in out
 
-    def test_prints_miss_queries(self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use):
+    def test_prints_miss_queries(
+        self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use
+    ):
         """Should include miss queries."""
         _render_plain(sample_stats, sample_trends, sample_miss, sample_low_use, 7, "day")
         out = capsys.readouterr().out
         assert "Miss Queries" in out
         assert "foo bar" in out
 
-    def test_prints_low_use_queries(self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use):
+    def test_prints_low_use_queries(
+        self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use
+    ):
         """Should include low-use queries."""
         _render_plain(sample_stats, sample_trends, sample_miss, sample_low_use, 7, "day")
         out = capsys.readouterr().out
@@ -260,7 +283,9 @@ class TestRenderPlain:
         out = capsys.readouterr().out
         assert "TM Search Quality Report" in out
 
-    def test_empty_miss_queries_no_crash(self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_low_use):
+    def test_empty_miss_queries_no_crash(
+        self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_low_use
+    ):
         """Empty miss queries should not crash."""
         _render_plain(sample_stats, sample_trends, [], sample_low_use, 7, "day")
         out = capsys.readouterr().out
@@ -291,13 +316,17 @@ class TestRenderPlain:
         out = capsys.readouterr().out
         assert "Low Use Queries" not in out
 
-    def test_use_rate_displayed(self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use):
+    def test_use_rate_displayed(
+        self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use
+    ):
         """Use rate percentage should appear."""
         _render_plain(sample_stats, sample_trends, sample_miss, sample_low_use, 7, "day")
         out = capsys.readouterr().out
         assert "50.0%" in out
 
-    def test_marker_and_fuzzy_counts(self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use):
+    def test_marker_and_fuzzy_counts(
+        self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use
+    ):
         """Marker and fuzzy counts should appear."""
         _render_plain(sample_stats, sample_trends, sample_miss, sample_low_use, 7, "day")
         out = capsys.readouterr().out
@@ -309,40 +338,41 @@ class TestRenderPlain:
 # main() — argparse entry point
 # ---------------------------------------------------------------------------
 
+
 class TestMain:
     """main() CLI argument parsing."""
 
     def test_default_args(self):
         """Default args should call run_stats with 7 days, day granularity."""
-        with patch("team_memory.daemon.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
+        with patch("team_memory.daemon.observe.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
             with patch("sys.argv", ["tm_stats.py"]):
                 main()
         mock_run.assert_awaited_once_with(7, "day")
 
     def test_custom_days(self):
         """--days 30 should pass 30."""
-        with patch("team_memory.daemon.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
+        with patch("team_memory.daemon.observe.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
             with patch("sys.argv", ["tm_stats.py", "--days", "30"]):
                 main()
         mock_run.assert_awaited_once_with(30, "day")
 
     def test_custom_granularity_hour(self):
         """--granularity hour should pass 'hour'."""
-        with patch("team_memory.daemon.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
+        with patch("team_memory.daemon.observe.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
             with patch("sys.argv", ["tm_stats.py", "--granularity", "hour"]):
                 main()
         mock_run.assert_awaited_once_with(7, "hour")
 
     def test_custom_granularity_week(self):
         """--granularity week should pass 'week'."""
-        with patch("team_memory.daemon.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
+        with patch("team_memory.daemon.observe.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
             with patch("sys.argv", ["tm_stats.py", "--granularity", "week"]):
                 main()
         mock_run.assert_awaited_once_with(7, "week")
 
     def test_all_custom_args(self):
         """Combined --days and --granularity."""
-        with patch("team_memory.daemon.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
+        with patch("team_memory.daemon.observe.tm_stats.run_stats", new_callable=AsyncMock) as mock_run:
             with patch("sys.argv", ["tm_stats.py", "--days", "14", "--granularity", "week"]):
                 main()
         mock_run.assert_awaited_once_with(14, "week")
@@ -351,6 +381,7 @@ class TestMain:
 # ===========================================================================
 # Integration-style tests (mocked asyncpg, but testing async DB query logic)
 # ===========================================================================
+
 
 class TestFaithfulnessBreakdown:
     """_faithfulness_breakdown() — async DB count query."""
@@ -467,6 +498,7 @@ class TestGetLowFaithfulnessEntries:
 # run_stats — full pipeline with mocked writer + buffer
 # ===========================================================================
 
+
 class TestRunStats:
     """run_stats() — end-to-end report with mocked dependencies."""
 
@@ -478,8 +510,8 @@ class TestRunStats:
         mock_writer.get_stats = AsyncMock(return_value={"error": "connection refused"})
         mock_writer.close = AsyncMock()
 
-        with patch("team_memory.daemon.tm_stats._resolve_dsn", return_value="postgresql://test"):
-            with patch("team_memory.daemon.search_log_writer.SearchLogWriter", return_value=mock_writer):
+        with patch("team_memory.daemon.observe.tm_stats._resolve_dsn", return_value="postgresql://test"):
+            with patch("team_memory.daemon.observe.search_log_writer.SearchLogWriter", return_value=mock_writer):
                 with patch("builtins.print") as mock_print:
                     await run_stats(7, "day")
         mock_print.assert_any_call("[ERROR] Failed to fetch stats: connection refused")
@@ -512,18 +544,23 @@ class TestRunStats:
         mock_writer.close = AsyncMock()
 
         mock_buffer = AsyncMock()
-        mock_buffer.get_stats = AsyncMock(return_value={
-            "total": 50, "evaluated": 40, "pending": 10, "avg_faithfulness": 0.8,
-        })
+        mock_buffer.get_stats = AsyncMock(
+            return_value={
+                "total": 50,
+                "evaluated": 40,
+                "pending": 10,
+                "avg_faithfulness": 0.8,
+            }
+        )
         mock_buffer.close = AsyncMock()
 
         mock_conn = AsyncMock()
         mock_conn.fetchval = AsyncMock(return_value=20)
         mock_conn.fetch = AsyncMock(return_value=[])
 
-        with patch("team_memory.daemon.tm_stats._resolve_dsn", return_value="postgresql://test"):
-            with patch("team_memory.daemon.search_log_writer.SearchLogWriter", return_value=mock_writer):
-                with patch("team_memory.daemon.response_buffer.ResponseBuffer", return_value=mock_buffer):
+        with patch("team_memory.daemon.observe.tm_stats._resolve_dsn", return_value="postgresql://test"):
+            with patch("team_memory.daemon.observe.search_log_writer.SearchLogWriter", return_value=mock_writer):
+                with patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=mock_buffer):
                     with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
                         await run_stats(7, "day")
 
@@ -538,9 +575,13 @@ class TestRunStats:
     async def test_rich_not_installed_falls_back_to_plain(self):
         """When Rich is not importable, _render_plain should be called."""
         stats = {
-            "total_searches": 10, "hit": 8, "used": 4,
-            "used_marker": 2, "used_fuzzy": 2,
-            "unjudged": 2, "use_rate": 0.4,
+            "total_searches": 10,
+            "hit": 8,
+            "used": 4,
+            "used_marker": 2,
+            "used_fuzzy": 2,
+            "unjudged": 2,
+            "use_rate": 0.4,
         }
         mock_writer = AsyncMock()
         mock_writer.get_stats = AsyncMock(return_value=stats)
@@ -549,10 +590,10 @@ class TestRunStats:
         mock_writer.get_low_use_queries = AsyncMock(return_value=[])
         mock_writer.close = AsyncMock()
 
-        with patch("team_memory.daemon.tm_stats._resolve_dsn", return_value="postgresql://test"):
-            with patch("team_memory.daemon.search_log_writer.SearchLogWriter", return_value=mock_writer):
+        with patch("team_memory.daemon.observe.tm_stats._resolve_dsn", return_value="postgresql://test"):
+            with patch("team_memory.daemon.observe.search_log_writer.SearchLogWriter", return_value=mock_writer):
                 with patch.dict("sys.modules", {"rich": None, "rich.console": None}):
-                    with patch("team_memory.daemon.tm_stats._render_plain") as mock_plain:
+                    with patch("team_memory.daemon.observe.tm_stats._render_plain") as mock_plain:
                         await run_stats(7, "day")
         mock_plain.assert_called_once()
 
@@ -561,17 +602,21 @@ class TestRunStats:
     async def test_writer_closed_on_exception(self):
         """Writer must be closed even when an exception occurs mid-render."""
         stats = {
-            "total_searches": 10, "hit": 8, "used": 4,
-            "used_marker": 2, "used_fuzzy": 2,
-            "unjudged": 2, "use_rate": 0.4,
+            "total_searches": 10,
+            "hit": 8,
+            "used": 4,
+            "used_marker": 2,
+            "used_fuzzy": 2,
+            "unjudged": 2,
+            "use_rate": 0.4,
         }
         mock_writer = AsyncMock()
         mock_writer.get_stats = AsyncMock(return_value=stats)
         mock_writer.get_trends = AsyncMock(side_effect=RuntimeError("boom"))
         mock_writer.close = AsyncMock()
 
-        with patch("team_memory.daemon.tm_stats._resolve_dsn", return_value="postgresql://test"):
-            with patch("team_memory.daemon.search_log_writer.SearchLogWriter", return_value=mock_writer):
+        with patch("team_memory.daemon.observe.tm_stats._resolve_dsn", return_value="postgresql://test"):
+            with patch("team_memory.daemon.observe.search_log_writer.SearchLogWriter", return_value=mock_writer):
                 with pytest.raises(RuntimeError):
                     await run_stats(7, "day")
         mock_writer.close.assert_awaited_once()

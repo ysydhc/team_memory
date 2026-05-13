@@ -1,4 +1,5 @@
 """Tests for platform-agnostic payload field reading in process_after_response."""
+
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock
@@ -7,18 +8,14 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from team_memory.daemon.pipeline import process_after_response
+from team_memory.daemon.refinement.pipeline import process_after_response
 
 
 @pytest.fixture(autouse=True)
 def _mock_auto_infer(monkeypatch):
     """Mock auto-inference so tests only exercise path_patterns."""
-    monkeypatch.setattr(
-        "team_memory.project_resolver.read_tm_toml", lambda _: None
-    )
-    monkeypatch.setattr(
-        "team_memory.project_resolver.infer_project_name", lambda _cwd="": "default"
-    )
+    monkeypatch.setattr("team_memory.project_resolver.read_tm_toml", lambda _: None)
+    monkeypatch.setattr("team_memory.project_resolver.infer_project_name", lambda _cwd="": "default")
 
 
 def _make_mocks(converged: bool = False):
@@ -59,9 +56,7 @@ async def test_response_text_field_is_used():
 
     await process_after_response(payload, config, sink, buf, detector, refiner)
 
-    buf.add_message.assert_called_once_with(
-        "sess-1", "assistant", "Here is what I learned today", project="proj"
-    )
+    buf.add_message.assert_called_once_with("sess-1", "assistant", "Here is what I learned today", project="proj")
 
 
 @pytest.mark.asyncio
@@ -77,9 +72,7 @@ async def test_prompt_field_fallback():
 
     await process_after_response(payload, config, sink, buf, detector, refiner)
 
-    buf.add_message.assert_called_once_with(
-        "sess-2", "assistant", "Agent replied with this text", project="proj"
-    )
+    buf.add_message.assert_called_once_with("sess-2", "assistant", "Agent replied with this text", project="proj")
 
 
 @pytest.mark.asyncio

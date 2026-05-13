@@ -15,17 +15,17 @@ from __future__ import annotations
 
 import os
 import tempfile
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
-from team_memory.daemon.draft_refiner import DraftRefiner, _FACT_KEYWORDS, _MAX_FACTS
-from team_memory.daemon.draft_buffer import DraftBuffer
-
+from team_memory.daemon.buffers.draft_buffer import DraftBuffer
+from team_memory.daemon.refinement.draft_refiner import _MAX_FACTS, DraftRefiner
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_db_path() -> str:
     fd, path = tempfile.mkstemp(suffix=".db")
@@ -232,7 +232,9 @@ class TestRefineAndPublishWikiCompiler:
         refiner = DraftRefiner(sink, buf, wiki_compiler=wc)
         async with buf:
             await buf.create_draft(
-                "team_doc", "sess-wiki-fields", "因为配置错误。需要解决。",
+                "team_doc",
+                "sess-wiki-fields",
+                "因为配置错误。需要解决。",
                 # project is positional in create_draft but the buffer stores it
             )
             result = await refiner.refine_and_publish("sess-wiki-fields")
@@ -288,6 +290,7 @@ class TestMarkForRefinement:
             await refiner.mark_for_refinement("sess-mark2")
             # Check the draft status changed
             import aiosqlite
+
             async with aiosqlite.connect(buf._db_path) as db:
                 db.row_factory = aiosqlite.Row
                 cursor = await db.execute("SELECT status FROM drafts WHERE id = ?", (draft_id,))
@@ -325,7 +328,9 @@ class TestRefineAndPublishTmIdViaDict:
         sink = _mock_sink()
         refiner = DraftRefiner(sink, buf)
         # Mock get_pending to return a dict with tm_id
-        mock_pending = [{"id": "local-123", "tm_id": "pg-tm-789", "content": "因为超时。", "title": "t", "project": "p"}]
+        mock_pending = [
+            {"id": "local-123", "tm_id": "pg-tm-789", "content": "因为超时。", "title": "t", "project": "p"}
+        ]
         refiner._buf.get_pending = AsyncMock(return_value=mock_pending)
         refiner._buf.mark_published_by_session = AsyncMock()
 

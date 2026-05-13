@@ -1,9 +1,8 @@
 """Tests for daemon.intent_classifier — keyword-based persona classification."""
+
 from __future__ import annotations
 
-import pytest
-
-from team_memory.daemon.intent_classifier import classify_persona
+from team_memory.daemon.integration.intent_classifier import classify_persona
 
 
 class TestClassifyPersona:

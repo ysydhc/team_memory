@@ -6,11 +6,12 @@ Covers:
 - Topic shift detection / 主题切换检测
 - detect_convergence priority / 检测优先级
 """
+
 from __future__ import annotations
 
 import pytest
 
-from team_memory.daemon.convergence_detector import ConvergenceDetector
+from team_memory.daemon.quality.convergence_detector import ConvergenceDetector
 
 pytestmark = pytest.mark.unit
 

@@ -8,6 +8,7 @@ Covers:
 - Retry mechanism with exponential backoff / 重试机制
 - _is_retryable_error classification / 可重试错误分类
 """
+
 from __future__ import annotations
 
 import json
@@ -16,7 +17,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from team_memory.daemon.faithfulness_judge import (
+from team_memory.daemon.quality.faithfulness_judge import (
     FaithfulnessJudge,
     FaithfulnessResult,
     _is_retryable_error,
@@ -53,8 +54,11 @@ class TestFaithfulnessResult:
     def test_to_dict_empty_claims(self):
         """to_dict with zero claims / 无 claims 时的 to_dict"""
         result = FaithfulnessResult(
-            score=1.0, total_claims=0, supported_claims=0,
-            claims_detail=[], raw_response="",
+            score=1.0,
+            total_claims=0,
+            supported_claims=0,
+            claims_detail=[],
+            raw_response="",
         )
         d = result.to_dict()
         assert d["score"] == 1.0
@@ -63,8 +67,11 @@ class TestFaithfulnessResult:
     def test_retries_used_default_zero(self):
         """retries_used defaults to 0 / retries_used 默认为 0"""
         result = FaithfulnessResult(
-            score=0.5, total_claims=1, supported_claims=1,
-            claims_detail=[], raw_response="",
+            score=0.5,
+            total_claims=1,
+            supported_claims=1,
+            claims_detail=[],
+            raw_response="",
         )
         assert result.retries_used == 0
 
@@ -81,13 +88,15 @@ class TestParseResult:
 
     def test_parse_valid_json(self):
         """Valid JSON should parse correctly / 有效 JSON 应正确解析"""
-        raw = json.dumps({
-            "claims": [
-                {"claim": "Docker uses containers", "supported": True, "reason": "found in context"},
-                {"claim": "K8s is easy", "supported": False, "reason": "not in context"},
-            ],
-            "score": 0.5,
-        })
+        raw = json.dumps(
+            {
+                "claims": [
+                    {"claim": "Docker uses containers", "supported": True, "reason": "found in context"},
+                    {"claim": "K8s is easy", "supported": False, "reason": "not in context"},
+                ],
+                "score": 0.5,
+            }
+        )
         result = self.judge._parse_result(raw)
         assert result.score == 0.5
         assert result.total_claims == 2
@@ -102,7 +111,9 @@ class TestParseResult:
 
     def test_parse_json_embedded_in_text(self):
         """JSON embedded in surrounding text should be extracted / 嵌入在文本中的 JSON 应被提取"""
-        raw = 'Here is the result:\n{"claims": [{"claim": "x", "supported": false, "reason": "no"}], "score": 0.0}\nEnd.'
+        raw = (
+            'Here is the result:\n{"claims": [{"claim": "x", "supported": false, "reason": "no"}], "score": 0.0}\nEnd.'
+        )
         result = self.judge._parse_result(raw)
         assert result.score == 0.0
         assert result.total_claims == 1
@@ -122,13 +133,15 @@ class TestParseResult:
 
     def test_parse_missing_score_computed_from_claims(self):
         """Missing score field should be computed from claims / 缺少 score 字段应从 claims 计算"""
-        raw = json.dumps({
-            "claims": [
-                {"claim": "A", "supported": True, "reason": "ok"},
-                {"claim": "B", "supported": True, "reason": "ok"},
-                {"claim": "C", "supported": False, "reason": "no"},
-            ],
-        })
+        raw = json.dumps(
+            {
+                "claims": [
+                    {"claim": "A", "supported": True, "reason": "ok"},
+                    {"claim": "B", "supported": True, "reason": "ok"},
+                    {"claim": "C", "supported": False, "reason": "no"},
+                ],
+            }
+        )
         result = self.judge._parse_result(raw)
         assert result.total_claims == 3
         assert result.supported_claims == 2
@@ -148,29 +161,27 @@ class TestEvaluate:
     @pytest.mark.asyncio
     async def test_evaluate_empty_response(self):
         """Empty response should return score=0 / 空回复应返回 score=0"""
-        result = await self.judge.evaluate(
-            query="test", contexts=["some context"], response=""
-        )
+        result = await self.judge.evaluate(query="test", contexts=["some context"], response="")
         assert result.score == 0.0
         assert result.total_claims == 0
 
     @pytest.mark.asyncio
     async def test_evaluate_whitespace_response(self):
         """Whitespace-only response should return score=0 / 仅空白回复应返回 score=0"""
-        result = await self.judge.evaluate(
-            query="test", contexts=["ctx"], response="   \n  "
-        )
+        result = await self.judge.evaluate(query="test", contexts=["ctx"], response="   \n  ")
         assert result.score == 0.0
 
     @pytest.mark.asyncio
     async def test_evaluate_llm_call_mocked(self):
         """Evaluate should call LLM and parse result / evaluate 应调用 LLM 并解析结果"""
-        mock_response = json.dumps({
-            "claims": [
-                {"claim": "PostgreSQL uses pgvector", "supported": True, "reason": "in context"},
-            ],
-            "score": 1.0,
-        })
+        mock_response = json.dumps(
+            {
+                "claims": [
+                    {"claim": "PostgreSQL uses pgvector", "supported": True, "reason": "in context"},
+                ],
+                "score": 1.0,
+            }
+        )
 
         with patch.object(self.judge, "_call_llm", new_callable=AsyncMock, return_value=mock_response):
             result = await self.judge.evaluate(
@@ -187,23 +198,21 @@ class TestEvaluate:
     async def test_evaluate_llm_failure_returns_negative(self):
         """LLM failure should return score=-1 / LLM 失败应返回 score=-1"""
         with patch.object(self.judge, "_call_llm", new_callable=AsyncMock, side_effect=Exception("timeout")):
-            result = await self.judge.evaluate(
-                query="test", contexts=["ctx"], response="some response"
-            )
+            result = await self.judge.evaluate(query="test", contexts=["ctx"], response="some response")
             assert result.score == -1.0
 
     @pytest.mark.asyncio
     async def test_evaluate_no_contexts(self):
         """No contexts should use placeholder text / 无检索结果应使用占位文本"""
-        mock_response = json.dumps({
-            "claims": [{"claim": "test", "supported": False, "reason": "no context"}],
-            "score": 0.0,
-        })
+        mock_response = json.dumps(
+            {
+                "claims": [{"claim": "test", "supported": False, "reason": "no context"}],
+                "score": 0.0,
+            }
+        )
 
         with patch.object(self.judge, "_call_llm", new_callable=AsyncMock, return_value=mock_response) as mock_llm:
-            result = await self.judge.evaluate(
-                query="test", contexts=[], response="some response"
-            )
+            result = await self.judge.evaluate(query="test", contexts=[], response="some response")
             # Verify the prompt includes placeholder
             call_args = mock_llm.call_args[0][0]
             assert "无检索结果" in call_args
@@ -225,10 +234,12 @@ class TestRetryMechanism:
     @pytest.mark.asyncio
     async def test_retry_succeeds_after_transient_error(self):
         """Should retry on transient errors and eventually succeed / 瞬时错误后应重试并最终成功"""
-        mock_response = json.dumps({
-            "claims": [{"claim": "test", "supported": True, "reason": "ok"}],
-            "score": 1.0,
-        })
+        mock_response = json.dumps(
+            {
+                "claims": [{"claim": "test", "supported": True, "reason": "ok"}],
+                "score": 1.0,
+            }
+        )
         # Fail once with a retryable error, then succeed
         call_count = 0
 
@@ -240,9 +251,7 @@ class TestRetryMechanism:
             return mock_response
 
         with patch.object(self.judge, "_call_llm", side_effect=_side_effect):
-            result = await self.judge.evaluate(
-                query="test", contexts=["ctx"], response="some response"
-            )
+            result = await self.judge.evaluate(query="test", contexts=["ctx"], response="some response")
             assert result.score == 1.0
             assert result.retries_used == 1
             assert call_count == 2
@@ -250,11 +259,10 @@ class TestRetryMechanism:
     @pytest.mark.asyncio
     async def test_retry_exhausted_returns_negative_score(self):
         """Should return score=-1 when all retries are exhausted / 所有重试耗尽后应返回 score=-1"""
-        with patch.object(self.judge, "_call_llm", new_callable=AsyncMock,
-                          side_effect=httpx.ConnectError("Connection refused")):
-            result = await self.judge.evaluate(
-                query="test", contexts=["ctx"], response="some response"
-            )
+        with patch.object(
+            self.judge, "_call_llm", new_callable=AsyncMock, side_effect=httpx.ConnectError("Connection refused")
+        ):
+            result = await self.judge.evaluate(query="test", contexts=["ctx"], response="some response")
             assert result.score == -1.0
             assert result.retries_used == 3
 
@@ -270,9 +278,7 @@ class TestRetryMechanism:
             raise httpx.HTTPStatusError("Bad Request", request=bad_resp.request, response=bad_resp)
 
         with patch.object(self.judge, "_call_llm", side_effect=_side_effect):
-            result = await self.judge.evaluate(
-                query="test", contexts=["ctx"], response="some response"
-            )
+            result = await self.judge.evaluate(query="test", contexts=["ctx"], response="some response")
             assert result.score == -1.0
             # Should only be called once (no retry for 400)
             assert call_count == 1
@@ -280,10 +286,12 @@ class TestRetryMechanism:
     @pytest.mark.asyncio
     async def test_retry_on_429_rate_limit(self):
         """Should retry on 429 Rate Limit / 429 限流应重试"""
-        mock_response = json.dumps({
-            "claims": [{"claim": "test", "supported": True, "reason": "ok"}],
-            "score": 1.0,
-        })
+        mock_response = json.dumps(
+            {
+                "claims": [{"claim": "test", "supported": True, "reason": "ok"}],
+                "score": 1.0,
+            }
+        )
         rate_limit_resp = httpx.Response(429, request=httpx.Request("POST", "http://fake"))
         call_count = 0
 
@@ -295,19 +303,19 @@ class TestRetryMechanism:
             return mock_response
 
         with patch.object(self.judge, "_call_llm", side_effect=_side_effect):
-            result = await self.judge.evaluate(
-                query="test", contexts=["ctx"], response="some response"
-            )
+            result = await self.judge.evaluate(query="test", contexts=["ctx"], response="some response")
             assert result.score == 1.0
             assert result.retries_used == 1
 
     @pytest.mark.asyncio
     async def test_retry_on_500_server_error(self):
         """Should retry on 5xx server errors / 5xx 服务端错误应重试"""
-        mock_response = json.dumps({
-            "claims": [{"claim": "test", "supported": True, "reason": "ok"}],
-            "score": 1.0,
-        })
+        mock_response = json.dumps(
+            {
+                "claims": [{"claim": "test", "supported": True, "reason": "ok"}],
+                "score": 1.0,
+            }
+        )
         server_resp = httpx.Response(503, request=httpx.Request("POST", "http://fake"))
         call_count = 0
 
@@ -319,9 +327,7 @@ class TestRetryMechanism:
             return mock_response
 
         with patch.object(self.judge, "_call_llm", side_effect=_side_effect):
-            result = await self.judge.evaluate(
-                query="test", contexts=["ctx"], response="some response"
-            )
+            result = await self.judge.evaluate(query="test", contexts=["ctx"], response="some response")
             assert result.score == 1.0
             assert result.retries_used == 2
             assert call_count == 3
@@ -329,10 +335,12 @@ class TestRetryMechanism:
     @pytest.mark.asyncio
     async def test_retry_on_timeout(self):
         """Should retry on TimeoutException / 超时应重试"""
-        mock_response = json.dumps({
-            "claims": [{"claim": "test", "supported": True, "reason": "ok"}],
-            "score": 1.0,
-        })
+        mock_response = json.dumps(
+            {
+                "claims": [{"claim": "test", "supported": True, "reason": "ok"}],
+                "score": 1.0,
+            }
+        )
         call_count = 0
 
         async def _side_effect(prompt):
@@ -343,9 +351,7 @@ class TestRetryMechanism:
             return mock_response
 
         with patch.object(self.judge, "_call_llm", side_effect=_side_effect):
-            result = await self.judge.evaluate(
-                query="test", contexts=["ctx"], response="some response"
-            )
+            result = await self.judge.evaluate(query="test", contexts=["ctx"], response="some response")
             assert result.score == 1.0
             assert result.retries_used == 1
 

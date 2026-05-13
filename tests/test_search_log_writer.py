@@ -7,33 +7,41 @@ Unit tests cover:
 
 Integration tests (marked @pytest.mark.integration) cover:
 """
+
 from __future__ import annotations
 
 import pytest
 
-from team_memory.daemon.search_log_writer import SearchLogWriter
+from team_memory.daemon.observe.search_log_writer import SearchLogWriter
 
 pytestmark = pytest.mark.unit
-
 
 
 class TestSearchLogWriterInit:
     """Tests for SearchLogWriter constructor / SearchLogWriter 构造函数测试"""
 
-    def test_default_dsn(self):
-        """Default DSN should contain localhost / 默认 DSN 应包含 localhost"""
+    def test_env_dsn_fallback(self, monkeypatch):
+        """Env var TEAM_MEMORY_DB_URL used when no dsn passed"""
+        monkeypatch.setenv(
+            "TEAM_MEMORY_DB_URL", "postgresql://env:test@localhost:5433/tm"
+        )
         writer = SearchLogWriter()
-        assert "localhost" in writer._dsn
-        assert "5433" in writer._dsn
+        assert writer._dsn == "postgresql://env:test@localhost:5433/tm"
+
+    def test_no_dsn_raises(self, monkeypatch):
+        """Missing DSN should raise RuntimeError"""
+        monkeypatch.delenv("TEAM_MEMORY_DB_URL", raising=False)
+        with pytest.raises(RuntimeError):
+            SearchLogWriter()
 
     def test_custom_dsn(self):
-        """Custom DSN should be stored / 自定义 DSN 应被保存"""
+        """Custom DSN should be stored"""
         writer = SearchLogWriter(dsn="postgresql://user:pass@remote:5432/db")
         assert writer._dsn == "postgresql://user:pass@remote:5432/db"
 
     def test_pool_initially_none(self):
-        """Pool should start as None / 连接池初始应为 None"""
-        writer = SearchLogWriter()
+        """Pool should start as None"""
+        writer = SearchLogWriter(dsn="postgresql://test:test@localhost:5433/tm")
         assert writer._pool is None
 
 
@@ -64,7 +72,9 @@ class TestFuzzyMatchingLogic:
     def test_no_keyword_overlap(self):
         """No overlap should return empty set / 无重叠应返回空集合"""
         query_keywords = {"kubernetes", "helm"}
-        response_text = "Docker compose is a tool for defining multi-container applications"
+        response_text = (
+            "Docker compose is a tool for defining multi-container applications"
+        )
         response_tokens = set(response_text.lower().split())
         overlap = query_keywords & response_tokens
         assert len(overlap) == 0
