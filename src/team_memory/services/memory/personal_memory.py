@@ -172,7 +172,8 @@ class PersonalMemoryService:
                 await repo.delete_oldest_by_persona(user_id, persona)
                 logger.info(
                     "Persona limit reached (%s/%s): deleted oldest memory",
-                    user_id, persona,
+                    user_id,
+                    persona,
                 )
             mem = await repo.upsert_by_semantic(
                 user_id=user_id,

@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from team_memory.services.search_orchestrator import SearchOrchestrator
+from team_memory.services.search.search_orchestrator import SearchOrchestrator
 
 
 class TestSearchOrchestratorSearch:
@@ -42,7 +42,7 @@ class TestSearchOrchestratorSearch:
                 "team_memory.storage.database.get_session",
             ) as mock_gs,
             patch(
-                "team_memory.services.search_orchestrator.ExperienceRepository",
+                "team_memory.services.search.search_orchestrator.ExperienceRepository",
                 return_value=mock_repo,
             ),
         ):
@@ -73,16 +73,14 @@ class TestSearchOrchestratorSearch:
 
         mock_session = AsyncMock()
         mock_repo = MagicMock()
-        mock_repo.search_by_vector = AsyncMock(
-            return_value=[{"id": "xyz", "title": "Legacy result"}]
-        )
+        mock_repo.search_by_vector = AsyncMock(return_value=[{"id": "xyz", "title": "Legacy result"}])
 
         with (
             patch(
                 "team_memory.storage.database.get_session",
             ) as mock_gs,
             patch(
-                "team_memory.services.search_orchestrator.ExperienceRepository",
+                "team_memory.services.search.search_orchestrator.ExperienceRepository",
                 return_value=mock_repo,
             ),
         ):
@@ -121,7 +119,7 @@ class TestSearchOrchestratorSearch:
                 "team_memory.storage.database.get_session",
             ) as mock_gs,
             patch(
-                "team_memory.services.search_orchestrator.ExperienceRepository",
+                "team_memory.services.search.search_orchestrator.ExperienceRepository",
                 return_value=mock_repo,
             ),
         ):

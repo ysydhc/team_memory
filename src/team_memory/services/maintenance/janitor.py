@@ -18,10 +18,10 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, select
 
-from team_memory.services.promotion_compiler import PromotionCompiler
+from team_memory.services.maintenance.promotion_compiler import PromotionCompiler
 from team_memory.storage.models import Experience, PersonalMemory
 
-logger = logging.getLogger("team_memory.services.janitor")
+logger = logging.getLogger("team_memory.services.maintenance.janitor")
 
 
 def _utcnow() -> datetime:
@@ -155,9 +155,7 @@ class MemoryJanitor:
                 "protection_days": protection_days,
             }
 
-    async def sweep_outdated(
-        self, project: str | None = None, auto_soft_delete: bool = False
-    ) -> dict:
+    async def sweep_outdated(self, project: str | None = None, auto_soft_delete: bool = False) -> dict:
         """Identify and optionally soft-delete outdated experiences.
 
         Args:
@@ -418,9 +416,7 @@ class MemoryJanitor:
                 .having(func.count(Experience.id) >= group_key_threshold)
             )
             if project:
-                group_count_query = group_count_query.where(
-                    Experience.project == project
-                )
+                group_count_query = group_count_query.where(Experience.project == project)
 
             group_result = await session.execute(group_count_query)
             qualifying_groups = [row[0] for row in group_result.all()]
@@ -436,9 +432,7 @@ class MemoryJanitor:
                     )
                 )
                 if project:
-                    group_exp_query = group_exp_query.where(
-                        Experience.project == project
-                    )
+                    group_exp_query = group_exp_query.where(Experience.project == project)
 
                 group_exp_result = await session.execute(group_exp_query)
                 group_experiences = list(group_exp_result.scalars().all())
@@ -513,9 +507,7 @@ class MemoryJanitor:
             "project": project,
         }
 
-    async def _write_promoted(
-        self, exp: Experience, markdown: str, output_dirs: dict[str, str]
-    ) -> None:
+    async def _write_promoted(self, exp: Experience, markdown: str, output_dirs: dict[str, str]) -> None:
         """Write compiled Markdown to the Obsidian output directory and git add/commit.
 
         Args:
@@ -592,7 +584,8 @@ class MemoryJanitor:
 
             logger.info(
                 "Experience dedup completed: soft-deleted %d duplicates in project '%s'",
-                deleted_count, project or "all",
+                deleted_count,
+                project or "all",
             )
 
             return {
@@ -629,7 +622,8 @@ class MemoryJanitor:
 
             logger.info(
                 "Search log dedup completed: deleted %d duplicates in project '%s'",
-                deleted_count, project or "all",
+                deleted_count,
+                project or "all",
             )
 
             return {
@@ -673,9 +667,7 @@ class MemoryJanitor:
 
             # 5. Prune old personal memories (global operation)
             if project is None:  # Only run for global operations
-                results["personal_memory_pruning"] = await self.prune_personal_memory(
-                    personal_memory_days
-                )
+                results["personal_memory_pruning"] = await self.prune_personal_memory(personal_memory_days)
 
             # 6. Promote experiences (L2→L3)
             if promotion_enabled:
@@ -686,14 +678,10 @@ class MemoryJanitor:
                 results["dedup_experiences"] = await self.dedup_experiences(project)
                 results["dedup_search_logs"] = await self.dedup_search_logs(project)
 
-            logger.info(
-                "Full janitor run completed successfully for project '%s'", project or "all"
-            )
+            logger.info("Full janitor run completed successfully for project '%s'", project or "all")
 
         except Exception as e:
-            logger.error(
-                "Janitor run failed for project '%s': %s", project or "all", e, exc_info=True
-            )
+            logger.error("Janitor run failed for project '%s': %s", project or "all", e, exc_info=True)
             results["error"] = str(e)
 
         return {

@@ -68,10 +68,7 @@ class LLMClient:
                 resp.raise_for_status()
                 data = resp.json()
         except httpx.ConnectError:
-            raise LLMError(
-                f"Cannot connect to LLM at {self._base_url}. "
-                "Make sure the service is running."
-            )
+            raise LLMError(f"Cannot connect to LLM at {self._base_url}. Make sure the service is running.")
         except httpx.HTTPStatusError as e:
             raise LLMError(f"LLM API error: {e.response.text[:200]}")
 

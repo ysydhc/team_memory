@@ -83,9 +83,7 @@ class EventBus:
         tasks = [self._safe_call(h, payload, event_type) for h in handlers]
         await asyncio.gather(*tasks)
 
-    async def _safe_call(
-        self, handler: EventHandler, payload: dict[str, Any], event_type: str
-    ) -> None:
+    async def _safe_call(self, handler: EventHandler, payload: dict[str, Any], event_type: str) -> None:
         """Call a handler with error isolation."""
         try:
             await handler(payload)

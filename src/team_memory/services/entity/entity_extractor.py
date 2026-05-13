@@ -36,8 +36,14 @@ logger = logging.getLogger("team_memory.entity_extractor")
 
 VALID_ENTITY_TYPES = {"tool", "concept", "person", "project", "config", "error", "service"}
 VALID_RELATION_TYPES = {
-    "depends_on", "configures", "causes", "fixes",
-    "related_to", "uses", "part_of", "replaces",
+    "depends_on",
+    "configures",
+    "causes",
+    "fixes",
+    "related_to",
+    "uses",
+    "part_of",
+    "replaces",
 }
 VALID_ROLES = {"mentioned", "subject", "solution", "tool"}
 
@@ -164,13 +170,15 @@ def _parse_llm_response(raw: str) -> ExtractionResult:
         role = e.get("role", "mentioned")
         if role not in VALID_ROLES:
             role = "mentioned"
-        result.entities.append(ExtractedEntity(
-            name=str(e["name"])[:255],
-            entity_type=etype,
-            description=str(e.get("description", ""))[:1000],
-            aliases=[str(a)[:100] for a in e.get("aliases", []) if a][:5],
-            role=role,
-        ))
+        result.entities.append(
+            ExtractedEntity(
+                name=str(e["name"])[:255],
+                entity_type=etype,
+                description=str(e.get("description", ""))[:1000],
+                aliases=[str(a)[:100] for a in e.get("aliases", []) if a][:5],
+                role=role,
+            )
+        )
 
     for r in data.get("relationships", [])[:15]:
         if not isinstance(r, dict) or not r.get("source") or not r.get("target"):
@@ -178,11 +186,13 @@ def _parse_llm_response(raw: str) -> ExtractionResult:
         rtype = r.get("relation_type", "related_to")
         if rtype not in VALID_RELATION_TYPES:
             rtype = "related_to"
-        result.relationships.append(ExtractedRelationship(
-            source=str(r["source"])[:255],
-            target=str(r["target"])[:255],
-            relation_type=rtype,
-        ))
+        result.relationships.append(
+            ExtractedRelationship(
+                source=str(r["source"])[:255],
+                target=str(r["target"])[:255],
+                relation_type=rtype,
+            )
+        )
 
     return result
 
@@ -190,6 +200,7 @@ def _parse_llm_response(raw: str) -> ExtractionResult:
 # --------------------------------------------------------------------------- #
 # DB upsert helpers
 # --------------------------------------------------------------------------- #
+
 
 async def _upsert_entity(
     session: Any,
@@ -217,8 +228,7 @@ async def _upsert_entity(
                 "source_count": text("entities.source_count + 1"),
                 "entity_type": entity_type,
                 "description": text(
-                    "CASE WHEN excluded.description IS NOT NULL "
-                    "THEN excluded.description ELSE entities.description END"
+                    "CASE WHEN excluded.description IS NOT NULL THEN excluded.description ELSE entities.description END"
                 ),
                 "updated_at": text("now()"),
             },
@@ -230,9 +240,7 @@ async def _upsert_entity(
     if result:
         return result[0]
     # Fallback: fetch existing
-    existing = await session.execute(
-        select(Entity.id).where(Entity.name == name, Entity.project == project)
-    )
+    existing = await session.execute(select(Entity.id).where(Entity.name == name, Entity.project == project))
     row2 = existing.fetchone()
     return row2[0] if row2 else uuid.uuid4()
 
@@ -292,6 +300,7 @@ async def _upsert_experience_entity(
 # --------------------------------------------------------------------------- #
 # Public API
 # --------------------------------------------------------------------------- #
+
 
 class EntityExtractor:
     """Async entity extractor — call extract_and_persist() after save()."""
@@ -365,9 +374,7 @@ class EntityExtractor:
                 src_id = name_to_id.get(rel.source)
                 tgt_id = name_to_id.get(rel.target)
                 if src_id and tgt_id and src_id != tgt_id:
-                    await _upsert_relationship(
-                        session, src_id, tgt_id, rel.relation_type, experience_id
-                    )
+                    await _upsert_relationship(session, src_id, tgt_id, rel.relation_type, experience_id)
 
             await session.commit()
             logger.info(

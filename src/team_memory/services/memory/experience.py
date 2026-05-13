@@ -16,7 +16,7 @@ from team_memory import io_logger
 from team_memory.auth.provider import AuthProvider, User
 from team_memory.embedding.base import EmbeddingProvider
 from team_memory.services.archive import ArchiveService
-from team_memory.services.event_bus import EventBus, Events
+from team_memory.services.infra.event_bus import EventBus, Events
 from team_memory.storage.repository import ExperienceRepository
 
 logger = logging.getLogger("team_memory.service")
@@ -25,9 +25,7 @@ logger = logging.getLogger("team_memory.service")
 def _validate_source_status(source: str, exp_status: str) -> None:
     """Validate that draft status is only allowed for source='pipeline' or 'obsidian'."""
     if exp_status == "draft" and source not in ("pipeline", "obsidian"):
-        raise ValueError(
-            f"exp_status='draft' requires source='pipeline' or 'obsidian', got source='{source}'"
-        )
+        raise ValueError(f"exp_status='draft' requires source='pipeline' or 'obsidian', got source='{source}'")
 
 
 class ExperienceService:
@@ -98,9 +96,7 @@ class ExperienceService:
                 c_sol = (c.solution or "")[: self._CHILD_EMBED_TRUNCATE]
             else:
                 c_title = c.get("title", "")
-                c_desc = (c.get("description") or c.get("problem") or "")[
-                    : self._CHILD_EMBED_TRUNCATE
-                ]
+                c_desc = (c.get("description") or c.get("problem") or "")[: self._CHILD_EMBED_TRUNCATE]
                 c_sol = (c.get("solution") or "")[: self._CHILD_EMBED_TRUNCATE]
             text += f"\n{c_title}\n{c_desc}\n{c_sol}"
         return text

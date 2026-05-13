@@ -12,7 +12,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from team_memory.services.personal_memory import PersonalMemoryService
+    from team_memory.services.memory.personal_memory import PersonalMemoryService
 
 logger = logging.getLogger("team_memory.pattern_extractor")
 
@@ -56,12 +56,10 @@ class PatternExtractor:
 
         Returns list of dicts with: pattern, category, frequency_hint, suggested_rule.
         """
-        from team_memory.services.llm_provider import create_llm_provider
+        from team_memory.services.llm.llm_provider import create_llm_provider
 
         llm = create_llm_provider(llm_config)
-        prompt = PATTERN_EXTRACTION_PROMPT.format(
-            conversation=conversation[:MAX_CONVERSATION_CHARS]
-        )
+        prompt = PATTERN_EXTRACTION_PROMPT.format(conversation=conversation[:MAX_CONVERSATION_CHARS])
 
         try:
             response = await llm.chat([{"role": "user", "content": prompt}])

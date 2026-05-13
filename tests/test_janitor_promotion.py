@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from team_memory.config.janitor import JanitorConfig
-from team_memory.services.janitor import MemoryJanitor
+from team_memory.services.maintenance.janitor import MemoryJanitor
 
 # ============================================================
 # Helpers
@@ -185,10 +185,7 @@ class TestRunPromotion:
     async def test_group_key_above_threshold_gets_promoted(self):
         """5+ published experiences with the same group_key should all be promoted."""
         group_key = "python-error-handling"
-        exps = [
-            _make_experience(recall_count=0, exp_status="published", group_key=group_key)
-            for _ in range(5)
-        ]
+        exps = [_make_experience(recall_count=0, exp_status="published", group_key=group_key) for _ in range(5)]
         janitor = _setup_janitor(JanitorConfig(promotion_group_key_threshold=5))
 
         mock_session = AsyncMock()
@@ -222,10 +219,7 @@ class TestRunPromotion:
     async def test_group_key_below_threshold_not_promoted(self):
         """4 published experiences with the same group_key should NOT be promoted."""
         group_key = "python-error-handling"
-        exps = [
-            _make_experience(recall_count=0, exp_status="published", group_key=group_key)
-            for _ in range(4)
-        ]
+        exps = [_make_experience(recall_count=0, exp_status="published", group_key=group_key) for _ in range(4)]
         janitor = _setup_janitor(JanitorConfig(promotion_group_key_threshold=5))
 
         mock_session = AsyncMock()
@@ -262,9 +256,7 @@ class TestRunPromotion:
         mock_session.execute = AsyncMock(
             side_effect=[
                 # 1. use_count query: returns only the published one
-                MagicMock(
-                    scalars=MagicMock(return_value=_FakeScalarResult([exp_published]))
-                ),
+                MagicMock(scalars=MagicMock(return_value=_FakeScalarResult([exp_published]))),
                 # 2. group_key count query: no qualifying groups
                 MagicMock(all=MagicMock(return_value=[])),
             ]
@@ -295,9 +287,7 @@ class TestRunAllPromotion:
 
         # Mock all methods
         janitor.run_score_decay = AsyncMock(return_value={"updated_count": 0})
-        janitor.sweep_outdated = AsyncMock(
-            return_value={"found_count": 0, "deleted_count": 0}
-        )
+        janitor.sweep_outdated = AsyncMock(return_value={"found_count": 0, "deleted_count": 0})
         janitor.purge_soft_deleted = AsyncMock(return_value={"purged_count": 0})
         janitor.expire_drafts = AsyncMock(return_value={"expired_count": 0})
         janitor.prune_personal_memory = AsyncMock(return_value={"pruned_count": 0})
@@ -321,9 +311,7 @@ class TestRunAllPromotion:
         janitor = _setup_janitor(JanitorConfig(promotion_enabled=False))
 
         janitor.run_score_decay = AsyncMock(return_value={"updated_count": 0})
-        janitor.sweep_outdated = AsyncMock(
-            return_value={"found_count": 0, "deleted_count": 0}
-        )
+        janitor.sweep_outdated = AsyncMock(return_value={"found_count": 0, "deleted_count": 0})
         janitor.purge_soft_deleted = AsyncMock(return_value={"purged_count": 0})
         janitor.expire_drafts = AsyncMock(return_value={"expired_count": 0})
         janitor.prune_personal_memory = AsyncMock(return_value={"pruned_count": 0})

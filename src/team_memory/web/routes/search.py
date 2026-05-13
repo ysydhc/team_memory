@@ -73,7 +73,7 @@ async def search_experiences_debug(
     max_results = req.max_results or (retrieval_cfg.max_count if retrieval_cfg else 10)
     top_k_children = req.top_k_children or (retrieval_cfg.top_k_children if retrieval_cfg else 3)
 
-    from team_memory.services.search_pipeline import SearchRequest as PipelineSearchRequest
+    from team_memory.services.search.search_pipeline import SearchRequest as PipelineSearchRequest
 
     async with get_session(db_url) as session:
         result = await search_orchestrator._search_pipeline.search(  # noqa: SLF001

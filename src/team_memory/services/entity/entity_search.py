@@ -27,9 +27,9 @@ _MIN_ENTITY_LEN = 2
 
 # Patterns that look like tool/project names: CamelCase, ALLCAPS (≥2 chars),
 # hyphenated-words, or known keyword lists.
-_CAMEL_PATTERN = re.compile(r'\b[A-Z][a-z]+[A-Z][A-Za-z]*\b')  # CamelCase
-_UPPER_PATTERN = re.compile(r'\b[A-Z]{2,}\b')                    # ALLCAPS
-_HYPHEN_PATTERN = re.compile(r'\b[a-zA-Z][a-zA-Z0-9]*(?:-[a-zA-Z0-9]+)+\b')  # kebab-case
+_CAMEL_PATTERN = re.compile(r"\b[A-Z][a-z]+[A-Z][A-Za-z]*\b")  # CamelCase
+_UPPER_PATTERN = re.compile(r"\b[A-Z]{2,}\b")  # ALLCAPS
+_HYPHEN_PATTERN = re.compile(r"\b[a-zA-Z][a-zA-Z0-9]*(?:-[a-zA-Z0-9]+)+\b")  # kebab-case
 
 
 def extract_entities_from_query(query: str) -> list[str]:

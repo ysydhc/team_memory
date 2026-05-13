@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from team_memory.services.personal_memory import PersonalMemoryService
+from team_memory.services.memory.personal_memory import PersonalMemoryService
 
 # ============================================================
 # Helpers
@@ -107,7 +107,7 @@ class TestPersonalMemoryWrite:
         _patch_session_and_repo(svc, mock_repo)
 
         with patch(
-            "team_memory.services.personal_memory.PersonalMemoryRepository",
+            "team_memory.services.memory.personal_memory.PersonalMemoryRepository",
             return_value=mock_repo,
         ):
             result = await svc.write(user_id="user1", content="likes vim")
@@ -132,7 +132,7 @@ class TestPersonalMemoryWrite:
         _patch_session_and_repo(svc, mock_repo)
 
         with patch(
-            "team_memory.services.personal_memory.PersonalMemoryRepository",
+            "team_memory.services.memory.personal_memory.PersonalMemoryRepository",
             return_value=mock_repo,
         ):
             await svc.write(user_id="user1", content="test content")
@@ -153,7 +153,7 @@ class TestPersonalMemoryWrite:
         _patch_session_and_repo(svc, mock_repo)
 
         with patch(
-            "team_memory.services.personal_memory.PersonalMemoryRepository",
+            "team_memory.services.memory.personal_memory.PersonalMemoryRepository",
             return_value=mock_repo,
         ):
             await svc.write(
@@ -188,7 +188,7 @@ class TestPersonalMemoryListByUser:
         _patch_session_and_repo(svc, mock_repo)
 
         with patch(
-            "team_memory.services.personal_memory.PersonalMemoryRepository",
+            "team_memory.services.memory.personal_memory.PersonalMemoryRepository",
             return_value=mock_repo,
         ):
             result = await svc.list_by_user("user1")
@@ -209,14 +209,12 @@ class TestPersonalMemoryListByUser:
         _patch_session_and_repo(svc, mock_repo)
 
         with patch(
-            "team_memory.services.personal_memory.PersonalMemoryRepository",
+            "team_memory.services.memory.personal_memory.PersonalMemoryRepository",
             return_value=mock_repo,
         ):
             await svc.list_by_user("user1", scope="context", profile_kind="dynamic")
 
-        mock_repo.list_by_user.assert_awaited_once_with(
-            "user1", scope="context", profile_kind="dynamic"
-        )
+        mock_repo.list_by_user.assert_awaited_once_with("user1", scope="context", profile_kind="dynamic")
 
 
 # ============================================================
@@ -256,7 +254,7 @@ class TestBuildProfileForUser:
         _patch_session_and_repo(svc, mock_repo)
 
         with patch(
-            "team_memory.services.personal_memory.PersonalMemoryRepository",
+            "team_memory.services.memory.personal_memory.PersonalMemoryRepository",
             return_value=mock_repo,
         ):
             result = await svc.build_profile_for_user("user1")
@@ -279,7 +277,7 @@ class TestBuildProfileForUser:
         _patch_session_and_repo(svc, mock_repo)
 
         with patch(
-            "team_memory.services.personal_memory.PersonalMemoryRepository",
+            "team_memory.services.memory.personal_memory.PersonalMemoryRepository",
             return_value=mock_repo,
         ):
             await svc.build_profile_for_user("user1", current_context="working on MCP tools")
@@ -303,7 +301,7 @@ class TestBuildProfileForUser:
         _patch_session_and_repo(svc, mock_repo)
 
         with patch(
-            "team_memory.services.personal_memory.PersonalMemoryRepository",
+            "team_memory.services.memory.personal_memory.PersonalMemoryRepository",
             return_value=mock_repo,
         ):
             result = await svc.build_profile_for_user("user1")
@@ -315,10 +313,7 @@ class TestBuildProfileForUser:
     @pytest.mark.asyncio
     async def test_build_profile_caps_at_max_per_side(self):
         """Respects max_per_side limit."""
-        mems = [
-            _make_personal_memory(content=f"preference {i}", profile_kind="static")
-            for i in range(30)
-        ]
+        mems = [_make_personal_memory(content=f"preference {i}", profile_kind="static") for i in range(30)]
         embedding_provider = _make_embedding_provider()
 
         mock_repo = MagicMock()
@@ -328,7 +323,7 @@ class TestBuildProfileForUser:
         _patch_session_and_repo(svc, mock_repo)
 
         with patch(
-            "team_memory.services.personal_memory.PersonalMemoryRepository",
+            "team_memory.services.memory.personal_memory.PersonalMemoryRepository",
             return_value=mock_repo,
         ):
             result = await svc.build_profile_for_user("user1", max_per_side=5)

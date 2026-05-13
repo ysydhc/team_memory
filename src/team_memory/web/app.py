@@ -35,7 +35,7 @@ from team_memory.bootstrap import (
     stop_background_tasks,
 )
 from team_memory.config import Settings, load_settings
-from team_memory.services.experience import ExperienceService
+from team_memory.services.memory.experience import ExperienceService
 from team_memory.storage.database import get_session  # noqa: F401 -- used by route modules
 from team_memory.web.auth_session import (  # noqa: F401 -- re-exported for backward compat
     _decode_session_token,
@@ -123,20 +123,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Ensure default admin when db_api_key auth and no users exist
     if ctx.settings.auth.type == "db_api_key":
-        password = (
-            os.environ.get("TEAM_MEMORY_ADMIN_PASSWORD")
-            or ctx.settings.auth.default_admin_password
-            or ""
-        )
+        password = os.environ.get("TEAM_MEMORY_ADMIN_PASSWORD") or ctx.settings.auth.default_admin_password or ""
         db_url = ctx.db_url
         if not password:
             from team_memory.auth.init_admin import is_api_keys_empty
 
             if await is_api_keys_empty(db_url):
-                raise RuntimeError(
-                    "首次启动需设置 TEAM_MEMORY_ADMIN_PASSWORD 以创建默认 admin，"
-                    "或手动在 DB 中创建用户"
-                )
+                raise RuntimeError("首次启动需设置 TEAM_MEMORY_ADMIN_PASSWORD 以创建默认 admin，或手动在 DB 中创建用户")
         else:
             from team_memory.auth.init_admin import ensure_default_admin
 
@@ -154,16 +147,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Start heartbeat
     import sys as _sys
+
     _scripts_dir = str(Path(__file__).resolve().parents[3] / "scripts")
     if _scripts_dir not in _sys.path:
         _sys.path.insert(0, _scripts_dir)
     from team_memory.monitoring.heartbeat import start_heartbeat
+
     app.state.heartbeat = start_heartbeat()
 
     logger.info("TeamMemory web server started")
     yield
     # Stop heartbeat
     from team_memory.monitoring.heartbeat import stop_heartbeat
+
     stop_heartbeat(app.state.heartbeat)
     await stop_background_tasks(ctx)
     # Ensure DB connections are released even if stop_background_tasks changes
@@ -241,9 +237,7 @@ async def _check_embedding_provider() -> dict:
     try:
         ctx = get_context()
         provider_name = ctx.settings.embedding.provider
-        base_url = getattr(
-            ctx.settings.embedding.ollama, "base_url", "http://localhost:11434"
-        )
+        base_url = getattr(ctx.settings.embedding.ollama, "base_url", "http://localhost:11434")
         model = getattr(ctx.settings.embedding.ollama, "model", "")
         dimension = getattr(ctx.settings.embedding.ollama, "dimension", 0)
 
@@ -253,16 +247,11 @@ async def _check_embedding_provider() -> dict:
             import httpx
 
             try:
-                resp = await httpx.AsyncClient(timeout=5.0).get(
-                    f"{base_url}/api/tags"
-                )
+                resp = await httpx.AsyncClient(timeout=5.0).get(f"{base_url}/api/tags")
                 if resp.status_code == 200:
                     models = resp.json().get("models", [])
                     model_base = model.split(":")[0]
-                    found = any(
-                        m.get("name", "").split(":")[0] == model_base
-                        for m in models
-                    )
+                    found = any(m.get("name", "").split(":")[0] == model_base for m in models)
                     if found:
                         return {
                             "status": "up",
@@ -317,11 +306,7 @@ async def _check_cache() -> dict:
     """Check cache backend availability."""
     try:
         ctx = get_context()
-        pipeline = (
-            ctx.search_orchestrator._search_pipeline
-            if hasattr(ctx, "search_orchestrator")
-            else None
-        )
+        pipeline = ctx.search_orchestrator._search_pipeline if hasattr(ctx, "search_orchestrator") else None
         if pipeline and pipeline._cache:
             return {"status": "up", "backend": ctx.settings.cache.backend}
         return {"status": "up", "backend": "none"}
@@ -425,9 +410,7 @@ async def rate_limit(request: Request, call_next):
 async def limit_request_body(request: Request, call_next):
     """Return 413 when Content-Length exceeds the configured maximum."""
     content_length = request.headers.get("content-length")
-    max_bytes = (
-        getattr(getattr(_settings, "web", None), "max_request_body_bytes", None) or 20_971_520
-    )
+    max_bytes = getattr(getattr(_settings, "web", None), "max_request_body_bytes", None) or 20_971_520
     if content_length and int(content_length) > int(max_bytes):
         return JSONResponse(
             status_code=413,

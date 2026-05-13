@@ -20,7 +20,9 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 if TYPE_CHECKING:
     from team_memory.embedding.base import EmbeddingProvider
@@ -32,6 +34,15 @@ logger = logging.getLogger("team_memory.cache")
 # Rate-limited Redis warning to avoid log storms
 _last_redis_warning: float = 0.0
 _REDIS_WARNING_INTERVAL = 300  # seconds
+
+
+def _redis_json_default(obj: object) -> str:
+    """JSON encoder hook for Redis cache values (nested experience rows may include these)."""
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, UUID):
+        return str(obj)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 def _warn_redis_once(msg: str, *args: object) -> None:
@@ -182,7 +193,7 @@ class RedisCacheBackend(CacheBackend):
         if client is None:
             return
         try:
-            serialized = json.dumps(value)
+            serialized = json.dumps(value, default=_redis_json_default)
             await client.setex(self._key(key), ttl or self._ttl, serialized)
         except Exception:
             _warn_redis_once("Redis SET error for key %s", key)
@@ -333,9 +344,7 @@ class SearchCache:
         """Get cached search results."""
         if not self.enabled:
             return None
-        key = self._make_key(
-            query, tags, project, current_user, include_archives, reranker_signature
-        )
+        key = self._make_key(query, tags, project, current_user, include_archives, reranker_signature)
         result = await self._result_cache.get(key)
         query_preview = (query or "")[:50]
         if result is not None:
@@ -359,9 +368,7 @@ class SearchCache:
         """Cache search results."""
         if not self.enabled:
             return
-        key = self._make_key(
-            query, tags, project, current_user, include_archives, reranker_signature
-        )
+        key = self._make_key(query, tags, project, current_user, include_archives, reranker_signature)
         await self._result_cache.put(key, value)
 
     async def get_or_compute_embedding(

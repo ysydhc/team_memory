@@ -87,9 +87,7 @@ def _simple_kmeans(
     centers = np.zeros((k, mats.shape[1]), dtype=np.float32)
     centers[0] = mats[rng.randint(n)]
     for ci in range(1, k):
-        dists = np.min(
-            np.clip(1 - np.dot(mats, centers[:ci].T), 0, None), axis=1
-        )
+        dists = np.min(np.clip(1 - np.dot(mats, centers[:ci].T), 0, None), axis=1)
         total = dists.sum()
         if total < 1e-10:
             # Fallback: uniform distribution
@@ -177,11 +175,7 @@ async def _generate_topic_name(
     api_key = os.environ.get(api_key_env, "none")
     timeout = getattr(llm_config, "timeout", 30)
 
-    user_msg = (
-        f"Entities: {entities[:5]}\n"
-        f"Tags: {tags[:5]}\n"
-        f"Sample titles:\n"
-    )
+    user_msg = f"Entities: {entities[:5]}\nTags: {tags[:5]}\nSample titles:\n"
     for t in sample_titles[:10]:
         user_msg += f"  - {t}\n"
 
@@ -209,7 +203,7 @@ async def _generate_topic_name(
             resp.raise_for_status()
             name = resp.json()["choices"][0]["message"]["content"].strip()
             # Sanitize: strip quotes, limit length
-            name = name.strip('"\'')
+            name = name.strip("\"'")
             if len(name) > 60:
                 name = name[:60]
             return name if name else None
@@ -250,11 +244,14 @@ async def discover_topics(
 
     async with get_session(db_url) as session:
         # Load experience embeddings + titles
-        result = await session.execute(text("""
+        result = await session.execute(
+            text("""
             SELECT id, embedding, tags, title FROM experiences
             WHERE embedding IS NOT NULL AND exp_status = 'published'
-        """))
+        """)
+        )
         import json
+
         for row in result.fetchall():
             exp_id = str(row[0])
             emb = row[1]
@@ -276,11 +273,13 @@ async def discover_topics(
                     continue
 
         # Load entity associations
-        result2 = await session.execute(text("""
+        result2 = await session.execute(
+            text("""
             SELECT ee.experience_id, e.name
             FROM experience_entities ee
             JOIN entities e ON e.id = ee.entity_id
-        """))
+        """)
+        )
         for row in result2.fetchall():
             exp_id = str(row[0])
             entity_name = row[1]
@@ -322,10 +321,7 @@ async def discover_topics(
         top_entities = sorted(all_entities, key=all_entities.get, reverse=True)[:5]
 
         # Collect sample titles for LLM naming
-        sample_titles = [
-            title_map[eid] for eid in exp_ids
-            if title_map.get(eid)
-        ][:10]
+        sample_titles = [title_map[eid] for eid in exp_ids if title_map.get(eid)][:10]
 
         # Name: LLM if available, else fallback to heuristic
         name: str | None = None
@@ -353,14 +349,16 @@ async def discover_topics(
         else:
             center = []
 
-        topics.append(Topic(
-            id=str(uuid.uuid4())[:8],
-            name=name,
-            experience_ids=exp_ids,
-            tags=top_tags,
-            entities=top_entities,
-            center=center,
-        ))
+        topics.append(
+            Topic(
+                id=str(uuid.uuid4())[:8],
+                name=name,
+                experience_ids=exp_ids,
+                tags=top_tags,
+                entities=top_entities,
+                center=center,
+            )
+        )
 
     # Sort by size descending
     topics.sort(key=lambda t: len(t.experience_ids), reverse=True)

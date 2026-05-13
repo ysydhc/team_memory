@@ -19,8 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from team_memory.config.janitor import JanitorConfig
-from team_memory.services.janitor import MemoryJanitor
-
+from team_memory.services.maintenance.janitor import MemoryJanitor
 
 # ============================================================
 # Helpers
@@ -54,17 +53,19 @@ def _make_experience(
     exp.is_deleted = is_deleted
     exp.created_at = datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
     # to_dict must return a dict usable by PromotionCompiler
-    exp.to_dict = MagicMock(return_value={
-        "id": str(exp.id),
-        "title": title,
-        "description": description,
-        "solution": solution,
-        "tags": tags or ["test"],
-        "group_key": group_key,
-        "project": project,
-        "recall_count": recall_count,
-        "created_at": "2026-01-15T10:00:00+00:00",
-    })
+    exp.to_dict = MagicMock(
+        return_value={
+            "id": str(exp.id),
+            "title": title,
+            "description": description,
+            "solution": solution,
+            "tags": tags or ["test"],
+            "group_key": group_key,
+            "project": project,
+            "recall_count": recall_count,
+            "created_at": "2026-01-15T10:00:00+00:00",
+        }
+    )
     return exp
 
 
@@ -78,9 +79,11 @@ def mock_session():
 
 def _patch_session(mock_session):
     """Return a patch for team_memory.storage.database.get_session that yields mock_session."""
+
     @asynccontextmanager
     async def _cm(_url):
         yield mock_session
+
     return patch("team_memory.storage.database.get_session", _cm)
 
 
@@ -136,8 +139,8 @@ class TestPromotionMarkdownCompilation:
 
         with (
             _patch_session(mock_session),
-            patch("team_memory.services.janitor.PromotionCompiler") as MockCompiler,
-            patch("team_memory.services.janitor.subprocess"),
+            patch("team_memory.services.maintenance.janitor.PromotionCompiler") as MockCompiler,
+            patch("team_memory.services.maintenance.janitor.subprocess"),
         ):
             mock_compiler_instance = AsyncMock()
             mock_compiler_instance.compile = AsyncMock(return_value="# Markdown output")
@@ -166,8 +169,8 @@ class TestPromotionMarkdownCompilation:
 
         with (
             _patch_session(mock_session),
-            patch("team_memory.services.janitor.PromotionCompiler") as MockCompiler,
-            patch("team_memory.services.janitor.subprocess"),
+            patch("team_memory.services.maintenance.janitor.PromotionCompiler") as MockCompiler,
+            patch("team_memory.services.maintenance.janitor.subprocess"),
         ):
             mock_compiler_instance = AsyncMock()
             mock_compiler_instance.compile = AsyncMock(return_value="# Group Markdown")
@@ -198,8 +201,8 @@ class TestPromotionFileWrite:
 
         with (
             _patch_session(mock_session),
-            patch("team_memory.services.janitor.PromotionCompiler") as MockCompiler,
-            patch("team_memory.services.janitor.subprocess") as mock_subprocess,
+            patch("team_memory.services.maintenance.janitor.PromotionCompiler") as MockCompiler,
+            patch("team_memory.services.maintenance.janitor.subprocess") as mock_subprocess,
         ):
             mock_compiler_instance = AsyncMock()
             mock_compiler_instance.compile = AsyncMock(return_value="# Promoted Markdown")
@@ -210,6 +213,7 @@ class TestPromotionFileWrite:
 
         # Check that a file was created in output_dir
         import os
+
         files = os.listdir(output_dir)
         assert len(files) == 1
         assert files[0].startswith("promoted-")
@@ -233,8 +237,8 @@ class TestPromotionFileWrite:
 
         with (
             _patch_session(mock_session),
-            patch("team_memory.services.janitor.PromotionCompiler") as MockCompiler,
-            patch("team_memory.services.janitor.subprocess") as mock_subprocess,
+            patch("team_memory.services.maintenance.janitor.PromotionCompiler") as MockCompiler,
+            patch("team_memory.services.maintenance.janitor.subprocess") as mock_subprocess,
         ):
             mock_compiler_instance = AsyncMock()
             mock_compiler_instance.compile = AsyncMock(return_value="# Markdown")
@@ -244,6 +248,7 @@ class TestPromotionFileWrite:
             result = await janitor.run_promotion()
 
         import os
+
         assert os.path.isdir(output_dir)
 
 
@@ -267,7 +272,7 @@ class TestPromotionNoOutputDir:
 
         with (
             _patch_session(mock_session),
-            patch("team_memory.services.janitor.PromotionCompiler") as MockCompiler,
+            patch("team_memory.services.maintenance.janitor.PromotionCompiler") as MockCompiler,
             patch("builtins.open", side_effect=tracking_open),
         ):
             mock_compiler_instance = AsyncMock()
@@ -300,7 +305,7 @@ class TestPromotionNoOutputDir:
 
         with (
             _patch_session(mock_session),
-            patch("team_memory.services.janitor.PromotionCompiler") as MockCompiler,
+            patch("team_memory.services.maintenance.janitor.PromotionCompiler") as MockCompiler,
             patch("builtins.open", side_effect=tracking_open),
         ):
             mock_compiler_instance = AsyncMock()
@@ -329,8 +334,8 @@ class TestPromotionGitCommit:
 
         with (
             _patch_session(mock_session),
-            patch("team_memory.services.janitor.PromotionCompiler") as MockCompiler,
-            patch("team_memory.services.janitor.subprocess") as mock_subprocess,
+            patch("team_memory.services.maintenance.janitor.PromotionCompiler") as MockCompiler,
+            patch("team_memory.services.maintenance.janitor.subprocess") as mock_subprocess,
         ):
             mock_compiler_instance = AsyncMock()
             mock_compiler_instance.compile = AsyncMock(return_value="# Markdown")
@@ -363,8 +368,8 @@ class TestPromotionGitCommit:
 
         with (
             _patch_session(mock_session),
-            patch("team_memory.services.janitor.PromotionCompiler") as MockCompiler,
-            patch("team_memory.services.janitor.subprocess") as mock_subprocess,
+            patch("team_memory.services.maintenance.janitor.PromotionCompiler") as MockCompiler,
+            patch("team_memory.services.maintenance.janitor.subprocess") as mock_subprocess,
         ):
             mock_compiler_instance = AsyncMock()
             mock_compiler_instance.compile = AsyncMock(return_value="# Markdown")
@@ -387,8 +392,8 @@ class TestPromotionStatusUpdate:
 
         with (
             _patch_session(mock_session),
-            patch("team_memory.services.janitor.PromotionCompiler") as MockCompiler,
-            patch("team_memory.services.janitor.subprocess"),
+            patch("team_memory.services.maintenance.janitor.PromotionCompiler") as MockCompiler,
+            patch("team_memory.services.maintenance.janitor.subprocess"),
         ):
             mock_compiler_instance = AsyncMock()
             mock_compiler_instance.compile = AsyncMock(return_value="# Markdown")
@@ -415,8 +420,8 @@ class TestPromotionStatusUpdate:
 
         with (
             _patch_session(mock_session),
-            patch("team_memory.services.janitor.PromotionCompiler") as MockCompiler,
-            patch("team_memory.services.janitor.subprocess"),
+            patch("team_memory.services.maintenance.janitor.PromotionCompiler") as MockCompiler,
+            patch("team_memory.services.maintenance.janitor.subprocess"),
         ):
             mock_compiler_instance = AsyncMock()
             mock_compiler_instance.compile = AsyncMock(return_value="# Markdown")

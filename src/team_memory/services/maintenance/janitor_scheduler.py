@@ -11,9 +11,9 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from team_memory.services.janitor import MemoryJanitor
+    from team_memory.services.maintenance.janitor import MemoryJanitor
 
-logger = logging.getLogger("team_memory.services.janitor_scheduler")
+logger = logging.getLogger("team_memory.services.maintenance.janitor_scheduler")
 
 
 class JanitorScheduler:
@@ -119,9 +119,7 @@ class JanitorScheduler:
                     if "outdated_sweep" in operations:
                         sweep_found = operations["outdated_sweep"].get("found_count", 0)
                         sweep_deleted = operations["outdated_sweep"].get("deleted_count", 0)
-                        summary_parts.append(
-                            f"outdated: {sweep_found} found, {sweep_deleted} deleted"
-                        )
+                        summary_parts.append(f"outdated: {sweep_found} found, {sweep_deleted} deleted")
 
                     if "soft_deleted_purge" in operations:
                         purge_count = operations["soft_deleted_purge"].get("purged_count", 0)

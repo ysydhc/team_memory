@@ -1,23 +1,21 @@
 """Tests for MemoryJanitor service.
 
 Tests the automated cleanup and quality management functionality
-using an in-memory SQLite database.
+with mocked database sessions.
 """
 
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 pytestmark = pytest.mark.unit
 
-from team_memory.services.janitor import MemoryJanitor
-from team_memory.storage.models import Experience, PersonalMemory
 from team_memory.config.janitor import JanitorConfig
+from team_memory.services.maintenance.janitor import MemoryJanitor
 
 
 def _utcnow() -> datetime:
@@ -41,8 +39,25 @@ class TestMemoryJanitor:
 
     @pytest.fixture
     def janitor(self, mock_config):
-        """Create MemoryJanitor instance with mock config."""
-        return MemoryJanitor(db_url="sqlite+aiosqlite://", config=mock_config)
+        """Create MemoryJanitor instance with mock config and mocked DB session."""
+        j = MemoryJanitor(db_url="sqlite+aiosqlite://", config=mock_config)
+
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = []
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value = mock_scalars
+
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = mock_result
+        mock_session.commit = AsyncMock()
+
+        @asynccontextmanager
+        async def _fake_session():
+            yield mock_session
+
+        j._session = _fake_session
+        return j
 
     @pytest.mark.asyncio
     async def test_init(self, mock_config):
@@ -51,54 +66,46 @@ class TestMemoryJanitor:
         assert janitor._db_url == "test_url"
         assert janitor._config == mock_config
 
-    def test_get_config(self, janitor, mock_config):
+    def test_get_config(self, mock_config):
         """Test configuration value retrieval."""
-        # Test existing config key
+        janitor = MemoryJanitor(db_url="test", config=mock_config)
         assert janitor._get_config("protection_period_days") == 10
 
-        # Test missing key with default - getattr should return default for missing attributes
         assert janitor._get_config("missing_key", "default_value") == "default_value"
 
-        # Test with None config
         janitor_no_config = MemoryJanitor(db_url="test", config=None)
         assert janitor_no_config._get_config("any_key", "default") == "default"
 
     @pytest.mark.asyncio
-    @pytest.mark.integration
     async def test_run_score_decay_no_experiences(self, janitor):
-        """Test score decay with no experiences returns zero updates / 无经验时分数衰减应返回零更新"""
+        """Test score decay with no experiences returns zero updates."""
         result = await janitor.run_score_decay()
         assert result["updated_count"] == 0
 
     @pytest.mark.asyncio
-    @pytest.mark.integration
     async def test_sweep_outdated_no_experiences(self, janitor):
-        """Test outdated sweep with no experiences returns empty result / 无经验时过时清理应返回空结果"""
+        """Test outdated sweep with no experiences returns empty result."""
         result = await janitor.sweep_outdated()
         assert result["found_count"] == 0
         assert result["deleted_count"] == 0
 
     @pytest.mark.asyncio
-    @pytest.mark.integration
     async def test_purge_soft_deleted_no_experiences(self, janitor):
-        """Test soft-deleted purge with no experiences returns empty result / 无经验时软删除清理应返回空结果"""
+        """Test soft-deleted purge with no experiences returns empty result."""
         result = await janitor.purge_soft_deleted()
         assert result["purged_count"] == 0
 
     @pytest.mark.asyncio
-    @pytest.mark.integration
     async def test_expire_drafts_no_experiences(self, janitor):
-        """Test draft expiration with no experiences returns empty result / 无经验时草稿过期应返回空结果"""
+        """Test draft expiration with no experiences returns empty result."""
         result = await janitor.expire_drafts()
         assert result["expired_count"] == 0
 
     @pytest.mark.asyncio
     async def test_prune_personal_memory_no_memories(self, janitor):
-        """Test personal memory pruning with no memories."""
-        with pytest.raises(Exception):
-            # This will fail because we don't have a real database session
-            # In a real test, we'd set up a test database with fixtures
-            await janitor.prune_personal_memory()
+        """Test personal memory pruning with no memories returns zero."""
+        result = await janitor.prune_personal_memory()
+        assert result["pruned_count"] == 0
 
     @pytest.mark.asyncio
     async def test_run_all_structure(self, janitor):

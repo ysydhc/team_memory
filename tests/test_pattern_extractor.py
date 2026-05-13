@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from team_memory.services.pattern_extractor import PatternExtractor
+from team_memory.services.analysis.pattern_extractor import PatternExtractor
 
 
 class TestPatternExtractor:
@@ -39,7 +39,7 @@ class TestPatternExtractor:
         mock_llm.chat = AsyncMock(return_value=llm_response)
 
         with patch(
-            "team_memory.services.llm_provider.create_llm_provider",
+            "team_memory.services.llm.llm_provider.create_llm_provider",
             return_value=mock_llm,
         ):
             extractor = PatternExtractor()
@@ -56,7 +56,7 @@ class TestPatternExtractor:
         mock_llm.chat = AsyncMock(return_value="no json here")
 
         with patch(
-            "team_memory.services.llm_provider.create_llm_provider",
+            "team_memory.services.llm.llm_provider.create_llm_provider",
             return_value=mock_llm,
         ):
             extractor = PatternExtractor()
@@ -71,7 +71,7 @@ class TestPatternExtractor:
         mock_llm.chat = AsyncMock(side_effect=RuntimeError("LLM down"))
 
         with patch(
-            "team_memory.services.llm_provider.create_llm_provider",
+            "team_memory.services.llm.llm_provider.create_llm_provider",
             return_value=mock_llm,
         ):
             extractor = PatternExtractor()
@@ -101,7 +101,7 @@ class TestPatternExtractor:
         mock_pm.write = AsyncMock()
 
         with patch(
-            "team_memory.services.llm_provider.create_llm_provider",
+            "team_memory.services.llm.llm_provider.create_llm_provider",
             return_value=mock_llm,
         ):
             extractor = PatternExtractor()
@@ -127,7 +127,7 @@ class TestPatternExtractor:
         mock_pm = AsyncMock()
 
         with patch(
-            "team_memory.services.llm_provider.create_llm_provider",
+            "team_memory.services.llm.llm_provider.create_llm_provider",
             return_value=mock_llm,
         ):
             extractor = PatternExtractor()
@@ -160,7 +160,7 @@ class TestPatternExtractor:
         mock_pm.write = AsyncMock()
 
         with patch(
-            "team_memory.services.llm_provider.create_llm_provider",
+            "team_memory.services.llm.llm_provider.create_llm_provider",
             return_value=mock_llm,
         ):
             extractor = PatternExtractor()

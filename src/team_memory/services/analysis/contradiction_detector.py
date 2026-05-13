@@ -6,6 +6,7 @@ Two-stage approach:
 
 Stage 1 is fast and cheap (no LLM). Stage 2 filters false positives.
 """
+
 from __future__ import annotations
 
 import logging
@@ -37,14 +38,14 @@ _CONTRADICTION_PROMPT = (
     "Given two experiences that share entities, "
     "determine if they contain genuinely contradictory advice.\n"
     "\nRules:\n"
-    "- TRUE contradiction: One says \"always do X\" and the other says \"never do X\" "
+    '- TRUE contradiction: One says "always do X" and the other says "never do X" '
     "about the SAME aspect\n"
     "- FALSE contradiction: They discuss different aspects, different contexts, "
     "or are complementary\n"
     "- Consider that one may be outdated and the other is a correction "
     "\u2014 this IS a contradiction worth flagging\n"
     "\nRespond with ONLY a JSON object:\n"
-    "{\"contradiction\": true/false, \"reason\": \"brief explanation\"}"
+    '{"contradiction": true/false, "reason": "brief explanation"}'
 )
 
 
@@ -93,10 +94,7 @@ async def _validate_with_llm(
         user_msg += f"  Solution: {(b.get('solution') or '')[:300]}\n"
         user_msg += f"  Shared entities: {pair.shared_entities}\n\n"
 
-    user_msg += (
-        "Return a JSON array with one object per pair: "
-        '[{"contradiction": true/false, "reason": "..."}, ...]'
-    )
+    user_msg += 'Return a JSON array with one object per pair: [{"contradiction": true/false, "reason": "..."}, ...]'
 
     payload = {
         "model": model,
@@ -147,7 +145,8 @@ async def _validate_with_llm(
 
             logger.info(
                 "LLM contradiction validation: %d/%d confirmed",
-                len(confirmed), len(pairs),
+                len(confirmed),
+                len(pairs),
             )
             return confirmed
 
@@ -179,19 +178,51 @@ async def detect_contradictions(
 
     # Signal words that indicate negation/opposition
     negation_words = {
-        "不", "不要", "别", "不能", "避免", "avoid", "don't", "do not",
-        "never", "禁止", "不可", "failed", "broken", "错误", "wrong",
-        "问题", "bug", "fix", "修复", "crash", "失败",
+        "不",
+        "不要",
+        "别",
+        "不能",
+        "避免",
+        "avoid",
+        "don't",
+        "do not",
+        "never",
+        "禁止",
+        "不可",
+        "failed",
+        "broken",
+        "错误",
+        "wrong",
+        "问题",
+        "bug",
+        "fix",
+        "修复",
+        "crash",
+        "失败",
     }
     positive_words = {
-        "必须", "要", "应该", "使用", "use", "must", "should",
-        "推荐", "recommend", "正确", "correct", "works", "成功",
-        "解决", "resolved", "best practice",
+        "必须",
+        "要",
+        "应该",
+        "使用",
+        "use",
+        "must",
+        "should",
+        "推荐",
+        "recommend",
+        "正确",
+        "correct",
+        "works",
+        "成功",
+        "解决",
+        "resolved",
+        "best practice",
     }
 
     # Step 1: Find experience pairs sharing 2+ entities
     async with get_session(db_url) as session:
-        result = await session.execute(text("""
+        result = await session.execute(
+            text("""
             SELECT ee1.experience_id as exp_a,
                    ee2.experience_id as exp_b,
                    array_agg(DISTINCT e.name) as shared_entities,
@@ -204,7 +235,9 @@ async def detect_contradictions(
             HAVING count(DISTINCT e.id) >= 2
             ORDER BY entity_count DESC
             LIMIT :limit
-        """), {"limit": max_pairs * 3})
+        """),
+            {"limit": max_pairs * 3},
+        )
 
         candidate_rows = result.fetchall()
 
@@ -221,11 +254,14 @@ async def detect_contradictions(
     # Fetch experience data
     exp_data: dict[str, dict] = {}
     async with get_session(db_url) as session:
-        result = await session.execute(text("""
+        result = await session.execute(
+            text("""
             SELECT id, title, description, solution
             FROM experiences
             WHERE id = ANY(:ids) AND exp_status = 'published'
-        """), {"ids": list(exp_ids_set)})
+        """),
+            {"ids": list(exp_ids_set)},
+        )
         for row in result.fetchall():
             exp_data[str(row[0])] = {
                 "title": row[1] or "",
@@ -277,14 +313,16 @@ async def detect_contradictions(
                 continue
             seen_titles.add(title_key)
 
-            pairs.append(ContradictionPair(
-                exp_a_id=exp_a_id,
-                exp_a_title=a_data["title"],
-                exp_b_id=exp_b_id,
-                exp_b_title=b_data["title"],
-                shared_entities=shared_entities,
-                reason=reason,
-            ))
+            pairs.append(
+                ContradictionPair(
+                    exp_a_id=exp_a_id,
+                    exp_a_title=a_data["title"],
+                    exp_b_id=exp_b_id,
+                    exp_b_title=b_data["title"],
+                    shared_entities=shared_entities,
+                    reason=reason,
+                )
+            )
 
         if len(pairs) >= max_pairs:
             break

@@ -100,9 +100,7 @@ class OllamaLLMProvider(LLMProvider):
                     _track_usage(0, len(content) // 4, 0)
                     return content
             except httpx.ConnectError:
-                raise ConnectionError(
-                    f"Cannot connect to Ollama at {self._base_url}. Make sure Ollama is running."
-                )
+                raise ConnectionError(f"Cannot connect to Ollama at {self._base_url}. Make sure Ollama is running.")
             except Exception as e:
                 if attempt == 0:
                     logger.info("Ollama LLM call failed, retrying in 1s: %s", e)
@@ -191,10 +189,7 @@ class OpenAILLMProvider(LLMProvider):
         raise RuntimeError("Unexpected retry loop exit")
 
     def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
-        return (
-            input_tokens / 1000 * self.COST_PER_1K_INPUT
-            + output_tokens / 1000 * self.COST_PER_1K_OUTPUT
-        )
+        return input_tokens / 1000 * self.COST_PER_1K_INPUT + output_tokens / 1000 * self.COST_PER_1K_OUTPUT
 
 
 class GenericLLMProvider(LLMProvider):

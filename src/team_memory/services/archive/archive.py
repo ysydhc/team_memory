@@ -11,7 +11,7 @@ from typing import Any
 
 from team_memory import io_logger
 from team_memory.embedding.base import EmbeddingProvider
-from team_memory.services.event_bus import EventBus, Events
+from team_memory.services.infra.event_bus import EventBus, Events
 from team_memory.storage.archive_repository import ArchiveRepository
 from team_memory.storage.database import get_session
 
@@ -138,7 +138,8 @@ class ArchiveService:
         if embedding is None:
             logger.warning(
                 "Archive embedding failed; saving without embedding (project=%s, title=%s)",
-                project, title,
+                project,
+                title,
             )
             # Graceful degradation: save archive without embedding instead of failing
 
@@ -172,12 +173,7 @@ class ArchiveService:
         )
 
         # Emit event for downstream subscribers (e.g. pattern extraction)
-        if (
-            self._event_bus
-            and raw_conversation
-            and created_by
-            and created_by.lower() != "anonymous"
-        ):
+        if self._event_bus and raw_conversation and created_by and created_by.lower() != "anonymous":
             await self._event_bus.emit(
                 Events.ARCHIVE_CREATED,
                 {"raw_conversation": raw_conversation, "user_id": created_by},
@@ -271,7 +267,8 @@ class ArchiveService:
         if embedding is None:
             logger.warning(
                 "Archive embedding failed; saving without embedding (project=%s, title=%s)",
-                project, title,
+                project,
+                title,
             )
 
         persist_start = time.monotonic()

@@ -9,7 +9,7 @@ from sqlalchemy.exc import ProgrammingError
 
 from team_memory.auth.provider import User
 from team_memory.bootstrap import get_context
-from team_memory.services.personal_memory import PersonalMemoryService
+from team_memory.services.memory.personal_memory import PersonalMemoryService
 from team_memory.web.auth_session import get_current_user
 
 logger = logging.getLogger("team_memory.web.personal_memory")

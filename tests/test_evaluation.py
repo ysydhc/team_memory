@@ -1,9 +1,10 @@
 """Tests for EvaluationService — marker injection and was_used detection."""
+
 from __future__ import annotations
 
 import pytest
 
-from team_memory.services.evaluation import EvaluationService
+from team_memory.services.analysis.evaluation import EvaluationService
 
 
 class TestInjectMarkers:

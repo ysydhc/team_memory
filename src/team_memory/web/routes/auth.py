@@ -113,9 +113,7 @@ async def login(req: LoginRequest, request: Request):
     from team_memory.auth.permissions import ROLE_PERMISSIONS
 
     perms = ROLE_PERMISSIONS.get(user.role, set())
-    resp_data = LoginResponse(
-        success=True, user=user.name, role=user.role, message="Login successful"
-    ).model_dump()
+    resp_data = LoginResponse(success=True, user=user.name, role=user.role, message="Login successful").model_dump()
     resp_data["permissions"] = sorted(perms) if "*" not in perms else ["*"]
 
     response = JSONResponse(content=resp_data)
@@ -361,9 +359,7 @@ async def update_api_key(
                 generate_key=req.generate_api_key or False,
             )
             if req.role and req.role != db_key.role:
-                await session.execute(
-                    update(ApiKey).where(ApiKey.id == key_id).values(role=req.role)
-                )
+                await session.execute(update(ApiKey).where(ApiKey.id == key_id).values(role=req.role))
                 result["role"] = req.role
             return result
 

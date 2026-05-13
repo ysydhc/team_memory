@@ -20,8 +20,8 @@ import logging
 import os
 import time
 import uuid
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from dataclasses import asdict, dataclass, field
+from typing import TYPE_CHECKING, Any, Mapping
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,7 +32,7 @@ from team_memory.config import (
     SearchConfig,
 )
 from team_memory.embedding.base import EmbeddingProvider
-from team_memory.services.cache import SearchCache
+from team_memory.services.search.cache import SearchCache
 
 if TYPE_CHECKING:
     from team_memory.reranker.base import RerankerProvider
@@ -106,6 +106,30 @@ class SearchPipelineResult:
     stage_metrics: dict[str, int] = field(default_factory=dict)
 
 
+def coerce_cached_search_pipeline_result(raw: SearchPipelineResult | Mapping[str, Any]) -> SearchPipelineResult:
+    """Normalize cache hits: memory backend returns a dataclass; Redis returns a dict (JSON)."""
+    if isinstance(raw, SearchPipelineResult):
+        return raw
+    if not isinstance(raw, Mapping):
+        raise TypeError(f"Unexpected cached search payload type: {type(raw)}")
+    results = raw.get("results") or []
+    if not isinstance(results, list):
+        results = []
+    sm = raw.get("stage_metrics") or {}
+    if not isinstance(sm, dict):
+        sm = {}
+    stage_metrics = {str(k): int(v) for k, v in sm.items()}
+    return SearchPipelineResult(
+        results=list(results),
+        total_candidates=int(raw.get("total_candidates", 0)),
+        search_type=str(raw.get("search_type", "hybrid")),
+        reranked=bool(raw.get("reranked", False)),
+        cached=bool(raw.get("cached", False)),
+        duration_ms=int(raw.get("duration_ms", 0)),
+        stage_metrics=stage_metrics,
+    )
+
+
 async def _llm_expand_query(
     query: str,
     llm_config,
@@ -132,7 +156,7 @@ async def _llm_expand_query(
         _expansion_cache.pop(cache_key, None)
 
     try:
-        from team_memory.services.llm_client import LLMClient
+        from team_memory.services.llm.llm_client import LLMClient
 
         client = LLMClient.from_config(llm_config)
         system = (
@@ -221,9 +245,10 @@ class SearchPipeline:
                 reranker_signature=self._reranker_signature,
             )
             if cached is not None:
-                cached.cached = True
-                cached.duration_ms = int((time.monotonic() - start) * 1000)
-                return cached
+                hit = coerce_cached_search_pipeline_result(cached)
+                hit.cached = True
+                hit.duration_ms = int((time.monotonic() - start) * 1000)
+                return hit
 
         # Query expansion: tag synonyms (simple key<->value)
         stage_begin = time.monotonic()
@@ -247,9 +272,7 @@ class SearchPipeline:
         short_threshold = getattr(self._search_config, "short_query_max_chars", 20)
         min_sim_short = getattr(self._search_config, "min_similarity_short", 0.45)
         effective_min_similarity = (
-            min_sim_short
-            if len(request.query.strip()) <= short_threshold
-            else request.min_similarity
+            min_sim_short if len(request.query.strip()) <= short_threshold else request.min_similarity
         )
         if request.tags:
             tags_lower = [t.lower() for t in request.tags if isinstance(t, str)]
@@ -259,15 +282,13 @@ class SearchPipeline:
         # Stage 1.5: Entity-graph query enrichment (rule-based, best-effort)
         # Extracts entity names from query and appends them for better recall.
         try:
-            from team_memory.services.entity_search import extract_entities_from_query
+            from team_memory.services.entity.entity_search import extract_entities_from_query
+
             entity_names = extract_entities_from_query(retrieval_query)
             if entity_names and self._db_url:
                 retrieval_query = retrieval_query.rstrip()
                 # Append entity names as additional search terms (deduplicated)
-                extra = " ".join(
-                    n for n in entity_names
-                    if n.lower() not in retrieval_query.lower()
-                )
+                extra = " ".join(n for n in entity_names if n.lower() not in retrieval_query.lower())
                 if extra:
                     retrieval_query = f"{retrieval_query} {extra}"
                 retrieval_query = retrieval_query[:2000]
@@ -278,9 +299,7 @@ class SearchPipeline:
         stage_begin = time.monotonic()
         query_embedding = None
         try:
-            query_embedding = await self._cache.get_or_compute_embedding(
-                retrieval_query, self._embedding
-            )
+            query_embedding = await self._cache.get_or_compute_embedding(retrieval_query, self._embedding)
         except Exception as e:
             logger.warning("Embedding failed, will use FTS only: %s", e, exc_info=True)
         stage_metrics["embedding_ms"] = int((time.monotonic() - stage_begin) * 1000)
@@ -409,10 +428,13 @@ class SearchPipeline:
         # Stage 8: Cache store
         if self._cache.enabled:
             stage_begin = time.monotonic()
+            to_store: SearchPipelineResult | dict[str, Any] = (
+                asdict(pipeline_result) if self._cache._backend == "redis" else pipeline_result
+            )
             await self._cache.put(
                 request.query,
                 request.tags,
-                pipeline_result,
+                to_store,
                 project=request.project,
                 current_user=request.current_user,
                 include_archives=request.include_archives,
@@ -457,16 +479,10 @@ class SearchPipeline:
         """Execute retrieval and RRF fusion."""
         q = (retrieval_query or request.query).strip()
         over_fetch = request.max_results * 3
-        min_sim = (
-            effective_min_similarity
-            if effective_min_similarity is not None
-            else request.min_similarity
-        )
+        min_sim = effective_min_similarity if effective_min_similarity is not None else request.min_similarity
 
         if mode == "vector" and query_embedding:
-            return await self._vector_search(
-                repo, query_embedding, over_fetch, request, min_similarity=min_sim
-            )
+            return await self._vector_search(repo, query_embedding, over_fetch, request, min_similarity=min_sim)
 
         if mode == "fts":
             return await self._fts_search(repo, q, over_fetch, request)
@@ -475,13 +491,9 @@ class SearchPipeline:
         if query_embedding is None:
             return await self._fts_search(repo, q, over_fetch, request)
 
-        vector_task = self._vector_search(
-            repo, query_embedding, over_fetch, request, min_similarity=min_sim
-        )
+        vector_task = self._vector_search(repo, query_embedding, over_fetch, request, min_similarity=min_sim)
         fts_task = self._fts_search(repo, q, over_fetch, request)
-        topic_task = self._topic_search(
-            query_embedding, over_fetch, request
-        )
+        topic_task = self._topic_search(query_embedding, over_fetch, request)
 
         vector_results, fts_results, topic_results = await asyncio.gather(
             vector_task, fts_task, topic_task, return_exceptions=True
@@ -708,7 +720,8 @@ class SearchPipeline:
             topics = cached[0]
         else:
             try:
-                from team_memory.services.topic_discovery import discover_topics
+                from team_memory.services.analysis.topic_discovery import discover_topics
+
                 result = await discover_topics(self._db_url)
                 topics = result.topics
                 _topic_cache[cache_key] = (topics, time.monotonic())
@@ -720,6 +733,7 @@ class SearchPipeline:
 
         # Step 2: Compute cosine similarity to each topic center
         import numpy as np
+
         q_vec = np.array(query_embedding, dtype=np.float32)
         q_norm = np.linalg.norm(q_vec)
         if q_norm < 1e-8:
@@ -730,9 +744,7 @@ class SearchPipeline:
             if not topic.center:
                 continue
             c_vec = np.array(topic.center, dtype=np.float32)
-            sim = float(
-                np.dot(q_vec, c_vec) / (q_norm * np.linalg.norm(c_vec) + 1e-8)
-            )
+            sim = float(np.dot(q_vec, c_vec) / (q_norm * np.linalg.norm(c_vec) + 1e-8))
             if sim >= 0.5:
                 for eid in topic.experience_ids:
                     scored.append((sim, eid))
@@ -772,31 +784,31 @@ class SearchPipeline:
                 )
                 rows = result.fetchall()
                 for row in rows:
-                    items.append(SearchResultItem(
-                        data={
-                            "id": str(row[0]),
-                            "title": row[1],
-                            "description": row[2],
-                            "solution": row[3],
-                            "tags": row[4],
-                            "project": row[5],
-                            "experience_type": row[6],
-                            "confidence": row[7],
-                            "recall_count": row[8],
-                            "used_count": row[9],
-                        },
-                        score=0.5,  # Will be overridden by RRF
-                        similarity=0.5,
-                        source_type="topic",
-                    ))
+                    items.append(
+                        SearchResultItem(
+                            data={
+                                "id": str(row[0]),
+                                "title": row[1],
+                                "description": row[2],
+                                "solution": row[3],
+                                "tags": row[4],
+                                "project": row[5],
+                                "experience_type": row[6],
+                                "confidence": row[7],
+                                "recall_count": row[8],
+                                "used_count": row[9],
+                            },
+                            score=0.5,  # Will be overridden by RRF
+                            similarity=0.5,
+                            source_type="topic",
+                        )
+                    )
         except Exception:
             return []
 
         return items
 
-    def _apply_exact_match_boost(
-        self, candidates: list[SearchResultItem], query: str
-    ) -> list[SearchResultItem]:
+    def _apply_exact_match_boost(self, candidates: list[SearchResultItem], query: str) -> list[SearchResultItem]:
         """Boost score when query exactly matches or is contained in title."""
         if not query or not query.strip():
             return candidates
@@ -836,9 +848,7 @@ class SearchPipeline:
         candidates.sort(key=lambda x: x.score, reverse=True)
         return candidates
 
-    def _apply_popularity_boost(
-        self, candidates: list[SearchResultItem]
-    ) -> list[SearchResultItem]:
+    def _apply_popularity_boost(self, candidates: list[SearchResultItem]) -> list[SearchResultItem]:
         """Boost score based on recall_count and used_count with time decay.
 
         Formula (multiplicative boost + log compression):
@@ -859,11 +869,11 @@ class SearchPipeline:
         from datetime import datetime, timezone
 
         cfg = self._search_config
-        alpha = cfg.popularity_recall_weight   # 0.02
-        beta = cfg.popularity_used_weight       # 0.1
-        lam = cfg.popularity_decay_lambda       # 0.05
+        alpha = cfg.popularity_recall_weight  # 0.02
+        beta = cfg.popularity_used_weight  # 0.1
+        lam = cfg.popularity_decay_lambda  # 0.05
         floor_ratio = cfg.popularity_age_floor_ratio  # 0.3
-        gamma = cfg.popularity_scale            # 0.3
+        gamma = cfg.popularity_scale  # 0.3
 
         now = datetime.now(timezone.utc)
 
@@ -961,11 +971,7 @@ class SearchPipeline:
                 break
 
             prev_s = _score(candidates[i - 1])
-            if (
-                len(filtered) >= min_keep
-                and prev_s > 0
-                and (prev_s - curr_s) / prev_s > gap_threshold
-            ):
+            if len(filtered) >= min_keep and prev_s > 0 and (prev_s - curr_s) / prev_s > gap_threshold:
                 break
 
             filtered.append(curr)
@@ -996,9 +1002,7 @@ class SearchPipeline:
 
         query = (request.query or "").strip()
         documents = [self._build_rerank_document_text(c) for c in candidates]
-        doc_meta: list[dict] = [
-            {"exact_title_match": (c.data.get("exact_title_match") or "")} for c in candidates
-        ]
+        doc_meta: list[dict] = [{"exact_title_match": (c.data.get("exact_title_match") or "")} for c in candidates]
         top_k = len(documents)
 
         try:

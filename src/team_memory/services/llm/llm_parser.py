@@ -374,12 +374,10 @@ async def parse_content_openai(
     """
     from team_memory.schemas import CATEGORIES, EXPERIENCE_TYPES, SEVERITY_LEVELS
 
-    system_prompt = _BUILTIN_PARSE_SINGLE.replace(
-        "{{experience_types}}", ", ".join(EXPERIENCE_TYPES)
-    ).replace(
-        "{{severity_levels}}", ", ".join(SEVERITY_LEVELS)
-    ).replace(
-        "{{categories}}", ", ".join(CATEGORIES)
+    system_prompt = (
+        _BUILTIN_PARSE_SINGLE.replace("{{experience_types}}", ", ".join(EXPERIENCE_TYPES))
+        .replace("{{severity_levels}}", ", ".join(SEVERITY_LEVELS))
+        .replace("{{categories}}", ", ".join(CATEGORIES))
     )
 
     user_content = content[:max_input_chars]
@@ -455,9 +453,7 @@ async def parse_content(
                 resp.raise_for_status()
                 data = resp.json()
         except httpx.ConnectError:
-            raise LLMParseError(
-                f"Cannot connect to Ollama at {llm_base_url}. Make sure Ollama is running."
-            )
+            raise LLMParseError(f"Cannot connect to Ollama at {llm_base_url}. Make sure Ollama is running.")
         except httpx.TimeoutException:
             raise LLMParseError("LLM call timed out") from None
         except httpx.HTTPStatusError as e:
@@ -831,9 +827,7 @@ async def generate_summary(
             resp.raise_for_status()
             data = resp.json()
     except httpx.ConnectError:
-        raise LLMParseError(
-            f"Cannot connect to Ollama at {llm_base_url}. Make sure Ollama is running."
-        )
+        raise LLMParseError(f"Cannot connect to Ollama at {llm_base_url}. Make sure Ollama is running.")
     except httpx.TimeoutException:
         raise LLMParseError("LLM call timed out") from None
     except httpx.HTTPStatusError as e:

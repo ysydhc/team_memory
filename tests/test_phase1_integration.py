@@ -17,10 +17,9 @@ import pytest
 
 from team_memory.config.janitor import JanitorConfig
 from team_memory.server import mcp
-from team_memory.services.janitor import MemoryJanitor
-from team_memory.services.search_orchestrator import OrchestratedSearchResult
+from team_memory.services.maintenance.janitor import MemoryJanitor
+from team_memory.services.search.search_orchestrator import OrchestratedSearchResult
 from tests.conftest import _O, _patch_expansion, _patch_user
-
 
 # ============================================================
 # Helpers
@@ -222,9 +221,7 @@ class TestDraftPublishRecallFlow:
             _patch_expansion(),
         ):
             mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(
-                return_value=OrchestratedSearchResult(results=mock_results)
-            )
+            mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
             mock_get_orch.return_value = mock_orchestrator
 
             mock_session = AsyncMock()
@@ -327,9 +324,7 @@ class TestDraftPublishRecallFlow:
             _patch_expansion(),
         ):
             orch = MagicMock()
-            orch.search = AsyncMock(
-                return_value=OrchestratedSearchResult(results=recall_results)
-            )
+            orch.search = AsyncMock(return_value=OrchestratedSearchResult(results=recall_results))
             mock_get_orch.return_value = orch
 
             s = AsyncMock()
@@ -476,9 +471,7 @@ class TestPublishedUseCountPromotionFlow:
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(
             side_effect=[
-                MagicMock(
-                    scalars=MagicMock(return_value=_FakeScalarResult([promoted_exp]))
-                ),
+                MagicMock(scalars=MagicMock(return_value=_FakeScalarResult([promoted_exp]))),
                 MagicMock(all=MagicMock(return_value=[])),
             ]
         )
@@ -496,10 +489,7 @@ class TestPublishedUseCountPromotionFlow:
     async def test_group_key_promotion_flow(self):
         """Multiple published experiences with same group_key get promoted together."""
         group_key = "auth-patterns"
-        exps = [
-            _make_experience(exp_status="published", recall_count=0, group_key=group_key)
-            for _ in range(5)
-        ]
+        exps = [_make_experience(exp_status="published", recall_count=0, group_key=group_key) for _ in range(5)]
         janitor = MemoryJanitor(
             db_url="sqlite+aiosqlite://",
             config=JanitorConfig(promotion_group_key_threshold=5),
@@ -598,9 +588,7 @@ class TestMemorySaveRecallRegression:
             _patch_expansion(),
         ):
             orch = MagicMock()
-            orch.search = AsyncMock(
-                return_value=OrchestratedSearchResult(results=mock_results)
-            )
+            orch.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
             mock_get_orch.return_value = orch
 
             s = AsyncMock()
@@ -638,9 +626,7 @@ class TestMemorySaveRecallRegression:
             _patch_expansion(),
         ):
             orch = MagicMock()
-            orch.search = AsyncMock(
-                return_value=OrchestratedSearchResult(results=mock_results)
-            )
+            orch.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
             mock_get_orch.return_value = orch
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -684,7 +670,7 @@ class TestMemorySaveRecallRegression:
             patch(f"{_O}._resolve_project", return_value="default"),
             patch(f"{_O}.get_session") as mock_gs,
             patch(
-                "team_memory.services.llm_parser.parse_content",
+                "team_memory.services.llm.llm_parser.parse_content",
                 new_callable=AsyncMock,
                 return_value=mock_parsed,
             ),

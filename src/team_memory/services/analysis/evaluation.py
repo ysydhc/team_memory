@@ -1,4 +1,5 @@
 """Evaluation service — injects [mem:xxx] markers and tracks was_used."""
+
 from __future__ import annotations
 
 import logging
@@ -73,11 +74,7 @@ class EvaluationService:
                 continue
 
             # Tokenize: split by spaces and punctuation, keep tokens with length > 2
-            keywords = [
-                tok.lower()
-                for tok in re.split(r"[^\w]+", text)
-                if len(tok) > 2
-            ]
+            keywords = [tok.lower() for tok in re.split(r"[^\w]+", text) if len(tok) > 2]
 
             if not keywords:
                 used[rid] = False

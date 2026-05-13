@@ -17,12 +17,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from team_memory.services.experience import ExperienceService
-from team_memory.services.search_orchestrator import SearchOrchestrator
+from team_memory.services.memory.experience import ExperienceService
+from team_memory.services.search.search_orchestrator import SearchOrchestrator
 
 # ============================================================
 # Fixtures
 # ============================================================
+
 
 class _MockEmbedding:
     """Minimal mock embedding provider."""
@@ -103,7 +104,7 @@ class TestPromotedStatus:
                 lambda _url: _mock_get_session(mock_session),
             ),
             patch(
-                "team_memory.services.experience.ExperienceRepository",
+                "team_memory.services.memory.experience.ExperienceRepository",
                 return_value=mock_repo_instance,
             ),
         ):
@@ -133,7 +134,7 @@ class TestPromotedStatus:
                 lambda _url: _mock_get_session(mock_session),
             ),
             patch(
-                "team_memory.services.experience.ExperienceRepository",
+                "team_memory.services.memory.experience.ExperienceRepository",
                 return_value=mock_repo_instance,
             ),
         ):
@@ -239,7 +240,7 @@ class TestPromotedSearchExclusion:
                 "team_memory.storage.database.get_session",
             ) as mock_gs,
             patch(
-                "team_memory.services.search_orchestrator.ExperienceRepository",
+                "team_memory.services.search.search_orchestrator.ExperienceRepository",
                 return_value=mock_repo,
             ),
         ):
@@ -288,7 +289,7 @@ class TestPromotedSearchExclusion:
                 "team_memory.storage.database.get_session",
             ) as mock_gs,
             patch(
-                "team_memory.services.search_orchestrator.ExperienceRepository",
+                "team_memory.services.search.search_orchestrator.ExperienceRepository",
                 return_value=mock_repo,
             ),
         ):
@@ -348,7 +349,7 @@ class TestDraftScorePenalty:
                 "team_memory.storage.database.get_session",
             ) as mock_gs,
             patch(
-                "team_memory.services.search_orchestrator.ExperienceRepository",
+                "team_memory.services.search.search_orchestrator.ExperienceRepository",
                 return_value=mock_repo,
             ),
         ):
@@ -402,7 +403,7 @@ class TestDraftScorePenalty:
                 "team_memory.storage.database.get_session",
             ) as mock_gs,
             patch(
-                "team_memory.services.search_orchestrator.ExperienceRepository",
+                "team_memory.services.search.search_orchestrator.ExperienceRepository",
                 return_value=mock_repo,
             ),
         ):
@@ -428,30 +429,30 @@ class TestValidateSourceStatus:
 
     def test_draft_with_pipeline_source_ok(self):
         """pipeline + draft should not raise."""
-        from team_memory.services.experience import _validate_source_status
+        from team_memory.services.memory.experience import _validate_source_status
 
         _validate_source_status("pipeline", "draft")  # should not raise
 
     def test_draft_with_api_source_raises(self):
-        from team_memory.services.experience import _validate_source_status
+        from team_memory.services.memory.experience import _validate_source_status
 
         with pytest.raises(ValueError, match="draft"):
             _validate_source_status("api", "draft")
 
     def test_draft_with_manual_source_raises(self):
-        from team_memory.services.experience import _validate_source_status
+        from team_memory.services.memory.experience import _validate_source_status
 
         with pytest.raises(ValueError, match="draft"):
             _validate_source_status("manual", "draft")
 
     def test_published_with_any_source_ok(self):
-        from team_memory.services.experience import _validate_source_status
+        from team_memory.services.memory.experience import _validate_source_status
 
         _validate_source_status("manual", "published")  # should not raise
         _validate_source_status("api", "published")  # should not raise
 
     def test_promoted_with_any_source_ok(self):
-        from team_memory.services.experience import _validate_source_status
+        from team_memory.services.memory.experience import _validate_source_status
 
         _validate_source_status("manual", "promoted")  # should not raise
         _validate_source_status("api", "promoted")  # should not raise

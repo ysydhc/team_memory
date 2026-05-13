@@ -5,12 +5,14 @@ Callers (MCP server) inject ``user`` and serialize/guard JSON output.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import uuid as uuid_mod
 from pathlib import PurePosixPath
 
 from pydantic import ValidationError
+from sqlalchemy import text
 
 from team_memory.bootstrap import bootstrap, get_context  # noqa  # noqa: layer-check
 from team_memory.schemas import ArchiveCreateRequest
@@ -91,9 +93,7 @@ async def write_search_log(
         return None
 
 
-async def _try_extract_and_save_personal_memory(
-    conversation: str, user: str | None, settings: object
-) -> None:
+async def _try_extract_and_save_personal_memory(conversation: str, user: str | None, settings: object) -> None:
     """Extract personal preferences from conversation and write to personal memory.
 
     Only runs for logged-in non-anonymous user. Failure is logged and
@@ -103,8 +103,8 @@ async def _try_extract_and_save_personal_memory(
         logger.info("personal_memory: skipped — user is anonymous or empty")
         return
     try:
-        from team_memory.services.llm_parser import parse_personal_memory
-        from team_memory.services.personal_memory import PersonalMemoryService
+        from team_memory.services.llm.llm_parser import parse_personal_memory
+        from team_memory.services.memory.personal_memory import PersonalMemoryService
 
         logger.debug(
             "personal_memory: parsing preferences (conversation_chars=%s user=%s)",
@@ -160,7 +160,7 @@ async def _save_from_content(
     db_url: str,
 ) -> dict:
     """LLM parse + save helper (tm_learn logic)."""
-    from team_memory.services.llm_parser import (
+    from team_memory.services.llm.llm_parser import (
         LLMParseError,
         parse_content,
     )
@@ -212,10 +212,7 @@ async def _save_from_content(
 
     if result.get("status") == "duplicate_detected":
         return {
-            "message": (
-                f"Found {len(result['candidates'])} similar experiences. "
-                "The knowledge may already exist."
-            ),
+            "message": (f"Found {len(result['candidates'])} similar experiences. The knowledge may already exist."),
             "duplicate_detected": True,
             "data": {"candidates": result["candidates"]},
         }
@@ -247,7 +244,7 @@ async def _append_user_profile_to_recall_json(
     settings = _get_settings()
     max_side = getattr(settings.mcp, "profile_max_strings_per_side", None) or 20
     try:
-        from team_memory.services.personal_memory import PersonalMemoryService
+        from team_memory.services.memory.personal_memory import PersonalMemoryService
 
         pm_svc = PersonalMemoryService(embedding_provider=ctx.embedding, db_url=ctx.db_url)
         data["profile"] = await pm_svc.build_profile_for_user(
@@ -308,8 +305,7 @@ async def _recall_solve(
     if not results:
         return {
             "message": (
-                "No matching experiences found. "
-                "After solving this problem, call memory_save to share the solution."
+                "No matching experiences found. After solving this problem, call memory_save to share the solution."
             ),
             "results": [],
             "reranked": False,
@@ -324,8 +320,7 @@ async def _recall_solve(
         "intent_type": osearch.intent_type,
         "feedback_hint": (f"If helpful, call memory_feedback(experience_id='{best_id}', rating=5)"),
         "usage_hint": (
-            "When referencing results, include [mem:xxxx] "
-            "(first 8 chars of id) in your response to track usage."
+            "When referencing results, include [mem:xxxx] (first 8 chars of id) in your response to track usage."
         ),
     }
 
@@ -371,8 +366,7 @@ async def _recall_search(
         "intent_type": osearch.intent_type,
         "feedback_hint": (f"If helpful, call memory_feedback(experience_id='{best_id}', rating=5)"),
         "usage_hint": (
-            "When referencing results, include [mem:xxxx] "
-            "(first 8 chars of id) in your response to track usage."
+            "When referencing results, include [mem:xxxx] (first 8 chars of id) in your response to track usage."
         ),
     }
 
@@ -467,8 +461,7 @@ async def _recall_suggest(
         "reranked": osearch.reranked,
         "intent_type": osearch.intent_type,
         "usage_hint": (
-            "When referencing results, include [mem:xxxx] "
-            "(first 8 chars of id) in your response to track usage."
+            "When referencing results, include [mem:xxxx] (first 8 chars of id) in your response to track usage."
         ),
     }
 
@@ -513,9 +506,7 @@ async def op_save(
             if len(tag) > settings.mcp.max_tag_length:
                 return {
                     "error": True,
-                    "message": (
-                        f"Tag too long (max {settings.mcp.max_tag_length} chars): {tag[:20]}..."
-                    ),
+                    "message": (f"Tag too long (max {settings.mcp.max_tag_length} chars): {tag[:20]}..."),
                     "code": "validation_error",
                 }
 
@@ -523,8 +514,7 @@ async def op_save(
         return {
             "error": True,
             "message": (
-                "scope='archive' is no longer supported. "
-                "Use the /archive skill or POST /api/v1/archives instead."
+                "scope='archive' is no longer supported. Use the /archive skill or POST /api/v1/archives instead."
             ),
             "code": "scope_removed",
         }
@@ -543,10 +533,7 @@ async def op_save(
     if not title or not problem:
         return {
             "error": True,
-            "message": (
-                "Provide either: (1) title + problem for direct save, or "
-                "(2) content for LLM extraction."
-            ),
+            "message": ("Provide either: (1) title + problem for direct save, or (2) content for LLM extraction."),
             "code": "validation_error",
         }
 
@@ -575,10 +562,7 @@ async def op_save(
 
     if result.get("status") == "duplicate_detected":
         return {
-            "message": (
-                f"Found {len(result['candidates'])} similar experiences. "
-                "The knowledge may already exist."
-            ),
+            "message": (f"Found {len(result['candidates'])} similar experiences. The knowledge may already exist."),
             "duplicate_detected": True,
             "data": {"candidates": result["candidates"]},
         }
@@ -757,7 +741,7 @@ async def op_context(
     }
 
     try:
-        from team_memory.services.personal_memory import PersonalMemoryService
+        from team_memory.services.memory.personal_memory import PersonalMemoryService
 
         pm_svc = PersonalMemoryService(embedding_provider=ctx.embedding, db_url=ctx.db_url)
         context_text = task_description
@@ -1128,3 +1112,73 @@ async def op_feedback(
         "message": "Experience not found.",
         "code": "not_found",
     }
+
+
+async def op_submit_response(
+    user: str,
+    *,
+    query: str,
+    response: str,
+    result_ids: list[str] | None = None,
+    project: str | None = None,
+) -> dict:
+    """Buffer an agent response for faithfulness evaluation (response_buffer row)."""
+    logger.debug("op_submit_response: user=%s", user)
+
+    if not str(query or "").strip() or not str(response or "").strip():
+        return {
+            "error": True,
+            "code": "validation_error",
+            "message": "query and response must be non-empty.",
+        }
+
+    resolved_project = _resolve_project(project)
+    truncated_query = (query or "")[:2000]
+    truncated_response = (response or "")[:10000]
+
+    payload_rows: list[dict[str, str]] = []
+    if result_ids:
+        for rid in result_ids:
+            try:
+                payload_rows.append({"id": str(uuid_mod.UUID(str(rid).strip()))})
+            except (ValueError, TypeError, AttributeError):
+                return {
+                    "error": True,
+                    "code": "validation_error",
+                    "message": f"Invalid UUID in result_ids: {rid!r}",
+                }
+
+    ids_json = json.dumps(payload_rows)
+    buffer_id = uuid_mod.uuid4()
+    db_url = _get_db_url()
+
+    try:
+        async with get_session(db_url) as session:
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO response_buffer (id, query, agent_response, result_ids, created_at)
+                    VALUES (:id, :query, :agent_response, CAST(:result_ids AS json), NOW())
+                    """
+                ),
+                {
+                    "id": buffer_id,
+                    "query": truncated_query,
+                    "agent_response": truncated_response,
+                    "result_ids": ids_json,
+                },
+            )
+    except Exception as e:
+        logger.exception("op_submit_response failed: %s", e)
+        return {
+            "error": True,
+            "code": "internal_error",
+            "message": f"Failed to buffer response: {e}",
+        }
+
+    logger.info(
+        "response buffered: id=%s project=%s",
+        buffer_id,
+        resolved_project,
+    )
+    return {"status": "buffered", "buffer_id": str(buffer_id)}

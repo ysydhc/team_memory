@@ -13,8 +13,8 @@ from dataclasses import dataclass
 
 from team_memory import io_logger
 from team_memory.embedding.base import EmbeddingProvider
-from team_memory.services.evaluation import EvaluationService
-from team_memory.services.intent_router import DefaultIntentRouter, IntentRouter
+from team_memory.services.analysis.evaluation import EvaluationService
+from team_memory.services.infra.intent_router import DefaultIntentRouter, IntentRouter
 from team_memory.storage.repository import ExperienceRepository
 
 logger = logging.getLogger("team_memory.search_orchestrator")
@@ -82,7 +82,7 @@ class SearchOrchestrator:
             repo = ExperienceRepository(session)
 
             if self._search_pipeline is not None:
-                from team_memory.services.search_pipeline import SearchRequest
+                from team_memory.services.search.search_pipeline import SearchRequest
 
                 request = SearchRequest(
                     query=query,
@@ -166,9 +166,7 @@ class SearchOrchestrator:
                 duration_ms=duration_ms,
             )
             # Apply status-based post-processing to legacy results
-            processed_legacy = self._apply_status_filter(
-                results, include_promoted=include_promoted
-            )
+            processed_legacy = self._apply_status_filter(results, include_promoted=include_promoted)
 
             # Inject [mem:xxx] markers if evaluation_service is configured
             processed_legacy = self._maybe_inject_markers(processed_legacy)

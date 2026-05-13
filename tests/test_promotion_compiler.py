@@ -17,7 +17,7 @@ import re
 
 import pytest
 
-from team_memory.services.promotion_compiler import PromotionCompiler
+from team_memory.services.maintenance.promotion_compiler import PromotionCompiler
 
 # ============================================================
 # Fixtures
@@ -76,9 +76,7 @@ class TestCompileSingle:
     """Single-experience compilation tests."""
 
     @pytest.mark.asyncio
-    async def test_single_produces_valid_markdown_with_frontmatter(
-        self, compiler: PromotionCompiler
-    ) -> None:
+    async def test_single_produces_valid_markdown_with_frontmatter(self, compiler: PromotionCompiler) -> None:
         """Single experience compiles to valid Markdown with frontmatter."""
         exp = _make_experience()
         result = await compiler.compile([exp])
@@ -88,9 +86,7 @@ class TestCompileSingle:
         assert "---\n\n## 问题描述" in result
 
     @pytest.mark.asyncio
-    async def test_single_frontmatter_contains_promoted_from(
-        self, compiler: PromotionCompiler
-    ) -> None:
+    async def test_single_frontmatter_contains_promoted_from(self, compiler: PromotionCompiler) -> None:
         """Single compile frontmatter must contain promoted_from."""
         exp = _make_experience(exp_id="abc-123")
         result = await compiler.compile([exp])
@@ -109,9 +105,7 @@ class TestCompileSingle:
         assert fm["title"] == "My Cool Fix"
 
     @pytest.mark.asyncio
-    async def test_single_frontmatter_contains_date(
-        self, compiler: PromotionCompiler
-    ) -> None:
+    async def test_single_frontmatter_contains_date(self, compiler: PromotionCompiler) -> None:
         """Frontmatter must contain a promoted_at date field."""
         exp = _make_experience()
         result = await compiler.compile([exp])
@@ -122,9 +116,7 @@ class TestCompileSingle:
         assert re.match(r"\d{4}-\d{2}-\d{2}", fm["promoted_at"])
 
     @pytest.mark.asyncio
-    async def test_single_contains_experience_source_section(
-        self, compiler: PromotionCompiler
-    ) -> None:
+    async def test_single_contains_experience_source_section(self, compiler: PromotionCompiler) -> None:
         """Compile result must contain '经验来源' section."""
         exp = _make_experience()
         result = await compiler.compile([exp])
@@ -132,9 +124,7 @@ class TestCompileSingle:
         assert "## 经验来源" in result
 
     @pytest.mark.asyncio
-    async def test_single_source_line_contains_date_and_title(
-        self, compiler: PromotionCompiler
-    ) -> None:
+    async def test_single_source_line_contains_date_and_title(self, compiler: PromotionCompiler) -> None:
         """The source line should contain the experience date and title."""
         exp = _make_experience(
             title="Fix Memory Leak",
@@ -155,9 +145,7 @@ class TestCompileMulti:
     """Multi-experience compilation tests."""
 
     @pytest.mark.asyncio
-    async def test_multi_produces_merged_markdown(
-        self, compiler: PromotionCompiler
-    ) -> None:
+    async def test_multi_produces_merged_markdown(self, compiler: PromotionCompiler) -> None:
         """Multiple experiences compile to one merged Markdown."""
         exps = [
             _make_experience(
@@ -196,9 +184,7 @@ class TestCompileMulti:
         assert "docker" in tags_str
 
     @pytest.mark.asyncio
-    async def test_multi_merges_all_ids_to_promoted_from(
-        self, compiler: PromotionCompiler
-    ) -> None:
+    async def test_multi_merges_all_ids_to_promoted_from(self, compiler: PromotionCompiler) -> None:
         """All experience ids should appear in promoted_from."""
         exps = [
             _make_experience(exp_id="id-alpha"),
@@ -224,9 +210,7 @@ class TestCompileMulti:
         assert "3" in fm["title"]
 
     @pytest.mark.asyncio
-    async def test_multi_problem_merges_descriptions(
-        self, compiler: PromotionCompiler
-    ) -> None:
+    async def test_multi_problem_merges_descriptions(self, compiler: PromotionCompiler) -> None:
         """Problem section should contain all descriptions."""
         exps = [
             _make_experience(exp_id="e1", description="Problem Alpha"),
@@ -238,9 +222,7 @@ class TestCompileMulti:
         assert "Problem Beta" in result
 
     @pytest.mark.asyncio
-    async def test_multi_solution_merges_solutions(
-        self, compiler: PromotionCompiler
-    ) -> None:
+    async def test_multi_solution_merges_solutions(self, compiler: PromotionCompiler) -> None:
         """Solution section should contain all solutions."""
         exps = [
             _make_experience(exp_id="e1", solution="Sol Alpha"),
@@ -289,18 +271,14 @@ class TestCompileEdgeCases:
             await compiler.compile([])
 
     @pytest.mark.asyncio
-    async def test_result_contains_source_section(
-        self, compiler: PromotionCompiler
-    ) -> None:
+    async def test_result_contains_source_section(self, compiler: PromotionCompiler) -> None:
         """Compile result always contains '经验来源' section."""
         exp = _make_experience()
         result = await compiler.compile([exp])
         assert "## 经验来源" in result
 
     @pytest.mark.asyncio
-    async def test_frontmatter_contains_date_field(
-        self, compiler: PromotionCompiler
-    ) -> None:
+    async def test_frontmatter_contains_date_field(self, compiler: PromotionCompiler) -> None:
         """Frontmatter always contains promoted_at date field."""
         exp = _make_experience()
         result = await compiler.compile([exp])
@@ -318,9 +296,7 @@ class TestCompileEdgeCases:
         assert fm.get("source") == "tm-promotion"
 
     @pytest.mark.asyncio
-    async def test_no_tags_produces_empty_brackets(
-        self, compiler: PromotionCompiler
-    ) -> None:
+    async def test_no_tags_produces_empty_brackets(self, compiler: PromotionCompiler) -> None:
         """Experience with no tags should produce [] in frontmatter."""
         exp = _make_experience(tags=[])
         result = await compiler.compile([exp])
