@@ -14,7 +14,7 @@ import pytest
 pytestmark = pytest.mark.integration
 
 from team_memory.server import mcp
-from team_memory.services.search_orchestrator import OrchestratedSearchResult
+from team_memory.services.search.search_orchestrator import OrchestratedSearchResult
 from tests.conftest import (
     _O,
     _P,
@@ -272,7 +272,7 @@ class TestMemorySave:
             patch(f"{_O}._resolve_project", return_value="default"),
             patch(f"{_O}.get_session") as mock_get_session,
             patch(
-                "team_memory.services.llm_parser.parse_content",
+                "team_memory.services.llm.llm_parser.parse_content",
                 new_callable=AsyncMock,
                 return_value=mock_parsed,
             ),
@@ -379,9 +379,7 @@ class TestMemoryRecall:
             _patch_expansion(),
         ):
             mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(
-                return_value=OrchestratedSearchResult(results=mock_results)
-            )
+            mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
             mock_get_orch.return_value = mock_orchestrator
 
             mock_session = AsyncMock()
@@ -420,9 +418,7 @@ class TestMemoryRecall:
             _patch_expansion(),
         ):
             mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(
-                return_value=OrchestratedSearchResult(results=mock_results)
-            )
+            mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
             mock_get_orch.return_value = mock_orchestrator
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -459,7 +455,7 @@ class TestMemoryRecall:
             patch(f"{_O}.get_context") as mock_get_ctx,
             patch(f"{_O}._get_settings", return_value=mock_settings),
             patch(
-                "team_memory.services.personal_memory.PersonalMemoryService",
+                "team_memory.services.memory.personal_memory.PersonalMemoryService",
             ) as mock_pm_cls,
             _patch_expansion(),
         ):
@@ -468,15 +464,11 @@ class TestMemoryRecall:
             mock_ctx.db_url = "sqlite://"
             mock_get_ctx.return_value = mock_ctx
             mock_pm = MagicMock()
-            mock_pm.build_profile_for_user = AsyncMock(
-                return_value={"static": ["prefers tests"], "dynamic": []}
-            )
+            mock_pm.build_profile_for_user = AsyncMock(return_value={"static": ["prefers tests"], "dynamic": []})
             mock_pm_cls.return_value = mock_pm
 
             mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(
-                return_value=OrchestratedSearchResult(results=mock_results)
-            )
+            mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
             mock_get_orch.return_value = mock_orchestrator
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -508,9 +500,7 @@ class TestMemoryRecall:
             patch(f"{_O}._resolve_project", return_value="default"),
         ):
             mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(
-                return_value=OrchestratedSearchResult(results=mock_results)
-            )
+            mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
             mock_get_orch.return_value = mock_orchestrator
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -580,9 +570,7 @@ class TestMemoryRecall:
             _patch_expansion(),
         ):
             mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(
-                return_value=OrchestratedSearchResult(results=mock_results)
-            )
+            mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
             mock_get_orch.return_value = mock_orchestrator
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -617,9 +605,7 @@ class TestMemoryRecall:
             _patch_expansion(),
         ):
             mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(
-                return_value=OrchestratedSearchResult(results=mock_results)
-            )
+            mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
             mock_get_orch.return_value = mock_orchestrator
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -705,7 +691,7 @@ class TestMemoryContext:
             patch(f"{_O}.get_context") as mock_get_ctx,
             patch(f"{_O}._get_search_orchestrator") as mock_get_orch,
             patch(
-                "team_memory.services.personal_memory.PersonalMemoryService",
+                "team_memory.services.memory.personal_memory.PersonalMemoryService",
             ) as mock_pm_cls,
         ):
             mock_ctx = MagicMock()
@@ -909,7 +895,7 @@ class TestMemorySaveContentLimit:
             patch(f"{_O}._resolve_project", return_value="default"),
             patch(f"{_O}.get_session") as mock_get_session,
             patch(
-                "team_memory.services.llm_parser.parse_content",
+                "team_memory.services.llm.llm_parser.parse_content",
                 new_callable=AsyncMock,
                 return_value=mock_parsed,
             ),
@@ -1038,3 +1024,69 @@ class TestMemorySaveTagsValidation:
         data = json.loads(result)
         assert "data" in data
         mock_service.save.assert_called_once()
+
+
+# ============================================================
+# memory_submit_response
+# ============================================================
+
+
+@pytest.mark.unit
+class TestMemorySubmitResponse:
+    """memory_submit_response delegates to op_submit_response (local) or RemoteTMClient."""
+
+    @pytest.mark.asyncio
+    async def test_local_delegates_to_op_submit_response(self):
+        buffer_id = str(uuid.uuid4())
+        exp_id = str(uuid.uuid4())
+        mock_op = AsyncMock(
+            return_value={
+                "status": "buffered",
+                "buffer_id": buffer_id,
+            }
+        )
+        with (
+            patch(f"{_P}._remote_client", None),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="proj-a"),
+            patch(f"{_O}.op_submit_response", mock_op),
+        ):
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_submit_response"].fn
+            out = await fn(query="why tests fail", response="because mocks", result_ids=[exp_id])
+
+        mock_op.assert_awaited_once_with(
+            "admin",
+            query="why tests fail",
+            response="because mocks",
+            result_ids=[exp_id],
+            project="proj-a",
+        )
+        data = json.loads(out)
+        assert data["status"] == "buffered"
+        assert data["buffer_id"] == buffer_id
+        assert "faithfulness" in data["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_remote_delegates_to_client(self):
+        buffer_id = str(uuid.uuid4())
+        mock_client = MagicMock()
+        mock_client.op_submit_response = AsyncMock(return_value={"status": "buffered", "buffer_id": buffer_id})
+        rid = str(uuid.uuid4())
+        with (
+            patch(f"{_P}._remote_client", mock_client),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="remote-proj"),
+        ):
+            tools = {t.name: t for t in await mcp.list_tools()}
+            fn = tools["memory_submit_response"].fn
+            out = await fn(query="q1", response="r1", result_ids=[rid])
+
+        mock_client.op_submit_response.assert_awaited_once_with(
+            "admin",
+            query="q1",
+            response="r1",
+            result_ids=[rid],
+            project="remote-proj",
+        )
+        assert json.loads(out)["buffer_id"] == buffer_id

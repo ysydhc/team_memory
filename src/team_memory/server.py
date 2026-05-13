@@ -22,7 +22,7 @@ from fastmcp import FastMCP
 
 from team_memory import io_logger
 from team_memory.bootstrap import bootstrap
-from team_memory.services import memory_operations
+from team_memory.services.memory import memory_operations
 
 if TYPE_CHECKING:
     from team_memory.remote_client import RemoteTMClient
@@ -142,8 +142,7 @@ async def _get_current_user() -> str:
 
     # Step 3: no identity — error
     raise RuntimeError(
-        "No authenticated user. Set TEAM_MEMORY_API_KEY env var "
-        "or provide Authorization header for HTTP MCP."
+        "No authenticated user. Set TEAM_MEMORY_API_KEY env var or provide Authorization header for HTTP MCP."
     )
 
 
@@ -270,6 +269,7 @@ logger.info(
 # Register aliases so recall/search can resolve historical names
 if _inferred_aliases:
     from team_memory.project_resolver import register_aliases
+
     register_aliases(_inferred_project, _inferred_aliases)
 
 
@@ -283,6 +283,7 @@ def _resolve_project(project: str | None) -> str | None:
     if project:
         try:
             from team_memory.utils.project import normalize_project_name
+
             normalized = normalize_project_name(project)
             if normalized:
                 return normalized
@@ -567,10 +568,7 @@ async def memory_feedback(
 
 @mcp.tool(
     name="memory_draft_save",
-    description=(
-        "Pipeline-only: save a draft memory. "
-        "source is always 'pipeline', exp_status is always 'draft'."
-    ),
+    description=("Pipeline-only: save a draft memory. source is always 'pipeline', exp_status is always 'draft'."),
 )
 @track_usage
 async def memory_draft_save(
@@ -641,6 +639,7 @@ async def memory_submit_response(
     query: str,
     response: str,
     result_ids: list[str] | None = None,
+    project: str | None = None,
 ) -> str:
     """Submit agent response for faithfulness evaluation.
 
@@ -648,42 +647,35 @@ async def memory_submit_response(
         query: The original search query used in memory_recall
         response: Your response text that used the search results
         result_ids: Optional list of experience IDs from the search results
+        project: Optional project scope (resolved like other memory_* tools)
     """
-    try:
-        import uuid as _uuid
-        from datetime import datetime, timezone
-
-        import asyncpg
-
-        dsn = os.environ.get(
-            "TEAM_MEMORY_DB_URL",
-            "postgresql://developer:devpass@localhost:5433/team_memory",
+    user = await _get_current_user()
+    resolved_project = _resolve_project(project)
+    if _remote_client:
+        result = await _remote_client.op_submit_response(
+            user,
+            query=query,
+            response=response,
+            result_ids=result_ids,
+            project=resolved_project,
         )
-        conn = await asyncpg.connect(dsn)
-        try:
-            entry_id = _uuid.uuid4()
-            parsed_ids = [{"": rid} for rid in (result_ids or [])]
-            await conn.execute(
-                """
-                INSERT INTO response_buffer
-                    (id, query, agent_response, result_ids, created_at)
-                VALUES ($1, $2, $3, $4, $5)
-                """,
-                entry_id,
-                query[:2000],
-                response[:10000],
-                json.dumps(parsed_ids) if parsed_ids else None,
-                datetime.now(timezone.utc),
-            )
-            return json.dumps({
-                "status": "buffered",
-                "entry_id": str(entry_id),
-                "message": "Response submitted for faithfulness evaluation.",
-            })
-        finally:
-            await conn.close()
-    except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)})
+    else:
+        result = await memory_operations.op_submit_response(
+            user,
+            query=query,
+            response=response,
+            result_ids=result_ids,
+            project=resolved_project,
+        )
+
+    if not isinstance(result, dict):
+        result = {"error": True, "code": "internal_error", "message": str(result)}
+    elif result.get("status") == "buffered" and result.get("buffer_id"):
+        result = {
+            **result,
+            "message": "Response submitted for faithfulness evaluation.",
+        }
+    return _guard_output(json.dumps(result, ensure_ascii=False))
 
 
 # ============================================================
@@ -715,6 +707,7 @@ def main() -> None:
     if remote_url:
         # Remote mode: patch memory_operations with HTTP client, skip bootstrap
         from team_memory.remote_client import setup_remote_ops
+
         api_key = os.environ.get("TEAM_MEMORY_API_KEY", "")
         setup_remote_ops(base_url=remote_url, api_key=api_key)
     else:

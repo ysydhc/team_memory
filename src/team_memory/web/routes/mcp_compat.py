@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from team_memory.auth.provider import User
-from team_memory.services import memory_operations
+from team_memory.services.memory import memory_operations
 from team_memory.web.auth_session import get_current_user
 
 logger = logging.getLogger("team_memory.web")
@@ -53,6 +53,13 @@ class McpSaveRequest(BaseModel):
     experience_type: str | None = None
     project: str | None = None
     group_key: str | None = None
+
+
+class McpSubmitResponseRequest(BaseModel):
+    query: str
+    response: str
+    result_ids: list[str] | None = None
+    project: str | None = None
 
 
 class McpRecallRequest(BaseModel):
@@ -152,6 +159,29 @@ async def mcp_recall(
         raise
     except Exception as e:
         logger.exception("mcp_compat recall failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/submit-response")
+async def mcp_submit_response(
+    body: McpSubmitResponseRequest,
+    user: User = Depends(get_current_user),
+):
+    """POST /mcp/submit-response — same contract as memory_submit_response buffer step."""
+    uid = user.name
+    try:
+        result = await memory_operations.op_submit_response(
+            uid,
+            query=body.query,
+            response=body.response,
+            result_ids=body.result_ids,
+            project=body.project,
+        )
+        return _json_response(result, user=uid, tool_name="submit_response")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("mcp_compat submit_response failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

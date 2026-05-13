@@ -16,7 +16,7 @@ pytestmark = pytest.mark.integration
 from team_memory.auth.provider import ApiKeyAuth
 from team_memory.config import UploadsConfig, WebConfig
 from team_memory.services.archive import ArchiveUploadError
-from team_memory.services.search_orchestrator import OrchestratedSearchResult
+from team_memory.services.search.search_orchestrator import OrchestratedSearchResult
 from team_memory.web import app as web_module
 from team_memory.web.app import app
 
@@ -177,7 +177,7 @@ def setup_app():
         patch("team_memory.web.routes.archives.get_context", return_value=mock_ctx),
         patch("team_memory.web.routes.search.get_context", return_value=mock_ctx),
         patch("team_memory.web.routes.config.get_context", return_value=mock_ctx),
-        patch("team_memory.services.memory_operations.get_context", return_value=mock_ctx),
+        patch("team_memory.services.memory.memory_operations.get_context", return_value=mock_ctx),
         patch("team_memory.web.app.start_background_tasks", new_callable=AsyncMock),
         patch("team_memory.web.app.stop_background_tasks", new_callable=AsyncMock),
     ):
@@ -424,9 +424,7 @@ class TestExperienceList:
 
 class TestCreateExperience:
     def test_create_requires_auth(self, client):
-        resp = client.post(
-            "/api/v1/experiences", json={"title": "t", "problem": "p", "solution": "s"}
-        )
+        resp = client.post("/api/v1/experiences", json={"title": "t", "problem": "p", "solution": "s"})
         assert resp.status_code == 401
 
     def test_create_experience(self, client, auth_headers, setup_app):
@@ -879,9 +877,7 @@ class TestArchivesApi:
         att_id = uuid.uuid4()
         fpath = tmp_path / "blob.md"
         fpath.write_bytes(b"attachment-bytes")
-        get_context().archive_service.read_archive_attachment_file = AsyncMock(
-            return_value=(fpath, "blob.md")
-        )
+        get_context().archive_service.read_archive_attachment_file = AsyncMock(return_value=(fpath, "blob.md"))
         resp = client.get(
             f"/api/v1/archives/{aid}/attachments/{att_id}/file",
             headers=auth_headers,
@@ -1523,6 +1519,37 @@ class TestMcpCompat:
         assert kw["experience_id"] == eid
         assert kw["feedback_by"] == "test_admin"
         assert kw["rating"] == 5
+
+    def test_mcp_submit_response_requires_auth(self, client):
+        resp = client.post(
+            "/api/v1/mcp/submit-response",
+            json={"query": "q", "response": "r"},
+        )
+        assert resp.status_code == 401
+
+    def test_mcp_submit_response_ok(self, client, auth_headers):
+        bid = str(uuid.uuid4())
+        with patch(
+            "team_memory.web.routes.mcp_compat.memory_operations.op_submit_response",
+            new_callable=AsyncMock,
+            return_value={"status": "buffered", "buffer_id": bid},
+        ) as mock_op:
+            resp = client.post(
+                "/api/v1/mcp/submit-response",
+                headers=auth_headers,
+                json={"query": "hello", "response": "world"},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "buffered"
+            assert data["buffer_id"] == bid
+            mock_op.assert_awaited_once_with(
+                "test_admin",
+                query="hello",
+                response="world",
+                result_ids=None,
+                project=None,
+            )
 
     def test_mcp_recall_query_ok(self, client, auth_headers):
         resp = client.post(

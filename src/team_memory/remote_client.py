@@ -470,6 +470,12 @@ class RemoteMCPClient:
             {k: v for k, v in kwargs.items() if v is not None},
         )
 
+    async def op_submit_response(self, user: str, **kwargs: Any) -> dict:
+        return await RemoteTMClient._post.__get__(self)(  # type: ignore[attr-defined]
+            "/api/v1/mcp/submit-response",
+            {k: v for k, v in kwargs.items() if v is not None},
+        )
+
 
 def setup_remote_ops(base_url: str, api_key: str) -> RemoteMCPClient:
     """Monkey-patch memory_operations with remote HTTP implementations.
@@ -477,7 +483,7 @@ def setup_remote_ops(base_url: str, api_key: str) -> RemoteMCPClient:
     旧版接口，保留向后兼容。server.py main() 中 TEAM_MEMORY_REMOTE_URL 仍可使用。
     Legacy interface, kept for backward compatibility.
     """
-    from team_memory.services import memory_operations
+    from team_memory.services.memory import memory_operations
 
     client = RemoteMCPClient(base_url=base_url, api_key=api_key)
 
@@ -490,6 +496,7 @@ def setup_remote_ops(base_url: str, api_key: str) -> RemoteMCPClient:
     memory_operations.op_feedback = client.op_feedback  # type: ignore[method-assign]
     memory_operations.op_draft_save = client.op_draft_save  # type: ignore[method-assign]
     memory_operations.op_draft_publish = client.op_draft_publish  # type: ignore[method-assign]
+    memory_operations.op_submit_response = client.op_submit_response  # type: ignore[method-assign]
 
     logger.info(
         "MCP server running in REMOTE mode (legacy) — delegating all ops to %s",
