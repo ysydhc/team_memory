@@ -26,7 +26,7 @@ def _utcnow() -> datetime:
 
 def _fts_tokenized_text(title: str, description: str, solution: str | None) -> str:
     """Return concatenated jieba-tokenized text for FTS trigger."""
-    from team_memory.services.tokenizer import tokenize
+    from team_memory.utils.tokenizer import tokenize
 
     parts = [tokenize(title or ""), tokenize(description or ""), tokenize(solution or "")]
     return " ".join(p for p in parts if p)
@@ -203,9 +203,7 @@ class ExperienceRepository:
 
     # ======================== READ ========================
 
-    async def get_by_id(
-        self, experience_id: uuid.UUID, include_deleted: bool = False
-    ) -> Experience | None:
+    async def get_by_id(self, experience_id: uuid.UUID, include_deleted: bool = False) -> Experience | None:
         """Get an experience by its ID."""
         query = select(Experience).where(Experience.id == experience_id)
         if not include_deleted:
@@ -213,9 +211,7 @@ class ExperienceRepository:
         result = await self._session.execute(query)
         return result.scalar_one_or_none()
 
-    async def get_with_children(
-        self, experience_id: uuid.UUID, include_deleted: bool = False
-    ) -> Experience | None:
+    async def get_with_children(self, experience_id: uuid.UUID, include_deleted: bool = False) -> Experience | None:
         """Get an experience with its children eagerly loaded."""
         query = (
             select(Experience)
@@ -230,15 +226,9 @@ class ExperienceRepository:
         result = await self._session.execute(query)
         return result.scalar_one_or_none()
 
-    async def get_children(
-        self, parent_id: uuid.UUID, include_deleted: bool = False
-    ) -> list[Experience]:
+    async def get_children(self, parent_id: uuid.UUID, include_deleted: bool = False) -> list[Experience]:
         """Get all children of a parent experience."""
-        query = (
-            select(Experience)
-            .where(Experience.parent_id == parent_id)
-            .order_by(Experience.created_at)
-        )
+        query = select(Experience).where(Experience.parent_id == parent_id).order_by(Experience.created_at)
         if not include_deleted:
             query = query.where(Experience.is_deleted == False)  # noqa: E712
         result = await self._session.execute(query)
@@ -359,8 +349,8 @@ class ExperienceRepository:
         offset: int = 0,
     ) -> list[dict]:
         """Full-text search using PostgreSQL tsvector/tsquery with jieba."""
-        from team_memory.services.tokenizer import tokenize
         from team_memory.storage.query_builders import build_fts_search
+        from team_memory.utils.tokenizer import tokenize
 
         tokenized_query = tokenize(query_text)
         stmt = build_fts_search(
@@ -413,11 +403,7 @@ class ExperienceRepository:
                 "title": exp.title,
                 "tags": exp.tags or [],
                 "similarity": round(float(sim), 4),
-                "description": (
-                    (exp.description[:200] + "...")
-                    if len(exp.description) > 200
-                    else exp.description
-                ),
+                "description": ((exp.description[:200] + "...") if len(exp.description) > 200 else exp.description),
             }
             for exp, sim in rows
         ]
@@ -457,9 +443,7 @@ class ExperienceRepository:
             ids.add(uuid.UUID(str(row.id_b)))
 
         exps_result = await self._session.execute(
-            select(Experience)
-            .where(Experience.id.in_(ids))
-            .options(selectinload(Experience.children))
+            select(Experience).where(Experience.id.in_(ids)).options(selectinload(Experience.children))
         )
         by_id: dict[uuid.UUID, Experience] = {e.id: e for e in exps_result.scalars()}
 
@@ -526,9 +510,7 @@ class ExperienceRepository:
         if is_admin and current_status == "draft" and new_status == "published":
             pass
         elif new_status not in allowed:
-            raise ValueError(
-                f"Cannot transition from '{current_status}' to '{new_status}'. Allowed: {allowed}"
-            )
+            raise ValueError(f"Cannot transition from '{current_status}' to '{new_status}'. Allowed: {allowed}")
 
         experience.exp_status = new_status
         if visibility is not None:
@@ -595,17 +577,13 @@ class ExperienceRepository:
     async def increment_recall_count(self, experience_id: uuid.UUID) -> None:
         """Increment recall_count (experience appeared in search results)."""
         await self._session.execute(
-            update(Experience)
-            .where(Experience.id == experience_id)
-            .values(recall_count=Experience.recall_count + 1)
+            update(Experience).where(Experience.id == experience_id).values(recall_count=Experience.recall_count + 1)
         )
 
     async def increment_used_count(self, experience_id: uuid.UUID) -> None:
         """Increment used_count (agent actually referenced the experience)."""
         await self._session.execute(
-            update(Experience)
-            .where(Experience.id == experience_id)
-            .values(used_count=Experience.used_count + 1)
+            update(Experience).where(Experience.id == experience_id).values(used_count=Experience.used_count + 1)
         )
 
     # ======================== PROJECT ========================
@@ -631,9 +609,7 @@ class ExperienceRepository:
 
     # ======================== QUALITY SCORING ========================
 
-    async def list_for_score_decay(
-        self, project: str | None = None, batch_size: int = 500
-    ) -> list[Experience]:
+    async def list_for_score_decay(self, project: str | None = None, batch_size: int = 500) -> list[Experience]:
         """List experiences that need score decay (last_scored_at > 24h ago)."""
         cutoff_time = _utcnow() - timedelta(hours=24)
         proj = self._project_value(project)
@@ -713,9 +689,7 @@ class ExperienceRepository:
         result = await self._session.execute(query)
         return list(result.scalars().all())
 
-    async def list_expired_drafts(
-        self, older_than_days: int = 30, project: str | None = None
-    ) -> list[Experience]:
+    async def list_expired_drafts(self, older_than_days: int = 30, project: str | None = None) -> list[Experience]:
         """List draft experiences older than specified days."""
         cutoff_time = _utcnow() - timedelta(days=older_than_days)
         proj = self._project_value(project)
@@ -764,9 +738,7 @@ class ExperienceRepository:
         result = await self._session.execute(
             update(Experience)
             .where(Experience.id == experience_id)
-            .values(
-                quality_score=new_score, quality_tier=new_tier, last_scored_at=now, updated_at=now
-            )
+            .values(quality_score=new_score, quality_tier=new_tier, last_scored_at=now, updated_at=now)
         )
 
         await self._session.flush()
