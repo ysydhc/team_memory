@@ -320,8 +320,8 @@ def bootstrap(
         evaluation_service=evaluation_service,
     )
 
-    from team_memory.services.search.adaptive_retriever import AdaptiveRetriever
     from team_memory.services.llm.llm_client import LLMClient
+    from team_memory.services.search.adaptive_retriever import AdaptiveRetriever
 
     adaptive_retriever = AdaptiveRetriever(
         search_orchestrator=search_orchestrator,
