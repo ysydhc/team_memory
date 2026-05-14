@@ -405,6 +405,7 @@ async def memory_recall(
     project: str | None = None,
     include_archives: bool | None = None,
     include_user_profile: bool = False,
+    adaptive: bool = False,
 ) -> str:
     """Unified read: route to solve/search/suggest mode based on input."""
     user = await _get_current_user()
@@ -443,6 +444,8 @@ async def memory_recall(
             project=resolved_project,
             include_archives=include_archives,
             include_user_profile=include_user_profile,
+            adaptive=adaptive,
+            adaptive_retriever=ctx.adaptive_retriever,
         )
     return _guard_output(json.dumps(result, ensure_ascii=False), settings=truncate_settings)
 

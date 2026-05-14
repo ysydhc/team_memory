@@ -208,6 +208,7 @@ class AppContext:
     janitor: MemoryJanitor | None = None
     janitor_scheduler: JanitorScheduler | None = None
     entity_extractor: object | None = None  # EntityExtractor (lazy import)
+    adaptive_retriever: object | None = None  # AdaptiveRetriever (lazy import)
     _log_listener: QueueListener | None = None
 
 
@@ -319,6 +320,15 @@ def bootstrap(
         evaluation_service=evaluation_service,
     )
 
+    from team_memory.services.search.adaptive_retriever import AdaptiveRetriever
+    from team_memory.services.llm.llm_client import LLMClient
+
+    adaptive_retriever = AdaptiveRetriever(
+        search_orchestrator=search_orchestrator,
+        llm_client=LLMClient.from_config(settings.llm),
+        max_loops=3,
+    )
+
     service = ExperienceService(
         embedding_provider=embedding,
         auth_provider=auth,
@@ -380,6 +390,7 @@ def bootstrap(
         janitor=janitor,
         janitor_scheduler=janitor_scheduler,
         entity_extractor=entity_extractor,
+        adaptive_retriever=adaptive_retriever,
         _log_listener=log_listener,
     )
 

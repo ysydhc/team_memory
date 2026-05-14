@@ -342,6 +342,52 @@ async def _recall_search(
     }
 
 
+async def _recall_adaptive(
+    *,
+    query: str,
+    tags: list[str] | None,
+    max_results: int,
+    adaptive_retriever: object,
+    user: str,
+    project: str,
+    include_archives: bool,
+) -> dict:
+    """Adaptive multi-hop retrieval mode."""
+    from team_memory.services.search.adaptive_retriever import AdaptiveResult
+
+    result: AdaptiveResult = await adaptive_retriever.retrieve(
+        query=query,
+        tags=tags,
+        max_results=max_results,
+        user_name=user,
+        project=project,
+        include_archives=include_archives,
+    )
+
+    if not result.results:
+        return {
+            "message": "No matching experiences found.",
+            "results": [],
+            "reranked": False,
+            "intent_type": result.intent_type,
+            "adaptive": {"hops": result.hops, "queries_used": result.queries_used},
+        }
+
+    best_id = result.results[0].get("group_id") or result.results[0].get("id", "")
+    return {
+        "message": f"Found {len(result.results)} result(s) across {result.hops} hop(s).",
+        "results": result.results,
+        "reranked": result.reranked,
+        "intent_type": result.intent_type,
+        "adaptive": {
+            "hops": result.hops,
+            "queries_used": result.queries_used,
+            "hop_log": result.hop_log,
+        },
+        "feedback_hint": f"If helpful, call memory_feedback(experience_id='{best_id}', rating=5)",
+    }
+
+
 async def _recall_suggest(
     *,
     file_path: str | None,
@@ -602,6 +648,8 @@ async def op_recall(
     project: str | None = None,
     include_archives: bool | None = None,
     include_user_profile: bool = False,
+    adaptive: bool = False,
+    adaptive_retriever: object | None = None,
 ) -> dict:
     """Unified read: route to solve/search/suggest mode based on input."""
     if include_archives is None:
@@ -645,15 +693,26 @@ async def op_recall(
         return result
 
     if query:
-        raw = await _recall_search(
-            query=query,
-            tags=tags,
-            max_results=max_results,
-            search_orchestrator=search_orchestrator,
-            user=user,
-            project=resolved_project,
-            include_archives=include_archives,
-        )
+        if adaptive and adaptive_retriever is not None:
+            raw = await _recall_adaptive(
+                query=query,
+                tags=tags,
+                max_results=max_results,
+                adaptive_retriever=adaptive_retriever,
+                user=user,
+                project=resolved_project,
+                include_archives=include_archives,
+            )
+        else:
+            raw = await _recall_search(
+                query=query,
+                tags=tags,
+                max_results=max_results,
+                search_orchestrator=search_orchestrator,
+                user=user,
+                project=resolved_project,
+                include_archives=include_archives,
+            )
         result = await _append_user_profile_to_recall_json(
             raw,
             user=user,
