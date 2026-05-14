@@ -71,3 +71,6 @@ specs/
 .hermes/plans/
 docs/2026/
 *.excalidraw
+
+# Docs directory (ignored but kept locally)
+docs/

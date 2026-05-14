@@ -119,11 +119,11 @@ pytest -k "search" -v
 
 ## 开发指南
 
-新进仓库或要做跨模块改动时，建议先读 [README.md](README.md)，再按需查 [docs/README.md](docs/README.md) 索引。
+新进仓库或要做跨模块改动时，建议先读 [README.md](README.md)。
 
 ### MCP 工具开发
 
-1. 在 [README.md](README.md)（MCP 工具表）与 [docs/guide/mcp-server.md](docs/guide/mcp-server.md) 保持叙述一致；契约以 [src/team_memory/server.py](src/team_memory/server.py) 为准
+1. 在 [README.md](README.md)（MCP 工具表）保持叙述一致；契约以 [src/team_memory/server.py](src/team_memory/server.py) 为准
 2. `@mcp.tool` + `@track_usage` 装饰 `async def memory_xxx(...) -> str`
 3. 在 `tests/test_server.py` 补充测试
 4. `make verify` 验收
@@ -154,10 +154,10 @@ alembic upgrade head
 - [ ] `make lint` 零报错
 - [ ] `make test` 全绿（新功能须有测试）
 - [ ] 若修改 model，须有 Alembic 迁移
-- [ ] 若新增 MCP 工具，已更新 [README.md](README.md) / [docs/guide/mcp-server.md](docs/guide/mcp-server.md) 且 `tests/test_server.py` 覆盖
+- [ ] 若新增 MCP 工具，已更新 [README.md](README.md) 且 `tests/test_server.py` 覆盖
 - [ ] 无硬编码密钥、无裸 `print()`
 - [ ] Web 改动通过 `make lint-js`
-- [ ] 若变更架构分层、MCP 对外契约或用户可见文档，已同步更新 [README.md](README.md)、本文件与 [docs/](docs/) 相关篇目
+- [ ] 若变更架构分层、MCP 对外契约或用户可见文档，已同步更新 [README.md](README.md) 与本文件
 - [ ] 若新增配置项，已在 `ClientConfig`（`client_config.py`）中添加，并在 `load_with_sources()` 中标注来源
 - [ ] 若修改 daemon/hooks 代码，确认 import 路径为 `from team_memory.daemon/...` 而非旧 `from daemon/...`
 
@@ -166,19 +166,14 @@ alembic upgrade head
 | 主题 | 文件 |
 |------|------|
 | 人类指南与 MCP 说明 | [README.md](README.md) |
-| 分层 / import 门禁 | `scripts/harness_import_check.py`（`LAYER_MAP`）；设计文档索引 [docs/README.md](docs/README.md) |
+| 分层 / import 门禁 | `scripts/harness_import_check.py`（`LAYER_MAP`） |
 | Import 分层（L0–L3） | `scripts/harness_import_check.py`（`LAYER_MAP`） |
 | MCP 实现 | [src/team_memory/server.py](src/team_memory/server.py) |
-| CLI 兼容层 + config/setup | [src/team_memory/cli.py](src/team_memory/cli.py)、[docs/guide/mcp-server.md](docs/guide/mcp-server.md) |
+| CLI 兼容层 + config/setup | [src/team_memory/cli.py](src/team_memory/cli.py) |
 | 统一客户端配置 | [src/team_memory/client_config.py](src/team_memory/client_config.py)（ClientConfig） |
 | 项目名零配置推断 | [src/team_memory/project_resolver.py](src/team_memory/project_resolver.py) |
 | TM Daemon | [src/team_memory/daemon/](src/team_memory/daemon/)（`tm-daemon` 入口） |
 | 平台 Hook | [src/team_memory/hooks/](src/team_memory/hooks/)（Claude/Cursor/Hermes） |
-| MCP 运维与配置 | [docs/guide/mcp-server.md](docs/guide/mcp-server.md)、[docs/decision/mcp-lite-default.md](docs/decision/mcp-lite-default.md) |
-| 配置重构 RFC | [docs/plan/configuration-refactor-rfc.md](docs/plan/configuration-refactor-rfc.md) |
-| 设计文档索引 | [docs/README.md](docs/README.md) |
-| Harness 框架 | [.harness/docs/harness-spec.md](.harness/docs/harness-spec.md) |
-| Harness 配置 | [.harness/harness-config.yaml](.harness/harness-config.yaml) |
 
 ## 调试
 
@@ -201,9 +196,8 @@ docker compose exec postgres psql -U developer -d team_memory  # DB 调试
 
 ## 不确定时
 
-1. 查 `docs/` 对应规范
-2. 找代码库同类实现
-3. **停下询问，不要臆测**
+1. 找代码库同类实现
+2. **停下询问，不要臆测**
 
 # Agent Workflow & Skills (Superpowers)
 This project uses the **Superpowers** framework for AI agent execution.
@@ -211,3 +205,71 @@ This project uses the **Superpowers** framework for AI agent execution.
 - **DO NOT** create `.specify` or `specs` directories.
 - **DO** use `/brainstorming` for planning and `/subagent-driven-development` or `/executing-plans` for execution.
 - Keep the project clean. Do not leave process artifacts in the repository.
+
+## LLM Behavioral Guidelines
+
+
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+## 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
