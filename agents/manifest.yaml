@@ -2,25 +2,9 @@
 # Bodies live under agents/shared/{bodies,prompts}/. Run: make sync-agent-artifacts
 version: 1
 
-prompts:
-  - id: doc-organize-task
-    skill_name: doc-organize-task
-    skill_description: "文档整理任务（doc-harness / doc-health）。"
-  - id: doc-health-check-task
-    skill_name: doc-health-check-task
-    skill_description: "文档健康巡检任务。"
+prompts: []
 
 agents:
-  - id: doc-admin-organize
-    claude:
-      name: doc-admin-organize
-      description: "文档整理员。按 doc-health 修复链接与索引；白名单仅 doc_gardening。"
-      tools: [Read, Grep, Glob, Edit, Write, Bash]
-    cursor:
-      name: doc-admin-organize
-      model: default
-      description: "文档整理员。按 doc-health 修复链接与索引；白名单仅 doc_gardening。"
-
   - id: engineering-autonomous-optimization-architect
     claude:
       name: engineering-autonomous-optimization-architect
