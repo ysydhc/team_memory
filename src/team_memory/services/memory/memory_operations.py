@@ -14,7 +14,6 @@ from pathlib import PurePosixPath
 from pydantic import ValidationError
 from sqlalchemy import text
 
-from team_memory.bootstrap import bootstrap, get_context  # noqa  # noqa: layer-check
 from team_memory.schemas import ArchiveCreateRequest
 from team_memory.services.archive import ArchiveUploadError
 from team_memory.storage.database import get_session
@@ -22,42 +21,6 @@ from team_memory.storage.search_log_repository import SearchLogRepository
 from team_memory.utils.project import resolve_project as _resolve_project
 
 logger = logging.getLogger("team_memory")
-
-
-def _get_service():
-    """Get ExperienceService from the shared AppContext (lazy-init on first call)."""
-    try:
-        return get_context().service
-    except RuntimeError:
-        return bootstrap(enable_background=False).service
-
-
-def _get_archive_service():
-    """Get ArchiveService from the shared AppContext (lazy-init on first call)."""
-    try:
-        return get_context().archive_service
-    except RuntimeError:
-        return bootstrap(enable_background=False).archive_service
-
-
-def _get_search_orchestrator():
-    """Get SearchOrchestrator from the shared AppContext (lazy-init on first call)."""
-    try:
-        return get_context().search_orchestrator
-    except RuntimeError:
-        return bootstrap(enable_background=False).search_orchestrator
-
-
-def _get_settings():
-    """Get Settings from the shared AppContext (lazy-init on first call)."""
-    try:
-        return get_context().settings
-    except RuntimeError:
-        return bootstrap(enable_background=False).settings
-
-
-def _get_db_url() -> str:
-    return get_context().db_url
 
 
 async def write_search_log(
@@ -93,7 +56,14 @@ async def write_search_log(
         return None
 
 
-async def _try_extract_and_save_personal_memory(conversation: str, user: str | None, settings: object) -> None:
+async def _try_extract_and_save_personal_memory(
+    conversation: str,
+    user: str | None,
+    settings: object,
+    *,
+    embedding_provider: object,
+    db_url: str,
+) -> None:
     """Extract personal preferences from conversation and write to personal memory.
 
     Only runs for logged-in non-anonymous user. Failure is logged and
@@ -115,8 +85,7 @@ async def _try_extract_and_save_personal_memory(conversation: str, user: str | N
         if not items:
             logger.info("personal_memory: no rows to save — LLM returned no preference items")
             return
-        ctx = get_context()
-        pm_svc = PersonalMemoryService(embedding_provider=ctx.embedding, db_url=ctx.db_url)
+        pm_svc = PersonalMemoryService(embedding_provider=embedding_provider, db_url=db_url)
         n_static = 0
         n_dynamic = 0
         for item in items:
@@ -158,6 +127,7 @@ async def _save_from_content(
     settings: object,
     service: object,
     db_url: str,
+    embedding_provider: object,
 ) -> dict:
     """LLM parse + save helper (tm_learn logic)."""
     from team_memory.services.llm.llm_parser import (
@@ -217,7 +187,13 @@ async def _save_from_content(
             "data": {"candidates": result["candidates"]},
         }
 
-    await _try_extract_and_save_personal_memory(content, user, settings)
+    await _try_extract_and_save_personal_memory(
+        content,
+        user,
+        settings,
+        embedding_provider=embedding_provider,
+        db_url=db_url,
+    )
     return {
         "message": f"Knowledge extracted and saved: {parsed.get('title', 'Untitled')}",
         "data": {
@@ -235,18 +211,19 @@ async def _append_user_profile_to_recall_json(
     user: str,
     context_text: str | None,
     include_user_profile: bool,
+    settings: object,
+    embedding_provider: object,
+    db_url: str,
 ) -> dict:
     data = {**payload}
     if not include_user_profile:
         data["profile"] = None
         return data
-    ctx = get_context()
-    settings = _get_settings()
     max_side = getattr(settings.mcp, "profile_max_strings_per_side", None) or 20
     try:
         from team_memory.services.memory.personal_memory import PersonalMemoryService
 
-        pm_svc = PersonalMemoryService(embedding_provider=ctx.embedding, db_url=ctx.db_url)
+        pm_svc = PersonalMemoryService(embedding_provider=embedding_provider, db_url=db_url)
         data["profile"] = await pm_svc.build_profile_for_user(
             user_id=user,
             current_context=context_text,
@@ -463,6 +440,10 @@ async def _recall_suggest(
 async def op_save(
     user: str,
     *,
+    service: object,
+    settings: object,
+    db_url: str,
+    embedding_provider: object,
     title: str | None = None,
     problem: str | None = None,
     solution: str | None = None,
@@ -474,9 +455,6 @@ async def op_save(
     group_key: str | None = None,
 ) -> dict:
     """Unified write: route to direct save or LLM parse based on input."""
-    service = _get_service()
-    settings = _get_settings()
-    db_url = _get_db_url()
     resolved_project = _resolve_project(project)
 
     if content and len(content) > settings.mcp.max_content_chars:
@@ -519,6 +497,7 @@ async def op_save(
             settings=settings,
             service=service,
             db_url=db_url,
+            embedding_provider=embedding_provider,
         )
 
     if not title or not problem:
@@ -609,6 +588,10 @@ async def _maybe_write_search_log(
 async def op_recall(
     user: str,
     *,
+    search_orchestrator: object,
+    db_url: str,
+    settings: object,
+    embedding_provider: object,
     query: str | None = None,
     problem: str | None = None,
     file_path: str | None = None,
@@ -626,9 +609,7 @@ async def op_recall(
 
         include_archives = _default_include_archives()
 
-    search_orchestrator = _get_search_orchestrator()
     resolved_project = _resolve_project(project)
-    db_url = _get_db_url()
 
     ctx_hint: str | None = None
     if problem:
@@ -656,6 +637,9 @@ async def op_recall(
             user=user,
             context_text=ctx_hint,
             include_user_profile=include_user_profile,
+            settings=settings,
+            embedding_provider=embedding_provider,
+            db_url=db_url,
         )
         await _maybe_write_search_log(result, db_url, resolved_project, query=problem or "")
         return result
@@ -675,6 +659,9 @@ async def op_recall(
             user=user,
             context_text=ctx_hint,
             include_user_profile=include_user_profile,
+            settings=settings,
+            embedding_provider=embedding_provider,
+            db_url=db_url,
         )
         await _maybe_write_search_log(result, db_url, resolved_project, query=query or "")
         return result
@@ -694,6 +681,9 @@ async def op_recall(
             user=user,
             context_text=ctx_hint,
             include_user_profile=include_user_profile,
+            settings=settings,
+            embedding_provider=embedding_provider,
+            db_url=db_url,
         )
         await _maybe_write_search_log(result, db_url, resolved_project, query=ctx_hint or "")
         return result
@@ -708,21 +698,25 @@ async def op_recall(
         user=user,
         context_text=ctx_hint,
         include_user_profile=include_user_profile,
+        settings=settings,
+        embedding_provider=embedding_provider,
+        db_url=db_url,
     )
 
 
 async def op_context(
     user: str,
     *,
+    search_orchestrator: object,
+    settings: object,
+    embedding_provider: object,
+    db_url: str,
     file_paths: list[str] | None = None,
     task_description: str | None = None,
     project: str | None = None,
 ) -> dict:
     """Return user profile + relevant experiences for current context."""
     resolved_project = _resolve_project(project)
-    ctx = get_context()
-
-    settings = _get_settings()
     max_side = getattr(settings.mcp, "profile_max_strings_per_side", None) or 20
     result: dict = {
         "user": user,
@@ -734,7 +728,7 @@ async def op_context(
     try:
         from team_memory.services.memory.personal_memory import PersonalMemoryService
 
-        pm_svc = PersonalMemoryService(embedding_provider=ctx.embedding, db_url=ctx.db_url)
+        pm_svc = PersonalMemoryService(embedding_provider=embedding_provider, db_url=db_url)
         context_text = task_description
         if not context_text and file_paths:
             context_text = " ".join(PurePosixPath(fp).name for fp in file_paths[:5])
@@ -756,9 +750,8 @@ async def op_context(
 
     if query_parts:
         try:
-            search_orch = _get_search_orchestrator()
             query = " ".join(query_parts)
-            osearch = await search_orch.search(
+            osearch = await search_orchestrator.search(
                 query=query,
                 max_results=3,
                 min_similarity=0.4,
@@ -788,6 +781,7 @@ async def op_context(
 async def op_get_archive(
     user: str,
     *,
+    archive_service: object,
     archive_id: str,
     project: str | None = None,
 ) -> dict:
@@ -798,7 +792,7 @@ async def op_get_archive(
         return {"error": True, "message": "Archive not found", "code": "not_found"}
 
     resolved = _resolve_project(project)
-    archive_svc = _get_archive_service()
+    archive_svc = archive_service
     try:
         out = await archive_svc.get_archive(aid, viewer=user, project=resolved)
     except Exception as e:
@@ -816,6 +810,8 @@ async def op_get_archive(
 async def op_archive_upsert(
     user: str,
     *,
+    archive_service: object,
+    settings: object,
     title: str,
     solution_doc: str,
     content_type: str = "session_archive",
@@ -830,7 +826,6 @@ async def op_archive_upsert(
     scope_ref: str | None = None,
 ) -> dict:
     """Upsert archive via ArchiveService; success or error dict."""
-    settings = _get_settings()
     max_sd = int(getattr(settings.mcp, "max_archive_solution_doc_chars", 64_000))
     if len(solution_doc or "") > max_sd:
         return {
@@ -870,7 +865,7 @@ async def op_archive_upsert(
             except (ValueError, TypeError):
                 pass
 
-    archive_svc = _get_archive_service()
+    archive_svc = archive_service
     try:
         result = await archive_svc.archive_upsert(
             title=body.title,
@@ -911,6 +906,8 @@ async def op_archive_upsert(
 async def op_draft_save(
     user: str,
     *,
+    service: object,
+    db_url: str,
     title: str,
     content: str,
     tags: list[str] | None = None,
@@ -920,8 +917,6 @@ async def op_draft_save(
     skip_dedup: bool = False,
 ) -> dict:
     """Pipeline write: save draft. Forces source='pipeline', exp_status='draft'."""
-    service = _get_service()
-    db_url = _get_db_url()
     resolved_project = _resolve_project(project)
 
     async with get_session(db_url) as session:
@@ -966,11 +961,11 @@ async def op_draft_save(
 async def op_draft_publish(
     user: str,
     *,
+    service: object,
     draft_id: str,
     refined_content: str | None = None,
 ) -> dict:
     """Pipeline write: promote draft to published. Only works on pipeline drafts."""
-    service = _get_service()
 
     # First verify the experience exists and is a pipeline draft
     exp = await service.get_by_id(draft_id)
@@ -1016,6 +1011,7 @@ async def op_draft_publish(
 async def op_experience_update(
     user: str,
     *,
+    service: object,
     experience_id: str,
     title: str | None = None,
     problem: str | None = None,
@@ -1039,7 +1035,6 @@ async def op_experience_update(
     Returns:
         Dict with updated experience data or error info.
     """
-    service = _get_service()
 
     kwargs: dict = {"experience_id": experience_id, "user": user}
     if title is not None:
@@ -1075,6 +1070,7 @@ async def op_experience_update(
 async def op_feedback(
     user: str,
     *,
+    service: object,
     experience_id: str,
     rating: int,
     comment: str | None = None,
@@ -1086,8 +1082,6 @@ async def op_feedback(
             "message": "Rating must be between 1 and 5.",
             "code": "validation_error",
         }
-
-    service = _get_service()
 
     success = await service.feedback(
         experience_id=experience_id,
@@ -1108,6 +1102,7 @@ async def op_feedback(
 async def op_submit_response(
     user: str,
     *,
+    db_url: str,
     query: str,
     response: str,
     result_ids: list[str] | None = None,
@@ -1141,7 +1136,6 @@ async def op_submit_response(
 
     ids_json = json.dumps(payload_rows)
     buffer_id = uuid_mod.uuid4()
-    db_url = _get_db_url()
 
     try:
         async with get_session(db_url) as session:

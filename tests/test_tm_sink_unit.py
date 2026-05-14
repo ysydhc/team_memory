@@ -29,6 +29,15 @@ from team_memory.daemon.integration.tm_sink import LocalTMSink, RemoteTMSink
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def mock_daemon_context():
+    from tests.conftest import make_mock_app_context
+
+    ctx = make_mock_app_context()
+    with patch("team_memory.daemon.integration.tm_sink._daemon_context", return_value=ctx) as mock:
+        yield mock
+
+
 class TestLocalTMSinkInit:
     """Tests for LocalTMSink constructor / LocalTMSink 构造函数测试"""
 
@@ -130,8 +139,11 @@ class TestLocalTMSinkUpdateExperience:
                 experience_type="lesson",
                 exp_status="active",
             )
+        from unittest.mock import ANY
+
         mock_op.assert_awaited_once_with(
             "test_user",
+            service=ANY,
             experience_id="exp1",
             title="Updated",
             problem="new problem",
@@ -443,8 +455,12 @@ class TestLocalTMSinkMethods:
                 conversation_id="conv1",
                 skip_dedup=True,
             )
+        from unittest.mock import ANY
+
         mock_op.assert_awaited_once_with(
             "u1",
+            service=ANY,
+            db_url=ANY,
             title="t",
             content="c",
             tags=["a"],
@@ -465,8 +481,11 @@ class TestLocalTMSinkMethods:
                 draft_id="d1",
                 refined_content="rc",
             )
+        from unittest.mock import ANY
+
         mock_op.assert_awaited_once_with(
             "u1",
+            service=ANY,
             draft_id="d1",
             refined_content="rc",
         )
@@ -489,8 +508,15 @@ class TestLocalTMSinkMethods:
                 project="proj",
                 group_key="gk",
             )
+        from unittest.mock import ANY
+        from unittest.mock import ANY
+
         mock_op.assert_awaited_once_with(
             "u1",
+            service=ANY,
+            settings=ANY,
+            db_url=ANY,
+            embedding_provider=ANY,
             title="t",
             problem="p",
             solution="s",
@@ -535,8 +561,14 @@ class TestLocalTMSinkMethods:
                 task_description="d",
                 project="p",
             )
+        from unittest.mock import ANY
+
         mock_op.assert_awaited_once_with(
             "u1",
+            search_orchestrator=ANY,
+            settings=ANY,
+            embedding_provider=ANY,
+            db_url=ANY,
             file_paths=["/f"],
             task_description="d",
             project="p",

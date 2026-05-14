@@ -70,7 +70,7 @@ class TestGetCurrentUserFromApiKey:
         mock_ctx = MagicMock()
         mock_ctx.auth.authenticate = AsyncMock(return_value=User(name="alice", role="editor"))
         with (
-            patch("team_memory.bootstrap.get_context", return_value=mock_ctx),
+            patch("team_memory.server._app_context", return_value=mock_ctx),
             patch.dict(os.environ, {"TEAM_MEMORY_API_KEY": "test-key"}, clear=False),
         ):
             result = await _get_current_user()

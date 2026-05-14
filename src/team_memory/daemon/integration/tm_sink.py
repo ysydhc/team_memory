@@ -17,6 +17,14 @@ import httpx
 
 logger = logging.getLogger("daemon.tm_sink")
 
+
+def _daemon_context():
+    """AppContext for in-process daemon calls (bootstrap must be initialized)."""
+    from team_memory.bootstrap import get_context
+
+    return get_context()
+
+
 # 模块级延迟导入引用 — 方便测试 patch，也避免无 TM 环境下 import 失败
 _op_draft_save = None
 _op_draft_publish = None
@@ -159,8 +167,11 @@ class LocalTMSink(TMSink):
         conversation_id: str | None = None,
         skip_dedup: bool = False,
     ) -> dict:
+        ctx = _daemon_context()
         return await _op_draft_save(
             self._user,
+            service=ctx.service,
+            db_url=ctx.db_url,
             title=title,
             content=content,
             tags=tags,
@@ -176,8 +187,10 @@ class LocalTMSink(TMSink):
         draft_id: str,
         refined_content: str | None = None,
     ) -> dict:
+        ctx = _daemon_context()
         return await _op_draft_publish(
             self._user,
+            service=ctx.service,
             draft_id=draft_id,
             refined_content=refined_content,
         )
@@ -195,8 +208,13 @@ class LocalTMSink(TMSink):
         project: str | None = None,
         group_key: str | None = None,
     ) -> dict:
+        ctx = _daemon_context()
         return await _op_save(
             self._user,
+            service=ctx.service,
+            settings=ctx.settings,
+            db_url=ctx.db_url,
+            embedding_provider=ctx.embedding,
             title=title,
             problem=problem,
             solution=solution,
@@ -220,8 +238,13 @@ class LocalTMSink(TMSink):
         max_results: int = 5,
         project: str | None = None,
     ) -> list[dict]:
+        ctx = _daemon_context()
         raw = await _op_recall(
             self._user,
+            search_orchestrator=ctx.search_orchestrator,
+            db_url=ctx.db_url,
+            settings=ctx.settings,
+            embedding_provider=ctx.embedding,
             query=query,
             problem=problem,
             file_path=file_path,
@@ -252,8 +275,10 @@ class LocalTMSink(TMSink):
         _ensure_ops()
         from team_memory.services.memory.memory_operations import op_experience_update
 
+        ctx = _daemon_context()
         return await op_experience_update(
             self._user,
+            service=ctx.service,
             experience_id=experience_id,
             title=title,
             problem=problem,
@@ -270,8 +295,13 @@ class LocalTMSink(TMSink):
         task_description: str | None = None,
         project: str | None = None,
     ) -> dict:
+        ctx = _daemon_context()
         return await _op_context(
             self._user,
+            search_orchestrator=ctx.search_orchestrator,
+            settings=ctx.settings,
+            embedding_provider=ctx.embedding,
+            db_url=ctx.db_url,
             file_paths=file_paths,
             task_description=task_description,
             project=project,
@@ -346,9 +376,7 @@ class RemoteTMSink(TMSink):
             if method == "GET":
                 resp = await client.get(url, headers=self._headers())
             else:
-                resp = await client.request(
-                    method, url, json=body or {}, headers=self._headers()
-                )
+                resp = await client.request(method, url, json=body or {}, headers=self._headers())
             resp.raise_for_status()
             return resp.json()
 

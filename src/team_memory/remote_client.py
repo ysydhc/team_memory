@@ -87,6 +87,10 @@ class RemoteTMClient:
         self,
         user: str,
         *,
+        service: object | None = None,
+        settings: object | None = None,
+        db_url: str | None = None,
+        embedding_provider: object | None = None,
         title: str | None = None,
         problem: str | None = None,
         solution: str | None = None,
@@ -120,6 +124,10 @@ class RemoteTMClient:
         self,
         user: str,
         *,
+        search_orchestrator: object | None = None,
+        db_url: str | None = None,
+        settings: object | None = None,
+        embedding_provider: object | None = None,
         query: str | None = None,
         problem: str | None = None,
         file_path: str | None = None,
@@ -157,6 +165,10 @@ class RemoteTMClient:
         self,
         user: str,
         *,
+        search_orchestrator: object | None = None,
+        settings: object | None = None,
+        embedding_provider: object | None = None,
+        db_url: str | None = None,
         file_paths: list[str] | None = None,
         task_description: str | None = None,
         project: str | None = None,
@@ -175,6 +187,7 @@ class RemoteTMClient:
         user: str,
         *,
         archive_id: str,
+        archive_service: object | None = None,
         project: str | None = None,
     ) -> dict:
         params: dict[str, Any] = {}
@@ -198,6 +211,8 @@ class RemoteTMClient:
         project: str | None = None,
         scope: str = "session",
         scope_ref: str | None = None,
+        archive_service: object | None = None,
+        settings: object | None = None,
     ) -> dict:
         body: dict[str, Any] = {
             "title": title,
@@ -231,6 +246,7 @@ class RemoteTMClient:
         rating: int,
         comment: str | None = None,
         project: str | None = None,
+        service: object | None = None,
     ) -> dict:
         body: dict[str, Any] = {
             "experience_id": experience_id,
@@ -252,6 +268,8 @@ class RemoteTMClient:
         project: str | None = None,
         group_key: str | None = None,
         conversation_id: str | None = None,
+        service: object | None = None,
+        db_url: str | None = None,
     ) -> dict:
         body: dict[str, Any] = {"title": title, "content": content}
         if tags is not None:
@@ -271,6 +289,7 @@ class RemoteTMClient:
         draft_id: str,
         refined_content: str | None = None,
         project: str | None = None,
+        service: object | None = None,
     ) -> dict:
         body: dict[str, Any] = {"draft_id": draft_id}
         if refined_content is not None:
@@ -287,6 +306,7 @@ class RemoteTMClient:
         response: str,
         result_ids: list[str] | None = None,
         project: str | None = None,
+        db_url: str | None = None,
     ) -> dict:
         body: dict[str, Any] = {"query": query, "response": response}
         if result_ids is not None:
@@ -390,94 +410,11 @@ def detect_remote_mode() -> tuple[bool, str, str]:
 # ============================================================
 
 
-class RemoteMCPClient:
-    """Deprecated: use RemoteTMClient instead. Kept for backward compatibility.
-
-    旧版实现：每次请求创建新的 httpx.AsyncClient。
-    Legacy implementation: creates a new httpx.AsyncClient per request.
-    """
-
-    def __init__(self, base_url: str, api_key: str) -> None:
-        self._base_url = base_url.rstrip("/")
-        self._api_key = api_key
-
-    def _headers(self) -> dict[str, str]:
-        h: dict[str, str] = {"Content-Type": "application/json"}
-        if self._api_key:
-            h["Authorization"] = f"Bearer {self._api_key}"
-        return h
-
-    async def _post(self, path: str, body: dict[str, Any]) -> dict:
-        url = f"{self._base_url}{path}"
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(url, json=body, headers=self._headers())
-            resp.raise_for_status()
-            return resp.json()
-
-    async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict:
-        url = f"{self._base_url}{path}"
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.get(url, params=params, headers=self._headers())
-            resp.raise_for_status()
-            return resp.json()
-
-    # 委托到 RemoteTMClient 的方法签名 / delegate method signatures
-    async def op_save(self, user: str, **kwargs: Any) -> dict:
-        return await RemoteTMClient._post.__get__(self)(  # type: ignore[attr-defined]
-            "/api/v1/mcp/save",
-            {k: v for k, v in kwargs.items() if v is not None},
-        )
-
-    async def op_recall(self, user: str, **kwargs: Any) -> dict:
-        return await RemoteTMClient._post.__get__(self)(  # type: ignore[attr-defined]
-            "/api/v1/mcp/recall",
-            {k: v for k, v in kwargs.items() if v is not None},
-        )
-
-    async def op_context(self, user: str, **kwargs: Any) -> dict:
-        return await RemoteTMClient._post.__get__(self)(  # type: ignore[attr-defined]
-            "/api/v1/mcp/context",
-            {k: v for k, v in kwargs.items() if v is not None},
-        )
-
-    async def op_get_archive(self, user: str, *, archive_id: str, **kwargs: Any) -> dict:
-        return await RemoteTMClient._get.__get__(self)(  # type: ignore[attr-defined]
-            f"/api/v1/mcp/archive/{archive_id}",
-            {k: v for k, v in kwargs.items() if v is not None} or None,
-        )
-
-    async def op_archive_upsert(self, user: str, **kwargs: Any) -> dict:
-        return await RemoteTMClient._post.__get__(self)(  # type: ignore[attr-defined]
-            "/api/v1/mcp/archive-upsert",
-            {k: v for k, v in kwargs.items() if v is not None},
-        )
-
-    async def op_feedback(self, user: str, **kwargs: Any) -> dict:
-        return await RemoteTMClient._post.__get__(self)(  # type: ignore[attr-defined]
-            "/api/v1/mcp/feedback",
-            {k: v for k, v in kwargs.items() if v is not None},
-        )
-
-    async def op_draft_save(self, user: str, **kwargs: Any) -> dict:
-        return await RemoteTMClient._post.__get__(self)(  # type: ignore[attr-defined]
-            "/api/v1/mcp/draft-save",
-            {k: v for k, v in kwargs.items() if v is not None},
-        )
-
-    async def op_draft_publish(self, user: str, **kwargs: Any) -> dict:
-        return await RemoteTMClient._post.__get__(self)(  # type: ignore[attr-defined]
-            "/api/v1/mcp/draft-publish",
-            {k: v for k, v in kwargs.items() if v is not None},
-        )
-
-    async def op_submit_response(self, user: str, **kwargs: Any) -> dict:
-        return await RemoteTMClient._post.__get__(self)(  # type: ignore[attr-defined]
-            "/api/v1/mcp/submit-response",
-            {k: v for k, v in kwargs.items() if v is not None},
-        )
+class RemoteMCPClient(RemoteTMClient):
+    """Deprecated: use ``RemoteTMClient`` directly. Alias kept for import stability."""
 
 
-def setup_remote_ops(base_url: str, api_key: str) -> RemoteMCPClient:
+def setup_remote_ops(base_url: str, api_key: str) -> RemoteTMClient:
     """Monkey-patch memory_operations with remote HTTP implementations.
 
     旧版接口，保留向后兼容。server.py main() 中 TEAM_MEMORY_REMOTE_URL 仍可使用。
@@ -485,7 +422,7 @@ def setup_remote_ops(base_url: str, api_key: str) -> RemoteMCPClient:
     """
     from team_memory.services.memory import memory_operations
 
-    client = RemoteMCPClient(base_url=base_url, api_key=api_key)
+    client = RemoteTMClient(base_url=base_url, api_key=api_key)
 
     # Patch each op_* used in server.py
     memory_operations.op_save = client.op_save  # type: ignore[method-assign]

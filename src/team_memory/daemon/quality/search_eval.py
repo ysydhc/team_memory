@@ -18,9 +18,7 @@ from datetime import datetime, timezone
 
 from team_memory.project_resolver import load_dotenv_if_exists
 
-load_dotenv_if_exists(
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-)
+load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 # Default test queries — each has a query and expected experience ids (or titles)
 DEFAULT_TEST_QUERIES = [
@@ -79,11 +77,13 @@ DEFAULT_TEST_QUERIES = [
 
 async def run_evaluation(db_url: str) -> dict:
     """Run evaluation and return metrics."""
-    from team_memory.bootstrap import bootstrap
+    from team_memory.bootstrap import bootstrap, get_context
     from team_memory.services.memory.memory_operations import op_recall
 
     # Bootstrap the AppContext
     bootstrap(enable_background=False)
+
+    ctx = get_context()
 
     results = []
     for test in DEFAULT_TEST_QUERIES:
@@ -94,6 +94,10 @@ async def run_evaluation(db_url: str) -> dict:
         try:
             recall_result = await op_recall(
                 "eval",
+                search_orchestrator=ctx.search_orchestrator,
+                db_url=ctx.db_url,
+                settings=ctx.settings,
+                embedding_provider=ctx.embedding,
                 query=query,
                 max_results=10,
             )
@@ -134,25 +138,15 @@ async def run_evaluation(db_url: str) -> dict:
                 "hits": hits,
                 "precision": precision,
                 "recall": recall,
-                "top_result": (
-                    recall_results[0].get("title", "") if recall_results else ""
-                ),
+                "top_result": (recall_results[0].get("title", "") if recall_results else ""),
             }
         )
 
     # Compute aggregate metrics
     ok_results = [r for r in results if r["status"] == "ok"]
-    avg_precision = (
-        sum(r["precision"] for r in ok_results) / len(ok_results) if ok_results else 0.0
-    )
-    avg_recall = (
-        sum(r["recall"] for r in ok_results) / len(ok_results) if ok_results else 0.0
-    )
-    hit_rate = (
-        sum(1 for r in ok_results if r["total_results"] > 0) / len(ok_results)
-        if ok_results
-        else 0.0
-    )
+    avg_precision = sum(r["precision"] for r in ok_results) / len(ok_results) if ok_results else 0.0
+    avg_recall = sum(r["recall"] for r in ok_results) / len(ok_results) if ok_results else 0.0
+    hit_rate = sum(1 for r in ok_results if r["total_results"] > 0) / len(ok_results) if ok_results else 0.0
 
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -186,9 +180,7 @@ def print_report(metrics: dict) -> None:
         if r["status"] == "error":
             print(f"  {r['query']:<35} {'ERR':>5}")
         else:
-            print(
-                f"  {r['query']:<35} {r['hits']:>5} {r['precision']:>6.1%} {r['recall']:>7.1%}"
-            )
+            print(f"  {r['query']:<35} {r['hits']:>5} {r['precision']:>6.1%} {r['recall']:>7.1%}")
 
     print(f"{'─' * 60}\n")
 

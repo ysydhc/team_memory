@@ -239,14 +239,11 @@ class TestObsidianDraftPublish:
         mock_service.get_by_id = AsyncMock(return_value=mock_exp)
         mock_service.update = AsyncMock(return_value={**mock_exp, "status": "published"})
 
-        with patch(
-            "team_memory.services.memory.memory_operations._get_service",
-            return_value=mock_service,
-        ):
-            result = await op_draft_publish(
-                user="test_user",
-                draft_id=exp_id,
-            )
+        result = await op_draft_publish(
+            user="test_user",
+            service=mock_service,
+            draft_id=exp_id,
+        )
 
         assert result.get("error") is not True
         mock_service.update.assert_called_once()
@@ -266,14 +263,11 @@ class TestObsidianDraftPublish:
         }
         mock_service.get_by_id = AsyncMock(return_value=mock_exp)
 
-        with patch(
-            "team_memory.services.memory.memory_operations._get_service",
-            return_value=mock_service,
-        ):
-            result = await op_draft_publish(
-                user="test_user",
-                draft_id=exp_id,
-            )
+        result = await op_draft_publish(
+            user="test_user",
+            service=mock_service,
+            draft_id=exp_id,
+        )
 
         assert result.get("error") is True
         assert "validation_error" in result.get("code", "")

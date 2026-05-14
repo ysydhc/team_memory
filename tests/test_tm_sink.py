@@ -8,6 +8,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def mock_daemon_context():
+    from tests.conftest import make_mock_app_context
+
+    ctx = make_mock_app_context()
+    with patch("team_memory.daemon.integration.tm_sink._daemon_context", return_value=ctx) as mock:
+        yield mock
+
+
 # ---------------------------------------------------------------------------
 # TMSink ABC
 # ---------------------------------------------------------------------------
@@ -99,8 +109,12 @@ class TestLocalTMSink:
                 group_key="gk1",
                 conversation_id="conv1",
             )
+            from unittest.mock import ANY
+
             mock_op.assert_awaited_once_with(
                 "test_user",
+                service=ANY,
+                db_url=ANY,
                 title="测试标题",
                 content="测试内容",
                 tags=["python"],
@@ -126,8 +140,11 @@ class TestLocalTMSink:
                 draft_id="abc-123",
                 refined_content="精炼内容",
             )
+            from unittest.mock import ANY
+
             mock_op.assert_awaited_once_with(
                 "test_user",
+                service=ANY,
                 draft_id="abc-123",
                 refined_content="精炼内容",
             )
@@ -144,7 +161,10 @@ class TestLocalTMSink:
             }
         )
 
-        with patch("team_memory.daemon.integration.tm_sink._ensure_ops"), patch("team_memory.daemon.integration.tm_sink._op_save", mock_op):
+        with (
+            patch("team_memory.daemon.integration.tm_sink._ensure_ops"),
+            patch("team_memory.daemon.integration.tm_sink._op_save", mock_op),
+        ):
             sink = LocalTMSink(user="test_user")
             result = await sink.save(
                 title="标题",
@@ -154,8 +174,14 @@ class TestLocalTMSink:
                 project="proj",
                 group_key="gk",
             )
+            from unittest.mock import ANY
+
             mock_op.assert_awaited_once_with(
                 "test_user",
+                service=ANY,
+                settings=ANY,
+                db_url=ANY,
+                embedding_provider=ANY,
                 title="标题",
                 problem="问题描述",
                 solution="解决方案",
@@ -180,11 +206,20 @@ class TestLocalTMSink:
             }
         )
 
-        with patch("team_memory.daemon.integration.tm_sink._ensure_ops"), patch("team_memory.daemon.integration.tm_sink._op_recall", mock_op):
+        with (
+            patch("team_memory.daemon.integration.tm_sink._ensure_ops"),
+            patch("team_memory.daemon.integration.tm_sink._op_recall", mock_op),
+        ):
             sink = LocalTMSink(user="test_user")
             result = await sink.recall(query="测试", project="proj")
+            from unittest.mock import ANY
+
             mock_op.assert_awaited_once_with(
                 "test_user",
+                search_orchestrator=ANY,
+                db_url=ANY,
+                settings=ANY,
+                embedding_provider=ANY,
                 query="测试",
                 problem=None,
                 file_path=None,
@@ -204,7 +239,10 @@ class TestLocalTMSink:
         raw = json.dumps({"results": [{"id": "1"}]})
         mock_op = AsyncMock(return_value=raw)
 
-        with patch("team_memory.daemon.integration.tm_sink._ensure_ops"), patch("team_memory.daemon.integration.tm_sink._op_recall", mock_op):
+        with (
+            patch("team_memory.daemon.integration.tm_sink._ensure_ops"),
+            patch("team_memory.daemon.integration.tm_sink._op_recall", mock_op),
+        ):
             sink = LocalTMSink(user="test_user")
             result = await sink.recall(query="测试")
             assert result == [{"id": "1"}]
@@ -216,7 +254,10 @@ class TestLocalTMSink:
 
         mock_op = AsyncMock(return_value={"message": "No matching experiences found."})
 
-        with patch("team_memory.daemon.integration.tm_sink._ensure_ops"), patch("team_memory.daemon.integration.tm_sink._op_recall", mock_op):
+        with (
+            patch("team_memory.daemon.integration.tm_sink._ensure_ops"),
+            patch("team_memory.daemon.integration.tm_sink._op_recall", mock_op),
+        ):
             sink = LocalTMSink(user="test_user")
             result = await sink.recall(query="不存在")
             assert result == []
@@ -234,15 +275,24 @@ class TestLocalTMSink:
             }
         )
 
-        with patch("team_memory.daemon.integration.tm_sink._ensure_ops"), patch("team_memory.daemon.integration.tm_sink._op_context", mock_op):
+        with (
+            patch("team_memory.daemon.integration.tm_sink._ensure_ops"),
+            patch("team_memory.daemon.integration.tm_sink._op_context", mock_op),
+        ):
             sink = LocalTMSink(user="test_user")
             result = await sink.context(
                 file_paths=["/a/b.py"],
                 task_description="做点什么",
                 project="proj",
             )
+            from unittest.mock import ANY
+
             mock_op.assert_awaited_once_with(
                 "test_user",
+                search_orchestrator=ANY,
+                settings=ANY,
+                embedding_provider=ANY,
+                db_url=ANY,
                 file_paths=["/a/b.py"],
                 task_description="做点什么",
                 project="proj",

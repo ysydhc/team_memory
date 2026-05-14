@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from team_memory.daemon.quality.search_eval import DEFAULT_TEST_QUERIES, print_report
+from tests.conftest import make_mock_app_context
 
 pytestmark = pytest.mark.unit
 
@@ -454,9 +455,11 @@ class TestRunEvaluationFlow:
         }
 
         mock_recall = AsyncMock(return_value=mock_recall_result)
+        mock_ctx = make_mock_app_context()
 
         with (
             patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch("team_memory.bootstrap.get_context", return_value=mock_ctx),
             patch("team_memory.bootstrap.bootstrap"),
         ):
             metrics = await run_evaluation("postgresql://fake:***@localhost/db")
@@ -476,9 +479,11 @@ class TestRunEvaluationFlow:
         from team_memory.daemon.quality.search_eval import run_evaluation
 
         mock_recall = AsyncMock(side_effect=Exception("search failed"))
+        mock_ctx = make_mock_app_context()
 
         with (
             patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch("team_memory.bootstrap.get_context", return_value=mock_ctx),
             patch("team_memory.bootstrap.bootstrap"),
         ):
             metrics = await run_evaluation("postgresql://fake:***@localhost/db")
@@ -532,9 +537,11 @@ class TestRunEvaluationFlow:
         }
 
         mock_recall = AsyncMock(return_value=mock_recall_result)
+        mock_ctx = make_mock_app_context()
 
         with (
             patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch("team_memory.bootstrap.get_context", return_value=mock_ctx),
             patch("team_memory.bootstrap.bootstrap"),
         ):
             metrics = await run_evaluation("postgresql://fake:***@localhost/db")
@@ -548,9 +555,11 @@ class TestRunEvaluationFlow:
 
         mock_recall_result = {"results": []}
         mock_recall = AsyncMock(return_value=mock_recall_result)
+        mock_ctx = make_mock_app_context()
 
         with (
             patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch("team_memory.bootstrap.get_context", return_value=mock_ctx),
             patch("team_memory.bootstrap.bootstrap"),
         ):
             metrics = await run_evaluation("postgresql://fake:***@localhost/db")
@@ -576,9 +585,11 @@ class TestRunEvaluationFlow:
             ]
         }
         mock_recall = AsyncMock(return_value=mock_recall_result)
+        mock_ctx = make_mock_app_context()
 
         with (
             patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch("team_memory.bootstrap.get_context", return_value=mock_ctx),
             patch("team_memory.bootstrap.bootstrap"),
         ):
             metrics = await run_evaluation("postgresql://fake:***@localhost/db")
@@ -594,9 +605,11 @@ class TestRunEvaluationFlow:
 
         mock_recall_result = {"results": []}
         mock_recall = AsyncMock(return_value=mock_recall_result)
+        mock_ctx = make_mock_app_context()
 
         with (
             patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch("team_memory.bootstrap.get_context", return_value=mock_ctx),
             patch("team_memory.bootstrap.bootstrap"),
         ):
             metrics = await run_evaluation("postgresql://fake:***@localhost/db")

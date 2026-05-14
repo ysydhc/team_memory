@@ -177,7 +177,8 @@ def setup_app():
         patch("team_memory.web.routes.archives.get_context", return_value=mock_ctx),
         patch("team_memory.web.routes.search.get_context", return_value=mock_ctx),
         patch("team_memory.web.routes.config.get_context", return_value=mock_ctx),
-        patch("team_memory.services.memory.memory_operations.get_context", return_value=mock_ctx),
+        patch("team_memory.web.routes.mcp_compat.get_context", return_value=mock_ctx),
+        patch("team_memory.web.routes.janitor.get_context", return_value=mock_ctx),
         patch("team_memory.web.app.start_background_tasks", new_callable=AsyncMock),
         patch("team_memory.web.app.stop_background_tasks", new_callable=AsyncMock),
     ):
@@ -1528,6 +1529,8 @@ class TestMcpCompat:
         assert resp.status_code == 401
 
     def test_mcp_submit_response_ok(self, client, auth_headers):
+        from unittest.mock import ANY
+
         bid = str(uuid.uuid4())
         with patch(
             "team_memory.web.routes.mcp_compat.memory_operations.op_submit_response",
@@ -1545,6 +1548,7 @@ class TestMcpCompat:
             assert data["buffer_id"] == bid
             mock_op.assert_awaited_once_with(
                 "test_admin",
+                db_url=ANY,
                 query="hello",
                 response="world",
                 result_ids=None,

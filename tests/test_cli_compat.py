@@ -167,7 +167,8 @@ def setup_app():
         patch("team_memory.web.routes.archives.get_context", return_value=mock_ctx),
         patch("team_memory.web.routes.search.get_context", return_value=mock_ctx),
         patch("team_memory.web.routes.config.get_context", return_value=mock_ctx),
-        patch("team_memory.services.memory.memory_operations.get_context", return_value=mock_ctx),
+        patch("team_memory.web.routes.mcp_compat.get_context", return_value=mock_ctx),
+        patch("team_memory.web.routes.janitor.get_context", return_value=mock_ctx),
         patch("team_memory.web.app.start_background_tasks", new_callable=AsyncMock),
         patch("team_memory.web.app.stop_background_tasks", new_callable=AsyncMock),
     ):
