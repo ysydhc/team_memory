@@ -49,7 +49,7 @@ class ExperienceService:
         self._db_url = db_url
         self._embedding = embedding_provider
         self._auth = auth_provider
-        self._event_bus = event_bus or EventBus()
+        self._event_bus = event_bus
         self._archive_service = archive_service
         self._lifecycle_config = lifecycle_config
         self._llm_config = llm_config
@@ -226,20 +226,21 @@ class ExperienceService:
                 parent_id=parent_id,
             )
 
-            await self._event_bus.emit(
-                Events.EXPERIENCE_CREATED,
-                {
-                    "experience_id": str(experience.id),
-                    "title": title,
-                    "description": problem,
-                    "solution": solution or "",
-                    "tags": tags or [],
-                    "project": project or "default",
-                    "created_by": created_by,
-                    "status": exp_status,
-                    "visibility": visibility,
-                },
-            )
+            if self._event_bus:
+                await self._event_bus.emit(
+                    Events.EXPERIENCE_CREATED,
+                    {
+                        "experience_id": str(experience.id),
+                        "title": title,
+                        "description": problem,
+                        "solution": solution or "",
+                        "tags": tags or [],
+                        "project": project or "default",
+                        "created_by": created_by,
+                        "status": exp_status,
+                        "visibility": visibility,
+                    },
+                )
             persist_duration_ms = int((time.monotonic() - persist_start) * 1000)
             io_logger.log_internal(
                 "save_persist",
@@ -348,22 +349,23 @@ class ExperienceService:
 
             if updated and updates:
                 fields_updated = list(updates.keys())
-                await self._event_bus.emit(
-                    Events.EXPERIENCE_UPDATED,
-                    {
-                        "experience_id": experience_id,
-                        "fields_updated": fields_updated,
-                        "user": user,
-                        # Include content fields for entity extraction
-                        "title": updated.title if updated else None,
-                        "description": updated.description if updated else None,
-                        "solution": updated.solution if updated else None,
-                        "tags": updated.tags if updated else None,
-                        "project": updated.project if updated else None,
-                        "status": updated.exp_status if updated else None,
-                        "visibility": updated.visibility if updated else None,
-                    },
-                )
+                if self._event_bus:
+                    await self._event_bus.emit(
+                        Events.EXPERIENCE_UPDATED,
+                        {
+                            "experience_id": experience_id,
+                            "fields_updated": fields_updated,
+                            "user": user,
+                            # Include content fields for entity extraction
+                            "title": updated.title if updated else None,
+                            "description": updated.description if updated else None,
+                            "solution": updated.solution if updated else None,
+                            "tags": updated.tags if updated else None,
+                            "project": updated.project if updated else None,
+                            "status": updated.exp_status if updated else None,
+                            "visibility": updated.visibility if updated else None,
+                        },
+                    )
 
                 # Update archive status if exp_status or visibility changed
                 if self._archive_service and ("exp_status" in updates or "visibility" in updates):
@@ -459,14 +461,15 @@ class ExperienceService:
                         )
                         errors += 1
 
-        await self._event_bus.emit(
-            Events.EXPERIENCE_UPDATED,
-            {
-                "experience_id": "batch_reembed",
-                "fields_updated": ["embedding"],
-                "user": "system",
-            },
-        )
+        if self._event_bus:
+            await self._event_bus.emit(
+                Events.EXPERIENCE_UPDATED,
+                {
+                    "experience_id": "batch_reembed",
+                    "fields_updated": ["embedding"],
+                    "user": "system",
+                },
+            )
         return {
             "updated": updated,
             "errors": errors,
@@ -479,7 +482,7 @@ class ExperienceService:
         async with self._session() as session:
             repo = ExperienceRepository(session)
             result = await repo.soft_delete(uuid.UUID(experience_id))
-            if result:
+            if result and self._event_bus:
                 await self._event_bus.emit(
                     Events.EXPERIENCE_DELETED,
                     {
@@ -494,7 +497,7 @@ class ExperienceService:
         async with self._session() as session:
             repo = ExperienceRepository(session)
             result = await repo.restore(uuid.UUID(experience_id))
-            if result:
+            if result and self._event_bus:
                 await self._event_bus.emit(
                     Events.EXPERIENCE_RESTORED,
                     {
@@ -538,14 +541,15 @@ class ExperienceService:
                 await repo.increment_quality_score(exp_uuid, 1.0)
                 await repo.increment_used_count(exp_uuid)
 
-            await self._event_bus.emit(
-                Events.FEEDBACK_ADDED,
-                {
-                    "experience_id": experience_id,
-                    "rating": rating,
-                    "feedback_by": feedback_by,
-                },
-            )
+            if self._event_bus:
+                await self._event_bus.emit(
+                    Events.FEEDBACK_ADDED,
+                    {
+                        "experience_id": experience_id,
+                        "rating": rating,
+                        "feedback_by": feedback_by,
+                    },
+                )
             return True
 
     async def get_by_id(self, experience_id: str) -> dict | None:

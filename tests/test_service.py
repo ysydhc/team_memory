@@ -46,6 +46,42 @@ class TestExperienceServiceUnit:
         assert user.name == "test_user"
 
     @pytest.mark.asyncio
+    async def test_event_bus_injection(self, mock_embedding, no_auth):
+        from team_memory.services.infra.event_bus import EventBus
+
+        mock_bus = MagicMock(spec=EventBus)
+        mock_bus.emit = AsyncMock()
+
+        service_with_bus = ExperienceService(
+            embedding_provider=mock_embedding,
+            auth_provider=no_auth,
+            event_bus=mock_bus,
+            db_url="sqlite+aiosqlite://",
+        )
+
+        service_no_bus = ExperienceService(
+            embedding_provider=mock_embedding,
+            auth_provider=no_auth,
+            event_bus=None,
+            db_url="sqlite+aiosqlite://",
+        )
+
+        mock_session = AsyncMock()
+        mock_repo_instance = MagicMock()
+        mock_experience = MagicMock()
+        mock_experience.id = uuid.uuid4()
+        mock_experience.to_dict.return_value = {"id": str(mock_experience.id)}
+        mock_repo_instance.create = AsyncMock(return_value=mock_experience)
+
+        with patch("team_memory.services.memory.experience.ExperienceRepository", return_value=mock_repo_instance):
+            # Test with event bus
+            await service_with_bus.save("T", "P", "S", session=mock_session)
+            mock_bus.emit.assert_awaited()
+
+            # Test without event bus (should not raise any exception)
+            await service_no_bus.save("T2", "P2", "S2", session=mock_session)
+
+    @pytest.mark.asyncio
     async def test_authenticate_invalid_api_key(self, mock_embedding, api_key_auth):
         service = ExperienceService(
             embedding_provider=mock_embedding,
