@@ -14,7 +14,9 @@ def mock_daemon_context():
     from tests.conftest import make_mock_app_context
 
     ctx = make_mock_app_context()
-    with patch("team_memory.daemon.integration.tm_sink._daemon_context", return_value=ctx) as mock:
+    with patch(
+        "team_memory.daemon.integration.tm_sink._daemon_context", return_value=ctx
+    ) as mock:
         yield mock
 
 
@@ -45,7 +47,9 @@ class TestTMSinkABC:
             "update_experience",
             "increment_used_count",
         }
-        assert expected == abstracts, f"Missing abstract methods: {expected - abstracts}"
+        assert (
+            expected == abstracts
+        ), f"Missing abstract methods: {expected - abstracts}"
 
     def test_is_abc_subclass(self):
         from team_memory.daemon.integration.tm_sink import TMSink
@@ -336,7 +340,9 @@ class TestRemoteTMSink:
         mock_response.json.return_value = {"id": "draft-1", "status": "draft"}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("team_memory.daemon.integration.tm_sink.httpx.AsyncClient") as MockClient:
+        with patch(
+            "team_memory.daemon.integration.tm_sink.httpx.AsyncClient"
+        ) as MockClient:
             mock_client = AsyncMock()
             mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -370,7 +376,9 @@ class TestRemoteTMSink:
         mock_response.json.return_value = {"id": "draft-1", "status": "published"}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("team_memory.daemon.integration.tm_sink.httpx.AsyncClient") as MockClient:
+        with patch(
+            "team_memory.daemon.integration.tm_sink.httpx.AsyncClient"
+        ) as MockClient:
             mock_client = AsyncMock()
             mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -397,13 +405,17 @@ class TestRemoteTMSink:
         mock_response.json.return_value = {"message": "saved", "data": {"id": "1"}}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("team_memory.daemon.integration.tm_sink.httpx.AsyncClient") as MockClient:
+        with patch(
+            "team_memory.daemon.integration.tm_sink.httpx.AsyncClient"
+        ) as MockClient:
             mock_client = AsyncMock()
             mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await sink.save(title="T", problem="P", solution="S", tags=["t"], project="proj")
+            result = await sink.save(
+                title="T", problem="P", solution="S", tags=["t"], project="proj"
+            )
             mock_client.request.assert_awaited_once_with(
                 "POST",
                 "http://tm:3900/api/v1/mcp/save",
@@ -430,7 +442,9 @@ class TestRemoteTMSink:
         }
         mock_response.raise_for_status = MagicMock()
 
-        with patch("team_memory.daemon.integration.tm_sink.httpx.AsyncClient") as MockClient:
+        with patch(
+            "team_memory.daemon.integration.tm_sink.httpx.AsyncClient"
+        ) as MockClient:
             mock_client = AsyncMock()
             mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -448,7 +462,9 @@ class TestRemoteTMSink:
         mock_response.json.return_value = {"message": "No results"}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("team_memory.daemon.integration.tm_sink.httpx.AsyncClient") as MockClient:
+        with patch(
+            "team_memory.daemon.integration.tm_sink.httpx.AsyncClient"
+        ) as MockClient:
             mock_client = AsyncMock()
             mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -466,13 +482,17 @@ class TestRemoteTMSink:
         mock_response.json.return_value = {"user": "ruser", "relevant_experiences": []}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("team_memory.daemon.integration.tm_sink.httpx.AsyncClient") as MockClient:
+        with patch(
+            "team_memory.daemon.integration.tm_sink.httpx.AsyncClient"
+        ) as MockClient:
             mock_client = AsyncMock()
             mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await sink.context(file_paths=["a.py"], task_description="task", project="proj")
+            result = await sink.context(
+                file_paths=["a.py"], task_description="task", project="proj"
+            )
             mock_client.request.assert_awaited_once_with(
                 "POST",
                 "http://tm:3900/api/v1/mcp/context",

@@ -25,7 +25,9 @@ logger = logging.getLogger("team_memory.service")
 def _validate_source_status(source: str, exp_status: str) -> None:
     """Validate that draft status is only allowed for source='pipeline' or 'obsidian'."""
     if exp_status == "draft" and source not in ("pipeline", "obsidian"):
-        raise ValueError(f"exp_status='draft' requires source='pipeline' or 'obsidian', got source='{source}'")
+        raise ValueError(
+            f"exp_status='draft' requires source='pipeline' or 'obsidian', got source='{source}'"
+        )
 
 
 class ExperienceService:
@@ -96,7 +98,9 @@ class ExperienceService:
                 c_sol = (c.solution or "")[: self._CHILD_EMBED_TRUNCATE]
             else:
                 c_title = c.get("title", "")
-                c_desc = (c.get("description") or c.get("problem") or "")[: self._CHILD_EMBED_TRUNCATE]
+                c_desc = (c.get("description") or c.get("problem") or "")[
+                    : self._CHILD_EMBED_TRUNCATE
+                ]
                 c_sol = (c.get("solution") or "")[: self._CHILD_EMBED_TRUNCATE]
             text += f"\n{c_title}\n{c_desc}\n{c_sol}"
         return text
@@ -157,7 +161,9 @@ class ExperienceService:
                     embedding = await self._embedding.encode_single(embed_text)
                     break
                 except Exception as e:
-                    logger.warning("Failed to generate embedding (attempt %d): %s", _attempt + 1, e)
+                    logger.warning(
+                        "Failed to generate embedding (attempt %d): %s", _attempt + 1, e
+                    )
                     if _attempt == 0:
                         await _asyncio.sleep(1.0)
 
@@ -263,7 +269,9 @@ class ExperienceService:
                             tags=parent_exp.tags,
                             children=parent_exp.children,
                         )
-                        parent_embedding = await self._embedding.encode_single(parent_embed_text)
+                        parent_embedding = await self._embedding.encode_single(
+                            parent_embed_text
+                        )
                         await repo.update(parent_id, embedding=parent_embedding)
                 except Exception:
                     logger.warning("Failed to re-embed group parent %s", parent_id)
@@ -309,7 +317,9 @@ class ExperienceService:
                 updates["solution"] = kwargs["solution"]
                 need_reembed = True
             elif solution_addendum:
-                updates["solution"] = f"{experience.solution or ''}\n\n---\n\n{solution_addendum}"
+                updates["solution"] = (
+                    f"{experience.solution or ''}\n\n---\n\n{solution_addendum}"
+                )
                 need_reembed = True
 
             if "tags" in kwargs:
@@ -368,9 +378,13 @@ class ExperienceService:
                     )
 
                 # Update archive status if exp_status or visibility changed
-                if self._archive_service and ("exp_status" in updates or "visibility" in updates):
+                if self._archive_service and (
+                    "exp_status" in updates or "visibility" in updates
+                ):
                     try:
-                        await self._archive_service.update_archive_status_for_experience(exp_uuid)
+                        await self._archive_service.update_archive_status_for_experience(
+                            exp_uuid
+                        )
                     except Exception:
                         logger.warning("Failed to update archive status", exc_info=True)
 
@@ -389,7 +403,9 @@ class ExperienceService:
         proj_norm = ExperienceRepository._project_value(project)
         async with self._session() as session:
             repo = ExperienceRepository(session)
-            pairs = await repo.find_duplicates(threshold=thr, limit=lim, project=project)
+            pairs = await repo.find_duplicates(
+                threshold=thr, limit=lim, project=project
+            )
         return {
             "pairs": pairs,
             "threshold": thr,
@@ -591,7 +607,9 @@ class ExperienceService:
                 tag=tag,
                 project=project,
             )
-            total = await repo.count_experiences(status=status, tag=tag, project=project)
+            total = await repo.count_experiences(
+                status=status, tag=tag, project=project
+            )
             return {
                 "experiences": exps,
                 "total": total,

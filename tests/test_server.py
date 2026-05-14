@@ -38,7 +38,9 @@ class TestLiteToolRegistration:
     @pytest.mark.asyncio
     async def test_exactly_six_tools(self):
         tools = {t.name: t for t in await mcp.list_tools()}
-        assert len(tools) == 9, f"Expected 9 tools, got {len(tools)}: {list(tools.keys())}"
+        assert (
+            len(tools) == 9
+        ), f"Expected 9 tools, got {len(tools)}: {list(tools.keys())}"
 
     @pytest.mark.asyncio
     async def test_tool_names(self):
@@ -91,7 +93,9 @@ class TestMemoryGetArchive:
         mock_app = make_mock_app_context(archive_service=mock_svc)
         with (
             _patch_app_context(mock_app),
-            patch(f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"),
+            patch(
+                f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"
+            ),
             patch(f"{_P}._resolve_project", return_value="default"),
         ):
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -126,12 +130,18 @@ class TestMemoryArchiveUpsert:
         st.mcp.max_archive_solution_doc_chars = 64_000
         mock_svc = MagicMock()
         mock_svc.archive_upsert = AsyncMock(
-            return_value={"action": "created", "archive_id": aid, "previous_updated_at": None}
+            return_value={
+                "action": "created",
+                "archive_id": aid,
+                "previous_updated_at": None,
+            }
         )
         mock_app = make_mock_app_context(settings=st, archive_service=mock_svc)
         with (
             _patch_app_context(mock_app),
-            patch(f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"),
+            patch(
+                f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"
+            ),
             patch(f"{_P}._resolve_project", return_value="myproj"),
         ):
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -194,7 +204,9 @@ class TestMemoryArchiveUpsert:
         mock_app = make_mock_app_context(settings=st, archive_service=mock_svc)
         with (
             _patch_app_context(mock_app),
-            patch(f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"),
+            patch(
+                f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"
+            ),
             patch(f"{_P}._resolve_project", return_value=None),
         ):
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -233,7 +245,9 @@ class TestMemorySave:
             patch(f"{_O}.get_session") as mock_get_session,
         ):
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aenter__ = AsyncMock(
+                return_value=mock_session
+            )
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -293,7 +307,9 @@ class TestMemorySave:
             _patch_personal(),
         ):
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aenter__ = AsyncMock(
+                return_value=mock_session
+            )
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -371,7 +387,9 @@ class TestMemoryRecall:
         ]
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
+        mock_orchestrator.search = AsyncMock(
+            return_value=OrchestratedSearchResult(results=mock_results)
+        )
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=mock_orchestrator,
@@ -383,7 +401,9 @@ class TestMemoryRecall:
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
             patch(
-                f"{_O}.write_search_log", new_callable=AsyncMock, return_value="00000000-0000-0000-0000-000000000001"
+                f"{_O}.write_search_log",
+                new_callable=AsyncMock,
+                return_value="00000000-0000-0000-0000-000000000001",
             ),
             _patch_expansion(),
         ):
@@ -411,7 +431,9 @@ class TestMemoryRecall:
         ]
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
+        mock_orchestrator.search = AsyncMock(
+            return_value=OrchestratedSearchResult(results=mock_results)
+        )
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=mock_orchestrator,
@@ -423,7 +445,9 @@ class TestMemoryRecall:
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
             patch(
-                f"{_O}.write_search_log", new_callable=AsyncMock, return_value="00000000-0000-0000-0000-000000000001"
+                f"{_O}.write_search_log",
+                new_callable=AsyncMock,
+                return_value="00000000-0000-0000-0000-000000000001",
             ),
             _patch_expansion(),
         ):
@@ -454,7 +478,9 @@ class TestMemoryRecall:
         mock_settings.mcp.truncate_solution_at = 2000
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
+        mock_orchestrator.search = AsyncMock(
+            return_value=OrchestratedSearchResult(results=mock_results)
+        )
         mock_embed = MagicMock()
         mock_app = make_mock_app_context(
             db_url="sqlite://",
@@ -467,7 +493,9 @@ class TestMemoryRecall:
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
             patch(
-                f"{_O}.write_search_log", new_callable=AsyncMock, return_value="00000000-0000-0000-0000-000000000001"
+                f"{_O}.write_search_log",
+                new_callable=AsyncMock,
+                return_value="00000000-0000-0000-0000-000000000001",
             ),
             patch(
                 "team_memory.services.memory.personal_memory.PersonalMemoryService",
@@ -475,7 +503,9 @@ class TestMemoryRecall:
             _patch_expansion(),
         ):
             mock_pm = MagicMock()
-            mock_pm.build_profile_for_user = AsyncMock(return_value={"static": ["prefers tests"], "dynamic": []})
+            mock_pm.build_profile_for_user = AsyncMock(
+                return_value={"static": ["prefers tests"], "dynamic": []}
+            )
             mock_pm_cls.return_value = mock_pm
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -493,7 +523,11 @@ class TestMemoryRecall:
         mock_results = [
             {
                 "id": str(uuid.uuid4()),
-                "parent": {"id": str(uuid.uuid4()), "title": "Auth middleware", "tags": ["auth"]},
+                "parent": {
+                    "id": str(uuid.uuid4()),
+                    "title": "Auth middleware",
+                    "tags": ["auth"],
+                },
                 "score": 0.7,
                 "confidence": "medium",
                 "total_children": 0,
@@ -501,7 +535,9 @@ class TestMemoryRecall:
         ]
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
+        mock_orchestrator.search = AsyncMock(
+            return_value=OrchestratedSearchResult(results=mock_results)
+        )
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=mock_orchestrator,
@@ -513,7 +549,9 @@ class TestMemoryRecall:
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
             patch(
-                f"{_O}.write_search_log", new_callable=AsyncMock, return_value="00000000-0000-0000-0000-000000000001"
+                f"{_O}.write_search_log",
+                new_callable=AsyncMock,
+                return_value="00000000-0000-0000-0000-000000000001",
             ),
         ):
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -541,7 +579,9 @@ class TestMemoryRecall:
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
             patch(
-                f"{_O}.write_search_log", new_callable=AsyncMock, return_value="00000000-0000-0000-0000-000000000001"
+                f"{_O}.write_search_log",
+                new_callable=AsyncMock,
+                return_value="00000000-0000-0000-0000-000000000001",
             ),
         ):
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -555,7 +595,9 @@ class TestMemoryRecall:
     async def test_no_results_suggests_save(self):
         """No results in solve mode → suggest memory_save."""
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=[]))
+        mock_orchestrator.search = AsyncMock(
+            return_value=OrchestratedSearchResult(results=[])
+        )
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=mock_orchestrator,
@@ -567,7 +609,9 @@ class TestMemoryRecall:
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
             patch(
-                f"{_O}.write_search_log", new_callable=AsyncMock, return_value="00000000-0000-0000-0000-000000000001"
+                f"{_O}.write_search_log",
+                new_callable=AsyncMock,
+                return_value="00000000-0000-0000-0000-000000000001",
             ),
         ):
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -591,7 +635,9 @@ class TestMemoryRecall:
         ]
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
+        mock_orchestrator.search = AsyncMock(
+            return_value=OrchestratedSearchResult(results=mock_results)
+        )
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=mock_orchestrator,
@@ -603,7 +649,9 @@ class TestMemoryRecall:
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
             patch(
-                f"{_O}.write_search_log", new_callable=AsyncMock, return_value="00000000-0000-0000-0000-000000000001"
+                f"{_O}.write_search_log",
+                new_callable=AsyncMock,
+                return_value="00000000-0000-0000-0000-000000000001",
             ),
             _patch_expansion(),
         ):
@@ -632,7 +680,9 @@ class TestMemoryRecall:
         ]
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
+        mock_orchestrator.search = AsyncMock(
+            return_value=OrchestratedSearchResult(results=mock_results)
+        )
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=mock_orchestrator,
@@ -644,7 +694,9 @@ class TestMemoryRecall:
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
             patch(
-                f"{_O}.write_search_log", new_callable=AsyncMock, return_value="00000000-0000-0000-0000-000000000001"
+                f"{_O}.write_search_log",
+                new_callable=AsyncMock,
+                return_value="00000000-0000-0000-0000-000000000001",
             ),
             _patch_expansion(),
         ):
@@ -666,7 +718,9 @@ class TestMemoryRecall:
         monkeypatch.setenv("TEAM_MEMORY_ENV", "development")
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=[]))
+        mock_orchestrator.search = AsyncMock(
+            return_value=OrchestratedSearchResult(results=[])
+        )
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=mock_orchestrator,
@@ -678,7 +732,9 @@ class TestMemoryRecall:
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
             patch(
-                f"{_O}.write_search_log", new_callable=AsyncMock, return_value="00000000-0000-0000-0000-000000000001"
+                f"{_O}.write_search_log",
+                new_callable=AsyncMock,
+                return_value="00000000-0000-0000-0000-000000000001",
             ),
             _patch_expansion(),
         ):
@@ -695,7 +751,9 @@ class TestMemoryRecall:
         monkeypatch.setenv("TEAM_MEMORY_ENV", "production")
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=[]))
+        mock_orchestrator.search = AsyncMock(
+            return_value=OrchestratedSearchResult(results=[])
+        )
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=mock_orchestrator,
@@ -707,7 +765,9 @@ class TestMemoryRecall:
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
             patch(
-                f"{_O}.write_search_log", new_callable=AsyncMock, return_value="00000000-0000-0000-0000-000000000001"
+                f"{_O}.write_search_log",
+                new_callable=AsyncMock,
+                return_value="00000000-0000-0000-0000-000000000001",
             ),
             _patch_expansion(),
         ):
@@ -732,7 +792,11 @@ class TestMemoryContext:
         mock_results = [
             {
                 "group_id": str(uuid.uuid4()),
-                "parent": {"id": str(uuid.uuid4()), "title": "Auth patterns", "tags": ["auth"]},
+                "parent": {
+                    "id": str(uuid.uuid4()),
+                    "title": "Auth patterns",
+                    "tags": ["auth"],
+                },
                 "confidence": "high",
             }
         ]
@@ -741,7 +805,9 @@ class TestMemoryContext:
         mock_settings.mcp.profile_max_strings_per_side = 20
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results, reranked=True))
+        mock_orchestrator.search = AsyncMock(
+            return_value=OrchestratedSearchResult(results=mock_results, reranked=True)
+        )
         mock_embed = MagicMock()
         mock_app = make_mock_app_context(
             db_url="sqlite://",
@@ -842,7 +908,9 @@ class TestGuardOutput:
     def test_large_output_truncates_results(self):
         from team_memory.server import _guard_output
 
-        results = [{"title": f"Experience {i}", "solution": "x" * 3000} for i in range(10)]
+        results = [
+            {"title": f"Experience {i}", "solution": "x" * 3000} for i in range(10)
+        ]
         data = {"message": "Found 10", "results": results}
         raw = json.dumps(data, ensure_ascii=False)
 
@@ -1100,7 +1168,9 @@ class TestMemorySubmitResponse:
         ):
             tools = {t.name: t for t in await mcp.list_tools()}
             fn = tools["memory_submit_response"].fn
-            out = await fn(query="why tests fail", response="because mocks", result_ids=[exp_id])
+            out = await fn(
+                query="why tests fail", response="because mocks", result_ids=[exp_id]
+            )
 
         mock_op.assert_awaited_once_with(
             "admin",
@@ -1119,7 +1189,9 @@ class TestMemorySubmitResponse:
     async def test_remote_delegates_to_client(self):
         buffer_id = str(uuid.uuid4())
         mock_client = MagicMock()
-        mock_client.op_submit_response = AsyncMock(return_value={"status": "buffered", "buffer_id": buffer_id})
+        mock_client.op_submit_response = AsyncMock(
+            return_value={"status": "buffered", "buffer_id": buffer_id}
+        )
         rid = str(uuid.uuid4())
         with (
             patch(f"{_P}._remote_client", mock_client),

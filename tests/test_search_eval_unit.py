@@ -42,8 +42,12 @@ class TestDefaultTestQueries:
             assert "expected_keywords" in tq, f"Query {i} missing 'expected_keywords'"
             assert "min_results" in tq, f"Query {i} missing 'min_results'"
             assert isinstance(tq["query"], str), f"Query {i} 'query' should be str"
-            assert isinstance(tq["expected_keywords"], list), f"Query {i} 'expected_keywords' should be list"
-            assert isinstance(tq["min_results"], int), f"Query {i} 'min_results' should be int"
+            assert isinstance(
+                tq["expected_keywords"], list
+            ), f"Query {i} 'expected_keywords' should be list"
+            assert isinstance(
+                tq["min_results"], int
+            ), f"Query {i} 'min_results' should be int"
 
     def test_expected_keywords_are_lowercase(self):
         """expected_keywords should be lowercase for case-insensitive matching."""
@@ -64,7 +68,9 @@ class TestDefaultTestQueries:
     def test_expected_keywords_non_empty(self):
         """Each query should have at least one expected keyword."""
         for i, tq in enumerate(DEFAULT_TEST_QUERIES):
-            assert len(tq["expected_keywords"]) > 0, f"Query {i} has no expected_keywords"
+            assert (
+                len(tq["expected_keywords"]) > 0
+            ), f"Query {i} has no expected_keywords"
 
     def test_query_strings_non_empty(self):
         """Each query string should be non-empty."""
@@ -197,7 +203,9 @@ class TestPrecisionRecallLogic:
     but without needing the full async DB pipeline.
     """
 
-    def _calc_metrics(self, recall_results: list[dict], expected_keywords: list[str], min_results: int):
+    def _calc_metrics(
+        self, recall_results: list[dict], expected_keywords: list[str], min_results: int
+    ):
         """Reproduce the precision/recall logic from run_evaluation."""
         hits = 0
         for r in recall_results:
@@ -362,9 +370,21 @@ class TestAggregateMetrics:
     def _compute_aggregates(self, results: list[dict]):
         """Reproduce the aggregate logic from run_evaluation."""
         ok_results = [r for r in results if r["status"] == "ok"]
-        avg_precision = sum(r["precision"] for r in ok_results) / len(ok_results) if ok_results else 0.0
-        avg_recall = sum(r["recall"] for r in ok_results) / len(ok_results) if ok_results else 0.0
-        hit_rate = sum(1 for r in ok_results if r["total_results"] > 0) / len(ok_results) if ok_results else 0.0
+        avg_precision = (
+            sum(r["precision"] for r in ok_results) / len(ok_results)
+            if ok_results
+            else 0.0
+        )
+        avg_recall = (
+            sum(r["recall"] for r in ok_results) / len(ok_results)
+            if ok_results
+            else 0.0
+        )
+        hit_rate = (
+            sum(1 for r in ok_results if r["total_results"] > 0) / len(ok_results)
+            if ok_results
+            else 0.0
+        )
         return {
             "avg_precision": round(avg_precision, 3),
             "avg_recall": round(avg_recall, 3),
@@ -422,8 +442,18 @@ class TestAggregateMetrics:
     def test_rounding_to_3_decimals(self):
         """Averages should be rounded to 3 decimal places."""
         results = [
-            {"status": "ok", "precision": 0.123456, "recall": 0.987654, "total_results": 1},
-            {"status": "ok", "precision": 0.654321, "recall": 0.111111, "total_results": 1},
+            {
+                "status": "ok",
+                "precision": 0.123456,
+                "recall": 0.987654,
+                "total_results": 1,
+            },
+            {
+                "status": "ok",
+                "precision": 0.654321,
+                "recall": 0.111111,
+                "total_results": 1,
+            },
         ]
         agg = self._compute_aggregates(results)
         assert agg["avg_precision"] == round((0.123456 + 0.654321) / 2, 3)
@@ -458,7 +488,9 @@ class TestRunEvaluationFlow:
         mock_ctx = make_mock_app_context()
 
         with (
-            patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch(
+                "team_memory.services.memory.memory_operations.op_recall", mock_recall
+            ),
             patch("team_memory.bootstrap.get_context", return_value=mock_ctx),
             patch("team_memory.bootstrap.bootstrap"),
         ):
@@ -482,7 +514,9 @@ class TestRunEvaluationFlow:
         mock_ctx = make_mock_app_context()
 
         with (
-            patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch(
+                "team_memory.services.memory.memory_operations.op_recall", mock_recall
+            ),
             patch("team_memory.bootstrap.get_context", return_value=mock_ctx),
             patch("team_memory.bootstrap.bootstrap"),
         ):
@@ -540,7 +574,9 @@ class TestRunEvaluationFlow:
         mock_ctx = make_mock_app_context()
 
         with (
-            patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch(
+                "team_memory.services.memory.memory_operations.op_recall", mock_recall
+            ),
             patch("team_memory.bootstrap.get_context", return_value=mock_ctx),
             patch("team_memory.bootstrap.bootstrap"),
         ):
@@ -558,7 +594,9 @@ class TestRunEvaluationFlow:
         mock_ctx = make_mock_app_context()
 
         with (
-            patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch(
+                "team_memory.services.memory.memory_operations.op_recall", mock_recall
+            ),
             patch("team_memory.bootstrap.get_context", return_value=mock_ctx),
             patch("team_memory.bootstrap.bootstrap"),
         ):
@@ -588,14 +626,18 @@ class TestRunEvaluationFlow:
         mock_ctx = make_mock_app_context()
 
         with (
-            patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch(
+                "team_memory.services.memory.memory_operations.op_recall", mock_recall
+            ),
             patch("team_memory.bootstrap.get_context", return_value=mock_ctx),
             patch("team_memory.bootstrap.bootstrap"),
         ):
             metrics = await run_evaluation("postgresql://fake:***@localhost/db")
 
         # At least one query should have "My Top Result" as top_result
-        top_results = [d["top_result"] for d in metrics["details"] if d["status"] == "ok"]
+        top_results = [
+            d["top_result"] for d in metrics["details"] if d["status"] == "ok"
+        ]
         assert any("My Top Result" in tr for tr in top_results)
 
     @pytest.mark.asyncio
@@ -608,7 +650,9 @@ class TestRunEvaluationFlow:
         mock_ctx = make_mock_app_context()
 
         with (
-            patch("team_memory.services.memory.memory_operations.op_recall", mock_recall),
+            patch(
+                "team_memory.services.memory.memory_operations.op_recall", mock_recall
+            ),
             patch("team_memory.bootstrap.get_context", return_value=mock_ctx),
             patch("team_memory.bootstrap.bootstrap"),
         ):

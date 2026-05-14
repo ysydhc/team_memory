@@ -34,7 +34,9 @@ def mock_daemon_context():
     from tests.conftest import make_mock_app_context
 
     ctx = make_mock_app_context()
-    with patch("team_memory.daemon.integration.tm_sink._daemon_context", return_value=ctx) as mock:
+    with patch(
+        "team_memory.daemon.integration.tm_sink._daemon_context", return_value=ctx
+    ) as mock:
         yield mock
 
 
@@ -106,7 +108,9 @@ class TestLocalTMSinkRecall:
     async def test_recall_returns_empty_list_when_raw_is_list(self):
         """When _op_recall returns a list (not dict, not str), recall returns []."""
         sink = LocalTMSink(user="test_user")
-        with patch("team_memory.daemon.integration.tm_sink._op_recall", new_callable=AsyncMock) as mock_recall:
+        with patch(
+            "team_memory.daemon.integration.tm_sink._op_recall", new_callable=AsyncMock
+        ) as mock_recall:
             mock_recall.return_value = [{"id": "1"}, {"id": "2"}]
             result = await sink.recall(query="test")
             assert result == []
@@ -115,7 +119,9 @@ class TestLocalTMSinkRecall:
     async def test_recall_returns_empty_list_when_raw_is_none(self):
         """When _op_recall returns None, recall returns []."""
         sink = LocalTMSink(user="test_user")
-        with patch("team_memory.daemon.integration.tm_sink._op_recall", new_callable=AsyncMock) as mock_recall:
+        with patch(
+            "team_memory.daemon.integration.tm_sink._op_recall", new_callable=AsyncMock
+        ) as mock_recall:
             mock_recall.return_value = None
             result = await sink.recall(query="test")
             assert result == []
@@ -129,7 +135,10 @@ class TestLocalTMSinkUpdateExperience:
         """update_experience should call op_experience_update with correct args."""
         sink = LocalTMSink(user="test_user")
         mock_op = AsyncMock(return_value={"id": "exp1", "title": "Updated"})
-        with patch("team_memory.services.memory.memory_operations.op_experience_update", mock_op):
+        with patch(
+            "team_memory.services.memory.memory_operations.op_experience_update",
+            mock_op,
+        ):
             result = await sink.update_experience(
                 experience_id="exp1",
                 title="Updated",
@@ -172,7 +181,10 @@ class TestLocalTMSinkIncrementUsedCount:
 
         with (
             patch("team_memory.storage.database.get_session", fake_get_session),
-            patch("team_memory.storage.repository.ExperienceRepository", return_value=mock_repo),
+            patch(
+                "team_memory.storage.repository.ExperienceRepository",
+                return_value=mock_repo,
+            ),
         ):
             await sink.increment_used_count("00000000-0000-0000-0000-000000000001")
 
@@ -253,7 +265,9 @@ class TestRemoteTMSinkDraftSave:
                 skip_dedup=True,
             )
         call_kwargs = mock_req.call_args
-        body = call_kwargs[0][2] if len(call_kwargs[0]) > 2 else call_kwargs[1].get("body")
+        body = (
+            call_kwargs[0][2] if len(call_kwargs[0]) > 2 else call_kwargs[1].get("body")
+        )
         # Verify body was built correctly
         # The _request is called as: _request("POST", "/api/v1/mcp/draft-save", body)
         args, kwargs = mock_req.call_args
