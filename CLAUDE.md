@@ -221,7 +221,7 @@ docker compose exec postgres psql -U developer -d team_memory  # DB 调试
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/014-phase2-rag-quality/plan.md`
+at `specs/015-phase3-arch-governance/plan.md`
 <!-- SPECKIT END -->
 
 # CLAUDE.md
@@ -289,3 +289,10 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+# Agent Workflow & Skills (Superpowers)
+This project uses the **Superpowers** framework for AI agent execution.
+- **DO NOT** use Speckit or generate `spec.md`, `plan.md`, or `tasks.md` files.
+- **DO NOT** create `.specify` or `specs` directories.
+- **DO** use `/brainstorming` for planning and `/subagent-driven-development` or `/executing-plans` for execution.
+- Keep the project clean. Do not leave process artifacts in the repository.

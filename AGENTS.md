@@ -204,3 +204,10 @@ docker compose exec postgres psql -U developer -d team_memory  # DB 调试
 1. 查 `docs/` 对应规范
 2. 找代码库同类实现
 3. **停下询问，不要臆测**
+
+# Agent Workflow & Skills (Superpowers)
+This project uses the **Superpowers** framework for AI agent execution.
+- **DO NOT** use Speckit or generate `spec.md`, `plan.md`, or `tasks.md` files.
+- **DO NOT** create `.specify` or `specs` directories.
+- **DO** use `/brainstorming` for planning and `/subagent-driven-development` or `/executing-plans` for execution.
+- Keep the project clean. Do not leave process artifacts in the repository.

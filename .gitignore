@@ -61,3 +61,13 @@ wiki/queries/
 wiki/index.md
 wiki/log.md
 .wiki/
+
+# Process and Plan Artifacts
+plans/
+backlog/
+specs/
+.specify/
+.harness/
+.hermes/plans/
+docs/2026/
+*.excalidraw
