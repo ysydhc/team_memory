@@ -212,7 +212,9 @@ def load_config(config_path: str | None = None) -> DaemonConfig:
 
     if config_path is None:
         # 默认路径：team_memory/hooks/config.yaml
-        default_path = Path(__file__).resolve().parent.parent / "hooks" / "config.yaml"
+        # __file__ = daemon/runtime/config.py
+        # .parent = runtime/ → .parent.parent = daemon/ → .parent.parent.parent = team_memory/
+        default_path = Path(__file__).resolve().parent.parent.parent / "hooks" / "config.yaml"
         if default_path.exists():
             config_path = str(default_path)
         else:
@@ -267,5 +269,9 @@ def load_config(config_path: str | None = None) -> DaemonConfig:
             config.daemon.host = client_cfg.daemon.host
         if config.daemon.port == 3901 and client_cfg.daemon.port != 3901:
             config.daemon.port = client_cfg.daemon.port
+        if not config.draft.db_path and hasattr(client_cfg, 'conversation') and client_cfg.conversation.db_path:
+            config.draft.db_path = os.path.expanduser(client_cfg.conversation.db_path)
+        if not config.wiki.db_path and hasattr(client_cfg, 'wiki') and client_cfg.wiki.db_path:
+            config.wiki.db_path = os.path.expanduser(client_cfg.wiki.db_path)
 
     return config

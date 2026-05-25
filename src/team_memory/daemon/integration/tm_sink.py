@@ -312,14 +312,13 @@ class LocalTMSink(TMSink):
         _ensure_ops()
         import uuid as _uuid
 
+        ctx = _daemon_context()
         from team_memory.storage.database import get_session
         from team_memory.storage.repository import ExperienceRepository
 
-        async for session in get_session():
+        async with get_session(ctx.db_url) as session:
             repo = ExperienceRepository(session)
             await repo.increment_used_count(_uuid.UUID(experience_id))
-            await session.commit()
-            break
 
 
 # ---------------------------------------------------------------------------

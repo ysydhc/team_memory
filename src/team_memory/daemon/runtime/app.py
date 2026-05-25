@@ -254,6 +254,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         buf = ConversationBuffer(db_path)
         await buf.__aenter__()
         application.state.buf = buf
+        logger.info("[INIT] ConversationBuffer initialized (db=%s)", db_path)
 
         # Separate DraftBuffer for Obsidian watcher (drafts table, not sessions)
         # 独立的 DraftBuffer 给 Obsidian watcher 使用（drafts 表，非 sessions）
