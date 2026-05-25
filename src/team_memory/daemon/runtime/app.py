@@ -679,7 +679,10 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                         logger.info("[EVAL]  faithfulness batch threshold reached, triggering evaluation")
                         import subprocess
                         import sys as _sys
+                        import os as _os
 
+                        # Build env with DB URL (batch script needs TEAM_MEMORY_DB_URL)
+                        _eval_env = {**_os.environ, "TEAM_MEMORY_DB_URL": _db_url}
                         subprocess.Popen(
                             [
                                 _sys.executable,
@@ -688,6 +691,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                                 "--force",
                             ],
                             cwd=find_project_root(),
+                            env=_eval_env,
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
                         )
