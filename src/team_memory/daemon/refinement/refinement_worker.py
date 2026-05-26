@@ -365,7 +365,10 @@ class RefinementWorker:
 
         Also auto-marks idle active sessions as needs_refinement.
         A session is considered idle if it has had no new messages
-        for idle_timeout_minutes (default 30).
+        for idle_timeout_minutes (default 30)."""
+        # Report worker activity for stall detection
+        if self._health_check:
+            self._health_check.report_worker_activity()
         """
         # Step 1: auto-mark idle active sessions
         await self._mark_idle_sessions()
