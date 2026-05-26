@@ -897,6 +897,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                                 "team_memory.daemon.quality.faithfulness_batch",
                                 "--force",
                                 "--db-url", _db_url,
+                                "--checkpoint", "/tmp/tm-faithfulness-checkpoint.txt",
                             ],
                             cwd=find_project_root(),
                             stdout=subprocess.DEVNULL,

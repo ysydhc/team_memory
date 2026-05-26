@@ -89,12 +89,25 @@ async def run_batch(
     batch_size: int = 20,
     dry_run: bool = False,
     force: bool = False,
+    checkpoint_path: str = "/tmp/tm-faithfulness-checkpoint.txt",
 ) -> dict:
-    """Run a batch faithfulness evaluation."""
+    """Run a batch faithfulness evaluation with checkpoint resume."""
+    from pathlib import Path as _Path
+
     from team_memory.daemon.buffers.response_buffer import ResponseBuffer
     from team_memory.daemon.quality.faithfulness_judge import FaithfulnessJudge
 
     buffer = ResponseBuffer(dsn=dsn)
+
+    # Load checkpoint (last successfully evaluated entry ID)
+    _cursor: str | None = None
+    try:
+        _ckpt_raw = _Path(checkpoint_path).read_text().strip()
+        if _ckpt_raw:
+            _cursor = _ckpt_raw
+            logger.info("Resuming from checkpoint: %s", _cursor[:8])
+    except FileNotFoundError:
+        pass
 
     try:
         # Check if we should run
@@ -109,8 +122,8 @@ async def run_batch(
             )
             return {"skipped": True, "pending": pending}
 
-        # Fetch entries to evaluate
-        entries = await buffer.fetch_pending(limit=batch_size)
+        # Fetch entries to evaluate (with cursor for checkpoint resume)
+        entries = await buffer.fetch_pending(limit=batch_size, cursor_id=_cursor)
         if not entries:
             logger.info("No entries to evaluate.")
             return {"skipped": False, "evaluated": 0}
@@ -159,6 +172,9 @@ async def run_batch(
                     faithfulness_score=score,
                     judge_reasoning=reasoning,
                 )
+                # Save checkpoint: write last evaluated entry ID
+                _Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
+                _Path(checkpoint_path).write_text(entry_id)
                 await buffer.sync_to_search_log(
                     entry_id,
                     faithfulness_score=score,
@@ -289,6 +305,11 @@ def main():
     parser.add_argument("--recent", type=int, default=0, help="Evaluate the N most recent buffer entries immediately")
     parser.add_argument("--show", type=int, default=0, help="Show the N most recent buffer entries with scores")
     parser.add_argument("--db-url", default=None, help="Database URL")
+    parser.add_argument(
+        "--checkpoint", type=str,
+        default="/tmp/tm-faithfulness-checkpoint.txt",
+        help="Checkpoint file (stores last evaluated entry ID)"
+    )
     args = parser.parse_args()
 
     dsn = (args.db_url or os.environ.get("TEAM_MEMORY_DB_URL") or "").strip()
@@ -311,6 +332,7 @@ def main():
                 batch_size=args.recent,
                 dry_run=args.dry_run,
                 force=True,  # Always force when --recent is specified
+                checkpoint_path=args.checkpoint,
             )
         )
     else:
@@ -322,6 +344,7 @@ def main():
                 api_key=args.api_key,
                 batch_size=args.batch_size,
                 dry_run=args.dry_run,
+                checkpoint_path=args.checkpoint,
                 force=args.force,
             )
         )
