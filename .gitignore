@@ -74,3 +74,9 @@ docs/2026/
 
 # Docs directory (ignored but kept locally)
 docs/
+
+# Runtime files (KuzuDB, task worker state)
+.kuzu_db
+.kuzu_db.wal
+.task_worker.log
+.task_worker.state
