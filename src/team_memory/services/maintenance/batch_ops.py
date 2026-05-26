@@ -39,7 +39,7 @@ class BatchOpsService:
         """
         async with get_session(self._db_url) as session:
             sql = (
-                "SELECT id, title, what_happened, solution, project, created_at "
+                "SELECT id, title, description, solution, tags, project, created_at "
                 "FROM experiences "
                 "WHERE embedding IS NULL AND is_deleted = FALSE"
             )
@@ -62,7 +62,7 @@ class BatchOpsService:
         """Return archives with embedding IS NULL."""
         async with get_session(self._db_url) as session:
             sql = (
-                "SELECT id, title, content, project, created_at "
+                "SELECT id, title, overview, solution_doc, project, created_at "
                 "FROM archives "
                 "WHERE embedding IS NULL"
             )
@@ -136,7 +136,7 @@ class BatchOpsService:
         """Return published or promoted experiences for graph backfill."""
         async with get_session(self._db_url) as session:
             sql = (
-                "SELECT id, title, what_happened, solution, project, "
+                "SELECT id, title, description, solution, tags, project, "
                 "exp_status, quality_tier, created_at "
                 "FROM experiences "
                 "WHERE exp_status IN ('published', 'promoted') AND is_deleted = FALSE"
@@ -156,7 +156,7 @@ class BatchOpsService:
         """Return published archives for graph backfill."""
         async with get_session(self._db_url) as session:
             sql = (
-                "SELECT id, title, content, project, created_at "
+                "SELECT id, title, overview, solution_doc, project, created_at "
                 "FROM archives "
                 "WHERE status IN ('published', 'active')"
             )
@@ -202,7 +202,7 @@ class BatchOpsService:
         """Return all published experiences for wiki generation."""
         async with get_session(self._db_url) as session:
             sql = (
-                "SELECT id, title, what_happened, solution, project, "
+                "SELECT id, title, description, solution, project, "
                 "exp_status, quality_tier, group_key, tags, created_at "
                 "FROM experiences "
                 "WHERE exp_status IN ('published', 'promoted') AND is_deleted = FALSE"
@@ -257,7 +257,7 @@ class BatchOpsService:
         """Return experiences where solution IS NULL or empty."""
         async with get_session(self._db_url) as session:
             sql = (
-                "SELECT id, title, what_happened, project, created_at "
+                "SELECT id, title, description, source, project, created_at "
                 "FROM experiences "
                 "WHERE (solution IS NULL OR solution = '') AND is_deleted = FALSE "
                 "ORDER BY created_at ASC LIMIT :limit"
@@ -277,3 +277,148 @@ class BatchOpsService:
                 ),
                 {"s": solution, "id": experience_id},
             )
+
+    # ------------------------------------------------------------------
+    # Personal memories – update embedding
+    # ------------------------------------------------------------------
+
+    async def update_personal_memory_embedding(
+        self, memory_id: str, embedding: list[float]
+    ) -> None:
+        """UPDATE personal_memories SET embedding = :e WHERE id = :id."""
+        async with get_session(self._db_url) as session:
+            await session.execute(
+                text(
+                    "UPDATE personal_memories SET embedding = :e WHERE id = :id::uuid"
+                ),
+                {"e": embedding, "id": memory_id},
+            )
+
+    # ------------------------------------------------------------------
+    # Entity deduplication
+    # ------------------------------------------------------------------
+
+    async def list_experiences_without_entity_links(
+        self, limit: int = 0
+    ) -> list[dict]:
+        """Return published experiences that have no entity links."""
+        async with get_session(self._db_url) as session:
+            sql = (
+                "SELECT id, title, description, solution, tags, project, updated_at "
+                "FROM experiences "
+                "WHERE exp_status = 'published' AND is_deleted = FALSE "
+                "AND NOT EXISTS ("
+                "    SELECT 1 FROM experience_entities ee "
+                "    WHERE ee.experience_id = experiences.id"
+                ") "
+                "ORDER BY updated_at DESC"
+            )
+            params: dict = {}
+            if limit > 0:
+                sql += " LIMIT :limit"
+                params["limit"] = limit
+            result = await session.execute(text(sql), params)
+            rows = result.mappings().all()
+            return [dict(r) for r in rows]
+
+    async def find_duplicate_entities(self) -> list[dict]:
+        """Return entity groups with same name (case-insensitive) appearing more than once."""
+        async with get_session(self._db_url) as session:
+            result = await session.execute(
+                text("""
+                SELECT lower(name) as lower_name,
+                       array_agg(id ORDER BY source_count DESC) as ids,
+                       array_agg(name ORDER BY source_count DESC) as names,
+                       array_agg(project ORDER BY source_count DESC) as projects,
+                       array_agg(source_count ORDER BY source_count DESC) as counts
+                FROM entities
+                GROUP BY lower(name)
+                HAVING count(*) > 1
+                ORDER BY count(*) DESC
+                """)
+            )
+            return [
+                {
+                    "lower_name": row[0],
+                    "ids": row[1],
+                    "names": row[2],
+                    "projects": row[3],
+                    "counts": row[4],
+                }
+                for row in result.fetchall()
+            ]
+
+    async def merge_entity_group(
+        self, primary_id: str, duplicate_ids: list[str]
+    ) -> int:
+        """Merge duplicate entities into primary. Returns affected row count."""
+        affected = 0
+        async with get_session(self._db_url) as session:
+            for dup_id in duplicate_ids:
+                r = await session.execute(
+                    text("""
+                    UPDATE experience_entities
+                    SET entity_id = :primary_id
+                    WHERE entity_id = :dup_id
+                    AND NOT EXISTS (
+                        SELECT 1 FROM experience_entities ee2
+                        WHERE ee2.experience_id = experience_entities.experience_id
+                        AND ee2.entity_id = :primary_id
+                    )
+                    """),
+                    {"primary_id": primary_id, "dup_id": dup_id},
+                )
+                affected += r.rowcount
+                await session.execute(
+                    text("DELETE FROM experience_entities WHERE entity_id = :dup_id"),
+                    {"dup_id": dup_id},
+                )
+                await session.execute(
+                    text("""
+                    DELETE FROM relationships r1
+                    WHERE r1.source_entity_id = :primary_id
+                    AND r1.relation_type IN (
+                        SELECT r2.relation_type FROM relationships r2
+                        WHERE r2.source_entity_id = :dup_id
+                        AND r2.target_entity_id = r1.target_entity_id
+                    )
+                    """),
+                    {"primary_id": primary_id, "dup_id": dup_id},
+                )
+                await session.execute(
+                    text("""
+                    DELETE FROM relationships r1
+                    WHERE r1.target_entity_id = :primary_id
+                    AND r1.relation_type IN (
+                        SELECT r2.relation_type FROM relationships r2
+                        WHERE r2.target_entity_id = :dup_id
+                        AND r2.source_entity_id = r1.source_entity_id
+                    )
+                    """),
+                    {"primary_id": primary_id, "dup_id": dup_id},
+                )
+                await session.execute(
+                    text("UPDATE relationships SET source_entity_id = :primary_id WHERE source_entity_id = :dup_id"),
+                    {"primary_id": primary_id, "dup_id": dup_id},
+                )
+                await session.execute(
+                    text("UPDATE relationships SET target_entity_id = :primary_id WHERE target_entity_id = :dup_id"),
+                    {"primary_id": primary_id, "dup_id": dup_id},
+                )
+                await session.execute(
+                    text("DELETE FROM entities WHERE id = :dup_id"),
+                    {"dup_id": dup_id},
+                )
+                await session.execute(
+                    text("UPDATE entities SET source_count = source_count + 1 WHERE id = :primary_id"),
+                    {"primary_id": primary_id},
+                )
+                affected += 1
+            await session.commit()
+        return affected
+
+    async def count_entities(self) -> int:
+        """Return total entity count."""
+        async with get_session(self._db_url) as session:
+            result = await session.execute(text("SELECT count(*) FROM entities"))
+            return result.scalar() or 0

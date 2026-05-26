@@ -38,32 +38,20 @@ async def run_backfill(
     Chunking controls how many tasks are submitted per batch to avoid
     overwhelming the task queue during large backfills.
     """
-    from sqlalchemy import text
-
     from team_memory.config import load_settings
-    from team_memory.storage.database import get_session
     from team_memory.services.infra.task_runner import enqueue
+    from team_memory.services.maintenance.batch_ops import BatchOpsService
 
     print(f"Chunk size: {chunk_size}, resume from: {resume_from or 'start'}")
 
     print("Loading settings...")
     settings = load_settings()
     db_url = str(settings.database.url)
+    svc = BatchOpsService(db_url=db_url)
 
     # Backfill experiences
     print("\n--- Backfilling Experiences to Graph ---")
-    async with get_session(db_url) as session:
-        result = await session.execute(
-            text(
-                """
-            SELECT id, title, description, solution, tags
-            FROM experiences
-            WHERE exp_status = 'published'
-            ORDER BY created_at ASC
-        """
-            )
-        )
-        rows = result.fetchall()
+    rows = await svc.list_published_experiences(limit=chunk_size if limit == 0 else limit)
 
     if not rows:
         print("No published experiences found.")
@@ -78,7 +66,7 @@ async def run_backfill(
 
         if dry_run:
             for row in rows[:10]:
-                print(f"  {str(row[0])[:8]}: {(row[1] or '')[:60]}")
+                print(f"  {str(row['id'])[:8]}: {(row.get('title') or '')[:60]}")
             if total > 10:
                 print(f"  ... and {total - 10} more")
         else:
@@ -87,11 +75,11 @@ async def run_backfill(
             start = time.monotonic()
 
             for i, row in enumerate(rows):
-                exp_id = row[0]
-                title = row[1] or ""
-                description = row[2] or ""
-                solution = row[3] or ""
-                tags = row[4] or []
+                exp_id = row["id"]
+                title = row.get("title") or ""
+                description = row.get("description") or ""
+                solution = row.get("solution") or ""
+                tags = row.get("tags") or []
 
                 content = f"{title}\n{description}\n{solution or ''}"
                 if tags:
@@ -126,17 +114,7 @@ async def run_backfill(
 
     # Backfill archives
     print("\n--- Backfilling Archives to Graph ---")
-    async with get_session(db_url) as session:
-        result = await session.execute(
-            text(
-                """
-            SELECT id, title, overview, solution_doc
-            FROM archives
-            ORDER BY created_at ASC
-        """
-            )
-        )
-        archive_rows = result.fetchall()
+    archive_rows = await svc.list_published_archives(limit=chunk_size if limit == 0 else limit)
 
     if not archive_rows:
         print("No archives found.")
@@ -149,16 +127,21 @@ async def run_backfill(
             f"Found {total} archives{f' (processing {len(archive_rows)})' if limit > 0 else ''}."
         )
 
-        if not dry_run:
+        if dry_run:
+            for row in archive_rows[:10]:
+                print(f"  {str(row['id'])[:8]}: {(row.get('title') or '')[:60]}")
+            if total > 10:
+                print(f"  ... and {total - 10} more")
+        else:
             succeeded = 0
             failed = 0
             start = time.monotonic()
 
             for i, row in enumerate(archive_rows):
-                arch_id = row[0]
-                title = row[1] or ""
-                overview = row[2] or ""
-                solution_doc = row[3] or ""
+                arch_id = row["id"]
+                title = row.get("title") or ""
+                overview = row.get("overview") or ""
+                solution_doc = row.get("solution_doc") or ""
 
                 content = f"{title}\n{overview}\n{solution_doc}"
 
@@ -191,17 +174,8 @@ async def run_backfill(
 
     # Backfill personal memories
     print("\n--- Backfilling Personal Memories to Graph ---")
-    async with get_session(db_url) as session:
-        result = await session.execute(
-            text(
-                """
-            SELECT id, content
-            FROM personal_memories
-            ORDER BY created_at ASC
-        """
-            )
-        )
-        pm_rows = result.fetchall()
+    from team_memory.services.maintenance.batch_ops import BatchOpsService as _BatchOps  # noqa: F811
+    pm_rows = await svc.list_personal_memories_missing_embedding(limit=chunk_size if limit == 0 else limit)
 
     if not pm_rows:
         print("No personal memories found.")
@@ -220,8 +194,8 @@ async def run_backfill(
             start = time.monotonic()
 
             for i, row in enumerate(pm_rows):
-                pm_id = row[0]
-                content = row[1] or ""
+                pm_id = row["id"]
+                content = row.get("content") or ""
 
                 try:
                     await enqueue(

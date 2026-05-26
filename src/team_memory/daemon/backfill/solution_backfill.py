@@ -19,11 +19,10 @@ import logging
 import os
 
 import httpx
-from sqlalchemy import text
 
 from team_memory.bootstrap import bootstrap
 from team_memory.project_resolver import load_dotenv_if_exists
-from team_memory.storage.database import get_session
+from team_memory.services.maintenance.batch_ops import BatchOpsService
 
 load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
@@ -98,6 +97,7 @@ async def main():
 
     ctx = bootstrap(enable_background=False)
     db_url = str(ctx.settings.database.url)
+    svc = BatchOpsService(db_url=db_url)
 
     # Get LLM config from entity_extraction settings
     ee_cfg = getattr(ctx.settings, "entity_extraction", None)
@@ -115,19 +115,7 @@ async def main():
     logger.info(f"Using LLM: {model} @ {base_url}")
 
     # Fetch experiences without solution
-    async with get_session(db_url) as session:
-        r = await session.execute(
-            text("""
-            SELECT id, title, description, source
-            FROM experiences
-            WHERE (solution IS NULL OR solution = '')
-            AND exp_status = 'published'
-            ORDER BY created_at DESC
-            LIMIT :limit
-        """),
-            {"limit": args.limit},
-        )
-        rows = r.fetchall()
+    rows = await svc.list_experiences_missing_solution(limit=args.limit)
 
     logger.info(f"Found {len(rows)} experiences without solution")
 
@@ -140,10 +128,9 @@ async def main():
     skipped = 0
 
     for i, row in enumerate(rows):
-        exp_id = str(row[0])
-        title = row[1] or ""
-        description = row[2] or ""
-        row[3] or ""
+        exp_id = str(row["id"])
+        title = row.get("title") or ""
+        description = row.get("description") or ""
 
         if not description.strip():
             logger.info(f"[{i + 1}/{len(rows)}] SKIP (empty description): {title[:40]}")
@@ -171,16 +158,7 @@ async def main():
         if args.dry_run:
             logger.info(f"  [DRY RUN] Would update experience {exp_id[:8]}")
         else:
-            async with get_session(db_url) as session:
-                await session.execute(
-                    text("""
-                    UPDATE experiences
-                    SET solution = :solution, updated_at = NOW()
-                    WHERE id = :id
-                """),
-                    {"solution": solution, "id": exp_id},
-                )
-                await session.commit()
+            await svc.update_experience_solution(exp_id, solution)
             logger.info(f"  Updated experience {exp_id[:8]}")
 
         success += 1

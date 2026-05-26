@@ -37,11 +37,9 @@ async def run_backfill(
     import json as _json
     from pathlib import Path as _Path
 
-    from sqlalchemy import text
-
     from team_memory.config import load_settings
     from team_memory.embedding.factory import create_embedding_provider
-    from team_memory.storage.database import get_session
+    from team_memory.services.maintenance.batch_ops import BatchOpsService
 
     # --- Checkpoint helpers ---
     def _load_checkpoint() -> dict | None:
@@ -67,40 +65,22 @@ async def run_backfill(
     print("Loading settings...")
     settings = load_settings()
     db_url = str(settings.database.url)
+    svc = BatchOpsService(db_url=db_url)
     print("Creating embedding provider...")
     embedding_provider = create_embedding_provider(settings)
     print(f"Embedding provider created: {embedding_provider.__class__.__name__}")
 
     # Backfill experiences (chunked, resumable)
     print("\n--- Backfilling Experiences ---")
-    _cursor_id = resume_from or ""
+    _cursor_id: str | None = resume_from or None
     _total_succeeded = 0
     _total_failed = 0
     _chunk_count = 0
 
     while True:
-        if _cursor_id:
-            _query = text(
-                """SELECT id, title, description, solution, tags
-                FROM experiences
-                WHERE exp_status = 'published' AND embedding IS NULL
-                  AND id > :cursor
-                ORDER BY created_at ASC
-                LIMIT :limit"""
-            )
-            _params = {"cursor": _cursor_id, "limit": chunk_size}
-        else:
-            _query = text(
-                """SELECT id, title, description, solution, tags
-                FROM experiences
-                WHERE exp_status = 'published' AND embedding IS NULL
-                ORDER BY created_at ASC
-                LIMIT :limit"""
-            )
-            _params = {"limit": chunk_size}
-        async with get_session(db_url) as session:
-            result = await session.execute(_query, _params)
-            rows = result.fetchall()
+        rows = await svc.list_experiences_missing_embedding(
+            limit=chunk_size, cursor_id=_cursor_id
+        )
 
         if not rows:
             if _chunk_count == 0:
@@ -114,10 +94,10 @@ async def run_backfill(
 
         if dry_run:
             for row in rows[:10]:
-                print(f"  {str(row[0])[:8]}: {(row[1] or '')[:60]}")
+                print(f"  {str(row['id'])[:8]}: {(row.get('title') or '')[:60]}")
             break
 
-        print(f"  Chunk {_chunk_count}: processing {chunk_total} records (cursor={_cursor_id[:8] if _cursor_id else 'start'})")
+        print(f"  Chunk {_chunk_count}: processing {chunk_total} records (cursor={str(_cursor_id)[:8] if _cursor_id else 'start'})")
 
         succeeded = 0
         failed = 0
@@ -125,11 +105,11 @@ async def run_backfill(
         _last_id = _cursor_id
 
         for i, row in enumerate(rows):
-            exp_id = row[0]
-            title = row[1] or ""
-            description = row[2] or ""
-            solution = row[3] or ""
-            tags = row[4] or []
+            exp_id = row["id"]
+            title = row.get("title") or ""
+            description = row.get("description") or ""
+            solution = row.get("solution") or ""
+            tags = row.get("tags") or []
 
             embed_text = f"{title}\n{description}\n{solution or ''}"
             if tags:
@@ -142,12 +122,7 @@ async def run_backfill(
                     failed += 1
                     continue
 
-                async with get_session(db_url) as session:
-                    await session.execute(
-                        text("UPDATE experiences SET embedding = :embedding WHERE id = :id"),
-                        {"embedding": str(embedding), "id": exp_id},
-                    )
-                    await session.commit()
+                await svc.update_experience_embedding(str(exp_id), embedding)
                 succeeded += 1
             except Exception as e:
                 failed += 1
@@ -180,33 +155,15 @@ async def run_backfill(
 
     # Backfill archives (chunked, resumable)
     print("\n--- Backfilling Archives ---")
-    _arch_cursor = ""
+    _arch_cursor: str | None = None
     _arch_succeeded = 0
     _arch_failed = 0
     _arch_chunks = 0
 
     while True:
-        if _arch_cursor:
-            _aquery = text(
-                """SELECT id, title, overview, solution_doc
-                FROM archives
-                WHERE embedding IS NULL AND id > :cursor
-                ORDER BY created_at ASC
-                LIMIT :limit"""
-            )
-            _params = {"cursor": _arch_cursor, "limit": chunk_size}
-        else:
-            _aquery = text(
-                """SELECT id, title, overview, solution_doc
-                FROM archives
-                WHERE embedding IS NULL
-                ORDER BY created_at ASC
-                LIMIT :limit"""
-            )
-            _params = {"limit": chunk_size}
-        async with get_session(db_url) as session:
-            result = await session.execute(_aquery, _params)
-            rows = result.fetchall()
+        rows = await svc.list_archives_missing_embedding(
+            limit=chunk_size, cursor_id=_arch_cursor
+        )
 
         if not rows:
             if _arch_chunks == 0:
@@ -219,7 +176,7 @@ async def run_backfill(
 
         if dry_run:
             for row in rows[:5]:
-                print(f"  {str(row[0])[:8]}: {(row[1] or '')[:60]}")
+                print(f"  {str(row['id'])[:8]}: {(row.get('title') or '')[:60]}")
             break
 
         print(f"  Chunk {_arch_chunks}: {len(rows)} archives")
@@ -227,19 +184,14 @@ async def run_backfill(
         _last_id = _arch_cursor
 
         for i, row in enumerate(rows):
-            arch_id = row[0]
-            embed_text = f"{row[1] or ''}\n{row[2] or ''}\n{row[3] or ''}"[:4000]
+            arch_id = row["id"]
+            embed_text = f"{row.get('title') or ''}\n{row.get('overview') or ''}\n{row.get('solution_doc') or ''}"[:4000]
             try:
                 embedding = await embedding_provider.encode_single(embed_text)
                 if embedding is None:
                     _arch_failed += 1
                     continue
-                async with get_session(db_url) as session:
-                    await session.execute(
-                        text("UPDATE archives SET embedding = :embedding WHERE id = :id"),
-                        {"embedding": str(embedding), "id": arch_id},
-                    )
-                    await session.commit()
+                await svc.update_archive_embedding(str(arch_id), embedding)
                 _arch_succeeded += 1
             except Exception as e:
                 _arch_failed += 1
@@ -252,35 +204,21 @@ async def run_backfill(
             "chunk": _arch_chunks, "succeeded": _arch_succeeded, "failed": _arch_failed,
         })
         elapsed = time.monotonic() - start
-        print(f"    Done {elapsed:.1f}s — ok={len(rows)-_arch_failed if _arch_failed==0 else '?'}")
+        print(f"    Done {elapsed:.1f}s — ok={_arch_succeeded}, fail={_arch_failed}")
 
         if limit > 0 and _arch_succeeded >= limit:
             break
 
     # Backfill personal memories
     print("\n--- Backfilling Personal Memories ---")
-    async with get_session(db_url) as session:
-        result = await session.execute(
-            text(
-                """
-            SELECT id, content
-            FROM personal_memories
-            WHERE embedding IS NULL
-            ORDER BY created_at ASC
-        """
-            )
-        )
-        pm_rows = result.fetchall()
+    pm_rows = await svc.list_personal_memories_missing_embedding(limit=limit if limit > 0 else 10000)
 
     if not pm_rows:
         print("All personal memories have embeddings.")
     else:
         total = len(pm_rows)
-        if limit > 0:
-            pm_rows = pm_rows[:limit]
-
         print(
-            f"Found {total} personal memories without embedding{f' (processing {len(pm_rows)})' if limit > 0 else ''}."
+            f"Found {total} personal memories without embedding."
         )
 
         if not dry_run:
@@ -289,8 +227,8 @@ async def run_backfill(
             start = time.monotonic()
 
             for i, row in enumerate(pm_rows):
-                pm_id = row[0]
-                content = row[1] or ""
+                pm_id = row["id"]
+                content = row.get("content") or ""
 
                 embed_text = content[:4000]
 
@@ -300,14 +238,7 @@ async def run_backfill(
                         failed += 1
                         continue
 
-                    async with get_session(db_url) as session:
-                        await session.execute(
-                            text(
-                                "UPDATE personal_memories SET embedding = :embedding WHERE id = :id"
-                            ),
-                            {"embedding": str(embedding), "id": pm_id},
-                        )
-                        await session.commit()
+                    await svc.update_personal_memory_embedding(str(pm_id), embedding)
 
                     succeeded += 1
                 except Exception as e:

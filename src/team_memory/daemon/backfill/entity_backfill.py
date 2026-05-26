@@ -29,42 +29,6 @@ load_dotenv_if_exists(
 )
 
 
-async def _get_unextracted_experiences(
-    db_url: str,
-    limit: int = 0,
-) -> list[dict]:
-    """Fetch published experiences without entity links."""
-    from sqlalchemy import select, text
-
-    from team_memory.storage.database import get_session
-    from team_memory.storage.models import Experience
-
-    experiences = []
-    async with get_session(db_url) as session:
-        # Find experience IDs that have no entity links
-        subq = (
-            select(text("1"))
-            .select_from(text("experience_entities ee"))
-            .where(text("ee.experience_id = experiences.id"))
-        )
-        stmt = (
-            select(Experience)
-            .where(Experience.exp_status == "published")
-            .where(~subq.exists())
-            .order_by(Experience.updated_at.desc())
-        )
-        if limit > 0:
-            stmt = stmt.limit(limit)
-        result = await session.execute(stmt)
-        rows = result.scalars().all()
-        experiences = [exp.to_dict() for exp in rows]
-
-    from team_memory.storage.database import close_db
-
-    await close_db()
-    return experiences
-
-
 async def _build_llm_config(
     model: str | None = None,
     base_url: str | None = None,
@@ -98,12 +62,14 @@ async def run_backfill(
     """Run entity backfill for all unextracted experiences."""
     from team_memory.config import load_settings
     from team_memory.services.entity.entity_extractor import EntityExtractor
+    from team_memory.services.maintenance.batch_ops import BatchOpsService
 
     settings = load_settings()
     db_url = str(settings.database.url)
+    svc = BatchOpsService(db_url=db_url)
 
-    # Fetch unextracted experiences
-    experiences = await _get_unextracted_experiences(db_url, limit=limit)
+    # Fetch published experiences without entity links
+    experiences = await svc.list_experiences_without_entity_links(limit=limit)
     if not experiences:
         print("No experiences need entity extraction.")
         return
