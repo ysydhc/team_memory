@@ -1175,6 +1175,42 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         )
         return results
 
+    @app.post("/hooks/session_timeout_check")
+    async def hook_session_timeout_check() -> dict[str, Any]:
+        """Return active sessions that have been idle for >= 30 minutes."""
+        from datetime import timedelta
+
+        buf_obj: ConversationBuffer = app.state.buf
+        sessions = await buf_obj.get_active_sessions()
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+        timed_out = []
+        for s in sessions:
+            updated_at = s.get("updated_at")
+            if not updated_at:
+                continue
+            try:
+                dt = datetime.fromisoformat(str(updated_at))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                if dt <= cutoff:
+                    timed_out.append(s["id"])
+            except (ValueError, TypeError):
+                continue
+        return {"timed_out_sessions": timed_out}
+
+    @app.post("/wiki/index")
+    async def wiki_index(request: Request) -> dict:
+        """Index a single file into the wiki compiler."""
+        data = await request.json()
+        path = data.get("path")
+        project = data.get("project", "")
+        wiki_compiler = getattr(app.state, "wiki_compiler", None)
+        if wiki_compiler and path:
+            compile_fn = getattr(wiki_compiler, "index_file", None)
+            if compile_fn:
+                await compile_fn(path, project=project)
+        return {"status": "ok"}
+
     @app.get("/wiki/stats")
     async def wiki_stats() -> dict[str, Any]:
         """Return wiki entry statistics."""
