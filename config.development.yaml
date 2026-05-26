@@ -49,13 +49,12 @@ database:
 #     model: text-embedding-3-small
 #     dimension: 1536
 embedding:
-  provider: ollama
-  ollama:
-    # 与 ollama list /api/tags 中 name 一致（含 :latest）；勿只写无前缀名以免脚本误判未安装
-    model: qwen3-embedding:0.6b
-    # TM 跑在宿主机用 localhost；TM 跑在 Docker 内而 Ollama 在宿主机时用 host.docker.internal（见 docker-compose）
-    base_url: http://localhost:11434
-    dimension: 1024
+  provider: openai
+  openai:
+    api_key: "${LITELLM_MASTER_KEY}"
+    model: qwen3-embedding-8b
+    base_url: http://localhost:4000/v1
+    dimension: 4096
 
 # -----------------------------------------------------------------------------
 # llm — 文档解析、经验提取、个人记忆抽取等（调用 Ollama 的 /api/chat）
@@ -283,7 +282,7 @@ uploads:
   enabled: true
   root_dir: ".tmp/uploads"
   max_bytes: 52428800
-  allowed_extensions: [ ".md", ".txt", ".json", ".pdf" ]
+  allowed_extensions: [".md", ".txt", ".json", ".pdf"]
 
 # -----------------------------------------------------------------------------
 # log_format — 控制台/结构化日志形态

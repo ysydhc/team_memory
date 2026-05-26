@@ -98,8 +98,8 @@ class LLMConfig:
 
     base_url: str = "http://localhost:4000/v1"
     api_key: str = ""
-    api_key_env: str = ""  # Reference to env var name, e.g. "LITELLM_MASTER_KEY"
-    model: str = "DeepSeek-V3"
+    api_key_env: str = "LITELLM_MASTER_KEY"  # Reference to env var name, e.g. "LITELLM_MASTER_KEY"
+    model: str = "DeepSeek-V4-Flash"
     timeout: int = 30
 
     @property

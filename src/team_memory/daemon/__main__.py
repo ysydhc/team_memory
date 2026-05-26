@@ -26,6 +26,7 @@ def main() -> None:
         host=config.daemon.host,
         port=config.daemon.port,
         log_level="info",
+        loop="asyncio",
         # Preserve app loggers (don't let uvicorn override them)
         log_config={
             "version": 1,
