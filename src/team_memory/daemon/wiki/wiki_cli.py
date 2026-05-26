@@ -25,29 +25,16 @@ load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), ".
 
 
 async def _fetch_published_experiences() -> list[dict]:
-    """Fetch all published experiences from PG via team_memory service."""
+    """Fetch all published experiences from PG via BatchOpsService."""
     try:
         from team_memory.config import load_settings
-        from team_memory.storage.database import get_session
-        from team_memory.storage.models import Experience
+        from team_memory.services.maintenance.batch_ops import BatchOpsService
 
         settings = load_settings()
-        db_url = str(settings.database.url)
+        database_url = str(settings.database.url)
 
-        experiences = []
-        async with get_session(db_url) as session:
-            from sqlalchemy import select
-
-            stmt = select(Experience).where(Experience.exp_status == "published").order_by(Experience.updated_at.desc())
-            result = await session.execute(stmt)
-            rows = result.scalars().all()
-            experiences = [exp.to_dict() for exp in rows]
-
-        # Close engine to release connections
-        from team_memory.storage.database import close_db
-
-        await close_db()
-
+        svc = BatchOpsService(db_url=database_url)
+        experiences = await svc.list_experiences_for_wiki(project=None)
         return experiences
     except Exception as e:
         print(f"[ERROR] Failed to fetch experiences from PG: {e}", file=sys.stderr)

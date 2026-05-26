@@ -204,87 +204,19 @@ class WikiCompiler:
     # ------------------------------------------------------------------
 
     async def _load_pg_data(self, pg_url: str) -> None:
-        """Load entity-graph and embedding data from PostgreSQL.
+        """Load entity-graph data from PostgreSQL via BatchOpsService.
 
         Called once at the start of compile_incremental / full_rebuild.
-        Results are cached in self._exp_entity_map and self._exp_embeddings.
+        Results are cached in self._exp_entity_map.
         """
-        from sqlalchemy import text
-
-        from team_memory.storage.database import get_session
+        from team_memory.services.maintenance.batch_ops import BatchOpsService
 
         self._pg_url = pg_url
-
-        # 1. Load experience → entity mapping
-        self._exp_entity_map = {}
         try:
-            async with get_session(pg_url) as session:
-                result = await session.execute(
-                    text(
-                        """
-                    SELECT ee.experience_id, ee.entity_id
-                    FROM experience_entities ee
-                    JOIN entities e ON e.id = ee.entity_id
-                """
-                    )
-                )
-                for row in result.fetchall():
-                    exp_id = str(row[0])
-                    if exp_id not in self._exp_entity_map:
-                        self._exp_entity_map[exp_id] = set()
-                    self._exp_entity_map[exp_id].add(str(row[1]))
+            svc = BatchOpsService(db_url=pg_url)
+            self._exp_entity_map = await svc.load_experience_entity_map()
         except Exception:
-            # Non-fatal: entity data is optional enhancement
             self._exp_entity_map = {}
-
-        # 2. Load embeddings
-        self._exp_embeddings = {}
-        try:
-            import numpy as np  # noqa: F811
-
-            async with get_session(pg_url) as session:
-                result = await session.execute(
-                    text(
-                        """
-                    SELECT id, embedding FROM experiences
-                    WHERE embedding IS NOT NULL AND exp_status = 'published'
-                """
-                    )
-                )
-                for row in result.fetchall():
-                    exp_id = str(row[0])
-                    emb = row[1]
-                    if emb is None:
-                        continue
-                    try:
-                        if isinstance(emb, str):
-                            # asyncpg returns pgvector as string: "[0.1,0.2,...]"
-                            import json
-
-                            vec = json.loads(emb)
-                            self._exp_embeddings[exp_id] = np.array(
-                                vec, dtype=np.float32
-                            )
-                        elif hasattr(emb, "tolist"):
-                            self._exp_embeddings[exp_id] = np.array(
-                                emb.tolist(), dtype=np.float32
-                            )
-                        elif isinstance(emb, list):
-                            self._exp_embeddings[exp_id] = np.array(
-                                emb, dtype=np.float32
-                            )
-                        elif isinstance(emb, bytes):
-                            self._exp_embeddings[exp_id] = np.frombuffer(
-                                emb, dtype=np.float32
-                            )
-                    except Exception:
-                        continue
-        except ImportError:
-            # numpy not available — skip embedding similarity
-            self._exp_embeddings = {}
-        except Exception:
-            # Non-fatal: embedding data is optional enhancement
-            self._exp_embeddings = {}
 
     # ------------------------------------------------------------------
     # Public API
