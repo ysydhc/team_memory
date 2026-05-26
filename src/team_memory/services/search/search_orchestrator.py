@@ -77,6 +77,25 @@ class SearchOrchestrator:
         # Classify query intent
         intent = await self._intent_router.classify(query)
 
+        # Optional: Dual-track graph retrieval if intent suggests logical chains or dependencies
+        graph_summary = None
+        if intent.intent_type in ("dependency", "evolution", "blast_radius"):
+            try:
+                from team_memory.services.graph.graphiti_client import get_graph_client
+
+                graph_client = get_graph_client()
+                subgraph = await graph_client.query_subgraph(
+                    query, max_depth=2, max_nodes=20
+                )
+                graph_summary = subgraph.get("summary")
+                logger.debug(
+                    "Graphiti dual-track retrieval returned summary: %s", graph_summary
+                )
+            except ImportError:
+                logger.debug("Graphiti not installed, skipping graph query.")
+            except Exception as e:
+                logger.warning("Graphiti dual-track retrieval failed: %s", str(e))
+
         async with get_session(self._db_url) as session:
             search_start = time.monotonic()
             repo = ExperienceRepository(session)
@@ -132,6 +151,21 @@ class SearchOrchestrator:
                     pipeline_result.results, include_promoted=include_promoted
                 )
 
+                # If we got a graph summary, inject it as a synthetic top result
+                if graph_summary:
+                    processed_results.insert(
+                        0,
+                        {
+                            "id": "graph-summary",
+                            "title": "Graph Knowledge Summary",
+                            "problem": "Logical chain and dependency analysis",
+                            "solution": graph_summary,
+                            "score": 1.0,
+                            "status": "published",
+                            "tags": ["graph_summary"],
+                        },
+                    )
+
                 return OrchestratedSearchResult(
                     results=processed_results,
                     reranked=pipeline_result.reranked,
@@ -163,7 +197,24 @@ class SearchOrchestrator:
                 duration_ms=duration_ms,
             )
             # Apply status-based post-processing to legacy results
-            processed_legacy = self._apply_status_filter(results, include_promoted=include_promoted)
+            processed_legacy = self._apply_status_filter(
+                results, include_promoted=include_promoted
+            )
+
+            # If we got a graph summary, inject it as a synthetic top result
+            if graph_summary:
+                processed_legacy.insert(
+                    0,
+                    {
+                        "id": "graph-summary",
+                        "title": "Graph Knowledge Summary",
+                        "problem": "Logical chain and dependency analysis",
+                        "solution": graph_summary,
+                        "score": 1.0,
+                        "status": "published",
+                        "tags": ["graph_summary"],
+                    },
+                )
 
             return OrchestratedSearchResult(
                 results=processed_legacy,

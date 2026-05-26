@@ -19,6 +19,37 @@ TaskHandler = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
 _handlers: dict[str, TaskHandler] = {}
 
 
+async def _handle_graphiti_ingest(payload: dict[str, Any]) -> None:
+    """Background task handler for Graphiti ingestion."""
+    try:
+        from team_memory.services.graph.graphiti_client import get_graph_client
+    except ImportError as e:
+        logger.warning("Graphiti not installed, skipping ingest task: %s", e)
+        return
+
+    record_id = payload.get("record_id")
+    content = payload.get("content")
+    source_type = payload.get("source_type", "experience")
+
+    if not record_id or not content:
+        logger.error("Missing record_id or content in graphiti_ingest payload")
+        return
+
+    try:
+        client = get_graph_client()
+        await client.ingest_to_graph(
+            record_id=record_id, content=content, source_type=source_type
+        )
+        logger.info("Successfully ingested %s to graphiti", record_id)
+        # Force garbage collection to clean up Kuzu resources
+        import gc
+
+        gc.collect()
+    except Exception as e:
+        logger.error("Failed to ingest %s to graphiti: %s", record_id, e)
+        raise
+
+
 def register_handler(task_type: str, handler: TaskHandler) -> None:
     """Register an async handler for a task type."""
     _handlers[task_type] = handler
@@ -34,6 +65,13 @@ def clear_handlers() -> None:
     """Remove all registered handlers (for testing)."""
     _handlers.clear()
 
+    # Re-register default handlers after clear
+    register_handler("graphiti_ingest", _handle_graphiti_ingest)
+
+
+# Register default handlers on module import
+register_handler("graphiti_ingest", _handle_graphiti_ingest)
+
 
 async def enqueue(task_type: str, payload: dict[str, Any], *, db_url: str) -> None:
     """Insert a pending task into the background_tasks table."""
@@ -42,7 +80,12 @@ async def enqueue(task_type: str, payload: dict[str, Any], *, db_url: str) -> No
         session.add(task)
 
 
-async def poll_and_execute(db_url: str, *, batch_size: int = 5) -> int:
+async def poll_and_execute(
+    db_url: str,
+    *,
+    batch_size: int = 5,
+    exclude_types: list[str] | None = None,
+) -> int:
     """Claim pending tasks atomically and execute them.
 
     Uses ``FOR UPDATE SKIP LOCKED`` so multiple workers can poll
@@ -53,14 +96,16 @@ async def poll_and_execute(db_url: str, *, batch_size: int = 5) -> int:
     processed = 0
     async with get_session(db_url) as session:
         for _ in range(batch_size):
-            # Atomic claim: SELECT … FOR UPDATE SKIP LOCKED + UPDATE in one statement
-            claim_subq = (
+            claim_q = (
                 select(BackgroundTask.id)
                 .where(BackgroundTask.status == "pending")
                 .order_by(BackgroundTask.created_at)
                 .limit(1)
                 .with_for_update(skip_locked=True)
-            ).scalar_subquery()
+            )
+            if exclude_types:
+                claim_q = claim_q.where(BackgroundTask.task_type.notin_(exclude_types))
+            claim_subq = claim_q.scalar_subquery()
 
             stmt = (
                 update(BackgroundTask)

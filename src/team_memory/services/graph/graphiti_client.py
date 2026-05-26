@@ -113,11 +113,11 @@ class GraphitiClient:
                 api_key=emb_api_key,
                 base_url=emb_base_url,
             )
-            print(
-                f"Graphiti Embedder Config: base_url={emb_base_url}, model={emb_model}, api_key={emb_api_key[:5]}***"
-            )
             logger.info(
-                f"Graphiti Embedder Config: base_url={emb_base_url}, model={emb_model}, api_key={emb_api_key[:5]}***"
+                "Graphiti Embedder Config: base_url=%s, model=%s, api_key=%s***",
+                emb_base_url,
+                emb_model,
+                emb_api_key[:5],
             )
             embedder_config = OpenAIEmbedderConfig(
                 api_key=emb_api_key,
@@ -151,11 +151,11 @@ class GraphitiClient:
             # Kuzu syntax for index creation is different or not supported in the same way
             # Let's try standard neo4j syntax just in case, or ignore if it fails
             try:
-                    # Kuzu FTS index creation syntax
-                    # await driver.execute_query(
-                    #     "CALL CREATE_FTS_INDEX('RelatesToNode_', 'edge_name_and_fact', ['name', 'fact'])"
-                    # )
-                    pass
+                # Kuzu FTS index creation syntax
+                # await driver.execute_query(
+                #     "CALL CREATE_FTS_INDEX('RelatesToNode_', 'edge_name_and_fact', ['name', 'fact'])"
+                # )
+                pass
             except Exception as e:
                 if "already exists" not in str(e):
                     logger.debug("Failed to create index manually: %s", e)
@@ -198,10 +198,6 @@ class GraphitiClient:
                     reference_time=datetime.now(timezone.utc),
                 )
             logger.info("Graphiti ingest completed for %s %s", source_type, record_id)
-            
-            # Re-initialize client to clear Kuzu internal states between large ingestions
-            self._initialized = False
-            self._client = None
         except Exception as e:
             logger.error(
                 "Graphiti ingest failed for %s %s: %s", source_type, record_id, e
@@ -260,7 +256,9 @@ class GraphitiClient:
                 summary_lines.append(
                     f"- {edge.source_node.name} {edge.name} {edge.target_node.name} ({edge.fact})"
                 )
-            elif hasattr(edge, "source_node_uuid") and hasattr(edge, "target_node_uuid"):
+            elif hasattr(edge, "source_node_uuid") and hasattr(
+                edge, "target_node_uuid"
+            ):
                 # We only have UUIDs, need to fetch nodes from Kuzu
                 try:
                     driver = self._client.driver
@@ -280,10 +278,18 @@ class GraphitiClient:
                         dst_records, _, _ = await driver.execute_query(
                             query_str, dst_uuid=edge.target_node_uuid
                         )
-                    
-                    src_name = src_records[0].get("src") if src_records else edge.source_node_uuid
-                    dst_name = dst_records[0].get("dst") if dst_records else edge.target_node_uuid
-                    
+
+                    src_name = (
+                        src_records[0].get("src")
+                        if src_records
+                        else edge.source_node_uuid
+                    )
+                    dst_name = (
+                        dst_records[0].get("dst")
+                        if dst_records
+                        else edge.target_node_uuid
+                    )
+
                     edges_found.append(
                         {
                             "source": src_name,
@@ -323,19 +329,21 @@ class GraphitiClient:
                     target = record.get("dst")
                     rel_name = record.get("rel_name", "RELATES_TO")
                     rel_uuid = record.get("rel_uuid")
-                    
+
                     fact = ""
                     if rel_uuid:
                         try:
                             # Fetch fact separately to avoid Kuzu projection bug
                             fact_records, _, _ = await driver.execute_query(
                                 "MATCH (rel:RelatesToNode_) WHERE rel.uuid = $uuid RETURN rel.fact as fact",
-                                uuid=rel_uuid
+                                uuid=rel_uuid,
                             )
                             if fact_records:
                                 fact = fact_records[0].get("fact", "")
                         except Exception as e:
-                            logger.debug("Failed to fetch fact for rel %s: %s", rel_uuid, e)
+                            logger.debug(
+                                "Failed to fetch fact for rel %s: %s", rel_uuid, e
+                            )
 
                     edges_found.append(
                         {
@@ -369,19 +377,21 @@ class GraphitiClient:
                     target = record.get("dst")
                     rel_name = record.get("rel_name", "RELATES_TO")
                     rel_uuid = record.get("rel_uuid")
-                    
+
                     fact = ""
                     if rel_uuid:
                         try:
                             # Fetch fact separately to avoid Kuzu projection bug
                             fact_records, _, _ = await driver.execute_query(
                                 "MATCH (rel:RelatesToNode_) WHERE rel.uuid = $uuid RETURN rel.fact as fact",
-                                uuid=rel_uuid
+                                uuid=rel_uuid,
                             )
                             if fact_records:
                                 fact = fact_records[0].get("fact", "")
                         except Exception as e:
-                            logger.debug("Failed to fetch fact for rel %s: %s", rel_uuid, e)
+                            logger.debug(
+                                "Failed to fetch fact for rel %s: %s", rel_uuid, e
+                            )
 
                     edges_found.append(
                         {
@@ -412,8 +422,9 @@ class GraphitiClient:
                     nodes_set.add(edge.target_node.name)
             nodes_found_count = len(nodes_set)
 
-        
-        nodes_found_list = list(set([e["source"] for e in edges_found] + [e["target"] for e in edges_found]))
+        nodes_found_list = list(
+            set([e["source"] for e in edges_found] + [e["target"] for e in edges_found])
+        )
         return {
             "query": query,
             "nodes_found": nodes_found_list,
