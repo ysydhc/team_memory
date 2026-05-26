@@ -308,17 +308,10 @@ class LocalTMSink(TMSink):
         )
 
     async def increment_used_count(self, experience_id: str) -> None:
-        """Increment used_count via direct DB access."""
+        """Increment used_count via ExperienceService."""
         _ensure_ops()
-        import uuid as _uuid
-
         ctx = _daemon_context()
-        from team_memory.storage.database import get_session
-        from team_memory.storage.repository import ExperienceRepository
-
-        async with get_session(ctx.db_url) as session:
-            repo = ExperienceRepository(session)
-            await repo.increment_used_count(_uuid.UUID(experience_id))
+        await ctx.service.increment_used_count(experience_id)
 
 
 # ---------------------------------------------------------------------------

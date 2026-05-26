@@ -169,27 +169,22 @@ class TestLocalTMSinkIncrementUsedCount:
 
     @pytest.mark.asyncio
     async def test_increment_used_count(self):
-        """increment_used_count should call repo.increment_used_count."""
+        """increment_used_count should delegate to ctx.service.increment_used_count."""
+        from tests.conftest import make_mock_app_context
+
+        mock_service = MagicMock()
+        mock_service.increment_used_count = AsyncMock()
+        ctx = make_mock_app_context(service=mock_service)
+
         sink = LocalTMSink(user="test_user")
-        mock_session = AsyncMock()
-        mock_repo = MagicMock()
-        mock_repo.increment_used_count = AsyncMock()
-
-        # Create an async generator for get_session
-        async def fake_get_session():
-            yield mock_session
-
-        with (
-            patch("team_memory.storage.database.get_session", fake_get_session),
-            patch(
-                "team_memory.storage.repository.ExperienceRepository",
-                return_value=mock_repo,
-            ),
+        with patch(
+            "team_memory.daemon.integration.tm_sink._daemon_context", return_value=ctx
         ):
             await sink.increment_used_count("00000000-0000-0000-0000-000000000001")
 
-        mock_repo.increment_used_count.assert_awaited_once()
-        mock_session.commit.assert_awaited_once()
+        mock_service.increment_used_count.assert_awaited_once_with(
+            "00000000-0000-0000-0000-000000000001"
+        )
 
 
 # ---------------------------------------------------------------------------
