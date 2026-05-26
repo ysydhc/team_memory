@@ -897,13 +897,17 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                         import sys as _sys
                         import os as _os
 
+                        # Get DB URL from config (same as how response_buffer connects)
+                        from team_memory.config import load_settings as _load_tm2
+                        _tm_settings2 = _load_tm2()
+                        _db_url_val = str(_tm_settings2.database.url).replace("+asyncpg", "")
                         subprocess.Popen(
                             [
                                 _sys.executable,
                                 "-m",
                                 "team_memory.daemon.quality.faithfulness_batch",
                                 "--force",
-                                "--db-url", _db_url,
+                                "--db-url", _db_url_val,
                                 "--checkpoint", "/tmp/tm-faithfulness-checkpoint.txt",
                             ],
                             cwd=find_project_root(),
