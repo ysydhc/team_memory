@@ -288,7 +288,7 @@ async def _check_cache() -> dict:
 async def health_check():
     """Health check endpoint -- no authentication required."""
     db_check, embed_health, embed_check, llm_check, cache_check = await asyncio.gather(
-        _check_db(),
+        _check_database(),
         _check_embedding_health(),
         _check_embedding_provider(),
         _check_llm_provider(),

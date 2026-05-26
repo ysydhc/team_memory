@@ -174,7 +174,6 @@ async def run_backfill(
 
     # Backfill personal memories
     print("\n--- Backfilling Personal Memories to Graph ---")
-    from team_memory.services.maintenance.batch_ops import BatchOpsService as _BatchOps  # noqa: F811
     pm_rows = await svc.list_personal_memories_missing_embedding(limit=chunk_size if limit == 0 else limit)
 
     if not pm_rows:
@@ -221,7 +220,8 @@ async def run_backfill(
 
             elapsed = time.monotonic() - start
             print(
-                f"Personal memories graph backfill tasks submitted in {elapsed:.1f}s: Succeeded {succeeded}, Failed {failed}"
+                f"Personal memories graph backfill tasks submitted in"
+                f" {elapsed:.1f}s: Succeeded {succeeded}, Failed {failed}"
             )
 
 

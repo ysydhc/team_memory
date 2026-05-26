@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
 
 from team_memory.hooks.core.daemon_http import async_post_hook
 

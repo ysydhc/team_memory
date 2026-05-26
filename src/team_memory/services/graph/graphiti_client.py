@@ -409,18 +409,19 @@ class GraphitiClient:
         if summary_lines:
             summary = "Graph relationships found:\n" + "\n".join(summary_lines)
 
-        nodes_found_count = 0
-        if hasattr(results, "nodes"):
-            nodes_found_count = len(results.nodes)
-        elif isinstance(results, list):
-            # If it's a list of edges, we can estimate nodes from unique sources/targets
-            nodes_set = set()
-            for edge in edges_to_process:
-                if hasattr(edge, "source_node"):
-                    nodes_set.add(edge.source_node.name)
-                if hasattr(edge, "target_node"):
-                    nodes_set.add(edge.target_node.name)
-            nodes_found_count = len(nodes_set)
+        if hasattr(results, "nodes") or isinstance(results, list):
+            nodes_set: set[str] = set()
+            if hasattr(results, "nodes"):
+                for node in results.nodes:
+                    if hasattr(node, "name"):
+                        nodes_set.add(node.name)
+            elif isinstance(results, list):
+                # If it's a list of edges, we can estimate nodes from unique sources/targets
+                for edge in edges_to_process:
+                    if hasattr(edge, "source_node"):
+                        nodes_set.add(edge.source_node.name)
+                    if hasattr(edge, "target_node"):
+                        nodes_set.add(edge.target_node.name)
 
         nodes_found_list = list(
             set([e["source"] for e in edges_found] + [e["target"] for e in edges_found])

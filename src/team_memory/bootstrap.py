@@ -522,6 +522,7 @@ async def start_background_tasks(ctx: AppContext) -> None:
     """Start background tasks and background task polling."""
     logger.info("Background tasks started")
     import asyncio
+
     from team_memory.services.infra import task_runner
 
     async def _poll_loop():

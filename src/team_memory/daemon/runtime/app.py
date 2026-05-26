@@ -192,8 +192,8 @@ async def _wait_for_deps(config: DaemonConfig, logger: logging.Logger) -> bool:
     import asyncio as _asyncio
     import time as _time
 
-    MAX_WAIT = 120  # 2 minutes
-    INTERVAL = 5
+    max_wait = 120  # 2 minutes
+    interval = 5
 
     # -- Resolve DB URL from config.development.yaml (not daemon config) --
     _db_url = ""
@@ -224,7 +224,7 @@ async def _wait_for_deps(config: DaemonConfig, logger: logging.Logger) -> bool:
 
     started = _time.monotonic()
 
-    while (_time.monotonic() - started) < MAX_WAIT:
+    while (_time.monotonic() - started) < max_wait:
         ok: list[str] = []
         fail: list[str] = []
 
@@ -320,7 +320,7 @@ async def _wait_for_deps(config: DaemonConfig, logger: logging.Logger) -> bool:
             ", ".join(fail),
             _time.monotonic() - started,
         )
-        await _asyncio.sleep(INTERVAL)
+        await _asyncio.sleep(interval)
 
     logger.warning(
         "[STARTUP] Degraded mode after %.0fs — failed deps: %s",
@@ -430,7 +430,8 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                 _dw.resume()
                 logger.info("[WAKE]  AutoDreamWorker resumed")
 
-            import json as _json2, time as _time2
+            import json as _json2
+            import time as _time2
             _rec_log = _json2.dumps({
                 "event": "system_wake_recovery_complete",
                 "sleep_seconds": round(sleep_seconds, 1),
@@ -895,7 +896,6 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                         logger.info("[EVAL]  faithfulness batch threshold reached, triggering evaluation")
                         import subprocess
                         import sys as _sys
-                        import os as _os
 
                         # Get DB URL from config (same as how response_buffer connects)
                         from team_memory.config import load_settings as _load_tm2

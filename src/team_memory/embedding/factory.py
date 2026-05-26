@@ -60,6 +60,14 @@ def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
         except Exception:
             return None
 
+    def _make_ollama(ollama_cfg: object) -> EmbeddingProvider | None:
+        try:
+            from team_memory.embedding.ollama_provider import OllamaEmbedding  # type: ignore[import]
+
+            return OllamaEmbedding(cfg=ollama_cfg)  # type: ignore[arg-type]
+        except Exception:
+            return None
+
     factories = {
         "ollama": lambda: _make_ollama(cfg),
         "openai": _try_openai,

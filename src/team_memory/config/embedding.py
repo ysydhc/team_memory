@@ -15,7 +15,7 @@ class OpenAIEmbeddingConfig(BaseModel):
     base_url: str | None = None
     model: str = "text-embedding-3-small"
     dimension: int = 1536
-    
+
     @property
     def resolved_api_key(self) -> str:
         """Resolve API key: env var reference > direct value."""

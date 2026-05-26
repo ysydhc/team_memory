@@ -97,7 +97,8 @@ async def run_backfill(
                 print(f"  {str(row['id'])[:8]}: {(row.get('title') or '')[:60]}")
             break
 
-        print(f"  Chunk {_chunk_count}: processing {chunk_total} records (cursor={str(_cursor_id)[:8] if _cursor_id else 'start'})")
+        cursor_label = str(_cursor_id)[:8] if _cursor_id else "start"
+        print(f"  Chunk {_chunk_count}: processing {chunk_total} records (cursor={cursor_label})")
 
         succeeded = 0
         failed = 0
@@ -148,7 +149,8 @@ async def run_backfill(
             "failed": _total_failed,
         })
         elapsed = time.monotonic() - start
-        print(f"    Chunk done in {elapsed:.1f}s — ok={succeeded}, fail={failed}, total={_total_succeeded}/{_total_failed}")
+        total_str = f"{_total_succeeded}/{_total_failed}"
+        print(f"    Chunk done in {elapsed:.1f}s — ok={succeeded}, fail={failed}, total={total_str}")
 
         if limit > 0 and _total_succeeded + _total_failed >= limit:
             break
@@ -185,7 +187,11 @@ async def run_backfill(
 
         for i, row in enumerate(rows):
             arch_id = row["id"]
-            embed_text = f"{row.get('title') or ''}\n{row.get('overview') or ''}\n{row.get('solution_doc') or ''}"[:4000]
+            embed_text = (
+                f"{row.get('title') or ''}\n"
+                f"{row.get('overview') or ''}\n"
+                f"{row.get('solution_doc') or ''}"
+            )[:4000]
             try:
                 embedding = await embedding_provider.encode_single(embed_text)
                 if embedding is None:

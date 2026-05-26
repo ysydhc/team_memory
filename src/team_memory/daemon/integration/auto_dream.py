@@ -546,7 +546,6 @@ class AutoDreamWorker:
 
     async def _prune_stale(self) -> int:
         """Find and soft-delete stale experiences via ExperienceService."""
-        from datetime import timedelta
         cutoff = _utcnow() - timedelta(days=self._cfg.prune_max_age_days)
         ctx = _daemon_context()
         candidates = await ctx.service.list_published(quality_tier="Bronze")

@@ -19,6 +19,11 @@ from team_memory.services.llm.llm_parser import LLMParseError, _extract_json, ca
 
 logger = logging.getLogger("daemon.refinement_worker")
 
+
+class LLMUnavailableError(Exception):
+    """Raised when the LLM API is unreachable and refinement cannot proceed."""
+
+
 # Maximum refinement attempts before giving up on a draft
 _MAX_REFINE_ATTEMPTS = 3
 
