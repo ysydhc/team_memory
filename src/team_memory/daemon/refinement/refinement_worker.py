@@ -203,6 +203,18 @@ def _normalize_refinement_result(parsed: dict) -> dict:
     }
 
 
+async def _llm_api_reachable(base_url: str, timeout: float = 3.0) -> bool:
+    """Quick health check — ping LLM API /models endpoint."""
+    try:
+        import httpx
+        url = base_url.rstrip("/") + "/models"
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(url)
+            return 200 <= resp.status_code < 500
+    except Exception:
+        return False
+
+
 class RefinementWorker:
     """Periodic background worker for LLM-driven draft refinement.
 
@@ -375,6 +387,11 @@ class RefinementWorker:
                     await self._refine_one(draft)
                     self._queue.dequeue(op_id)
                     logger.info("Queue retry succeeded for %s", op_id)
+                except LLMUnavailableError:
+                    logger.info(
+                        "Queue op %s skipped — LLM API unreachable, will retry next tick",
+                        op_id,
+                    )
                 except Exception as retry_err:
                     retries = op["retries"] + 1
                     if retries >= self._queue.MAX_RETRIES:
@@ -439,6 +456,11 @@ class RefinementWorker:
 
                 try:
                     await self._refine_one(draft)
+                except LLMUnavailableError:
+                    logger.info(
+                        "Draft %s skipped — LLM API unreachable",
+                        draft_id,
+                    )
                 except Exception:
                     from team_memory.daemon.runtime.structured_logger import StructuredLogger
 
@@ -790,6 +812,16 @@ class RefinementWorker:
         last_error: Exception | None = None
         max_retries = max(0, self._cfg.max_retries)
 
+        # Pre-call health check — skip if LLM API is unreachable
+        if not await _llm_api_reachable(self._cfg.base_url, timeout=3.0):
+            logger.warning(
+                "[LLM]  Skipping refinement — LLM API unreachable (%s)",
+                self._cfg.base_url,
+            )
+            raise LLMUnavailableError(
+                f"LLM API {self._cfg.base_url} is unreachable"
+            )
+
         for attempt in range(max_retries + 1):
             try:
                 if self._cfg.provider == "litellm":
@@ -820,6 +852,9 @@ class RefinementWorker:
                     )
                 else:
                     raise ValueError(f"Unsupported refinement provider: {self._cfg.provider}")
+            except LLMUnavailableError:
+                # API unreachable — don't retry, propagate immediately
+                raise
             except LLMParseError as e:
                 last_error = e
                 logger.warning(
