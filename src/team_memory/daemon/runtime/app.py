@@ -182,6 +182,154 @@ class RecallQuery(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+async def _wait_for_deps(config: DaemonConfig, logger: logging.Logger) -> bool:
+    """Wait for critical dependencies before serving.
+
+    Reads config (no hardcoded values): checks Docker, PostgreSQL, LLM API,
+    and Embedding API.  Loops every 5s for up to 2 minutes.  Returns True
+    if all are ready, False if timed out (degraded mode).
+    """
+    import asyncio as _asyncio
+    import time as _time
+
+    MAX_WAIT = 120  # 2 minutes
+    INTERVAL = 5
+
+    # -- Resolve DB URL from config.development.yaml (not daemon config) --
+    _db_url = ""
+    try:
+        from team_memory.config import load_settings as _load_tm
+
+        _tm = _load_tm()
+        _db_url = str(_tm.database.url).replace("+asyncpg", "")
+    except Exception:
+        pass
+
+    # -- Resolve LLM API URL from refinement config --
+    _llm_url = ""
+    if getattr(config, "refinement", None) and config.refinement.base_url:
+        _llm_url = config.refinement.base_url.rstrip("/")
+
+    # -- Resolve Embedding API URL --
+    _emb_url = ""
+    try:
+        from team_memory.config import load_settings as _load_tm2
+
+        _tm2 = _load_tm2()
+        _ecfg = _tm2.embedding
+        if _ecfg.provider == "openai" and _ecfg.openai.base_url:
+            _emb_url = _ecfg.openai.base_url.rstrip("/")
+    except Exception:
+        pass
+
+    started = _time.monotonic()
+
+    while (_time.monotonic() - started) < MAX_WAIT:
+        ok: list[str] = []
+        fail: list[str] = []
+
+        # --- Docker ---
+        try:
+            _docker = "/usr/local/bin/docker"
+            proc = await _asyncio.create_subprocess_exec(
+                _docker, "info",
+                stdout=_asyncio.subprocess.DEVNULL,
+                stderr=_asyncio.subprocess.DEVNULL,
+            )
+            try:
+                await _asyncio.wait_for(proc.wait(), timeout=5)
+                if proc.returncode == 0:
+                    ok.append("docker")
+                else:
+                    fail.append("docker")
+            except _asyncio.TimeoutError:
+                proc.kill()
+                fail.append("docker (timeout)")
+        except Exception:
+            fail.append("docker")
+
+        # --- PostgreSQL ---
+        if _db_url:
+            try:
+                import asyncpg
+
+                conn = await _asyncio.wait_for(
+                    asyncpg.connect(_db_url, timeout=5),
+                    timeout=6,
+                )
+                await conn.close()
+                ok.append("postgres")
+            except Exception:
+                fail.append("postgres")
+        else:
+            fail.append("postgres (no url)")
+
+        # --- LLM API ---
+        if _llm_url:
+            try:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.get(f"{_llm_url}/models")
+                    if 200 <= resp.status_code < 500:
+                        ok.append("llm_api")
+                    else:
+                        fail.append("llm_api")
+            except Exception:
+                fail.append("llm_api")
+        else:
+            ok.append("llm_api (skipped)")
+
+        # --- Embedding API ---
+        if _emb_url:
+            try:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.get(f"{_emb_url}/models")
+                    if 200 <= resp.status_code < 500:
+                        ok.append("embedding_api")
+                    else:
+                        fail.append("embedding_api")
+            except Exception:
+                fail.append("embedding_api")
+        else:
+            fail.append("embedding_api (no url)")
+
+        # --- Decision ---
+        # Docker is a soft check — PostgreSQL reachability is the real gate.
+        _hard_fail = [f for f in fail if f not in ("docker",)]
+        if not _hard_fail:
+            if "docker" in fail:
+                logger.info(
+                    "[STARTUP] All critical deps ready (%s; docker CLI unavailable but PG reachable) after %.0fs",
+                    ", ".join(ok),
+                    _time.monotonic() - started,
+                )
+            else:
+                logger.info(
+                    "[STARTUP] All dependencies ready (%s) after %.0fs",
+                    ", ".join(ok),
+                    _time.monotonic() - started,
+                )
+            return True
+
+        logger.info(
+            "[STARTUP] Waiting for deps (ok=%s, fail=%s, elapsed=%.0fs)",
+            ", ".join(ok) if ok else "none",
+            ", ".join(fail),
+            _time.monotonic() - started,
+        )
+        await _asyncio.sleep(INTERVAL)
+
+    logger.warning(
+        "[STARTUP] Degraded mode after %.0fs — failed deps: %s",
+        _time.monotonic() - started,
+        ", ".join(fail) if fail else "unknown",
+    )
+    return False
+
+
 def create_app(config: DaemonConfig | None = None) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -198,6 +346,15 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
     async def lifespan(application: FastAPI):
         """Initialize resources on startup, cleanup on shutdown."""
         # -- Startup --
+        # Wait for dependencies before serving (critical for laptop/sleep recovery)
+        deps_ready = await _wait_for_deps(config, logger)
+        application.state.deps_ready = deps_ready
+        if not deps_ready:
+            logger.warning(
+                "[STARTUP] Degraded mode — some dependencies unavailable. "
+                "Refinement/Faithfulness workers will retry on next tick."
+            )
+
         # When running in local mode, bootstrap the TM AppContext so that
         # LocalTMSink → op_draft_save → _get_service() uses a properly
         # initialised ExperienceService (with Embedding provider ready).
