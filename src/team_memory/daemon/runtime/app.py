@@ -380,10 +380,62 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         application.state.tm_mode = config.tm.mode
         application.state.config = config
 
-        # Start heartbeat
+        # Start heartbeat (with sleep/wake detection)
         from team_memory.monitoring.heartbeat import start_heartbeat
 
         application.state.heartbeat = start_heartbeat()
+
+        # Register wake-up recovery callback on the heartbeat
+        async def _on_wake_from_sleep(sleep_seconds: float) -> None:
+            sleep_min = sleep_seconds / 60
+            logger.warning(
+                "[WAKE]  System slept for %.0f min. Running recovery sequence.",
+                sleep_min,
+            )
+
+            # 1. Pause workers to avoid cascading failures
+            _rw = getattr(application.state, "refinement_worker", None)
+            _dw = getattr(application.state, "dream_worker", None)
+            if _rw and hasattr(_rw, "pause"):
+                _rw.pause()
+                logger.info("[WAKE]  RefinementWorker paused")
+            if _dw and hasattr(_dw, "pause"):
+                _dw.pause()
+                logger.info("[WAKE]  AutoDreamWorker paused")
+
+            # 2. Close PG pool so next access rebuilds it
+            try:
+                import team_memory.storage.database as _db_mod
+                _pg_engine = getattr(_db_mod, "_engine", None)
+                if _pg_engine:
+                    await _pg_engine.dispose()
+                    _db_mod._engine = None  # force rebuild on next use
+                    logger.info("[WAKE]  PG connection pool disposed")
+            except Exception as e:
+                logger.warning("[WAKE]  PG pool dispose failed: %s", e)
+
+            # 3. Re-run dependency check
+            _cfg = application.state.config
+            _ok = await _wait_for_deps(_cfg, logger)
+            if _ok:
+                logger.info("[WAKE]  All dependencies recovered")
+            else:
+                logger.warning("[WAKE]  Some dependencies still unavailable")
+
+            # 4. Resume workers
+            if _rw and hasattr(_rw, "resume"):
+                _rw.resume()
+                logger.info("[WAKE]  RefinementWorker resumed")
+            if _dw and hasattr(_dw, "resume"):
+                _dw.resume()
+                logger.info("[WAKE]  AutoDreamWorker resumed")
+
+            logger.info(
+                "[WAKE]  Recovery complete (slept %.0f min)",
+                sleep_min,
+            )
+
+        application.state.heartbeat.on_wake(_on_wake_from_sleep)
 
         # Initialize alert manager (feishu / wecom / webhook channels)
         try:

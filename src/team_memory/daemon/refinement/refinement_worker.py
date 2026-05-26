@@ -235,7 +235,8 @@ class RefinementWorker:
 
     # ------------------------------------------------------------------
     # Lifecycle
-    # ------------------------------------------------------------------
+        self._running = False
+        self._paused = False
 
     def start(self) -> asyncio.Task:
         """Start the background worker loop."""
@@ -246,6 +247,7 @@ class RefinementWorker:
             return self._task
 
         self._running = True
+        self._paused = False
         self._task = asyncio.create_task(self._loop())
         logger.info(
             "RefinementWorker started (interval=%ss, model=%s, provider=%s)",
@@ -259,15 +261,28 @@ class RefinementWorker:
         """No-op task when worker is disabled."""
         pass
 
+    def pause(self) -> None:
+        """Pause the worker — next tick will skip refinement."""
+        self._paused = True
+        logger.info("RefinementWorker paused")
+
+    def resume(self) -> None:
+        """Resume the worker after pause."""
+        self._paused = False
+        logger.info("RefinementWorker resumed")
+
     def stop(self) -> None:
-        """Signal the worker to stop gracefully."""
+        """Stop the worker."""
         self._running = False
         if self._task is not None:
             self._task.cancel()
 
     async def _loop(self) -> None:
-        """Main loop: sleep, scan, refine, repeat."""
+        """Main worker loop."""
         while self._running:
+            if self._paused:
+                await asyncio.sleep(self._cfg.scan_interval_seconds)
+                continue
             try:
                 await self._tick()
             except asyncio.CancelledError:

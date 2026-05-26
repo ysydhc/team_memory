@@ -87,20 +87,21 @@ class AutoDreamWorker:
         self._cfg: AutoDreamSettings = config.auto_dream
         self._sink = sink
         self._running = False
+        self._paused = False
         self._task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
-    # ------------------------------------------------------------------
 
     def start(self) -> asyncio.Task:
-        """Start the background worker loop."""
+        """Start the background worker."""
         if not self._cfg.enabled:
             logger.info("AutoDreamWorker is disabled in config")
             self._task = asyncio.create_task(self._noop())
             return self._task
 
         self._running = True
+        self._paused = False
         self._task = asyncio.create_task(self._loop())
         logger.info(
             "AutoDreamWorker started "
@@ -117,8 +118,14 @@ class AutoDreamWorker:
         """No-op task when worker is disabled."""
         pass
 
+    def pause(self) -> None:
+        self._paused = True
+
+    def resume(self) -> None:
+        self._paused = False
+
     def stop(self) -> None:
-        """Signal the worker to stop gracefully."""
+        """Stop the worker."""
         self._running = False
         if self._task is not None:
             self._task.cancel()
@@ -126,6 +133,9 @@ class AutoDreamWorker:
     async def _loop(self) -> None:
         """Main loop: sleep, check triggers, dream, repeat."""
         while self._running:
+            if self._paused:
+                await asyncio.sleep(60)
+                continue
             try:
                 await self._tick()
             except asyncio.CancelledError:
