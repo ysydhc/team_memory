@@ -19,6 +19,7 @@ _CREATE_TABLE = """CREATE TABLE IF NOT EXISTS pending_ops (
     retries INTEGER DEFAULT 0,
     next_retry_at TEXT NOT NULL,
     last_error TEXT,
+    checkpoint_json TEXT,
     status TEXT DEFAULT 'pending',
     created_at TEXT DEFAULT (datetime('now'))
 )"""
@@ -40,6 +41,11 @@ class PendingQueue:
         self._db = sqlite3.connect(db_path, check_same_thread=False)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute(_CREATE_TABLE)
+        # Migration: add checkpoint column (safe no-op if already exists)
+        try:
+            self._db.execute("ALTER TABLE pending_ops ADD COLUMN checkpoint_json TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists
         self._db.commit()
 
     def enqueue(self, op_type: str, session_id: str, payload: dict[str, Any]) -> str | None:
@@ -137,6 +143,30 @@ class PendingQueue:
                 result[status] = count
         return result
 
+    def save_checkpoint(self, op_id: str, data: dict[str, Any]) -> None:
+        """Save intermediate progress for long-running tasks.
+
+        Call periodically during batch operations.  On recovery, the
+        task can read ``checkpoint`` from the op dict and skip already
+        completed items.
+        """
+        import json
+        self._db.execute(
+            "UPDATE pending_ops SET checkpoint_json = ? WHERE id = ?",
+            (json.dumps(data), op_id),
+        )
+        self._db.commit()
+
+    def load_checkpoint(self, op_id: str) -> dict[str, Any] | None:
+        """Read the last saved checkpoint. Returns None if none exists."""
+        import json
+        row = self._db.execute(
+            "SELECT checkpoint_json FROM pending_ops WHERE id = ?", (op_id,),
+        ).fetchone()
+        if row and row[0]:
+            return json.loads(row[0])
+        return None
+
     def list_ops(self, op_type: str | None = None) -> list[dict[str, Any]]:
         """List all queued ops, optionally filtered by type / 列出所有队列操作。"""
         if op_type:
@@ -155,6 +185,7 @@ class PendingQueue:
             "retries",
             "next_retry_at",
             "last_error",
+            "checkpoint_json",
             "status",
             "created_at",
         ]
@@ -162,5 +193,9 @@ class PendingQueue:
         for row in rows:
             d = dict(zip(cols, row))
             d.pop("payload_json")
+            if "checkpoint_json" in d:
+                import json
+                raw = d.pop("checkpoint_json")
+                d["checkpoint"] = json.loads(raw) if raw else None
             results.append(d)
         return results
