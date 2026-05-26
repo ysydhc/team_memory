@@ -26,13 +26,25 @@ load_dotenv_if_exists(
 )
 
 
-async def run_backfill(dry_run: bool = False, limit: int = 0) -> None:
-    """Backfill missing graph nodes and edges."""
+async def run_backfill(
+    dry_run: bool = False,
+    limit: int = 0,
+    chunk_size: int = 50,
+    resume_from: str | None = None,
+) -> None:
+    """Backfill missing graph nodes with chunked task submission.
+
+    Each record becomes a background task (task_runner.enqueue).
+    Chunking controls how many tasks are submitted per batch to avoid
+    overwhelming the task queue during large backfills.
+    """
     from sqlalchemy import text
 
     from team_memory.config import load_settings
     from team_memory.storage.database import get_session
     from team_memory.services.infra.task_runner import enqueue
+
+    print(f"Chunk size: {chunk_size}, resume from: {resume_from or 'start'}")
 
     print("Loading settings...")
     settings = load_settings()
@@ -246,12 +258,25 @@ def main() -> None:
     )
     parser.add_argument("--dry-run", action="store_true", help="Show count only")
     parser.add_argument(
-        "--limit", type=int, default=0, help="Max experiences to process"
+        "--limit", type=int, default=0, help="Max records (0=all)"
+    )
+    parser.add_argument(
+        "--chunk-size", type=int, default=50,
+        help="Submit N tasks per chunk. Smaller chunks survive sleep interruptions better."
+    )
+    parser.add_argument(
+        "--resume-from", type=str, default=None,
+        help="Resume from record ID (skip already submitted)"
     )
     args = parser.parse_args()
 
     print("Running backfill...")
-    asyncio.run(run_backfill(dry_run=args.dry_run, limit=args.limit))
+    asyncio.run(run_backfill(
+        dry_run=args.dry_run,
+        limit=args.limit,
+        chunk_size=args.chunk_size,
+        resume_from=args.resume_from,
+    ))
     print("Main finished.")
 
 

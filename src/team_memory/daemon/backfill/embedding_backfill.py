@@ -26,13 +26,43 @@ load_dotenv_if_exists(
 )
 
 
-async def run_backfill(dry_run: bool = False, limit: int = 0) -> None:
-    """Backfill missing embeddings."""
+async def run_backfill(
+    dry_run: bool = False,
+    limit: int = 0,
+    chunk_size: int = 50,
+    resume_from: str | None = None,
+    checkpoint_path: str = "/tmp/tm-embedding-backfill-checkpoint.json",
+) -> None:
+    """Backfill missing embeddings with chunked, resumable execution."""
+    import json as _json
+    from pathlib import Path as _Path
+
     from sqlalchemy import text
 
     from team_memory.config import load_settings
     from team_memory.embedding.factory import create_embedding_provider
     from team_memory.storage.database import get_session
+
+    # --- Checkpoint helpers ---
+    def _load_checkpoint() -> dict | None:
+        try:
+            with open(checkpoint_path) as f:
+                return _json.load(f)
+        except (FileNotFoundError, _json.JSONDecodeError):
+            return None
+
+    def _save_checkpoint(data: dict) -> None:
+        _Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(checkpoint_path, "w") as f:
+            _json.dump(data, f, indent=2)
+
+    # Auto-resume from checkpoint if no explicit resume-from
+    if resume_from is None:
+        ckpt = _load_checkpoint()
+        if ckpt:
+            resume_from = ckpt.get("last_id")
+            if resume_from:
+                print(f"Resuming from checkpoint: {resume_from}")
 
     print("Loading settings...")
     settings = load_settings()
@@ -41,156 +71,191 @@ async def run_backfill(dry_run: bool = False, limit: int = 0) -> None:
     embedding_provider = create_embedding_provider(settings)
     print(f"Embedding provider created: {embedding_provider.__class__.__name__}")
 
-    # Backfill experiences
+    # Backfill experiences (chunked, resumable)
     print("\n--- Backfilling Experiences ---")
-    async with get_session(db_url) as session:
-        result = await session.execute(
-            text(
-                """
-            SELECT id, title, description, solution, tags
-            FROM experiences
-            WHERE exp_status = 'published' AND embedding IS NULL
-            ORDER BY created_at ASC
-        """
+    _cursor_id = resume_from or ""
+    _total_succeeded = 0
+    _total_failed = 0
+    _chunk_count = 0
+
+    while True:
+        if _cursor_id:
+            _query = text(
+                """SELECT id, title, description, solution, tags
+                FROM experiences
+                WHERE exp_status = 'published' AND embedding IS NULL
+                  AND id > :cursor
+                ORDER BY created_at ASC
+                LIMIT :limit"""
             )
-        )
-        rows = result.fetchall()
+            _params = {"cursor": _cursor_id, "limit": chunk_size}
+        else:
+            _query = text(
+                """SELECT id, title, description, solution, tags
+                FROM experiences
+                WHERE exp_status = 'published' AND embedding IS NULL
+                ORDER BY created_at ASC
+                LIMIT :limit"""
+            )
+            _params = {"limit": chunk_size}
+        async with get_session(db_url) as session:
+            result = await session.execute(_query, _params)
+            rows = result.fetchall()
 
-    if not rows:
-        print("All published experiences have embeddings.")
-    else:
-        total = len(rows)
-        if limit > 0:
-            rows = rows[:limit]
+        if not rows:
+            if _chunk_count == 0:
+                print("All published experiences have embeddings.")
+            else:
+                print(f"Experiences backfill complete: {_total_succeeded} ok, {_total_failed} failed")
+            break
 
-        print(
-            f"Found {total} experiences without embedding{f' (processing {len(rows)})' if limit > 0 else ''}."
-        )
+        _chunk_count += 1
+        chunk_total = limit if limit > 0 and limit < len(rows) else len(rows)
 
         if dry_run:
             for row in rows[:10]:
                 print(f"  {str(row[0])[:8]}: {(row[1] or '')[:60]}")
-            if total > 10:
-                print(f"  ... and {total - 10} more")
-        else:
-            succeeded = 0
-            failed = 0
-            start = time.monotonic()
+            break
 
-            for i, row in enumerate(rows):
-                exp_id = row[0]
-                title = row[1] or ""
-                description = row[2] or ""
-                solution = row[3] or ""
-                tags = row[4] or []
+        print(f"  Chunk {_chunk_count}: processing {chunk_total} records (cursor={_cursor_id[:8] if _cursor_id else 'start'})")
 
-                embed_text = f"{title}\n{description}\n{solution or ''}"
-                if tags:
-                    embed_text += f"\n{' '.join(str(t) for t in tags)}"
-                embed_text = embed_text[:4000]
+        succeeded = 0
+        failed = 0
+        start = time.monotonic()
+        _last_id = _cursor_id
 
-                try:
-                    embedding = await embedding_provider.encode_single(embed_text)
-                    if embedding is None:
-                        failed += 1
-                        continue
+        for i, row in enumerate(rows):
+            exp_id = row[0]
+            title = row[1] or ""
+            description = row[2] or ""
+            solution = row[3] or ""
+            tags = row[4] or []
 
-                    async with get_session(db_url) as session:
-                        await session.execute(
-                            text(
-                                "UPDATE experiences SET embedding = :embedding WHERE id = :id"
-                            ),
-                            {"embedding": str(embedding), "id": exp_id},
-                        )
-                        await session.commit()
+            embed_text = f"{title}\n{description}\n{solution or ''}"
+            if tags:
+                embed_text += f"\n{' '.join(str(t) for t in tags)}"
+            embed_text = embed_text[:4000]
 
-                    succeeded += 1
-                except Exception as e:
+            try:
+                embedding = await embedding_provider.encode_single(embed_text)
+                if embedding is None:
                     failed += 1
-                    print(f"  Failed {str(exp_id)[:8]}: {e}")
+                    continue
 
-                if (i + 1) % 10 == 0 or i + 1 == len(rows):
-                    elapsed = time.monotonic() - start
-                    rate = (i + 1) / elapsed if elapsed > 0 else 0
-                    print(
-                        f"  Progress: {i + 1}/{len(rows)} ({rate:.1f}/s) — failed: {failed}"
+                async with get_session(db_url) as session:
+                    await session.execute(
+                        text("UPDATE experiences SET embedding = :embedding WHERE id = :id"),
+                        {"embedding": str(embedding), "id": exp_id},
                     )
+                    await session.commit()
+                succeeded += 1
+            except Exception as e:
+                failed += 1
+                print(f"  Failed {str(exp_id)[:8]}: {e}")
 
-            elapsed = time.monotonic() - start
-            print(
-                f"Experiences backfill complete in {elapsed:.1f}s: Succeeded {succeeded}, Failed {failed}"
-            )
+            _last_id = str(exp_id)
 
-    # Backfill archives
+            if (i + 1) % 10 == 0:
+                elapsed = time.monotonic() - start
+                rate = (i + 1) / elapsed if elapsed > 0 else 0
+                print(f"    {i + 1}/{chunk_total} ({rate:.1f}/s)")
+
+        _total_succeeded += succeeded
+        _total_failed += failed
+        _cursor_id = _last_id
+
+        # Save checkpoint after each chunk
+        _save_checkpoint({
+            "last_id": _cursor_id,
+            "type": "experiences",
+            "chunk": _chunk_count,
+            "succeeded": _total_succeeded,
+            "failed": _total_failed,
+        })
+        elapsed = time.monotonic() - start
+        print(f"    Chunk done in {elapsed:.1f}s — ok={succeeded}, fail={failed}, total={_total_succeeded}/{_total_failed}")
+
+        if limit > 0 and _total_succeeded + _total_failed >= limit:
+            break
+
+    # Backfill archives (chunked, resumable)
     print("\n--- Backfilling Archives ---")
-    async with get_session(db_url) as session:
-        result = await session.execute(
-            text(
-                """
-            SELECT id, title, overview, solution_doc
-            FROM archives
-            WHERE embedding IS NULL
-            ORDER BY created_at ASC
-        """
+    _arch_cursor = ""
+    _arch_succeeded = 0
+    _arch_failed = 0
+    _arch_chunks = 0
+
+    while True:
+        if _arch_cursor:
+            _aquery = text(
+                """SELECT id, title, overview, solution_doc
+                FROM archives
+                WHERE embedding IS NULL AND id > :cursor
+                ORDER BY created_at ASC
+                LIMIT :limit"""
             )
-        )
-        archive_rows = result.fetchall()
+            _params = {"cursor": _arch_cursor, "limit": chunk_size}
+        else:
+            _aquery = text(
+                """SELECT id, title, overview, solution_doc
+                FROM archives
+                WHERE embedding IS NULL
+                ORDER BY created_at ASC
+                LIMIT :limit"""
+            )
+            _params = {"limit": chunk_size}
+        async with get_session(db_url) as session:
+            result = await session.execute(_aquery, _params)
+            rows = result.fetchall()
 
-    if not archive_rows:
-        print("All archives have embeddings.")
-    else:
-        total = len(archive_rows)
-        if limit > 0:
-            archive_rows = archive_rows[:limit]
+        if not rows:
+            if _arch_chunks == 0:
+                print("All archives have embeddings.")
+            else:
+                print(f"Archives backfill complete ({_arch_succeeded} ok, {_arch_failed} failed)")
+            break
 
-        print(
-            f"Found {total} archives without embedding{f' (processing {len(archive_rows)})' if limit > 0 else ''}."
-        )
+        _arch_chunks += 1
 
-        if not dry_run:
-            succeeded = 0
-            failed = 0
-            start = time.monotonic()
+        if dry_run:
+            for row in rows[:5]:
+                print(f"  {str(row[0])[:8]}: {(row[1] or '')[:60]}")
+            break
 
-            for i, row in enumerate(archive_rows):
-                arch_id = row[0]
-                title = row[1] or ""
-                overview = row[2] or ""
-                solution_doc = row[3] or ""
+        print(f"  Chunk {_arch_chunks}: {len(rows)} archives")
+        start = time.monotonic()
+        _last_id = _arch_cursor
 
-                embed_text = f"{title}\n{overview}\n{solution_doc}"[:4000]
-
-                try:
-                    embedding = await embedding_provider.encode_single(embed_text)
-                    if embedding is None:
-                        failed += 1
-                        continue
-
-                    async with get_session(db_url) as session:
-                        await session.execute(
-                            text(
-                                "UPDATE archives SET embedding = :embedding WHERE id = :id"
-                            ),
-                            {"embedding": str(embedding), "id": arch_id},
-                        )
-                        await session.commit()
-
-                    succeeded += 1
-                except Exception as e:
-                    failed += 1
-                    print(f"  Failed {str(arch_id)[:8]}: {e}")
-
-                if (i + 1) % 10 == 0 or i + 1 == len(archive_rows):
-                    elapsed = time.monotonic() - start
-                    rate = (i + 1) / elapsed if elapsed > 0 else 0
-                    print(
-                        f"  Progress: {i + 1}/{len(archive_rows)} ({rate:.1f}/s) — failed: {failed}"
+        for i, row in enumerate(rows):
+            arch_id = row[0]
+            embed_text = f"{row[1] or ''}\n{row[2] or ''}\n{row[3] or ''}"[:4000]
+            try:
+                embedding = await embedding_provider.encode_single(embed_text)
+                if embedding is None:
+                    _arch_failed += 1
+                    continue
+                async with get_session(db_url) as session:
+                    await session.execute(
+                        text("UPDATE archives SET embedding = :embedding WHERE id = :id"),
+                        {"embedding": str(embedding), "id": arch_id},
                     )
+                    await session.commit()
+                _arch_succeeded += 1
+            except Exception as e:
+                _arch_failed += 1
+                print(f"  Failed {str(arch_id)[:8]}: {e}")
+            _last_id = str(arch_id)
 
-            elapsed = time.monotonic() - start
-            print(
-                f"Archives backfill complete in {elapsed:.1f}s: Succeeded {succeeded}, Failed {failed}"
-            )
+        _arch_cursor = _last_id
+        _save_checkpoint({
+            "last_id": _arch_cursor, "type": "archives",
+            "chunk": _arch_chunks, "succeeded": _arch_succeeded, "failed": _arch_failed,
+        })
+        elapsed = time.monotonic() - start
+        print(f"    Done {elapsed:.1f}s — ok={len(rows)-_arch_failed if _arch_failed==0 else '?'}")
+
+        if limit > 0 and _arch_succeeded >= limit:
+            break
 
     # Backfill personal memories
     print("\n--- Backfilling Personal Memories ---")
@@ -263,18 +328,37 @@ async def run_backfill(dry_run: bool = False, limit: int = 0) -> None:
 
 
 def main() -> None:
-    print("Starting main...")
+
     parser = argparse.ArgumentParser(
-        description="Backfill missing embeddings for published experiences",
+        description="Embedding backfill — generate embeddings for missing experiences"
     )
     parser.add_argument("--dry-run", action="store_true", help="Show count only")
     parser.add_argument(
-        "--limit", type=int, default=0, help="Max experiences to process"
+        "--limit", type=int, default=0, help="Max records (0=all)"
+    )
+    parser.add_argument(
+        "--chunk-size", type=int, default=50,
+        help="Process N records per chunk. Saves checkpoint after each chunk."
+    )
+    parser.add_argument(
+        "--resume-from", type=str, default=None,
+        help="Resume from experience/archive ID (from checkpoint file or manual)"
+    )
+    parser.add_argument(
+        "--checkpoint", type=str,
+        default="/tmp/tm-embedding-backfill-checkpoint.json",
+        help="Checkpoint file path (auto-resume if exists)"
     )
     args = parser.parse_args()
 
     print("Running backfill...")
-    asyncio.run(run_backfill(dry_run=args.dry_run, limit=args.limit))
+    asyncio.run(run_backfill(
+        dry_run=args.dry_run,
+        limit=args.limit,
+        chunk_size=args.chunk_size,
+        resume_from=args.resume_from,
+        checkpoint_path=args.checkpoint,
+    ))
     print("Main finished.")
 
 
