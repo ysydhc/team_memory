@@ -47,6 +47,25 @@ FORBIDDEN_L3_MODULES = {
 # Rule IDs for output
 RULE_L2_IMPORTS_L3 = "L2_IMPORTS_L3"
 RULE_L0_L2_IMPORTS_BOOTSTRAP_SERVER = "L0_L2_IMPORTS_BOOTSTRAP_SERVER"
+RULE_DAEMON_IMPORTS_STORAGE = "DAEMON_IMPORTS_STORAGE"
+RULE_HOOKS_IMPORTS_DAEMON = "HOOKS_IMPORTS_DAEMON"
+
+# Custom path-based import rules: (source_path_prefix, forbidden_import_prefix, rule_id, message)
+# These supplement the layer rules above with explicit cross-boundary restrictions.
+CUSTOM_PATH_RULES: list[tuple[str, str, str, str]] = [
+    (
+        "src/team_memory/daemon/",
+        "team_memory.storage",
+        RULE_DAEMON_IMPORTS_STORAGE,
+        "daemon/ must not import storage/ directly — use services/ layer (Facade pattern)",
+    ),
+    (
+        "src/team_memory/hooks/",
+        "team_memory.daemon",
+        RULE_HOOKS_IMPORTS_DAEMON,
+        "hooks/ must not import daemon/ directly — use HTTP via hooks.core.daemon_http",
+    ),
+]
 
 # Exclude patterns (relative to root)
 EXCLUDE_DIRS = {"tests"}
@@ -155,14 +174,31 @@ def collect_imports_with_context(
     return results
 
 
+def get_custom_rules_for_path(file_path: Path, root: Path) -> list[tuple[str, str, str]]:
+    """Return (forbidden_import_prefix, rule_id, message) for custom path rules matching this file."""
+    try:
+        rel = file_path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return []
+    rel_str = str(rel).replace("\\", "/")
+    return [
+        (forbidden, rule_id, msg)
+        for src_prefix, forbidden, rule_id, msg in CUSTOM_PATH_RULES
+        if rel_str.startswith(src_prefix)
+    ]
+
+
 def check_file(file_path: Path, root: Path) -> list[tuple[int, str, str]]:
     """Check a single file. Returns list of (line, rule_id, message)."""
     violations: list[tuple[int, str, str]] = []
     layer = get_layer_for_path(file_path, root)
-    if layer is None:
+    custom_rules = get_custom_rules_for_path(file_path, root)
+
+    # Skip files not in any known layer and with no custom rules
+    if layer is None and not custom_rules:
         return violations
-    if layer == "L3":
-        return violations  # L3 internal not validated
+    if layer == "L3" and not custom_rules:
+        return violations  # L3 internal not validated unless custom rules apply
 
     try:
         source = file_path.read_text(encoding="utf-8", errors="replace")
@@ -180,6 +216,17 @@ def check_file(file_path: Path, root: Path) -> list[tuple[int, str, str]]:
     imports = collect_imports_with_context(tree, source_lines)
     for lineno, node, in_type_checking, has_noqa in imports:
         if in_type_checking or has_noqa:
+            continue
+
+        mod = node.module or ""
+
+        # Check custom path-based rules (e.g. daemon→storage, hooks→daemon)
+        for forbidden_prefix, rule_id, msg in custom_rules:
+            if mod == forbidden_prefix or mod.startswith(forbidden_prefix + "."):
+                violations.append((lineno, rule_id, msg))
+
+        # Check standard layer rules
+        if layer is None or layer == "L3":
             continue
         imported = get_imported_module(node)
         if imported is None:
