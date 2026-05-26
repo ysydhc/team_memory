@@ -33,13 +33,18 @@ class HealthCheck:
         pg_url: str | None = None,
         worker_task: asyncio.Task | None = None,
         alert_callback: Callable | None = None,
+        pending_queue: Any | None = None,
     ) -> None:
         self._db_path = db_path
         self._pg_url = pg_url
         self._worker_task = worker_task
         self._alert_cb = alert_callback
+        self._pending_queue = pending_queue
         # {name: {"last_alert": float, "backoff_idx": int, "started": float}}
         self._alerts: dict[str, dict[str, float | int]] = {}
+        # Stall detection: track last time worker produced output
+        self._last_worker_activity: float = time.time()
+        self._stall_threshold: float = 600.0  # 10 minutes of inactivity → alert
 
     async def check_all(self) -> list[str]:
         """Run all checks. Returns list of anomaly names. 返回异常列表。"""
@@ -48,6 +53,8 @@ class HealthCheck:
         checks = [
             ("sqlite_size", self._check_sqlite_size),
             ("worker_task", self._check_worker_task),
+            ("pending_failures", self._check_pending_failures),
+            ("worker_stall", self._check_worker_stall),
         ]
         if self._pg_url:
             checks.append(("pg_connect", self._check_pg_connect))
@@ -97,6 +104,33 @@ class HealthCheck:
         except Exception as e:
             return f"PG error: {e}"
         return None
+
+    async def _check_pending_failures(self) -> str | None:
+        """Check if PendingQueue has excessive failures."""
+        if not self._pending_queue:
+            return None
+        try:
+            s = self._pending_queue.stats()
+            failed = s.get("failed", 0)
+            if failed >= 3:
+                return f"PendingQueue has {failed} permanently failed ops"
+        except Exception as e:
+            return f"PendingQueue stats error: {e}"
+        return None
+
+    async def _check_worker_stall(self) -> str | None:
+        """Check if RefinementWorker has been inactive too long."""
+        idle = time.time() - self._last_worker_activity
+        if idle > self._stall_threshold:
+            return (
+                f"RefinementWorker appears stalled — no activity for {idle:.0f}s "
+                f"(threshold={self._stall_threshold:.0f}s)"
+            )
+        return None
+
+    def report_worker_activity(self) -> None:
+        """Call from RefinementWorker after each successful tick."""
+        self._last_worker_activity = time.time()
 
     def _should_alert(self, name: str) -> bool:
         """Check backoff: should we alert now? 检查退避：现在该告警吗？"""

@@ -562,6 +562,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         from team_memory.daemon.buffers.pending_queue import PendingQueue
 
         pending_queue = PendingQueue(db_path=db_path)
+        _health_check._pending_queue = pending_queue
 
         # LLM background refinement worker
         from team_memory.daemon.refinement.refinement_worker import RefinementWorker
