@@ -57,6 +57,7 @@ class OpenAIEmbedding(EmbeddingProvider):
                 json={
                     "input": texts,
                     "model": self._model,
+                    "encoding_format": "float",
                 },
             )
             response.raise_for_status()

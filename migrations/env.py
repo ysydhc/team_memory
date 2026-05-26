@@ -69,6 +69,10 @@ async def run_async_migrations() -> None:
         await connection.execute(text("SELECT pg_advisory_lock(1)"))
         try:
             await connection.run_sync(do_run_migrations)
+        except Exception as e:
+            print(f"Migration failed: {e}")
+            await connection.rollback()
+            raise
         finally:
             await connection.execute(text("SELECT pg_advisory_unlock(1)"))
         await connection.commit()

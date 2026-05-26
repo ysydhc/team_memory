@@ -81,11 +81,11 @@ dev:            ## 启动全部服务（Docker 基础设施 + 本机 Web）；�
 	@$(MAKE) -s release-9111 || true
 	docker compose up -d postgres redis
 	@if ! lsof -i :11434 >/dev/null 2>&1; then docker compose --profile ollama up -d 2>/dev/null || true; fi
-	python -m team_memory.web.app
+	uv run python -m team_memory.web.app
 
 web:            ## 仅启动 Web 管理界面（默认端口 9111）；自动释放 9111 后启动
 	@$(MAKE) -s release-9111 || true
-	python -m team_memory.web.app
+	uv run python -m team_memory.web.app
 
 mcp:            ## 启动 MCP（需仓库根 .env；经 scripts/run_mcp_with_dotenv.sh）
 	bash scripts/run_mcp_with_dotenv.sh
