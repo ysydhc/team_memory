@@ -61,7 +61,7 @@ def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
             return None
 
     factories = {
-        "ollama": lambda: _create_from_config(cfg.ollama) if cfg.ollama else _fail("ollama"),
+        "ollama": lambda: _make_ollama(cfg),
         "openai": _try_openai,
         "generic": _try_generic,
         "local": _try_local,
