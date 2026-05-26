@@ -11,8 +11,18 @@ class OpenAIEmbeddingConfig(BaseModel):
     """OpenAI embedding API configuration."""
 
     api_key: str = ""
+    api_key_env: str = "LITELLM_MASTER_KEY"
+    base_url: str | None = None
     model: str = "text-embedding-3-small"
     dimension: int = 1536
+    
+    @property
+    def resolved_api_key(self) -> str:
+        """Resolve API key: env var reference > direct value."""
+        import os
+        if self.api_key_env:
+            return os.environ.get(self.api_key_env, "")
+        return self.api_key
 
 
 class OllamaEmbeddingConfig(BaseModel):
@@ -44,8 +54,8 @@ class GenericEmbeddingConfig(BaseModel):
 class EmbeddingConfig(BaseModel):
     """Embedding service configuration."""
 
-    provider: Literal["ollama", "openai", "local", "generic"] = "ollama"
-    ollama: OllamaEmbeddingConfig = Field(default_factory=OllamaEmbeddingConfig)
+    provider: Literal["ollama", "openai", "local", "generic"] = ""  # must be explicitly configured
+    ollama: OllamaEmbeddingConfig | None = None  # deprecated, kept for legacy compat
     openai: OpenAIEmbeddingConfig = Field(default_factory=OpenAIEmbeddingConfig)
     local: LocalEmbeddingConfig = Field(default_factory=LocalEmbeddingConfig)
     generic: GenericEmbeddingConfig = Field(default_factory=GenericEmbeddingConfig)

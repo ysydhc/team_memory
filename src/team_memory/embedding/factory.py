@@ -19,33 +19,20 @@ def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
     cfg = settings.embedding
     provider = cfg.provider
 
-    def _try_ollama() -> EmbeddingProvider | None:
-        try:
-            import httpx
-
-            resp = httpx.get(f"{cfg.ollama.base_url}/api/tags", timeout=3)
-            if resp.status_code == 200:
-                from team_memory.embedding.ollama_provider import OllamaEmbedding
-
-                return OllamaEmbedding(
-                    model=cfg.ollama.model,
-                    dim=cfg.ollama.dimension,
-                    base_url=cfg.ollama.base_url,
-                )
-        except Exception:
-            pass
-        return None
-
     def _try_openai() -> EmbeddingProvider | None:
         api_key = cfg.openai.api_key or os.environ.get("OPENAI_API_KEY", "")
         if api_key:
             from team_memory.embedding.openai_provider import OpenAIEmbedding
 
-            return OpenAIEmbedding(
-                api_key=api_key,
-                model=cfg.openai.model,
-                dim=cfg.openai.dimension,
-            )
+            kwargs = {
+                "api_key": api_key,
+                "model": cfg.openai.model,
+                "dim": cfg.openai.dimension,
+            }
+            if cfg.openai.base_url:
+                kwargs["base_url"] = cfg.openai.base_url
+
+            return OpenAIEmbedding(**kwargs)
         return None
 
     def _try_generic() -> EmbeddingProvider | None:
@@ -74,18 +61,26 @@ def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
             return None
 
     factories = {
-        "ollama": _try_ollama,
+        "ollama": lambda: _create_from_config(cfg.ollama) if cfg.ollama else _fail("ollama"),
         "openai": _try_openai,
         "generic": _try_generic,
         "local": _try_local,
     }
 
-    result = factories.get(provider, _try_ollama)()
+    if provider not in factories:
+        raise ValueError(
+            f"Unknown embedding provider '{provider}'. "
+            f"Must be one of: {list(factories.keys())}. "
+            f"Set embedding.provider in config.development.yaml."
+        )
+    result = factories[provider]()
     if result is not None:
         logger.info("Embedding provider: %s (configured)", provider)
         return result
 
-    logger.warning("Configured embedding provider '%s' unavailable, trying fallbacks...", provider)
+    logger.warning(
+        "Configured embedding provider '%s' unavailable, trying fallbacks...", provider
+    )
     fallback_order = ["ollama", "openai", "generic", "local"]
     for fb in fallback_order:
         if fb == provider:

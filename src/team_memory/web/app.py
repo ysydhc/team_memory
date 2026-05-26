@@ -9,6 +9,11 @@ Authentication is via API Key (same keys used for MCP access).
 from __future__ import annotations
 
 import asyncio
+import sys
+
+if sys.platform != "win32":
+    asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+
 import logging
 import os
 import time
@@ -210,73 +215,38 @@ async def _check_database() -> dict:
         return {"status": "down", "error": str(e)}
 
 
-async def _check_ollama() -> dict:
+async def _check_embedding_health() -> dict:
+    """Check embedding provider health by pinging its base URL."""
     try:
-        base_url = "http://localhost:11434"
-        if _settings and _settings.embedding.provider == "ollama":
-            base_url = _settings.embedding.ollama.base_url
-        start = time.monotonic()
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{base_url}/api/tags")
-            resp.raise_for_status()
-        latency_ms = round((time.monotonic() - start) * 1000, 1)
-        return {"status": "up", "latency_ms": latency_ms}
+        if _settings and _settings.embedding.provider:
+            provider = _settings.embedding.provider
+            if provider == "openai":
+                cfg = _settings.embedding.openai
+                base_url = cfg.base_url or "http://localhost:4000/v1"
+            else:
+                return {"status": "up", "provider": provider, "note": "health check not implemented"}
+            start = time.monotonic()
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{base_url}/models")
+                resp.raise_for_status()
+            latency_ms = round((time.monotonic() - start) * 1000, 1)
+            return {"status": "up", "provider": provider, "latency_ms": latency_ms}
+        return {"status": "down", "error": "no embedding provider configured"}
     except Exception as e:
-        return {"status": "down", "error": str(e)}
+        return {"status": "down", "error": str(e)[:80]}
 
 
 async def _check_embedding_provider() -> dict:
-    """Check embedding provider availability without loading the model.
-
-    健康检查嵌入提供者可达性（不加载模型）。
-    With keep_alive=0, models are unloaded after each call.
-    Checking by actually calling encode_single would reload the model
-    every health check, defeating the purpose of keep_alive=0.
-    Instead, just verify Ollama is reachable and the model exists.
-    """
+    """Check embedding provider availability — generic, provider-agnostic."""
     try:
         ctx = get_context()
         provider_name = ctx.settings.embedding.provider
-        base_url = getattr(ctx.settings.embedding.ollama, "base_url", "http://localhost:11434")
-        model = getattr(ctx.settings.embedding.ollama, "model", "")
-        dimension = getattr(ctx.settings.embedding.ollama, "dimension", 0)
-
-        if provider_name == "ollama":
-            # Light check: just ping /api/tags to see if model exists
-            # 轻量检查：只 ping /api/tags 确认模型存在，不实际加载
-            import httpx
-
-            try:
-                resp = await httpx.AsyncClient(timeout=5.0).get(f"{base_url}/api/tags")
-                if resp.status_code == 200:
-                    models = resp.json().get("models", [])
-                    model_base = model.split(":")[0]
-                    found = any(m.get("name", "").split(":")[0] == model_base for m in models)
-                    if found:
-                        return {
-                            "status": "up",
-                            "provider": provider_name,
-                            "dimension": dimension,
-                            "note": "light check (model not loaded)",
-                        }
-                    return {
-                        "status": "down",
-                        "provider": provider_name,
-                        "error": f"model '{model}' not found in Ollama",
-                    }
-                return {
-                    "status": "down",
-                    "provider": provider_name,
-                    "error": f"Ollama returned {resp.status_code}",
-                }
-            except httpx.ConnectError:
-                return {
-                    "status": "down",
-                    "provider": provider_name,
-                    "error": "Ollama not reachable",
-                }
-        # Non-ollama providers: just report configured
-        return {"status": "up", "provider": provider_name, "dimension": dimension}
+        if not provider_name:
+            return {"status": "down", "error": "no embedding.provider configured"}
+        if provider_name == "openai":
+            cfg = ctx.settings.embedding.openai
+            return {"status": "up", "provider": provider_name, "model": cfg.model, "dimension": cfg.dimension}
+        return {"status": "up", "provider": provider_name, "note": "configured"}
     except RuntimeError:
         return {"status": "down", "reason": "not bootstrapped"}
     except Exception as e:
@@ -317,9 +287,9 @@ async def _check_cache() -> dict:
 @app.get("/health")
 async def health_check():
     """Health check endpoint -- no authentication required."""
-    db_check, ollama_check, embed_check, llm_check, cache_check = await asyncio.gather(
-        _check_database(),
-        _check_ollama(),
+    db_check, embed_health, embed_check, llm_check, cache_check = await asyncio.gather(
+        _check_db(),
+        _check_embedding_health(),
         _check_embedding_provider(),
         _check_llm_provider(),
         _check_cache(),
@@ -327,7 +297,7 @@ async def health_check():
 
     checks = {
         "database": db_check,
-        "ollama": ollama_check,
+        "embedding_health": embed_health,
         "embedding_provider": embed_check,
         "llm_provider": llm_check,
         "cache": cache_check,
@@ -512,6 +482,7 @@ def main():
         "host": host,
         "port": port,
         "reload": False,
+        "loop": "asyncio",
         "log_level": "info",
     }
     if use_ssl:

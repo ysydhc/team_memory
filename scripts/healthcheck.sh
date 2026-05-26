@@ -3,8 +3,7 @@
 # Usage: ./scripts/healthcheck.sh [web_port]
 #
 # Checks all team_memory components and reports their status.
-# Ollama URL and embedding model are read from config.development.yaml / load_settings (same as app);
-# override with TEAM_MEMORY_EMBEDDING__OLLAMA__BASE_URL / TEAM_MEMORY_OLLAMA_MODEL.
+# Embedding provider/base_url/model are read from load_settings (same as app).
 # Exit code 0 = all critical services OK, non-zero = at least one FAIL.
 
 PORT="${1:-9111}"
@@ -25,38 +24,69 @@ elif [ -f "${ROOT_DIR}/.venv/bin/python" ]; then
 fi
 [ -z "${_TM_PYTHON}" ] && _TM_PYTHON="python3"
 
-# Load Ollama base_url and embedding model from config
-# 从配置加载 Ollama 地址和嵌入模型
-OLLAMA_BASE_URL="http://localhost:11434"
-OLLAMA_EMBED_MODEL="qwen3-embedding:0.6b"
-OLLAMA_LLM_MODEL_CONFIG=""
+# Load embedding provider/base_url/model from config
+# 从配置加载 embedding provider / base_url / 模型
+EMB_PROVIDER=""
+EMB_BASE_URL=""
+EMB_MODEL=""
+EMB_API_KEY=""
+EMB_API_KEY=""
 if [ -f "${ROOT_DIR}/config.development.yaml" ] || [ -f "${ROOT_DIR}/config.production.yaml" ]; then
+    # Read embedding config from YAML using Python (more reliable than YAML parsing in bash)
+    EMB_VALUES=$(cd "${ROOT_DIR}" && python3 -c "
+from team_memory.config import load_settings
+s = load_settings()
+e = s.embedding
+print(f'{e.provider}|{e.openai.base_url}|{e.openai.model}|{e.openai.dimension}|{e.openai.api_key}')
+" 2>/dev/null)
+    if [ -n "$EMB_VALUES" ]; then
+        EMB_PROVIDER=$(echo "$EMB_VALUES" | cut -d'|' -f1)
+        EMB_BASE_URL=$(echo "$EMB_VALUES" | cut -d'|' -f2)
+        EMB_MODEL=$(echo "$EMB_VALUES" | cut -d'|' -f3)
+        EMB_DIM=$(echo "$EMB_VALUES" | cut -d'|' -f4)
+        EMB_API_KEY=$(echo "$EMB_VALUES" | cut -d'|' -f5)
+    fi
+fi
+# Fall back to old YAML parsing if Python method failed
+if [ -z "$EMB_PROVIDER" ] && [ -f "${ROOT_DIR}/config.development.yaml" ] || [ -f "${ROOT_DIR}/config.production.yaml" ]; then
   CONFIG_OUT=$(cd "${ROOT_DIR}" && PYTHONPATH=src "${_TM_PYTHON}" -c "
 try:
     from team_memory.config import load_settings
     s = load_settings()
-    if getattr(s.embedding, 'ollama', None) and getattr(s.embedding, 'provider', None) == 'ollama':
-        print(s.embedding.ollama.base_url.rstrip('/'))
+    provider = getattr(s.embedding, 'provider', None) or 'ollama'
+    print(provider)
+    if provider == 'ollama' and getattr(s.embedding, 'ollama', None):
+        print((s.embedding.ollama.base_url or 'http://localhost:11434').rstrip('/'))
         print(s.embedding.ollama.model or 'nomic-embed-text:latest')
+        print('')
+    elif provider == 'openai' and getattr(s.embedding, 'openai', None):
+        print((s.embedding.openai.base_url or 'https://api.openai.com/v1').rstrip('/'))
+        print(s.embedding.openai.model or 'text-embedding-3-small')
+        print(s.embedding.openai.resolved_api_key or '')
+    elif provider == 'generic' and getattr(s.embedding, 'generic', None):
+        print((s.embedding.generic.base_url or '').rstrip('/'))
+        print(s.embedding.generic.model or '')
+        print(s.embedding.generic.api_key or '')
     else:
         print('http://localhost:11434')
         print('nomic-embed-text:latest')
+        print('')
     if getattr(s, 'llm', None) and getattr(s.llm, 'model', None):
         print(s.llm.model)
 except Exception:
     pass
 " 2>/dev/null)
   if [ -n "$CONFIG_OUT" ]; then
-    OLLAMA_BASE_URL=$(echo "$CONFIG_OUT" | sed -n '1p')
-    OLLAMA_EMBED_MODEL=$(echo "$CONFIG_OUT" | sed -n '2p')
-    OLLAMA_LLM_MODEL_CONFIG=$(echo "$CONFIG_OUT" | sed -n '3p')
-    [ -z "$OLLAMA_BASE_URL" ] && OLLAMA_BASE_URL="http://localhost:11434"
-    [ -z "$OLLAMA_EMBED_MODEL" ] && OLLAMA_EMBED_MODEL="nomic-embed-text:latest"
+    EMB_PROVIDER=$(echo "$CONFIG_OUT" | sed -n '1p')
+    EMB_BASE_URL=$(echo "$CONFIG_OUT" | sed -n '2p')
+    EMB_MODEL=$(echo "$CONFIG_OUT" | sed -n '3p')
+    EMB_API_KEY=$(echo "$CONFIG_OUT" | sed -n '4p')
+    OLLAMA_LLM_MODEL_CONFIG=$(echo "$CONFIG_OUT" | sed -n '5p')
+    [ -z "$EMB_PROVIDER" ] && EMB_PROVIDER="ollama"
+    [ -z "$EMB_BASE_URL" ] && EMB_BASE_URL="http://localhost:11434"
+    [ -z "$EMB_MODEL" ] && EMB_MODEL="nomic-embed-text:latest"
   fi
 fi
-# Env overrides (same prefix as app)
-[ -n "${TEAM_MEMORY_EMBEDDING__OLLAMA__BASE_URL}" ] && OLLAMA_BASE_URL="${TEAM_MEMORY_EMBEDDING__OLLAMA__BASE_URL}"
-[ -n "${TEAM_MEMORY_OLLAMA_MODEL}" ] && OLLAMA_EMBED_MODEL="${TEAM_MEMORY_OLLAMA_MODEL}"
 
 echo "===== team_memory Health Check ====="
 echo ""
@@ -80,20 +110,39 @@ else
     fi
 fi
 
-# 2. Ollama (base_url from config / TEAM_MEMORY_EMBEDDING__OLLAMA__BASE_URL)
-printf "  %-22s" "Ollama:"
-if curl -sf --max-time 3 "${OLLAMA_BASE_URL}/api/tags" >/dev/null 2>&1; then
-    # Tags use "name":"model:tag" — match base name so both nomic-embed-text and nomic-embed-text:latest work
-    OLLAMA_EMBED_MODEL_BASE="${OLLAMA_EMBED_MODEL%%:*}"
-    if curl -sf --max-time 3 "${OLLAMA_BASE_URL}/api/tags" | grep -q "\"name\":\"${OLLAMA_EMBED_MODEL_BASE}"; then
-        echo "OK (model: ${OLLAMA_EMBED_MODEL})"
+# 2. Embedding provider/model health
+printf "  %-22s" "Embedding:"
+if [ "${EMB_PROVIDER}" = "ollama" ]; then
+    if curl -sf --max-time 3 "${EMB_BASE_URL}/api/tags" >/dev/null 2>&1; then
+        EMB_MODEL_BASE="${EMB_MODEL%%:*}"
+        if curl -sf --max-time 3 "${EMB_BASE_URL}/api/tags" | grep -q "\"name\":\"${EMB_MODEL_BASE}"; then
+            echo "OK (provider: ollama, model: ${EMB_MODEL})"
+        else
+            echo "WARN  (provider: ollama up, but model '${EMB_MODEL}' not pulled)"
+            echo "                        Fix: ollama pull ${EMB_MODEL}"
+        fi
     else
-        echo "WARN  (service up, but model '${OLLAMA_EMBED_MODEL}' not pulled)"
-        echo "                        Fix: ollama pull ${OLLAMA_EMBED_MODEL}"
+        echo "FAIL  (provider: ollama unreachable at ${EMB_BASE_URL})"
+        FAILURES=$((FAILURES + 1))
     fi
 else
-    echo "FAIL  (run: docker compose up -d ollama or check config embedding.ollama.base_url)"
-    FAILURES=$((FAILURES + 1))
+    MODELS_URL="${EMB_BASE_URL%/}/models"
+    if [ -n "${EMB_API_KEY}" ]; then
+        MODELS_RESP=$(curl -sf --max-time 5 -H "Authorization: Bearer ${EMB_API_KEY}" "${MODELS_URL}" 2>/dev/null)
+    else
+        MODELS_RESP=$(curl -sf --max-time 5 "${MODELS_URL}" 2>/dev/null)
+    fi
+
+    if [ -n "${MODELS_RESP}" ]; then
+        if echo "${MODELS_RESP}" | grep -q "\"id\":\"${EMB_MODEL}\""; then
+            echo "OK (provider: ${EMB_PROVIDER}, model: ${EMB_MODEL})"
+        else
+            echo "OK (provider: ${EMB_PROVIDER}, endpoint reachable, model: ${EMB_MODEL})"
+        fi
+    else
+        echo "FAIL  (provider: ${EMB_PROVIDER} endpoint unreachable at ${MODELS_URL})"
+        FAILURES=$((FAILURES + 1))
+    fi
 fi
 
 # 3. Redis (optional)
@@ -125,18 +174,18 @@ else
     FAILURES=$((FAILURES + 1))
 fi
 
-# 5. Ollama LLM model (optional, for parsing/reranking; same base_url as embedding)
+# 5. Ollama LLM model (optional, only when embedding provider is ollama)
 printf "  %-22s" "LLM model (optional):"
 LLM_MODEL="${TEAM_MEMORY_LLM_MODEL:-${OLLAMA_LLM_MODEL_CONFIG:-}}"
-if [ -n "$LLM_MODEL" ]; then
+if [ "${EMB_PROVIDER}" = "ollama" ] && [ -n "$LLM_MODEL" ]; then
     LLM_MODEL_BASE="${LLM_MODEL%%:*}"
-    if curl -sf --max-time 3 "${OLLAMA_BASE_URL}/api/tags" | grep -q "\"name\":\"${LLM_MODEL_BASE}"; then
+    if curl -sf --max-time 3 "${EMB_BASE_URL}/api/tags" | grep -q "\"name\":\"${LLM_MODEL_BASE}"; then
         echo "OK (model: ${LLM_MODEL})"
     else
         echo "WARN  (model '${LLM_MODEL}' not found)"
     fi
 else
-    echo "SKIP  (no LLM model configured)"
+    echo "SKIP  (not using ollama embedding provider)"
 fi
 
 # 6. Dashboard /stats (if Web returned health JSON)
