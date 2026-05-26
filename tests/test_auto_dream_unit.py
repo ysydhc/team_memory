@@ -233,7 +233,7 @@ class TestPhaseOrient:
             _make_experience(exp_id="r2", quality_tier="Silver", recall_count=5),  # Not a candidate
         ]
 
-        with patch.object(worker, "_query_candidates_db", side_effect=Exception("DB down")):
+        with patch.object(worker, "_get_dream_candidates", side_effect=Exception("DB down")):
             candidates = await worker._phase_orient(None)
 
         # Should have found the Bronze experience
@@ -412,7 +412,7 @@ class TestPhasePrune:
         sink = _make_sink()
         worker = AutoDreamWorker(config=cfg, sink=sink)
 
-        with patch.object(worker, "_prune_db", side_effect=Exception("DB error")):
+        with patch.object(worker, "_prune_stale", side_effect=Exception("DB error")):
             pruned = await worker._phase_prune()
             assert pruned == 0
 

@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from team_memory.daemon.integration.tm_sink import TMSink
+from team_memory.daemon.integration.tm_sink import TMSink, _daemon_context
 from team_memory.daemon.runtime.config import AutoDreamSettings, DaemonConfig
 
 logger = logging.getLogger("daemon.auto_dream")
@@ -269,97 +269,24 @@ class AutoDreamWorker:
         return candidates
 
     async def _query_candidates(self, last_dream: datetime | None) -> list[dict]:
-        """Query PG for candidate experiences directly.
-
-        Uses SQLAlchemy/asyncpg to find experiences matching candidate criteria.
-        Falls back to recall-based approach if direct DB access is unavailable.
-        """
+        """Query candidate experiences via ExperienceService."""
         try:
-            return await self._query_candidates_db(last_dream)
+            return await self._get_dream_candidates(last_dream)
         except Exception:
             logger.warning(
-                "Direct DB query for candidates failed, falling back to recall-based scan",
+                "Service query for candidates failed, falling back to recall-based scan",
                 exc_info=True,
             )
             return await self._query_candidates_recall(last_dream)
 
-    async def _query_candidates_db(self, last_dream: datetime | None) -> list[dict]:
-        """Direct PG query for candidate experiences."""
-        from sqlalchemy import and_, select
-
-        from team_memory.config import load_settings as _load_tm_settings
-        from team_memory.storage.database import get_session
-        from team_memory.storage.models import Experience
-
-        _settings = _load_tm_settings()
-        database_url = str(_settings.database.url)
-        candidates: list[dict] = []
-
-        async with get_session(database_url) as session:
-            # Build query: recent + (Bronze OR low recall_count)
-            conditions = [
-                Experience.is_deleted == False,  # noqa: E712
-                Experience.exp_status.in_(["published", "promoted"]),
-                Experience.quality_tier == "Bronze",
-            ]
-            if last_dream is not None:
-                conditions.append(Experience.created_at >= last_dream)
-
-            stmt = select(Experience).where(and_(*conditions)).order_by(Experience.created_at.desc()).limit(100)
-            result = await session.execute(stmt)
-            rows = list(result.scalars().all())
-
-            for exp in rows:
-                candidates.append(
-                    {
-                        "id": str(exp.id),
-                        "title": exp.title,
-                        "description": exp.description,
-                        "solution": exp.solution,
-                        "project": exp.project,
-                        "tags": exp.tags or [],
-                        "quality_score": exp.quality_score,
-                        "quality_tier": exp.quality_tier,
-                        "recall_count": exp.recall_count,
-                        "created_at": exp.created_at.isoformat() if exp.created_at else None,
-                    }
-                )
-
-            # Also find experiences with low recall_count (regardless of tier)
-            low_recall_conditions = [
-                Experience.is_deleted == False,  # noqa: E712
-                Experience.exp_status.in_(["published", "promoted"]),
-                Experience.recall_count == 0,
-                Experience.is_pinned == False,  # noqa: E712
-            ]
-            if last_dream is not None:
-                low_recall_conditions.append(Experience.created_at >= last_dream)
-
-            low_recall_stmt = (
-                select(Experience).where(and_(*low_recall_conditions)).order_by(Experience.created_at.desc()).limit(100)
-            )
-            low_recall_result = await session.execute(low_recall_stmt)
-            low_recall_rows = list(low_recall_result.scalars().all())
-
-            existing_ids = {c["id"] for c in candidates}
-            for exp in low_recall_rows:
-                if str(exp.id) not in existing_ids:
-                    candidates.append(
-                        {
-                            "id": str(exp.id),
-                            "title": exp.title,
-                            "description": exp.description,
-                            "solution": exp.solution,
-                            "project": exp.project,
-                            "tags": exp.tags or [],
-                            "quality_score": exp.quality_score,
-                            "quality_tier": exp.quality_tier,
-                            "recall_count": exp.recall_count,
-                            "created_at": exp.created_at.isoformat() if exp.created_at else None,
-                        }
-                    )
-
-        return candidates
+    async def _get_dream_candidates(self, last_dream: datetime | None) -> list[dict]:
+        """Fetch candidate experiences via ExperienceService."""
+        ctx = _daemon_context()
+        return await ctx.service.list_published(
+            quality_tier="Bronze",
+            since=last_dream,
+            limit=200,
+        )
 
     async def _query_candidates_recall(self, last_dream: datetime | None) -> list[dict]:
         """Fallback: use recall() to discover candidate experiences.
@@ -612,51 +539,27 @@ class AutoDreamWorker:
         Returns the number of experiences pruned.
         """
         try:
-            return await self._prune_db()
+            return await self._prune_stale()
         except Exception:
-            logger.warning("Direct DB prune failed, skipping prune phase", exc_info=True)
+            logger.warning("Service prune failed, skipping prune phase", exc_info=True)
             return 0
 
-    async def _prune_db(self) -> int:
-        """Direct PG query to find and soft-delete stale experiences."""
-        from sqlalchemy import and_, select
-
-        from team_memory.config import load_settings as _load_tm_settings
-        from team_memory.storage.database import get_session
-        from team_memory.storage.models import Experience
-
-        _settings = _load_tm_settings()
-        database_url = str(_settings.database.url)
+    async def _prune_stale(self) -> int:
+        """Find and soft-delete stale experiences via ExperienceService."""
+        from datetime import timedelta
         cutoff = _utcnow() - timedelta(days=self._cfg.prune_max_age_days)
-
+        ctx = _daemon_context()
+        candidates = await ctx.service.list_published(quality_tier="Bronze")
         pruned = 0
-        async with get_session(database_url) as session:
-            # Find stale experiences: Bronze + recall_count=0 + old
-            stmt = select(Experience).where(
-                and_(
-                    Experience.is_deleted == False,  # noqa: E712
-                    Experience.quality_tier == "Bronze",
-                    Experience.recall_count == 0,
-                    Experience.is_pinned == False,  # noqa: E712
-                    Experience.created_at < cutoff,
-                    Experience.exp_status.in_(["published", "promoted"]),
-                )
-            )
-            result = await session.execute(stmt)
-            stale_experiences = list(result.scalars().all())
-
-            now = _utcnow()
-            for exp in stale_experiences:
-                exp.is_deleted = True
-                exp.deleted_at = now
+        for exp in candidates:
+            if (exp.get("recall_count", 1) == 0
+                    and not exp.get("is_pinned")
+                    and exp.get("created_at") is not None
+                    and exp["created_at"] < cutoff):
+                await ctx.service.soft_delete_by_id(exp["id"])
                 pruned += 1
-
-            if stale_experiences:
-                await session.commit()
-
         if pruned > 0:
             logger.info("pruned %d stale experiences", pruned)
-
         return pruned
 
     # ------------------------------------------------------------------
@@ -664,56 +567,20 @@ class AutoDreamWorker:
     # ------------------------------------------------------------------
 
     async def _soft_delete(self, experience_id: str) -> None:
-        """Soft-delete an experience (is_deleted=true, deleted_at=NOW())."""
-        from team_memory.config import load_settings as _load_tm_settings
-        from team_memory.storage.database import get_session
-        from team_memory.storage.models import Experience
+        """Soft-delete an experience via ExperienceService."""
+        await self._soft_delete_experience(experience_id)
 
-        _settings = _load_tm_settings()
-        database_url = str(_settings.database.url)
-
-        async with get_session(database_url) as session:
-            import uuid as _uuid
-
-            from sqlalchemy import select
-
-            stmt = select(Experience).where(Experience.id == _uuid.UUID(experience_id))
-            result = await session.execute(stmt)
-            exp = result.scalar_one_or_none()
-            if exp is not None:
-                exp.is_deleted = True
-                exp.deleted_at = _utcnow()
-                await session.commit()
+    async def _soft_delete_experience(self, experience_id: str) -> None:
+        """Soft-delete an experience by ID via ExperienceService."""
+        ctx = _daemon_context()
+        await ctx.service.soft_delete_by_id(experience_id)
 
     async def _count_new_experiences(self, last_dream: datetime | None) -> int:
         """Count experiences created since last dream run."""
         try:
-            return await self._count_new_experiences_db(last_dream)
+            ctx = _daemon_context()
+            return await ctx.service.count_published(since=last_dream)
         except Exception:
-            logger.debug("Direct DB count failed, using estimate", exc_info=True)
+            logger.debug("Service count failed, using estimate", exc_info=True)
             # Rough estimate: if we can't count, assume enough
             return self._cfg.min_new_experiences
-
-    async def _count_new_experiences_db(self, last_dream: datetime | None) -> int:
-        """Direct PG count of new experiences."""
-        from sqlalchemy import and_, func, select
-
-        from team_memory.config import load_settings as _load_tm_settings
-        from team_memory.storage.database import get_session
-        from team_memory.storage.models import Experience
-
-        _settings = _load_tm_settings()
-        database_url = str(_settings.database.url)
-
-        async with get_session(database_url) as session:
-            conditions = [
-                Experience.is_deleted == False,  # noqa: E712
-            ]
-            if last_dream is not None:
-                conditions.append(Experience.created_at >= last_dream)
-
-            stmt = select(func.count(Experience.id)).where(and_(*conditions))
-            result = await session.execute(stmt)
-            count = result.scalar() or 0
-
-        return count
