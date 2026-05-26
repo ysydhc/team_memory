@@ -67,11 +67,21 @@ async def _beat_loop(state: HeartbeatState, interval: int) -> None:
 
         if gap > SLEEP_THRESHOLD:
             sleep_sec = gap - interval  # subtract normal interval
-            logger.warning(
-                "[WAKE]  Sleep detected — %.0f sec gap (%.1f min). Triggering recovery.",
-                sleep_sec,
-                sleep_sec / 60,
-            )
+            sleep_min = sleep_sec / 60
+            wake_time = datetime.now(timezone.utc).isoformat()
+
+            # Structured sleep log (JSON for log aggregation)
+            import json as _json
+            _sleep_log = _json.dumps({
+                "event": "system_sleep_detected",
+                "gap_seconds": round(sleep_sec, 1),
+                "gap_minutes": round(sleep_min, 1),
+                "wake_time_utc": wake_time,
+                "threshold_seconds": SLEEP_THRESHOLD,
+                "pid": state.pid,
+            }, ensure_ascii=False)
+            logger.warning("[WAKE]  %s", _sleep_log)
+
             if state._wake_callback:
                 try:
                     await state._wake_callback(sleep_sec)

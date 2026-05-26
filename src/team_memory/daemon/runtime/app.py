@@ -430,10 +430,16 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
                 _dw.resume()
                 logger.info("[WAKE]  AutoDreamWorker resumed")
 
-            logger.info(
-                "[WAKE]  Recovery complete (slept %.0f min)",
-                sleep_min,
-            )
+            import json as _json2, time as _time2
+            _rec_log = _json2.dumps({
+                "event": "system_wake_recovery_complete",
+                "sleep_seconds": round(sleep_seconds, 1),
+                "sleep_minutes": round(sleep_min, 1),
+                "deps_recovered": _ok,
+                "workers_resumed": True,
+                "recovered_at": _time2.time(),
+            }, ensure_ascii=False)
+            logger.info("[WAKE]  %s", _rec_log)
 
         application.state.heartbeat.on_wake(_on_wake_from_sleep)
 
