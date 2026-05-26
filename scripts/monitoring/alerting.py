@@ -3,13 +3,13 @@
 Strategy pattern: each platform implements AlertChannel interface.
 Channels: feishu, wecom, webhook, macos, log
 """
+
 from __future__ import annotations
 
 import abc
 import base64
 import hashlib
 import hmac
-import json
 import logging
 import subprocess
 import time
@@ -30,6 +30,7 @@ class AlertSeverity(str, Enum):
 @dataclass
 class AlertMessage:
     """Unified alert message / 统一告警消息"""
+
     title: str
     body: str
     severity: AlertSeverity = AlertSeverity.CRITICAL
@@ -42,11 +43,7 @@ class AlertMessage:
     def to_plain_text(self) -> str:
         """Format as plain text / 格式化为纯文本"""
         level = self.severity.value.upper()
-        return (
-            f"[TM {level}] {self.title}\n"
-            f"Time: {self.timestamp}\n"
-            f"Detail: {self.body}"
-        )
+        return f"[TM {level}] {self.title}\nTime: {self.timestamp}\nDetail: {self.body}"
 
 
 class AlertChannel(abc.ABC):
@@ -88,6 +85,7 @@ class FeishuChannel(AlertChannel):
     async def send(self, message: AlertMessage) -> bool:
         try:
             import httpx
+
             payload = self._build_payload(message)
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(self.webhook, json=payload)
@@ -120,6 +118,7 @@ class WeComChannel(AlertChannel):
     async def send(self, message: AlertMessage) -> bool:
         try:
             import httpx
+
             payload = self._build_payload(message)
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(self.webhook, json=payload)
@@ -144,6 +143,7 @@ class WebhookChannel(AlertChannel):
     async def send(self, message: AlertMessage) -> bool:
         try:
             import httpx
+
             payload = {"text": message.to_plain_text()}
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(self.url, json=payload)
@@ -161,9 +161,13 @@ class MacOSNotificationChannel(AlertChannel):
     async def send(self, message: AlertMessage) -> bool:
         try:
             subprocess.run(
-                ["osascript", "-e",
-                 f'display notification "{message.body[:200]}" with title "TM Alert: {message.title}"'],
-                timeout=5, capture_output=True,
+                [
+                    "osascript",
+                    "-e",
+                    f'display notification "{message.body[:200]}" with title "TM Alert: {message.title}"',
+                ],
+                timeout=5,
+                capture_output=True,
             )
             return True
         except (OSError, subprocess.TimeoutExpired):
@@ -206,6 +210,7 @@ def create_channel(channel_type: str, **kwargs) -> AlertChannel:
 @dataclass
 class AlertManager:
     """Multi-channel alert manager / 多渠道告警管理器"""
+
     channels: list[AlertChannel] = field(default_factory=list)
     alert_cooldown: int = 300
     _last_alert_times: dict[str, float] = field(default_factory=dict, repr=False)
@@ -244,7 +249,8 @@ class AlertManager:
     @classmethod
     def from_config(cls, config: Any) -> AlertManager:
         """Create AlertManager from MonitoringConfig / 从配置创建"""
-        from monitoring.config import MonitoringConfig, ChannelConfig
+        from monitoring.config import MonitoringConfig
+
         if not isinstance(config, MonitoringConfig):
             raise TypeError(f"Expected MonitoringConfig, got {type(config)}")
 
@@ -254,11 +260,13 @@ class AlertManager:
         for ch in config.channels:
             if not ch.webhook:
                 continue
-            channels.append(create_channel(
-                channel_type=ch.type,
-                webhook=ch.webhook,
-                secret=ch.secret,
-            ))
+            channels.append(
+                create_channel(
+                    channel_type=ch.type,
+                    webhook=ch.webhook,
+                    secret=ch.secret,
+                )
+            )
 
         # Always add log + macos (local dev)
         channels.append(LogChannel(log_file=config.watchdog_log_file))

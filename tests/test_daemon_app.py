@@ -10,10 +10,11 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
-from team_memory.daemon.app import create_app
-from team_memory.daemon.config import DaemonConfig, DaemonSettings, DraftSettings, TMSettings
-from team_memory.daemon.tm_sink import TMSink
 from httpx import ASGITransport
+
+from team_memory.daemon.runtime.app import create_app
+from team_memory.daemon.runtime.config import DaemonConfig, DaemonSettings, DraftSettings, TMSettings
+from team_memory.daemon.integration.tm_sink import TMSink
 
 
 # ---------------------------------------------------------------------------
@@ -22,12 +23,8 @@ from httpx import ASGITransport
 @pytest.fixture(autouse=True)
 def _mock_auto_infer(monkeypatch):
     """Mock auto-inference so fake test paths don't resolve to project names."""
-    monkeypatch.setattr(
-        "team_memory.project_resolver.read_tm_toml", lambda _: None
-    )
-    monkeypatch.setattr(
-        "team_memory.project_resolver.infer_project_name", lambda _cwd="": "default"
-    )
+    monkeypatch.setattr("team_memory.project_resolver.read_tm_toml", lambda _: None)
+    monkeypatch.setattr("team_memory.project_resolver.infer_project_name", lambda _cwd="": "default")
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +104,7 @@ async def client(stub_sink: _StubTMSink, config: DaemonConfig):
     httpx ASGITransport does not send ASGI lifespan events, so we manually
     invoke the lifespan context manager to populate app.state.
     """
-    with patch("team_memory.daemon.app.create_sink", return_value=stub_sink):
+    with patch("team_memory.daemon.runtime.app.create_sink", return_value=stub_sink):
         app = create_app(config)
 
         # Manually trigger the lifespan to populate app.state
@@ -143,7 +140,7 @@ class TestStatusEndpoint:
             tm=TMSettings(mode="remote", base_url="http://tm:3900", user="test"),
             draft=DraftSettings(db_path=""),
         )
-        with patch("team_memory.daemon.app.create_sink", return_value=stub_sink):
+        with patch("team_memory.daemon.runtime.app.create_sink", return_value=stub_sink):
             app = create_app(config)
             lifespan_gen = app.router.lifespan_context(app)
             await lifespan_gen.__aenter__()
@@ -176,7 +173,7 @@ class TestHookEndpoints:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["action"] == "ok"
+        assert data["action"] in ("ok", "draft_updated")
 
     @pytest.mark.asyncio
     async def test_session_start(self, client: httpx.AsyncClient):
@@ -273,9 +270,7 @@ class TestDraftSaveEndpoint:
 
 class TestDraftPublishEndpoint:
     @pytest.mark.asyncio
-    async def test_draft_publish_calls_sink(
-        self, client: httpx.AsyncClient, stub_sink: _StubTMSink
-    ):
+    async def test_draft_publish_calls_sink(self, client: httpx.AsyncClient, stub_sink: _StubTMSink):
         resp = await client.post(
             "/draft/publish",
             json={
@@ -292,9 +287,7 @@ class TestDraftPublishEndpoint:
         assert call["refined_content"] == "Refined text"
 
     @pytest.mark.asyncio
-    async def test_draft_publish_without_refined(
-        self, client: httpx.AsyncClient, stub_sink: _StubTMSink
-    ):
+    async def test_draft_publish_without_refined(self, client: httpx.AsyncClient, stub_sink: _StubTMSink):
         resp = await client.post(
             "/draft/publish",
             json={
@@ -347,7 +340,7 @@ class TestDaemonDraftRefiner:
         buf = AsyncMock()
         buf.upsert_draft = AsyncMock()
 
-        from team_memory.daemon.draft_refiner import DraftRefiner
+        from team_memory.daemon.refinement.draft_refiner import DraftRefiner
 
         refiner = DraftRefiner(sink=sink, draft_buffer=buf)
         result = await refiner.save_draft(
@@ -365,12 +358,10 @@ class TestDaemonDraftRefiner:
     async def test_refine_and_publish_uses_sink(self):
         sink = _StubTMSink()
         buf = AsyncMock()
-        buf.get_pending = AsyncMock(
-            return_value=[{"id": "d-1", "content": "使用了Python解决配置问题"}]
-        )
+        buf.get_pending = AsyncMock(return_value=[{"id": "d-1", "content": "使用了Python解决配置问题"}])
         buf.mark_published_by_session = AsyncMock()
 
-        from team_memory.daemon.draft_refiner import DraftRefiner
+        from team_memory.daemon.refinement.draft_refiner import DraftRefiner
 
         refiner = DraftRefiner(sink=sink, draft_buffer=buf)
         result = await refiner.refine_and_publish("conv-1")
@@ -388,7 +379,7 @@ class TestDaemonDraftRefiner:
         buf = AsyncMock()
         buf.get_pending = AsyncMock(return_value=[])
 
-        from team_memory.daemon.draft_refiner import DraftRefiner
+        from team_memory.daemon.refinement.draft_refiner import DraftRefiner
 
         refiner = DraftRefiner(sink=sink, draft_buffer=buf)
         result = await refiner.refine_and_publish("conv-1")
@@ -397,14 +388,14 @@ class TestDaemonDraftRefiner:
         assert len(sink.draft_publish_calls) == 0
 
     def test_extract_facts(self):
-        from team_memory.daemon.draft_refiner import DraftRefiner
+        from team_memory.daemon.refinement.draft_refiner import DraftRefiner
 
         facts = DraftRefiner.extract_facts("因为配置错误所以需要修复。其他无关句子")
         assert len(facts) >= 1
         assert any("因为" in f for f in facts)
 
     def test_extract_facts_empty(self):
-        from team_memory.daemon.draft_refiner import DraftRefiner
+        from team_memory.daemon.refinement.draft_refiner import DraftRefiner
 
         assert DraftRefiner.extract_facts("") == []
         assert DraftRefiner.extract_facts("hello world") == []

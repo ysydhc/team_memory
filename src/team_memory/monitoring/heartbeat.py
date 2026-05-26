@@ -1,16 +1,19 @@
-"""Process-level heartbeat / 进程级心跳"""
+"""Process-level heartbeat with sleep/wake detection."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
 HEARTBEAT_INTERVAL = 30  # seconds
+SLEEP_THRESHOLD = 300  # 5 minutes — gap larger than this → sleep detected
 
 
 @dataclass
@@ -19,6 +22,11 @@ class HeartbeatState:
     start_time: float = field(default_factory=time.time)
     pid: int = field(default_factory=os.getpid)
     _task: asyncio.Task | None = field(default=None, repr=False)
+    # Sleep detection fields
+    _last_monotonic: float = field(default_factory=time.monotonic, repr=False)
+    _wake_callback: Callable[[float], Awaitable[None]] | None = field(
+        default=None, repr=False
+    )
 
     @property
     def last_beat_iso(self) -> str:
@@ -38,22 +46,57 @@ class HeartbeatState:
         }
 
     def is_alive(self, timeout: int = 90) -> bool:
-        """Check if heartbeat is within timeout window."""
         if self.last_beat == 0:
-            return True  # not started yet
+            return True
         return (time.time() - self.last_beat) < timeout
+
+    def on_wake(self, callback: Callable[[float], Awaitable[None]]) -> None:
+        """Register a callback fired when sleep is detected (arg = sleep_seconds)."""
+        self._wake_callback = callback
 
 
 async def _beat_loop(state: HeartbeatState, interval: int) -> None:
-    """Background loop that updates heartbeat timestamp."""
+    """Background heartbeat with sleep detection via monotonic clock."""
     while True:
         state.last_beat = time.time()
-        logger.debug("Heartbeat beat (pid=%d)", state.pid)
+
+        # --- Sleep detection via monotonic clock ---
+        now_mono = time.monotonic()
+        gap = now_mono - state._last_monotonic
+        state._last_monotonic = now_mono
+
+        if gap > SLEEP_THRESHOLD:
+            sleep_sec = gap - interval  # subtract normal interval
+            sleep_min = sleep_sec / 60
+            wake_time = datetime.now(timezone.utc).isoformat()
+
+            # Structured sleep log (JSON for log aggregation)
+            import json as _json
+            _sleep_log = _json.dumps({
+                "event": "system_sleep_detected",
+                "gap_seconds": round(sleep_sec, 1),
+                "gap_minutes": round(sleep_min, 1),
+                "wake_time_utc": wake_time,
+                "threshold_seconds": SLEEP_THRESHOLD,
+                "pid": state.pid,
+            }, ensure_ascii=False)
+            logger.warning("[WAKE]  %s", _sleep_log)
+
+            if state._wake_callback:
+                try:
+                    await state._wake_callback(sleep_sec)
+                except Exception as exc:
+                    logger.error("[WAKE]  Recovery callback failed: %s", exc)
+        elif gap > interval * 2:
+            logger.info("[WAKE]  Minor gap %.0fs (likely GC/load), no recovery", gap)
+        else:
+            logger.debug("Heartbeat beat (pid=%d)", state.pid)
+
         await asyncio.sleep(interval)
 
 
 def start_heartbeat(interval: int = HEARTBEAT_INTERVAL) -> HeartbeatState:
-    """Start heartbeat background task. Call from app startup."""
+    """Start heartbeat background task."""
     state = HeartbeatState()
     state._task = asyncio.create_task(_beat_loop(state, interval))
     logger.info("Heartbeat started (interval=%ds, pid=%d)", interval, state.pid)

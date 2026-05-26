@@ -31,17 +31,18 @@ from typing import TYPE_CHECKING
 from team_memory.auth.provider import AuthProvider, create_auth_provider
 from team_memory.config import Settings, load_settings
 from team_memory.embedding.base import ConcurrencyLimitedEmbedding, EmbeddingProvider
+from team_memory.embedding.factory import create_embedding_provider
+from team_memory.services.analysis.evaluation import EvaluationService
 from team_memory.services.archive import ArchiveService
-from team_memory.services.evaluation import EvaluationService
-from team_memory.services.event_bus import EventBus, Events
-from team_memory.services.experience import ExperienceService
-from team_memory.services.intent_router import DefaultIntentRouter, IntentRouter
-from team_memory.services.search_orchestrator import SearchOrchestrator
+from team_memory.services.infra.event_bus import EventBus, Events
+from team_memory.services.infra.intent_router import DefaultIntentRouter, IntentRouter
+from team_memory.services.memory.experience import ExperienceService
+from team_memory.services.search.search_orchestrator import SearchOrchestrator
 
 if TYPE_CHECKING:
-    from team_memory.services.janitor import MemoryJanitor
-    from team_memory.services.janitor_scheduler import JanitorScheduler
-    from team_memory.services.search_pipeline import SearchPipeline
+    from team_memory.services.maintenance.janitor import MemoryJanitor
+    from team_memory.services.maintenance.janitor_scheduler import JanitorScheduler
+    from team_memory.services.search.search_pipeline import SearchPipeline
 
 logger = logging.getLogger("team_memory.bootstrap")
 
@@ -121,7 +122,9 @@ class _JsonFormatter(logging.Formatter):
         }
         if hasattr(record, "request_id") and record.request_id:
             log_record["request_id"] = record.request_id
-        extra = {k: v for k, v in record.__dict__.items() if k not in _LOG_RECORD_STD_ATTRS}
+        extra = {
+            k: v for k, v in record.__dict__.items() if k not in _LOG_RECORD_STD_ATTRS
+        }
         if extra:
             log_record["extra"] = _redact_sensitive(extra)
         return json.dumps(log_record, ensure_ascii=False)
@@ -161,11 +164,15 @@ def _configure_logging(settings: Settings) -> QueueListener | None:
     if use_json:
         handler.setFormatter(_JsonFormatter())
     else:
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
+        )
     root.addHandler(handler)
 
     log_listener: QueueListener | None = None
-    if getattr(settings, "logging", None) and getattr(settings.logging, "log_file_enabled", False):
+    if getattr(settings, "logging", None) and getattr(
+        settings.logging, "log_file_enabled", False
+    ):
         log_cfg = settings.logging
         log_path = getattr(log_cfg, "log_file_path", "logs/team_memory.log")
         backup_count = getattr(log_cfg, "log_file_backup_count", 5)
@@ -188,7 +195,9 @@ def _configure_logging(settings: Settings) -> QueueListener | None:
             file_handler.setFormatter(
                 logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
             )
-        log_listener = QueueListener(log_queue, file_handler, respect_handler_level=True)
+        log_listener = QueueListener(
+            log_queue, file_handler, respect_handler_level=True
+        )
         log_listener.start()
         root.addHandler(NonBlockingQueueHandler(log_queue))
 
@@ -218,100 +227,11 @@ class AppContext:
     janitor: MemoryJanitor | None = None
     janitor_scheduler: JanitorScheduler | None = None
     entity_extractor: object | None = None  # EntityExtractor (lazy import)
+    adaptive_retriever: object | None = None  # AdaptiveRetriever (lazy import)
     _log_listener: QueueListener | None = None
 
 
 _instance: AppContext | None = None
-
-
-def _create_embedding_provider(settings: Settings) -> EmbeddingProvider:
-    """Create the configured embedding provider with automatic degradation.
-
-    Priority: configured provider -> Ollama -> OpenAI -> generic -> local.
-    """
-    cfg = settings.embedding
-    provider = cfg.provider
-
-    def _try_ollama() -> EmbeddingProvider | None:
-        try:
-            import httpx
-
-            resp = httpx.get(f"{cfg.ollama.base_url}/api/tags", timeout=3)
-            if resp.status_code == 200:
-                from team_memory.embedding.ollama_provider import OllamaEmbedding
-
-                return OllamaEmbedding(
-                    model=cfg.ollama.model,
-                    dim=cfg.ollama.dimension,
-                    base_url=cfg.ollama.base_url,
-                )
-        except Exception:
-            pass
-        return None
-
-    def _try_openai() -> EmbeddingProvider | None:
-        api_key = cfg.openai.api_key or os.environ.get("OPENAI_API_KEY", "")
-        if api_key:
-            from team_memory.embedding.openai_provider import OpenAIEmbedding
-
-            return OpenAIEmbedding(
-                api_key=api_key,
-                model=cfg.openai.model,
-                dim=cfg.openai.dimension,
-            )
-        return None
-
-    def _try_generic() -> EmbeddingProvider | None:
-        api_key = cfg.generic.api_key or os.environ.get("EMBEDDING_API_KEY", "")
-        if api_key or cfg.generic.base_url != "http://localhost:8080/v1":
-            from team_memory.embedding.generic_provider import GenericEmbedding
-
-            return GenericEmbedding(
-                base_url=cfg.generic.base_url,
-                api_key=api_key,
-                model=cfg.generic.model,
-                dim=cfg.generic.dimension,
-            )
-        return None
-
-    def _try_local() -> EmbeddingProvider | None:
-        try:
-            from team_memory.embedding.local_provider import LocalEmbedding
-
-            return LocalEmbedding(
-                model_name=cfg.local.model_name,
-                device=cfg.local.device,
-                dim=cfg.local.dimension,
-            )
-        except Exception:
-            return None
-
-    factories = {
-        "ollama": _try_ollama,
-        "openai": _try_openai,
-        "generic": _try_generic,
-        "local": _try_local,
-    }
-
-    result = factories.get(provider, _try_ollama)()
-    if result is not None:
-        logger.info("Embedding provider: %s (configured)", provider)
-        return result
-
-    logger.warning("Configured embedding provider '%s' unavailable, trying fallbacks...", provider)
-    fallback_order = ["ollama", "openai", "generic", "local"]
-    for fb in fallback_order:
-        if fb == provider:
-            continue
-        result = factories[fb]()
-        if result is not None:
-            logger.warning("Embedding provider degraded to: %s", fb)
-            return result
-
-    raise RuntimeError(
-        "No embedding provider available. Install sentence-transformers, "
-        "start Ollama, or set OPENAI_API_KEY."
-    )
 
 
 def _validate_embedding_dimension(settings: Settings) -> None:
@@ -344,12 +264,15 @@ def _configure_auth(settings: Settings) -> AuthProvider:
     auth = create_auth_provider(settings.auth.type, db_url=db_url)
     if isinstance(auth, ApiKeyAuth):
         if settings.auth.api_key:
-            auth.register_key((settings.auth.api_key or "").strip(), settings.auth.user, "admin")
+            auth.register_key(
+                (settings.auth.api_key or "").strip(), settings.auth.user, "admin"
+            )
         env_key = (os.environ.get("TEAM_MEMORY_API_KEY") or "").strip()
         if env_key:
             auth.register_key(env_key, settings.auth.user, "admin")
             logger.debug(
-                "Registered API key from TEAM_MEMORY_API_KEY for user %s", settings.auth.user
+                "Registered API key from TEAM_MEMORY_API_KEY for user %s",
+                settings.auth.user,
             )
     return auth
 
@@ -375,17 +298,19 @@ def bootstrap(
     settings = load_settings(config_path)
     log_listener = _configure_logging(settings)
     db_url = _resolve_db_url(settings)
-    embedding = _create_embedding_provider(settings)
+    embedding = create_embedding_provider(settings)
     embedding = ConcurrencyLimitedEmbedding(embedding, max_concurrent=10)
     _validate_embedding_dimension(settings)
     auth = _configure_auth(settings)
 
     from team_memory.reranker.factory import create_reranker
-    from team_memory.services.search_pipeline import SearchPipeline
+    from team_memory.services.search.search_pipeline import SearchPipeline
 
     rerank_cfg = settings.reranker
     rerank_enabled = rerank_cfg.provider != "none"
-    reranker_provider = create_reranker(rerank_cfg, settings.llm) if rerank_enabled else None
+    reranker_provider = (
+        create_reranker(rerank_cfg, settings.llm) if rerank_enabled else None
+    )
 
     search_pipeline = SearchPipeline(
         embedding_provider=embedding,
@@ -421,6 +346,15 @@ def bootstrap(
         evaluation_service=evaluation_service,
     )
 
+    from team_memory.services.llm.llm_client import LLMClient
+    from team_memory.services.search.adaptive_retriever import AdaptiveRetriever
+
+    adaptive_retriever = AdaptiveRetriever(
+        search_orchestrator=search_orchestrator,
+        llm_client=LLMClient.from_config(settings.llm),
+        max_loops=3,
+    )
+
     service = ExperienceService(
         embedding_provider=embedding,
         auth_provider=auth,
@@ -437,7 +371,9 @@ def bootstrap(
 
     # Entity extraction always registered (both Daemon and Docker)
     entity_extractor = _register_entity_extraction(
-        event_bus, settings.llm, db_url,
+        event_bus,
+        settings.llm,
+        db_url,
         entity_extraction_config=settings.entity_extraction,
     )
 
@@ -446,8 +382,8 @@ def bootstrap(
     janitor_scheduler = None
 
     if settings.janitor.enabled:
-        from team_memory.services.janitor import MemoryJanitor
-        from team_memory.services.janitor_scheduler import JanitorScheduler
+        from team_memory.services.maintenance.janitor import MemoryJanitor
+        from team_memory.services.maintenance.janitor_scheduler import JanitorScheduler
 
         janitor = MemoryJanitor(db_url=db_url, config=settings.janitor)
         janitor_scheduler = JanitorScheduler(janitor=janitor, config=settings.janitor)
@@ -463,7 +399,9 @@ def bootstrap(
                 logger.info("Janitor scheduler started in background")
             except RuntimeError:
                 # No running event loop, scheduler will be started later
-                logger.debug("No running event loop, janitor scheduler will start later")
+                logger.debug(
+                    "No running event loop, janitor scheduler will start later"
+                )
 
     _instance = AppContext(
         settings=settings,
@@ -480,6 +418,7 @@ def bootstrap(
         janitor=janitor,
         janitor_scheduler=janitor_scheduler,
         entity_extractor=entity_extractor,
+        adaptive_retriever=adaptive_retriever,
         _log_listener=log_listener,
     )
 
@@ -508,7 +447,9 @@ def reset_context() -> None:
     _instance = None
 
 
-def _register_cache_invalidation(event_bus: EventBus, search_orchestrator: SearchOrchestrator):
+def _register_cache_invalidation(
+    event_bus: EventBus, search_orchestrator: SearchOrchestrator
+):
     async def _on_data_change(payload: dict) -> None:
         await search_orchestrator.invalidate_cache()
         logger.debug("Cache invalidated by event: %s", payload)
@@ -529,7 +470,7 @@ def _register_pattern_extraction(
     db_url: str,
 ) -> None:
     """Subscribe to ARCHIVE_CREATED to enqueue pattern extraction as a background task."""
-    from team_memory.services import task_runner
+    from team_memory.services.infra import task_runner
 
     async def _handle_pattern_extraction(payload: dict) -> None:
         raw = payload.get("raw_conversation", "")
@@ -537,8 +478,10 @@ def _register_pattern_extraction(
         if not raw or not user_id:
             return
         try:
-            from team_memory.services.pattern_extractor import PatternExtractor
-            from team_memory.services.personal_memory import PersonalMemoryService
+            from team_memory.services.analysis.pattern_extractor import PatternExtractor
+            from team_memory.services.memory.personal_memory import (
+                PersonalMemoryService,
+            )
 
             pm_svc = PersonalMemoryService(embedding_provider=embedding, db_url=db_url)
             extractor = PatternExtractor()
@@ -564,16 +507,42 @@ def _register_pattern_extraction(
         await task_runner.enqueue("pattern_extraction", payload, db_url=db_url)
         # Attempt immediate execution (best-effort, like the old create_task)
         try:
-            await task_runner.poll_and_execute(db_url, batch_size=1)
+            await task_runner.poll_and_execute(
+                db_url, batch_size=1, exclude_types=["graphiti_ingest"]
+            )
         except Exception:
-            logger.debug("Immediate task execution failed; will retry later", exc_info=True)
+            logger.debug(
+                "Immediate task execution failed; will retry later", exc_info=True
+            )
 
     event_bus.on(Events.ARCHIVE_CREATED, _on_archive_created)
 
 
 async def start_background_tasks(ctx: AppContext) -> None:
-    """Start background tasks (placeholder for future use)."""
+    """Start background tasks and background task polling."""
     logger.info("Background tasks started")
+    import asyncio
+
+    from team_memory.services.infra import task_runner
+
+    async def _poll_loop():
+        while True:
+            try:
+                await task_runner.poll_and_execute(
+                    ctx.db_url,
+                    batch_size=1,
+                    exclude_types=["graphiti_ingest"],
+                )
+            except Exception as e:
+                logger.error("Error in background task polling loop: %s", e)
+            await asyncio.sleep(5)
+
+    try:
+        loop = asyncio.get_running_loop()
+        ctx._task_poll_task = loop.create_task(_poll_loop())
+        logger.info("Background task polling loop started")
+    except RuntimeError:
+        logger.debug("No running event loop, task polling will not start")
 
 
 def _register_entity_extraction(
@@ -585,7 +554,7 @@ def _register_entity_extraction(
     """Subscribe to EXPERIENCE_CREATED to fire async entity extraction."""
     import asyncio
 
-    from team_memory.services.entity_extractor import EntityExtractor
+    from team_memory.services.entity.entity_extractor import EntityExtractor
 
     # Use dedicated entity_extraction config if available, else fall back to main LLMConfig
     if entity_extraction_config is not None and getattr(
@@ -594,9 +563,7 @@ def _register_entity_extraction(
         ee_cfg = entity_extraction_config
         import os as _os
 
-        api_key = _os.environ.get(
-            getattr(ee_cfg, "api_key_env", ""), ""
-        ) or ""
+        api_key = _os.environ.get(getattr(ee_cfg, "api_key_env", ""), "") or ""
         from team_memory.config.llm import LLMConfig
 
         extract_llm_config = LLMConfig(
@@ -636,6 +603,10 @@ def _register_entity_extraction(
 
 async def stop_background_tasks(ctx: AppContext) -> None:
     """Gracefully stop background tasks."""
+    if hasattr(ctx, "_task_poll_task"):
+        ctx._task_poll_task.cancel()
+        logger.info("Background task polling loop stopped")
+
     # Stop janitor scheduler first
     if ctx.janitor_scheduler is not None:
         try:

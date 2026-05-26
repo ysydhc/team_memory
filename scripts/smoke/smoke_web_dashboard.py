@@ -8,6 +8,7 @@ Usage:
 Prints: health (including dashboard_stats), and /api/v1/stats response or error.
 No browser required. For full UI test use Playwright (see README).
 """
+
 from __future__ import annotations
 
 import argparse

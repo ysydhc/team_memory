@@ -87,14 +87,10 @@ async def get_janitor_status(
         janitor_config = context.janitor._config
         status["janitor_config"] = {
             "protection_period_days": getattr(janitor_config, "protection_period_days", 10),
-            "auto_soft_delete_outdated": getattr(
-                janitor_config, "auto_soft_delete_outdated", False
-            ),
+            "auto_soft_delete_outdated": getattr(janitor_config, "auto_soft_delete_outdated", False),
             "purge_soft_deleted_days": getattr(janitor_config, "purge_soft_deleted_days", 30),
             "draft_expiry_days": getattr(janitor_config, "draft_expiry_days", 7),
-            "personal_memory_retention_days": getattr(
-                janitor_config, "personal_memory_retention_days", 90
-            ),
+            "personal_memory_retention_days": getattr(janitor_config, "personal_memory_retention_days", 90),
         }
 
     return status
@@ -135,9 +131,7 @@ async def list_outdated_experiences(
 
         # 计算总数
         count_query = (
-            select(Experience.id)
-            .where(Experience.quality_tier == "Outdated")
-            .where(Experience.is_deleted == False)  # noqa: E712
+            select(Experience.id).where(Experience.quality_tier == "Outdated").where(Experience.is_deleted == False)  # noqa: E712
         )
         if resolved_project:
             count_query = count_query.where(Experience.project == resolved_project)

@@ -1,13 +1,10 @@
 """Unit tests for LLMWiki — local SQLite knowledge store with FTS5 search."""
-from __future__ import annotations
 
-import asyncio
-import os
+from __future__ import annotations
 
 import pytest
 
-from team_memory.daemon.llm_wiki import LLMWiki
-
+from team_memory.daemon.wiki.llm_wiki import LLMWiki
 
 # ---------------------------------------------------------------------------
 # Fixtures

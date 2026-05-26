@@ -3,6 +3,7 @@
 Detects convergence signals in agent responses to identify when a task
 has reached a natural conclusion (e.g., "解决了", "test passed").
 """
+
 from __future__ import annotations
 
 import re

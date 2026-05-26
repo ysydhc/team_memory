@@ -3,6 +3,7 @@
 Tests each thin hook's main() function with mocked httpx,
 stdin parsing, daemon-not-running fallback, and timeout handling.
 """
+
 from __future__ import annotations
 
 import io
@@ -28,7 +29,7 @@ class TestCursorAfterResponse:
     """Tests for scripts/hooks/cursor_after_response.py."""
 
     def test_forwards_to_daemon(self) -> None:
-        from team_memory.hooks.cursor_after_response import main
+        from team_memory.hooks.platforms.cursor.after_response import main
 
         mock_response = httpx.Response(
             200,
@@ -38,63 +39,65 @@ class TestCursorAfterResponse:
 
         input_data = {"conversation_id": "sess-1", "prompt": "hello"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("team_memory.hooks.cursor_after_response.httpx.post", return_value=mock_response):
+            with patch(
+                "team_memory.hooks.core.daemon_http.httpx.post",
+                return_value=mock_response,
+            ):
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "draft_saved", "convergence": False})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "draft_saved", "convergence": False}))
 
     def test_daemon_not_running(self) -> None:
-        from team_memory.hooks.cursor_after_response import main
+        from team_memory.hooks.platforms.cursor.after_response import main
 
         input_data = {"conversation_id": "sess-1", "prompt": "hello"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("team_memory.hooks.cursor_after_response.httpx.post", side_effect=httpx.ConnectError("Connection refused")):
+            with patch(
+                "team_memory.hooks.core.daemon_http.httpx.post",
+                side_effect=httpx.ConnectError("Connection refused"),
+            ):
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "ok", "message": "daemon not running"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "ok", "message": "daemon not running"}))
 
     def test_invalid_stdin(self) -> None:
-        from team_memory.hooks.cursor_after_response import main
+        from team_memory.hooks.platforms.cursor.after_response import main
 
         with patch("sys.stdin", io.StringIO("not json!!!")):
             with patch("builtins.print") as mock_print:
                 main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "error", "message": "invalid input"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "error", "message": "invalid input"}))
 
     def test_generic_exception(self) -> None:
-        from team_memory.hooks.cursor_after_response import main
+        from team_memory.hooks.platforms.cursor.after_response import main
 
         input_data = {"conversation_id": "sess-1", "prompt": "hello"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("team_memory.hooks.cursor_after_response.httpx.post", side_effect=RuntimeError("something broke")):
+            with patch(
+                "team_memory.hooks.core.daemon_http.httpx.post",
+                side_effect=RuntimeError("something broke"),
+            ):
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "error", "message": "something broke"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "error", "message": "something broke"}))
 
     def test_timeout_exception(self) -> None:
-        from team_memory.hooks.cursor_after_response import main
+        from team_memory.hooks.platforms.cursor.after_response import main
 
         input_data = {"conversation_id": "sess-1", "prompt": "hello"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("team_memory.hooks.cursor_after_response.httpx.post", side_effect=httpx.TimeoutException("timed out")):
+            with patch(
+                "team_memory.hooks.core.daemon_http.httpx.post",
+                side_effect=httpx.TimeoutException("timed out"),
+            ):
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "error", "message": "timed out"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "error", "message": "timed out"}))
 
 
 # -----------------------------------------------------------------------
@@ -106,7 +109,7 @@ class TestCursorSessionStart:
     """Tests for scripts/hooks/cursor_session_start.py."""
 
     def test_forwards_to_daemon(self) -> None:
-        from team_memory.hooks.cursor_session_start import main
+        from team_memory.hooks.platforms.cursor.session_start import main
 
         mock_response = httpx.Response(
             200,
@@ -116,37 +119,37 @@ class TestCursorSessionStart:
 
         input_data = {"workspace_roots": ["/tmp"], "conversation_id": "sess-1"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("team_memory.hooks.cursor_session_start.httpx.post", return_value=mock_response):
+            with patch(
+                "team_memory.hooks.core.daemon_http.httpx.post",
+                return_value=mock_response,
+            ):
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"additionalContext": "some context"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"additionalContext": "some context"}))
 
     def test_daemon_not_running(self) -> None:
-        from team_memory.hooks.cursor_session_start import main
+        from team_memory.hooks.platforms.cursor.session_start import main
 
         input_data = {"workspace_roots": ["/tmp"]}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("team_memory.hooks.cursor_session_start.httpx.post", side_effect=httpx.ConnectError("Connection refused")):
+            with patch(
+                "team_memory.hooks.core.daemon_http.httpx.post",
+                side_effect=httpx.ConnectError("Connection refused"),
+            ):
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "ok", "message": "daemon not running"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "ok", "message": "daemon not running"}))
 
     def test_invalid_stdin(self) -> None:
-        from team_memory.hooks.cursor_session_start import main
+        from team_memory.hooks.platforms.cursor.session_start import main
 
         with patch("sys.stdin", io.StringIO("invalid!")):
             with patch("builtins.print") as mock_print:
                 main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "error", "message": "invalid input"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "error", "message": "invalid input"}))
 
 
 # -----------------------------------------------------------------------
@@ -158,7 +161,7 @@ class TestCursorBeforePrompt:
     """Tests for scripts/hooks/cursor_before_prompt.py."""
 
     def test_forwards_to_daemon(self) -> None:
-        from team_memory.hooks.cursor_before_prompt import main
+        from team_memory.hooks.platforms.cursor.before_prompt import main
 
         mock_response = httpx.Response(
             200,
@@ -168,50 +171,51 @@ class TestCursorBeforePrompt:
 
         input_data = {"prompt": "之前的问题", "workspace_roots": ["/tmp"]}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("team_memory.hooks.cursor_before_prompt.httpx.post", return_value=mock_response):
+            with patch(
+                "team_memory.hooks.core.daemon_http.httpx.post",
+                return_value=mock_response,
+            ):
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"additionalContext": "retrieved context"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"additionalContext": "retrieved context"}))
 
     def test_daemon_not_running(self) -> None:
-        from team_memory.hooks.cursor_before_prompt import main
+        from team_memory.hooks.platforms.cursor.before_prompt import main
 
         input_data = {"prompt": "test", "workspace_roots": []}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("team_memory.hooks.cursor_before_prompt.httpx.post", side_effect=httpx.ConnectError("Connection refused")):
+            with patch(
+                "team_memory.hooks.core.daemon_http.httpx.post",
+                side_effect=httpx.ConnectError("Connection refused"),
+            ):
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "ok", "message": "daemon not running"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "ok", "message": "daemon not running"}))
 
     def test_invalid_stdin(self) -> None:
-        from team_memory.hooks.cursor_before_prompt import main
+        from team_memory.hooks.platforms.cursor.before_prompt import main
 
         with patch("sys.stdin", io.StringIO("not-json")):
             with patch("builtins.print") as mock_print:
                 main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "error", "message": "invalid input"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "error", "message": "invalid input"}))
 
     def test_timeout_exception(self) -> None:
-        from team_memory.hooks.cursor_before_prompt import main
+        from team_memory.hooks.platforms.cursor.before_prompt import main
 
         input_data = {"prompt": "test"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("team_memory.hooks.cursor_before_prompt.httpx.post", side_effect=httpx.TimeoutException("timed out")):
+            with patch(
+                "team_memory.hooks.core.daemon_http.httpx.post",
+                side_effect=httpx.TimeoutException("timed out"),
+            ):
                 with patch("builtins.print") as mock_print:
                     main()
 
-        mock_print.assert_called_once_with(
-            json.dumps({"action": "error", "message": "timed out"})
-        )
+        mock_print.assert_called_once_with(json.dumps({"action": "error", "message": "timed out"}))
 
 
 # -----------------------------------------------------------------------
@@ -223,54 +227,61 @@ class TestClaudeSessionStart:
     """Tests for scripts/hooks/claude_session_start.py."""
 
     def test_forwards_to_daemon(self) -> None:
-        from team_memory.hooks.claude_session_start import main
+        from team_memory.hooks.platforms.claude.session_start import main
 
-        # Daemon returns additional_context with experiences/profile
         mock_response = httpx.Response(
             200,
-            text=json.dumps({
-                "project": "test_proj",
-                "additional_context": {
-                    "relevant_experiences": [
-                        {"id": "abcd1234efgh", "title": "Test experience"},
-                    ],
-                    "profile": {"static": [], "dynamic": []},
-                },
-            }),
+            text=json.dumps(
+                {
+                    "project": "test_proj",
+                    "additional_context": {
+                        "relevant_experiences": [
+                            {"id": "abcd1234efgh", "title": "Test experience"},
+                        ],
+                        "profile": {"static": [], "dynamic": []},
+                    },
+                }
+            ),
             request=httpx.Request("POST", "http://127.0.0.1:3901/hooks/session_start"),
         )
 
         input_data = {"workspace": "/tmp/project", "session_id": "sess-1"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("team_memory.hooks.claude_session_start.httpx.post", return_value=mock_response):
+            with patch(
+                "team_memory.hooks.core.daemon_http.httpx.post",
+                return_value=mock_response,
+            ):
                 with patch("builtins.print") as mock_print:
                     main()
 
         mock_print.assert_called_once()
         printed = json.loads(mock_print.call_args[0][0])
         assert "additionalContext" in printed
-        assert "abcd1234" in printed["additionalContext"]
+        assert "Test experience" in printed["additionalContext"]
 
     def test_daemon_not_running(self) -> None:
-        from team_memory.hooks.claude_session_start import main
+        from team_memory.hooks.platforms.claude.session_start import main
 
         input_data = {"workspace": "/tmp/project"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
-            with patch("team_memory.hooks.claude_session_start.httpx.post", side_effect=httpx.ConnectError("Connection refused")):
+            with patch(
+                "team_memory.hooks.core.daemon_http.httpx.post",
+                side_effect=httpx.ConnectError("Connection refused"),
+            ):
                 with patch("builtins.print") as mock_print:
                     main()
 
-        # When daemon is not running, output is empty JSON object
         mock_print.assert_called_once_with("{}")
 
     def test_invalid_stdin(self) -> None:
-        from team_memory.hooks.claude_session_start import main
+        from team_memory.hooks.platforms.claude.session_start import main
 
         with patch("sys.stdin", io.StringIO("not-json")):
-            with pytest.raises(SystemExit) as exc_info:
+            with patch("builtins.print") as mock_print:
                 main()
 
-        assert exc_info.value.code == 0
+        # parse_stdin_json returns {} → main() returns without output
+        mock_print.assert_not_called()
 
 
 # -----------------------------------------------------------------------
@@ -283,7 +294,7 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_turn_start_success(self) -> None:
-        from team_memory.hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.platforms.hermes.pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 
@@ -301,13 +312,11 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_turn_start_daemon_not_running(self) -> None:
-        from team_memory.hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.platforms.hermes.pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 
-        with patch.object(
-            pipeline._client, "post", side_effect=httpx.ConnectError("refused")
-        ):
+        with patch.object(pipeline._client, "post", side_effect=httpx.ConnectError("refused")):
             result = await pipeline.on_turn_start("hello", project="team_doc")
 
         assert result == {"action": "ok", "message": "daemon not running"}
@@ -315,7 +324,7 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_turn_end_success(self) -> None:
-        from team_memory.hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.platforms.hermes.pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 
@@ -333,13 +342,11 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_turn_end_daemon_not_running(self) -> None:
-        from team_memory.hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.platforms.hermes.pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 
-        with patch.object(
-            pipeline._client, "post", side_effect=httpx.ConnectError("refused")
-        ):
+        with patch.object(pipeline._client, "post", side_effect=httpx.ConnectError("refused")):
             result = await pipeline.on_turn_end("sess-1", "response text")
 
         assert result == {"action": "ok", "message": "daemon not running"}
@@ -347,7 +354,7 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_session_end_success(self) -> None:
-        from team_memory.hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.platforms.hermes.pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 
@@ -365,13 +372,11 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_session_end_daemon_not_running(self) -> None:
-        from team_memory.hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.platforms.hermes.pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 
-        with patch.object(
-            pipeline._client, "post", side_effect=httpx.ConnectError("refused")
-        ):
+        with patch.object(pipeline._client, "post", side_effect=httpx.ConnectError("refused")):
             result = await pipeline.on_session_end("sess-1")
 
         assert result is None
@@ -379,13 +384,11 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_session_end_generic_error(self) -> None:
-        from team_memory.hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.platforms.hermes.pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 
-        with patch.object(
-            pipeline._client, "post", side_effect=RuntimeError("something broke")
-        ):
+        with patch.object(pipeline._client, "post", side_effect=RuntimeError("something broke")):
             result = await pipeline.on_session_end("sess-1")
 
         assert result == {"action": "error", "message": "something broke"}
@@ -393,7 +396,7 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_context_manager(self) -> None:
-        from team_memory.hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.platforms.hermes.pipeline import HermesPipeline
 
         async with HermesPipeline() as pipeline:
             mock_response = httpx.Response(
@@ -407,13 +410,11 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_turn_start_generic_error(self) -> None:
-        from team_memory.hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.platforms.hermes.pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 
-        with patch.object(
-            pipeline._client, "post", side_effect=RuntimeError("fail")
-        ):
+        with patch.object(pipeline._client, "post", side_effect=RuntimeError("fail")):
             result = await pipeline.on_turn_start("hello")
 
         assert result == {"action": "error", "message": "fail"}
@@ -421,13 +422,11 @@ class TestHermesPipelineThin:
 
     @pytest.mark.asyncio
     async def test_on_turn_end_generic_error(self) -> None:
-        from team_memory.hooks.hermes_pipeline import HermesPipeline
+        from team_memory.hooks.platforms.hermes.pipeline import HermesPipeline
 
         pipeline = HermesPipeline()
 
-        with patch.object(
-            pipeline._client, "post", side_effect=RuntimeError("fail")
-        ):
+        with patch.object(pipeline._client, "post", side_effect=RuntimeError("fail")):
             result = await pipeline.on_turn_end("sess-1", "hello")
 
         assert result == {"action": "error", "message": "fail"}

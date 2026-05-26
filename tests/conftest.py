@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -15,9 +15,50 @@ from team_memory.embedding.base import EmbeddingProvider
 # ============================================================
 
 LITE_PATCH_BASE = "team_memory.server"
-_OPS_PATCH_BASE = "team_memory.services.memory_operations"
+_OPS_PATCH_BASE = "team_memory.services.memory.memory_operations"
 _P = LITE_PATCH_BASE  # short alias
 _O = _OPS_PATCH_BASE  # MCP orchestration (memory_operations)
+
+
+def make_mock_app_context(
+    *,
+    settings: MagicMock | None = None,
+    service: MagicMock | None = None,
+    search_orchestrator=None,
+    archive_service=None,
+    db_url: str = "sqlite://",
+    embedding=None,
+) -> MagicMock:
+    """Build a MagicMock mimicking bootstrap AppContext fields used by MCP tools."""
+
+    ctx = MagicMock()
+    ctx.settings = MagicMock() if settings is None else settings
+    ctx.service = MagicMock() if service is None else service
+    ctx.search_orchestrator = MagicMock() if search_orchestrator is None else search_orchestrator
+    ctx.archive_service = MagicMock() if archive_service is None else archive_service
+    ctx.db_url = db_url
+    ctx.embedding = MagicMock() if embedding is None else embedding
+    return ctx
+
+
+def _patch_app_context(mock_ctx: MagicMock):
+    """Patch ``team_memory.server._app_context`` (bootstrap get_context alias) for tests."""
+
+    return patch(f"{LITE_PATCH_BASE}._app_context", return_value=mock_ctx)
+
+
+def make_mcp_tool_settings_stub() -> MagicMock:
+    """MagicMock ``settings`` with numeric ``settings.mcp.*`` attrs for MCP ``_guard_output`` tests."""
+
+    s = MagicMock()
+    s.mcp.truncate_solution_at = 2000
+    s.mcp.max_output_tokens = 4000
+    s.mcp.max_content_chars = 200_000
+    s.mcp.max_tags = 20
+    s.mcp.max_tag_length = 50
+    s.mcp.profile_max_strings_per_side = 20
+    s.mcp.max_archive_solution_doc_chars = 64_000
+    return s
 
 
 def _patch_user(username: str = "admin"):
@@ -141,7 +182,7 @@ def api_key_auth() -> ApiKeyAuth:
 
 import pytest_asyncio  # noqa: E402, I001
 
-from team_memory.daemon.conversation_buffer import ConversationBuffer  # noqa: E402
+from team_memory.daemon.buffers.conversation_buffer import ConversationBuffer  # noqa: E402
 
 
 # Note: mock_embedding fixture already defined above (line 121)

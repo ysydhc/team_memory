@@ -9,16 +9,14 @@ Covers all pure functions and static methods that don't require DB/LLM:
 - MarkdownIndexer.should_index: index/exclude pattern filtering
 - MarkdownIndexer.load_config: YAML config loading
 """
+
 from __future__ import annotations
 
 import os
-import tempfile
-from pathlib import Path
 
 import pytest
-import yaml
 
-from team_memory.daemon.markdown_indexer import (
+from team_memory.daemon.wiki.markdown_indexer import (
     MarkdownIndexer,
     _infer_tags,
     _match_pattern,
@@ -364,9 +362,7 @@ class TestShouldIndex:
         vault = tmp_path / "vault"
         (vault / ".obsidian").mkdir(parents=True)
         config = self._make_config(str(vault), exclude=[".obsidian/**"])
-        assert not MarkdownIndexer.should_index(
-            str(vault / ".obsidian" / "config.md"), config
-        )
+        assert not MarkdownIndexer.should_index(str(vault / ".obsidian" / "config.md"), config)
 
     def test_no_matching_index_pattern(self, tmp_path):
         """File not matching any index pattern is not indexed."""
@@ -414,9 +410,7 @@ class TestShouldIndex:
             exclude=["secret/**"],
         )
         # Even though **/*.md matches, secret/** excludes first
-        assert not MarkdownIndexer.should_index(
-            str(vault / "secret" / "leak.md"), config
-        )
+        assert not MarkdownIndexer.should_index(str(vault / "secret" / "leak.md"), config)
 
 
 # ---------------------------------------------------------------------------

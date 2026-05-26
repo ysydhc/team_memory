@@ -1,11 +1,13 @@
 """Tests for daemon pipeline logic."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from team_memory.daemon.config import DaemonConfig, ProjectMapping, RetrievalSettings
-from team_memory.daemon.pipeline import (
+
+from team_memory.daemon.runtime.config import DaemonConfig, ProjectMapping, RetrievalSettings
+from team_memory.daemon.refinement.pipeline import (
     _resolve_project,
     process_after_response,
     process_before_prompt,
@@ -16,6 +18,7 @@ from team_memory.daemon.pipeline import (
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_config() -> DaemonConfig:
     return DaemonConfig(
@@ -39,7 +42,11 @@ def _make_buf() -> AsyncMock:
     buf.get_messages = AsyncMock(return_value=[])
     buf.get_user_messages = AsyncMock(return_value=[])
     buf.get_assistant_messages = AsyncMock(return_value=[{"content": "some response"}])
-    buf.get_pending = AsyncMock(return_value=[{"id": "sess-1", "content": "text", "project": "team_doc", "conversation_id": "sess-1", "status": "active"}])
+    buf.get_pending = AsyncMock(
+        return_value=[
+            {"id": "sess-1", "content": "text", "project": "team_doc", "conversation_id": "sess-1", "status": "active"}
+        ]
+    )
     buf.count_messages = AsyncMock(return_value=0)
     buf.mark_published_by_session = AsyncMock()
     buf.mark_needs_refinement = AsyncMock()
@@ -86,17 +93,14 @@ def _make_sink() -> AsyncMock:
 @pytest.fixture(autouse=True)
 def _mock_auto_infer(monkeypatch):
     """Mock auto-inference so tests only exercise path_patterns."""
-    monkeypatch.setattr(
-        "team_memory.project_resolver.read_tm_toml", lambda _: None
-    )
-    monkeypatch.setattr(
-        "team_memory.project_resolver.infer_project_name", lambda _cwd="": "default"
-    )
+    monkeypatch.setattr("team_memory.project_resolver.read_tm_toml", lambda _: None)
+    monkeypatch.setattr("team_memory.project_resolver.infer_project_name", lambda _cwd="": "default")
 
 
 # ---------------------------------------------------------------------------
 # _resolve_project
 # ---------------------------------------------------------------------------
+
 
 class TestResolveProject:
     def test_match_team_doc(self):
@@ -120,6 +124,7 @@ class TestResolveProject:
 # process_after_response
 # ---------------------------------------------------------------------------
 
+
 class TestProcessAfterResponse:
     @pytest.mark.asyncio
     async def test_no_project_returns_draft_updated(self):
@@ -129,7 +134,11 @@ class TestProcessAfterResponse:
         buf.get_session = AsyncMock(return_value=None)
         result = await process_after_response(
             {"conversation_id": "123", "prompt": "hello", "workspace_roots": ["/unknown"]},
-            config, _make_sink(), buf, _make_detector(), _make_refiner(),
+            config,
+            _make_sink(),
+            buf,
+            _make_detector(),
+            _make_refiner(),
         )
         assert result["action"] == "draft_updated"
 
@@ -139,14 +148,18 @@ class TestProcessAfterResponse:
         buf = _make_buf()
         result = await process_after_response(
             {"conversation_id": "123", "prompt": "hello", "workspace_roots": ["/x/team_doc"]},
-            config, _make_sink(), buf, _make_detector(result=False), _make_refiner(),
+            config,
+            _make_sink(),
+            buf,
+            _make_detector(result=False),
+            _make_refiner(),
         )
         assert result["action"] == "draft_updated"
         assert result["convergence"] is False
         buf.add_message.assert_called_once_with("123", "assistant", "hello", project="team_doc")
 
     @pytest.mark.asyncio
-    @patch("team_memory.daemon.pipeline._try_extract_personal_memory", new_callable=AsyncMock)
+    @patch("team_memory.daemon.refinement.pipeline._try_extract_personal_memory", new_callable=AsyncMock)
     async def test_converged_marks_refinement(self, mock_extract):
         config = _make_config()
         buf = _make_buf()
@@ -154,7 +167,11 @@ class TestProcessAfterResponse:
         refiner.mark_for_refinement = AsyncMock(return_value={"draft_id": "d1"})
         result = await process_after_response(
             {"conversation_id": "123", "prompt": "问题解决了", "workspace_roots": ["/x/team_doc"]},
-            config, _make_sink(), buf, _make_detector(result=True), refiner,
+            config,
+            _make_sink(),
+            buf,
+            _make_detector(result=True),
+            refiner,
         )
         assert result["action"] == "needs_refinement"
         assert result["convergence"] is True
@@ -167,7 +184,11 @@ class TestProcessAfterResponse:
         buf = _make_buf()
         result = await process_after_response(
             {"conversation_id": "123", "prompt": "", "response_text": "", "workspace_roots": ["/x/team_doc"]},
-            config, _make_sink(), buf, _make_detector(), _make_refiner(),
+            config,
+            _make_sink(),
+            buf,
+            _make_detector(),
+            _make_refiner(),
         )
         assert result["action"] == "ok"
         buf.add_message.assert_not_called()
@@ -177,12 +198,15 @@ class TestProcessAfterResponse:
 # process_session_start
 # ---------------------------------------------------------------------------
 
+
 class TestProcessSessionStart:
     @pytest.mark.asyncio
     async def test_no_project_returns_empty(self):
         config = _make_config()
         result = await process_session_start(
-            {"workspace_roots": ["/unknown"]}, config, _make_sink(),
+            {"workspace_roots": ["/unknown"]},
+            config,
+            _make_sink(),
         )
         assert result["additional_context"] == ""
         assert result["project"] == ""
@@ -191,7 +215,9 @@ class TestProcessSessionStart:
     async def test_with_project_returns_project(self):
         config = _make_config()
         result = await process_session_start(
-            {"workspace_roots": ["/x/team_doc"]}, config, _make_sink(),
+            {"workspace_roots": ["/x/team_doc"]},
+            config,
+            _make_sink(),
         )
         assert result["project"] == "team_doc"
 
@@ -199,6 +225,7 @@ class TestProcessSessionStart:
 # ---------------------------------------------------------------------------
 # process_before_prompt
 # ---------------------------------------------------------------------------
+
 
 class TestProcessBeforePrompt:
     @pytest.mark.asyncio
@@ -209,7 +236,9 @@ class TestProcessBeforePrompt:
         sink.recall = AsyncMock(return_value=[{"title": "match"}])
         result = await process_before_prompt(
             {"prompt": "之前怎么解决的", "workspace_roots": ["/x/team_doc"], "conversation_id": "c1"},
-            config, sink, buf,
+            config,
+            sink,
+            buf,
         )
         assert len(result["results"]) == 1
         sink.recall.assert_called_once()
@@ -223,7 +252,9 @@ class TestProcessBeforePrompt:
         buf = _make_buf()
         result = await process_before_prompt(
             {"prompt": "", "workspace_roots": ["/x/team_doc"], "conversation_id": "c1"},
-            config, sink, buf,
+            config,
+            sink,
+            buf,
         )
         assert result["results"] == []
         sink.recall.assert_not_called()
@@ -233,25 +264,34 @@ class TestProcessBeforePrompt:
 # process_session_end
 # ---------------------------------------------------------------------------
 
+
 class TestProcessSessionEnd:
     @pytest.mark.asyncio
     async def test_no_active_session_returns_ok(self):
         config = _make_config()
         buf = _make_buf_empty()
         result = await process_session_end(
-            {"conversation_id": "123"}, config, _make_sink(), buf, _make_refiner(),
+            {"conversation_id": "123"},
+            config,
+            _make_sink(),
+            buf,
+            _make_refiner(),
         )
         assert result["action"] == "ok"
         assert result["flushed"] is False
 
     @pytest.mark.asyncio
-    @patch("team_memory.daemon.pipeline._try_extract_personal_memory", new_callable=AsyncMock)
+    @patch("team_memory.daemon.refinement.pipeline._try_extract_personal_memory", new_callable=AsyncMock)
     async def test_active_session_marked_for_refinement(self, mock_extract):
         config = _make_config()
         buf = _make_buf()
         refiner = _make_refiner()
         result = await process_session_end(
-            {"conversation_id": "sess-1"}, config, _make_sink(), buf, refiner,
+            {"conversation_id": "sess-1"},
+            config,
+            _make_sink(),
+            buf,
+            refiner,
         )
         assert result["action"] == "needs_refinement"
         assert result["flushed"] is True
@@ -259,14 +299,18 @@ class TestProcessSessionEnd:
         mock_extract.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("team_memory.daemon.pipeline._try_extract_personal_memory", new_callable=AsyncMock)
+    @patch("team_memory.daemon.refinement.pipeline._try_extract_personal_memory", new_callable=AsyncMock)
     async def test_mark_refinement_failure_returns_ok(self, mock_extract):
         config = _make_config()
         buf = _make_buf()
         buf.mark_needs_refinement = AsyncMock(side_effect=Exception("boom"))
         refiner = _make_refiner()
         result = await process_session_end(
-            {"conversation_id": "sess-1"}, config, _make_sink(), buf, refiner,
+            {"conversation_id": "sess-1"},
+            config,
+            _make_sink(),
+            buf,
+            refiner,
         )
         assert result["action"] == "ok"
         assert result["flushed"] is False

@@ -11,22 +11,30 @@ import pytest
 
 @pytest.mark.failure_injection
 class TestKillRefining:
-    def test_refining_session_recovered_on_restart(
-        self, daemon: str, unique_session: str
-    ) -> None:
+    def test_refining_session_recovered_on_restart(self, daemon: str, unique_session: str) -> None:
         """Kill daemon while session is refining → restart → session recovered."""
         sid = unique_session
 
         # 1. Send 3 rounds to trigger convergence
         for i in range(3):
-            httpx.post(f"{daemon}/hooks/before_prompt", json={
-                "conversation_id": sid, "prompt": f"Kill test {i+1}",
-                "workspace_roots": ["/Users/yeshouyou/Work/agent/team_doc"],
-            }, timeout=10)
-            httpx.post(f"{daemon}/hooks/after_response", json={
-                "conversation_id": sid, "response_text": f"Response {i+1}",
-                "workspace_roots": ["/Users/yeshouyou/Work/agent/team_doc"],
-            }, timeout=10)
+            httpx.post(
+                f"{daemon}/hooks/before_prompt",
+                json={
+                    "conversation_id": sid,
+                    "prompt": f"Kill test {i + 1}",
+                    "workspace_roots": ["/Users/yeshouyou/Work/agent/team_doc"],
+                },
+                timeout=10,
+            )
+            httpx.post(
+                f"{daemon}/hooks/after_response",
+                json={
+                    "conversation_id": sid,
+                    "response_text": f"Response {i + 1}",
+                    "workspace_roots": ["/Users/yeshouyou/Work/agent/team_doc"],
+                },
+                timeout=10,
+            )
 
         # 2. Wait for _tick to pick up and mark as refining
         time.sleep(35)
@@ -51,14 +59,9 @@ class TestKillRefining:
         # 6. Verify session was recovered
         import sqlite3
         from pathlib import Path
-        db = sqlite3.connect(
-            str(Path.home() / ".cache" / "tm-pipeline" / "drafts.db")
-        )
-        row = db.execute(
-            "SELECT status FROM sessions WHERE id = ?", (sid,)
-        ).fetchone()
+
+        db = sqlite3.connect(str(Path.home() / ".cache" / "tm-pipeline" / "drafts.db"))
+        row = db.execute("SELECT status FROM sessions WHERE id = ?", (sid,)).fetchone()
         assert row is not None, f"Session {sid} disappeared after restart"
         # Should be in a valid terminal state
-        assert row[0] in ("needs_refinement", "published", "publishing"), (
-            f"Unexpected status: {row[0]}"
-        )
+        assert row[0] in ("needs_refinement", "published", "publishing"), f"Unexpected status: {row[0]}"

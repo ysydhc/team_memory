@@ -49,9 +49,7 @@ def _archive_visible_to_viewer(
     if viewer_role == "admin":
         return True
     if viewer_name:
-        return archive.created_by == viewer_name or (
-            archive.status == "published" and archive.project == proj
-        )
+        return archive.created_by == viewer_name or (archive.status == "published" and archive.project == proj)
     return archive.status == "published" and archive.project == proj
 
 
@@ -115,9 +113,7 @@ class ArchiveRepository:
             result = await self._session.execute(stmt)
             statuses = [row[0] for row in result.all()]
             if statuses and all(s == "published" for s in statuses):
-                await self._session.execute(
-                    update(Archive).where(Archive.id == archive.id).values(status="published")
-                )
+                await self._session.execute(update(Archive).where(Archive.id == archive.id).values(status="published"))
 
         if attachments:
             for att in attachments:
@@ -229,14 +225,10 @@ class ArchiveRepository:
 
         # --- Re-associate experience links ---
         # Delete old links for this archive (incremental attachments are NOT touched).
-        await self._session.execute(
-            delete(ArchiveExperienceLink).where(ArchiveExperienceLink.archive_id == archive_id)
-        )
+        await self._session.execute(delete(ArchiveExperienceLink).where(ArchiveExperienceLink.archive_id == archive_id))
 
         if linked_experience_ids:
-            link_rows = [
-                {"archive_id": archive_id, "experience_id": eid} for eid in linked_experience_ids
-            ]
+            link_rows = [{"archive_id": archive_id, "experience_id": eid} for eid in linked_experience_ids]
             await self._session.execute(insert(ArchiveExperienceLink).values(link_rows))
 
             # Derive status from linked experiences
@@ -244,9 +236,7 @@ class ArchiveRepository:
             exp_result = await self._session.execute(exp_stmt)
             statuses = [r[0] for r in exp_result.all()]
             if statuses and all(s == "published" for s in statuses):
-                await self._session.execute(
-                    update(Archive).where(Archive.id == archive_id).values(status="published")
-                )
+                await self._session.execute(update(Archive).where(Archive.id == archive_id).values(status="published"))
 
         await self._session.flush()
 
@@ -270,9 +260,7 @@ class ArchiveRepository:
         Uses correlated subqueries for linked_experience_ids and attachment_count
         to avoid N+1 queries.
         """
-        similarity_expr = (1 - Archive.embedding.cosine_distance(query_embedding)).label(
-            "similarity"
-        )
+        similarity_expr = (1 - Archive.embedding.cosine_distance(query_embedding)).label("similarity")
 
         # Correlated subquery: array of linked experience UUIDs (removes NULLs)
         # When no links exist, array_agg returns NULL → handled in Python as []
@@ -350,9 +338,7 @@ class ArchiveRepository:
             )
         return out
 
-    async def recompute_archive_status_for_linked_experience(
-        self, experience_id: uuid.UUID
-    ) -> None:
+    async def recompute_archive_status_for_linked_experience(self, experience_id: uuid.UUID) -> None:
         """Recompute and update status of all archives that link this experience.
 
         For each such archive: if all its linked experiences have exp_status='published',
@@ -390,9 +376,7 @@ class ArchiveRepository:
 
     async def _build_l2_dict(self, archive: Archive) -> dict[str, Any]:
         link_result = await self._session.execute(
-            select(ArchiveExperienceLink.experience_id).where(
-                ArchiveExperienceLink.archive_id == archive.id
-            )
+            select(ArchiveExperienceLink.experience_id).where(ArchiveExperienceLink.archive_id == archive.id)
         )
         linked_ids = [str(r[0]) for r in link_result.all()]
         aid_str = str(archive.id)
@@ -603,9 +587,7 @@ class ArchiveRepository:
             source=(source or "web")[:20],
             error_code=error_code[:50],
             error_message=msg,
-            client_filename_hint=(client_filename_hint or "")[:500]
-            if client_filename_hint
-            else None,
+            client_filename_hint=(client_filename_hint or "")[:500] if client_filename_hint else None,
         )
         self._session.add(row)
         await self._session.flush()
@@ -731,9 +713,7 @@ class ArchiveRepository:
     ) -> tuple[str | None, str | None]:
         """Return (rel_path, source_path) if visible; (None, None) otherwise."""
         result = await self._session.execute(
-            select(Archive)
-            .where(Archive.id == archive_id)
-            .options(selectinload(Archive.attachments))
+            select(Archive).where(Archive.id == archive_id).options(selectinload(Archive.attachments))
         )
         archive = result.scalar_one_or_none()
         if archive is None:

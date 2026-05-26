@@ -60,9 +60,7 @@ async def list_experiences(
 ):
     """List experiences with pagination and filters."""
     db_url = _get_db_url()
-    project_list = (
-        [p.strip() for p in project.split(",") if p.strip()] if project and "," in project else None
-    )
+    project_list = [p.strip() for p in project.split(",") if p.strip()] if project and "," in project else None
     resolved_project = _resolve_project(project.split(",")[0] if project else project)
     current_user = user.name
 

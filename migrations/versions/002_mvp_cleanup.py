@@ -8,7 +8,6 @@ Bridges existing DB schema to the simplified MVP model.
 """
 
 from alembic import op
-import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "002_mvp_cleanup"
@@ -36,9 +35,9 @@ def upgrade() -> None:
 
     # -- 2. Drop deleted tables (order: dependents first) --
     for table in [
-        "personal_tasks",       # FK → task_groups, experiences
-        "task_dependencies",    # FK → personal_tasks
-        "task_messages",        # FK → personal_tasks
+        "personal_tasks",  # FK → task_groups, experiences
+        "task_dependencies",  # FK → personal_tasks
+        "task_messages",  # FK → personal_tasks
         "task_groups",
         "experience_artifacts",
         "experience_reflections",

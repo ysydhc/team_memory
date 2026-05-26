@@ -41,19 +41,13 @@ class SearchLogRepository:
         await self._session.flush()
         return log
 
-    async def mark_used(
-        self, log_id: uuid.UUID, agent_snippet: str | None = None
-    ) -> None:
+    async def mark_used(self, log_id: uuid.UUID, agent_snippet: str | None = None) -> None:
         """Mark a search log as was_used=True with optional agent response snippet."""
         values: dict = {"was_used": True}
         if agent_snippet is not None:
             values["agent_response_snippet"] = agent_snippet
 
-        stmt = (
-            update(SearchLog)
-            .where(SearchLog.id == log_id)
-            .values(**values)
-        )
+        stmt = update(SearchLog).where(SearchLog.id == log_id).values(**values)
         await self._session.execute(stmt)
         await self._session.flush()
 
@@ -68,9 +62,7 @@ class SearchLogRepository:
         base_filter = SearchLog.created_at >= cutoff
 
         # Total count
-        total_result = await self._session.execute(
-            select(func.count()).select_from(SearchLog).where(base_filter)
-        )
+        total_result = await self._session.execute(select(func.count()).select_from(SearchLog).where(base_filter))
         total = total_result.scalar_one()
 
         # Hit count: result_ids is not null and not empty list
@@ -93,10 +85,7 @@ class SearchLogRepository:
 
         # Used count
         used_result = await self._session.execute(
-            select(func.count())
-            .select_from(SearchLog)
-            .where(base_filter)
-            .where(SearchLog.was_used == True)  # noqa: E712
+            select(func.count()).select_from(SearchLog).where(base_filter).where(SearchLog.was_used == True)  # noqa: E712
         )
         used = used_result.scalar_one()
 
@@ -112,11 +101,6 @@ class SearchLogRepository:
     async def get_recent(self, days: int = 7, limit: int = 100) -> list[SearchLog]:
         """Get recent search logs within the last N days, newest first."""
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        stmt = (
-            select(SearchLog)
-            .where(SearchLog.created_at >= cutoff)
-            .order_by(desc(SearchLog.created_at))
-            .limit(limit)
-        )
+        stmt = select(SearchLog).where(SearchLog.created_at >= cutoff).order_by(desc(SearchLog.created_at)).limit(limit)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())

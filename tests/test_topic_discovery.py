@@ -1,9 +1,8 @@
 """Tests for topic_discovery service."""
+
 from __future__ import annotations
 
-import pytest
-
-from team_memory.services.topic_discovery import (
+from team_memory.services.analysis.topic_discovery import (
     Topic,
     TopicResult,
     _simple_kmeans,
@@ -14,6 +13,7 @@ class TestSimpleKmeans:
     def test_basic_clustering(self):
         """Two well-separated clusters should be correctly identified."""
         import numpy as np
+
         rng = np.random.RandomState(42)
         # Cluster 1: centered around [1, 0, 0]
         c1 = rng.randn(10, 3) * 0.1 + np.array([1, 0, 0])

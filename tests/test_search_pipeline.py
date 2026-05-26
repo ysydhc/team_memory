@@ -12,8 +12,8 @@ from team_memory.config import (
     SearchConfig,
 )
 from team_memory.reranker.base import RerankerProvider, RerankResult
-from team_memory.services.cache import SearchCache
-from team_memory.services.search_pipeline import (
+from team_memory.services.search.cache import SearchCache
+from team_memory.services.search.search_pipeline import (
     _EXPANSION_CACHE_TTL,
     SearchPipeline,
     SearchRequest,
@@ -248,6 +248,59 @@ class TestApplyRerank:
         assert [x.data["id"] for x in out] == ["a", "b"]
 
 
+class TestSearchPipelineGrouping:
+    @pytest.mark.asyncio
+    async def test_grouped_results(self):
+        pipeline = _make_pipeline(adaptive_filter=False)
+
+        candidates = [
+            SearchResultItem(data={"id": "child1", "group_id": "parentA", "title": "C1"}, score=0.9),
+            SearchResultItem(data={"id": "child2", "group_id": "parentA", "title": "C2"}, score=0.8),
+            SearchResultItem(data={"id": "child3", "group_id": "parentA", "title": "C3"}, score=0.7),
+            SearchResultItem(data={"id": "parentB", "group_id": "parentB", "title": "P2"}, score=0.6),
+            SearchResultItem(data={"id": "child4", "group_id": "parentB", "title": "C4"}, score=0.5),
+        ]
+
+        # Override retrieve_and_fuse and other methods to just return these candidates
+        pipeline._retrieve_and_fuse = AsyncMock(return_value=candidates)
+        pipeline._cache.get = AsyncMock(return_value=None)
+        pipeline._cache.put = AsyncMock()
+
+        req = SearchRequest(query="test", grouped=True, top_k_children=2, max_results=5)
+
+        mock_session = AsyncMock()
+        res = await pipeline.search(mock_session, req)
+
+        # Should have C1, C2 (from parentA), P2, C4 (from parentB) - C3 is excluded because top_k_children=2
+        assert len(res.results) == 4
+        ids = [r["id"] for r in res.results]
+        assert "child1" in ids
+        assert "child2" in ids
+        assert "child3" not in ids
+        assert "parentB" in ids
+        assert "child4" in ids
+
+    @pytest.mark.asyncio
+    async def test_grouped_flattens_cleanly(self):
+        pipeline = _make_pipeline(adaptive_filter=False)
+        candidates = [
+            SearchResultItem(data={"id": "c1", "group_id": "p1"}, score=0.9),
+            SearchResultItem(data={"id": "c2", "group_id": "p2"}, score=0.8),
+        ]
+        pipeline._retrieve_and_fuse = AsyncMock(return_value=candidates)
+        pipeline._cache.get = AsyncMock(return_value=None)
+        pipeline._cache.put = AsyncMock()
+
+        req = SearchRequest(query="test", grouped=True, top_k_children=5, max_results=10)
+        mock_session = AsyncMock()
+        res = await pipeline.search(mock_session, req)
+
+        # Flattens properly
+        assert len(res.results) == 2
+        assert res.results[0]["id"] == "c1"
+        assert res.results[1]["id"] == "c2"
+
+
 # ======================== LLM Expansion Cache ========================
 
 
@@ -278,7 +331,7 @@ class TestLLMExpansionCache:
         mock_client = AsyncMock()
         mock_client.chat = AsyncMock(return_value="expanded keywords here")
 
-        with patch("team_memory.services.llm_client.LLMClient") as mock_llm_cls:
+        with patch("team_memory.services.llm.llm_client.LLMClient") as mock_llm_cls:
             mock_llm_cls.from_config.return_value = mock_client
 
             llm_config = LLMConfig()
@@ -299,7 +352,7 @@ class TestLLMExpansionCache:
         mock_client = AsyncMock()
         mock_client.chat = AsyncMock(return_value="expanded")
 
-        with patch("team_memory.services.llm_client.LLMClient") as mock_llm_cls:
+        with patch("team_memory.services.llm.llm_client.LLMClient") as mock_llm_cls:
             mock_llm_cls.from_config.return_value = mock_client
 
             llm_config = LLMConfig()
@@ -315,7 +368,7 @@ class TestLLMExpansionCache:
         mock_client = AsyncMock()
         mock_client.chat = AsyncMock(return_value="result")
 
-        with patch("team_memory.services.llm_client.LLMClient") as mock_llm_cls:
+        with patch("team_memory.services.llm.llm_client.LLMClient") as mock_llm_cls:
             mock_llm_cls.from_config.return_value = mock_client
 
             llm_config = LLMConfig()
@@ -338,7 +391,7 @@ class TestLLMExpansionCache:
         mock_client = AsyncMock()
         mock_client.chat = AsyncMock(side_effect=RuntimeError("LLM down"))
 
-        with patch("team_memory.services.llm_client.LLMClient") as mock_llm_cls:
+        with patch("team_memory.services.llm.llm_client.LLMClient") as mock_llm_cls:
             mock_llm_cls.from_config.return_value = mock_client
 
             llm_config = LLMConfig()

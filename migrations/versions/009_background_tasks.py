@@ -22,9 +22,7 @@ def upgrade() -> None:
         sa.Column("task_type", sa.String(50), nullable=False, index=True),
         sa.Column("payload", sa.JSON(), nullable=False),
         sa.Column("status", sa.String(20), nullable=False, server_default="pending", index=True),
-        sa.Column(
-            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
-        ),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("error_message", sa.Text(), nullable=True),

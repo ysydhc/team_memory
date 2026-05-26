@@ -47,9 +47,11 @@ def resolve_alias(project: str) -> str:
     """
     return _alias_registry.get(project, project)
 
+
 # ---------------------------------------------------------------------------
 # .tm.toml reader
 # ---------------------------------------------------------------------------
+
 
 def read_tm_toml(directory: str | Path) -> dict[str, Any] | None:
     """Read .tm.toml from the given directory.
@@ -70,8 +72,7 @@ def read_tm_toml(directory: str | Path) -> dict[str, Any] | None:
                 import tomli as tomllib  # type: ignore[no-redef]
             except ImportError:
                 logger.warning(
-                    ".tm.toml found at %s but no TOML parser available. "
-                    "Install tomli for Python < 3.11.",
+                    ".tm.toml found at %s but no TOML parser available. Install tomli for Python < 3.11.",
                     tm_path,
                 )
                 return None
@@ -99,6 +100,7 @@ def read_tm_toml(directory: str | Path) -> dict[str, Any] | None:
 # Git repo detection
 # ---------------------------------------------------------------------------
 
+
 def _git_repo_name(cwd: str) -> str | None:
     """Get git repo basename from cwd. Returns None if not a git repo."""
     try:
@@ -124,6 +126,7 @@ def _normalize(name: str) -> str:
 # ---------------------------------------------------------------------------
 # Core inference
 # ---------------------------------------------------------------------------
+
 
 def infer_project_name(cwd: str | None = None) -> str:
     """Infer project name from directory, zero-config.
@@ -236,10 +239,12 @@ def load_dotenv_if_exists(start: str | None = None) -> None:
 def get_server_url() -> str:
     """Get TM server URL from config or env."""
     from team_memory.client_config import get_server_url as _get_url
+
     return _get_url()
 
 
 def get_api_key() -> str:
     """Get TM API key from env > config."""
     from team_memory.client_config import get_api_key as _get_key
+
     return _get_key()

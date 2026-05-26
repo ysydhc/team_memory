@@ -10,6 +10,7 @@ Shows:
 - PayloadCapture summary
 - Convergence status
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,7 +44,7 @@ def show_project_stats(db):
     """).fetchall()
 
     print(f"  {'Project':<25s} {'Sessions':>8s} {'User':>6s} {'Asst':>6s} {'Status'}")
-    print(f"  {'-'*25} {'-'*8} {'-'*6} {'-'*6} {'-'*10}")
+    print(f"  {'-' * 25} {'-' * 8} {'-' * 6} {'-' * 6} {'-' * 10}")
     for proj, sessions, user_n, asst_n in rows:
         status = "✅ OK" if asst_n > 0 else "⚠️  无 assistant 消息"
         print(f"  {proj:<25s} {sessions:>8d} {user_n:>6d} {asst_n:>6d}   {status}")
@@ -70,7 +71,7 @@ def show_sessions(db, limit=10):
         print(f"     Created: {created}")
         print(f"     Updated: {updated}")
         if asst_n == 0 and user_n > 0:
-            print(f"     ⚠️  有 user 消息但无 assistant — hook 可能没触发或旧数据")
+            print("     ⚠️  有 user 消息但无 assistant — hook 可能没触发或旧数据")
         print()
 
 
@@ -127,7 +128,7 @@ def show_convergence_status(db):
     print(f"  Stuck (0 assistant messages): {no_asst}")
     if no_asst > 0:
         print(f"  ⚠️  {no_asst} 个 session 没有 assistant 消息")
-        print(f"     可能原因: 旧 daemon 运行时的数据，或 hook 没有触发")
+        print("     可能原因: 旧 daemon 运行时的数据，或 hook 没有触发")
     print()
 
 
@@ -157,8 +158,7 @@ def show_payload_capture():
     endpoints = [r[0] for r in rows]
     for ep in endpoints[:3]:
         row = db.execute(
-            "SELECT source, payload_json FROM raw_payloads WHERE endpoint = ? ORDER BY id DESC LIMIT 1",
-            (ep,)
+            "SELECT source, payload_json FROM raw_payloads WHERE endpoint = ? ORDER BY id DESC LIMIT 1", (ep,)
         ).fetchone()
         if row:
             source, payload_json = row

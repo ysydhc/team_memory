@@ -51,10 +51,7 @@ def upgrade() -> None:
     # 4. Recreate indexes
     for table, indexes in INDEXES.items():
         for idx_name, method, params in indexes:
-            op.execute(
-                f"CREATE INDEX {idx_name} ON {table} USING {method} "
-                f"(embedding vector_cosine_ops) {params}"
-            )
+            op.execute(f"CREATE INDEX {idx_name} ON {table} USING {method} (embedding vector_cosine_ops) {params}")
 
 
 def downgrade() -> None:
@@ -74,7 +71,4 @@ def downgrade() -> None:
     # Recreate indexes
     for table, indexes in INDEXES.items():
         for idx_name, method, params in indexes:
-            op.execute(
-                f"CREATE INDEX {idx_name} ON {table} USING {method} "
-                f"(embedding vector_cosine_ops) {params}"
-            )
+            op.execute(f"CREATE INDEX {idx_name} ON {table} USING {method} (embedding vector_cosine_ops) {params}")

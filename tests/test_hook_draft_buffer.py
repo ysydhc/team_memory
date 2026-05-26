@@ -1,23 +1,20 @@
 """Tests for scripts/hooks/draft_buffer.py — local SQLite draft buffer."""
+
 from __future__ import annotations
 
 import asyncio
 import os
-import sys
 import tempfile
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 # Ensure scripts/hooks/ is importable
-
-from team_memory.daemon.draft_buffer import DraftBuffer  # noqa: E402
-
+from team_memory.daemon.buffers.draft_buffer import DraftBuffer  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_db_path() -> str:
     """Return a unique temp file path for a test SQLite DB."""
@@ -44,6 +41,7 @@ def buf(db_path):
 # ---------------------------------------------------------------------------
 # __init__ — table creation
 # ---------------------------------------------------------------------------
+
 
 class TestInit:
     """DraftBuffer.__init__ creates the drafts table if it doesn't exist."""
@@ -72,6 +70,7 @@ class TestInit:
 # ---------------------------------------------------------------------------
 # create_draft
 # ---------------------------------------------------------------------------
+
 
 class TestCreateDraft:
     """DraftBuffer.create_draft inserts a new draft and returns its UUID."""
@@ -109,6 +108,7 @@ class TestCreateDraft:
 # update_draft
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateDraft:
     """DraftBuffer.update_draft changes the content of an existing draft."""
 
@@ -133,7 +133,10 @@ class TestUpdateDraft:
             await buf.update_draft(draft_id, "updated")
             pending_after = await buf.get_pending_drafts()
 
-        assert pending_after[0]["updated_at"] != pending_after[0]["created_at"] or created_at != pending_after[0]["updated_at"]
+        assert (
+            pending_after[0]["updated_at"] != pending_after[0]["created_at"]
+            or created_at != pending_after[0]["updated_at"]
+        )
 
     @pytest.mark.asyncio
     async def test_update_nonexistent_raises(self, buf):
@@ -145,6 +148,7 @@ class TestUpdateDraft:
 # ---------------------------------------------------------------------------
 # get_pending_drafts
 # ---------------------------------------------------------------------------
+
 
 class TestGetPendingDrafts:
     """DraftBuffer.get_pending_drafts returns only pending drafts."""
@@ -189,6 +193,7 @@ class TestGetPendingDrafts:
 # get_older_than
 # ---------------------------------------------------------------------------
 
+
 class TestGetOlderThan:
     """DraftBuffer.get_older_than returns drafts older than N minutes."""
 
@@ -204,7 +209,7 @@ class TestGetOlderThan:
         async with buf:
             draft_id = await buf.create_draft("team_doc", "c1", "old fact")
             # Manually backdate the created_at timestamp
-            import aiosqlite
+
             await buf._db.execute(
                 "UPDATE drafts SET created_at = datetime('now', '-90 minutes') WHERE id = ?",
                 (draft_id,),
@@ -219,7 +224,7 @@ class TestGetOlderThan:
         """Drafts exactly N minutes old should NOT be returned (< not <=)."""
         async with buf:
             draft_id = await buf.create_draft("team_doc", "c1", "boundary")
-            import aiosqlite
+
             await buf._db.execute(
                 "UPDATE drafts SET created_at = datetime('now', '-30 minutes') WHERE id = ?",
                 (draft_id,),
@@ -232,6 +237,7 @@ class TestGetOlderThan:
 # ---------------------------------------------------------------------------
 # mark_published
 # ---------------------------------------------------------------------------
+
 
 class TestMarkPublished:
     """DraftBuffer.mark_published sets status to 'published'."""
@@ -263,6 +269,7 @@ class TestMarkPublished:
 # ---------------------------------------------------------------------------
 # find_pending_by_conversation
 # ---------------------------------------------------------------------------
+
 
 class TestFindPendingByConversation:
     """DraftBuffer.find_pending_by_conversation returns drafts matching project + conversation_id."""
@@ -302,6 +309,7 @@ class TestFindPendingByConversation:
 # ---------------------------------------------------------------------------
 # mark_for_publishing
 # ---------------------------------------------------------------------------
+
 
 class TestMarkForPublishing:
     """DraftBuffer.mark_for_publishing sets status to 'ready_to_publish'."""

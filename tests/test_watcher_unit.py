@@ -9,6 +9,7 @@ Unit tests cover:
 Integration tests cover:
 - Full watchfile loop with real filesystem
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from team_memory.daemon.watcher import _find_vault, _process_changes
+from team_memory.daemon.observe.watcher import _find_vault, _process_changes
 
 pytestmark = pytest.mark.unit
 

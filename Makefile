@@ -81,11 +81,11 @@ dev:            ## 启动全部服务（Docker 基础设施 + 本机 Web）；�
 	@$(MAKE) -s release-9111 || true
 	docker compose up -d postgres redis
 	@if ! lsof -i :11434 >/dev/null 2>&1; then docker compose --profile ollama up -d 2>/dev/null || true; fi
-	python -m team_memory.web.app
+	uv run python -m team_memory.web.app
 
 web:            ## 仅启动 Web 管理界面（默认端口 9111）；自动释放 9111 后启动
 	@$(MAKE) -s release-9111 || true
-	python -m team_memory.web.app
+	uv run python -m team_memory.web.app
 
 mcp:            ## 启动 MCP（需仓库根 .env；经 scripts/run_mcp_with_dotenv.sh）
 	bash scripts/run_mcp_with_dotenv.sh
@@ -165,27 +165,27 @@ verify-entities: ## 验证 L2.5 实体图表（建表 + 规则提取 + 样例数
 
 stats:           ## 搜索质量报告（--days 30 --granularity day）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	$(PYTHON_BIN) -m team_memory.daemon.tm_stats $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.observe.tm_stats $(OPTS)
 
 wiki-compile:    ## 编译 Wiki（--full 全量重建）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	$(PYTHON_BIN) -m team_memory.daemon.wiki_cli compile $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.wiki.wiki_cli compile $(OPTS)
 
 wiki-status:     ## Wiki 编译状态
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	$(PYTHON_BIN) -m team_memory.daemon.wiki_cli status $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.wiki.wiki_cli status $(OPTS)
 
 entity-backfill: ## 全量补抽实体（--model 指定模型，--dry-run 预览，--limit N 限量）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	$(PYTHON_BIN) -m team_memory.daemon.entity_backfill $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.backfill.entity_backfill $(OPTS)
 
 entity-dedup:	## 实体去重合并
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	$(PYTHON_BIN) -m team_memory.daemon.entity_dedup $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.backfill.entity_dedup $(OPTS)
 
 embedding-backfill:	## 补齐缺失的 experience embedding
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	$(PYTHON_BIN) -m team_memory.daemon.embedding_backfill $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.backfill.embedding_backfill $(OPTS)
 
 detect-contradictions:\t## 检测矛盾经验对（含 LLM 验证）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
@@ -193,19 +193,19 @@ detect-contradictions:\t## 检测矛盾经验对（含 LLM 验证）
 
 search-eval:		## 搜索质量评估（precision/recall）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	$(PYTHON_BIN) -m team_memory.daemon.search_eval $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.quality.search_eval $(OPTS)
 
 faithfulness-eval:\t## Faithfulness 批量评估（RAGAS LLM Judge）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	$(PYTHON_BIN) -m team_memory.daemon.faithfulness_batch $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.quality.faithfulness_batch $(OPTS)
 
 test-llm:		## 测试 LLM 连通性（LiteLLM proxy + chat completion）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	$(PYTHON_BIN) -m team_memory.daemon.test_llm $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.integration.test_llm $(OPTS)
 
 solution-backfill:\t## 补跑无 solution 的 experience（LLM 提取）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	$(PYTHON_BIN) -m team_memory.daemon.solution_backfill $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.backfill.solution_backfill $(OPTS)
 
 migrate:        ## 运行数据库迁移（默认 uv / .venv 内 python -m alembic）
 	@case "$(ALEMBIC)" in \
@@ -266,7 +266,7 @@ daemon-run:      ## Run TM Daemon in foreground (for testing)
 
 daemon-reload:   ## Watch daemon code and auto-restart on change
 	@set -a && [ -f .env ] && source .env || true && set +a; \
-	$(PYTHON_BIN) -m team_memory.daemon.reloader $(OPTS)
+	$(PYTHON_BIN) -m team_memory.daemon.runtime.reloader $(OPTS)
 
 daemon-install:  ## Install launchd plist (auto-start on login + crash restart)
 	@PLIST_SRC=src/team_memory/daemon/com.teammemory.daemon.plist; \

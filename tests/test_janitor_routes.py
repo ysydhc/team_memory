@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from fastapi import HTTPException
+
 from team_memory.auth.provider import User
 from team_memory.web.routes.janitor import (
     get_janitor_status,
-    list_outdated_experiences,
     run_janitor,
 )
 

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from team_memory.daemon.pending_queue import PendingQueue
+from team_memory.daemon.buffers.pending_queue import PendingQueue
 
 
 class TestPendingQueue:

@@ -6,8 +6,8 @@ Create Date: 2026-04-13
 
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "011_add_quality_score_fields"
@@ -42,9 +42,7 @@ def upgrade() -> None:
     )
 
     # Add is_pinned column
-    op.add_column(
-        "experiences", sa.Column("is_pinned", sa.Boolean(), nullable=False, server_default="false")
-    )
+    op.add_column("experiences", sa.Column("is_pinned", sa.Boolean(), nullable=False, server_default="false"))
 
 
 def downgrade() -> None:

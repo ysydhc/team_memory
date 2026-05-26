@@ -42,9 +42,7 @@ class TestPublishStatusDefaults:
     def test_experience_valid_statuses(self):
         """Only draft and published are valid exp_status."""
         valid = {"draft", "published"}
-        exp = Experience(
-            title="test", description="test", exp_status="published", visibility="project"
-        )
+        exp = Experience(title="test", description="test", exp_status="published", visibility="project")
         assert exp.exp_status in valid
 
 
@@ -53,14 +51,14 @@ class TestSearchPipelineRequest:
 
     def test_search_request_has_current_user(self):
         """SearchRequest should have current_user field."""
-        from team_memory.services.search_pipeline import SearchRequest
+        from team_memory.services.search.search_pipeline import SearchRequest
 
         req = SearchRequest(query="test", current_user="alice")
         assert req.current_user == "alice"
 
     def test_search_request_default_current_user_none(self):
         """SearchRequest current_user should default to None."""
-        from team_memory.services.search_pipeline import SearchRequest
+        from team_memory.services.search.search_pipeline import SearchRequest
 
         req = SearchRequest(query="test")
         assert req.current_user is None

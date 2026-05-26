@@ -296,11 +296,7 @@ def main() -> int:
 
     # 与 MCP 一致：从环境变量读取（项目级 mcp.json 的 env 或脚本前导 export）
     default_user = os.environ.get("TEAM_MEMORY_USER", "system")
-    default_project = (
-        os.environ.get("TEAM_MEMORY_PROJECT", "")
-        or get_context().settings.default_project
-        or "default"
-    )
+    default_project = os.environ.get("TEAM_MEMORY_PROJECT", "") or get_context().settings.default_project or "default"
 
     async def save_all() -> None:
         for exp in experiences:

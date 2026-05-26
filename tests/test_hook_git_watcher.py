@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-import os
-import textwrap
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from team_memory.hooks.git_watcher import GitWatcher
-from team_memory.daemon.markdown_indexer import MarkdownIndexer
-
+from team_memory.daemon.wiki.markdown_indexer import MarkdownIndexer
+from team_memory.hooks.integrations.git_watcher import GitWatcher
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def sample_config(tmp_path):
@@ -53,6 +51,7 @@ def watcher(sample_config, mock_tm_client):
 # ---------------------------------------------------------------------------
 # on_git_add
 # ---------------------------------------------------------------------------
+
 
 class TestOnGitAdd:
     """GitWatcher.on_git_add"""
@@ -119,6 +118,7 @@ class TestOnGitAdd:
 # on_git_commit
 # ---------------------------------------------------------------------------
 
+
 class TestOnGitCommit:
     """GitWatcher.on_git_commit"""
 
@@ -130,9 +130,9 @@ class TestOnGitCommit:
         md_file.write_text("# Updated content", encoding="utf-8")
 
         # recall finds a draft for this file
-        mock_tm_client.recall = AsyncMock(return_value={
-            "results": [{"id": "draft-456", "group_key": str(md_file), "status": "draft"}]
-        })
+        mock_tm_client.recall = AsyncMock(
+            return_value={"results": [{"id": "draft-456", "group_key": str(md_file), "status": "draft"}]}
+        )
 
         results = await watcher.on_git_commit(str(vault_dir), committed_files=[str(md_file)])
 
@@ -190,6 +190,7 @@ class TestOnGitCommit:
 # on_git_rm
 # ---------------------------------------------------------------------------
 
+
 class TestOnGitRm:
     """GitWatcher.on_git_rm"""
 
@@ -200,9 +201,9 @@ class TestOnGitRm:
         md_file = vault_dir / "note.md"
 
         # recall finds an experience for this file
-        mock_tm_client.recall = AsyncMock(return_value={
-            "results": [{"id": "exp-789", "group_key": str(md_file), "status": "published"}]
-        })
+        mock_tm_client.recall = AsyncMock(
+            return_value={"results": [{"id": "exp-789", "group_key": str(md_file), "status": "published"}]}
+        )
 
         results = await watcher.on_git_rm(str(vault_dir), [str(md_file)])
 
@@ -240,6 +241,7 @@ class TestOnGitRm:
 # get_staged_files
 # ---------------------------------------------------------------------------
 
+
 class TestGetStagedFiles:
     """GitWatcher.get_staged_files"""
 
@@ -270,6 +272,7 @@ class TestGetStagedFiles:
 # get_committed_files
 # ---------------------------------------------------------------------------
 
+
 class TestGetCommittedFiles:
     """GitWatcher.get_committed_files"""
 
@@ -299,6 +302,7 @@ class TestGetCommittedFiles:
 # on_git_mv
 # ---------------------------------------------------------------------------
 
+
 class TestOnGitMv:
     """GitWatcher.on_git_mv"""
 
@@ -310,9 +314,9 @@ class TestOnGitMv:
         new_file.write_text("# New location", encoding="utf-8")
 
         # recall finds experience for old path
-        mock_tm_client.recall = AsyncMock(return_value={
-            "results": [{"id": "exp-old", "group_key": "/old/path.md", "status": "published"}]
-        })
+        mock_tm_client.recall = AsyncMock(
+            return_value={"results": [{"id": "exp-old", "group_key": "/old/path.md", "status": "published"}]}
+        )
 
         result = await watcher.on_git_mv(str(vault_dir), "/old/path.md", str(new_file))
 

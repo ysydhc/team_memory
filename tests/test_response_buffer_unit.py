@@ -8,6 +8,7 @@ error handling paths, input truncation, JSON serialization, and UUID handling.
 Uses @pytest.mark.unit for pure-logic and mocked-DB tests.
 Uses @pytest.mark.integration for tests that hit a real PostgreSQL.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,17 +18,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from team_memory.daemon.response_buffer import ResponseBuffer
+from team_memory.daemon.buffers.response_buffer import ResponseBuffer
 
 pytestmark = pytest.mark.unit
+
+_TEST_DSN = "postgresql://developer:devpass@localhost:5433/team_memory"
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_buffer(
-    dsn: str = "postgresql://developer:***@localhost:5433/team_memory",
+    dsn: str = _TEST_DSN,
     batch_threshold: int = 5,
 ) -> ResponseBuffer:
     return ResponseBuffer(dsn=dsn, batch_threshold=batch_threshold)
@@ -75,11 +79,12 @@ def _mock_pool(
 # Constructor
 # ===================================================================
 
+
 class TestResponseBufferConstructor:
     """Tests for constructor defaults and attribute storage."""
 
     def test_default_dsn_format(self):
-        buf = ResponseBuffer()
+        buf = ResponseBuffer(dsn=_TEST_DSN)
         assert buf._dsn.startswith("postgresql://")
         assert "5433" in buf._dsn
 
@@ -89,33 +94,34 @@ class TestResponseBufferConstructor:
         assert buf._dsn == dsn
 
     def test_pool_initially_none(self):
-        buf = ResponseBuffer()
+        buf = ResponseBuffer(dsn=_TEST_DSN)
         assert buf._pool is None
 
     def test_default_batch_threshold(self):
-        buf = ResponseBuffer()
+        buf = ResponseBuffer(dsn=_TEST_DSN)
         assert buf._batch_threshold == 5
 
     def test_custom_batch_threshold(self):
-        buf = ResponseBuffer(batch_threshold=10)
+        buf = ResponseBuffer(dsn=_TEST_DSN, batch_threshold=10)
         assert buf._batch_threshold == 10
 
     def test_threshold_zero(self):
-        buf = ResponseBuffer(batch_threshold=0)
+        buf = ResponseBuffer(dsn=_TEST_DSN, batch_threshold=0)
         assert buf._batch_threshold == 0
 
     def test_threshold_one(self):
-        buf = ResponseBuffer(batch_threshold=1)
+        buf = ResponseBuffer(dsn=_TEST_DSN, batch_threshold=1)
         assert buf._batch_threshold == 1
 
     def test_threshold_large(self):
-        buf = ResponseBuffer(batch_threshold=1000)
+        buf = ResponseBuffer(dsn=_TEST_DSN, batch_threshold=1000)
         assert buf._batch_threshold == 1000
 
 
 # ===================================================================
 # _ensure_pool
 # ===================================================================
+
 
 class TestEnsurePool:
     """Tests for pool creation and reuse."""
@@ -124,7 +130,7 @@ class TestEnsurePool:
     async def test_creates_pool_when_none(self):
         buf = _make_buffer()
         mock_pool = _mock_pool()
-        with patch("team_memory.daemon.response_buffer.asyncpg") as mock_asyncpg:
+        with patch("team_memory.daemon.buffers.response_buffer.asyncpg") as mock_asyncpg:
             mock_asyncpg.create_pool = AsyncMock(return_value=mock_pool)
             pool = await buf._ensure_pool()
             assert pool is mock_pool
@@ -146,7 +152,7 @@ class TestEnsurePool:
         old._closed = True
         buf._pool = old
         new_pool = _mock_pool()
-        with patch("team_memory.daemon.response_buffer.asyncpg") as mock_asyncpg:
+        with patch("team_memory.daemon.buffers.response_buffer.asyncpg") as mock_asyncpg:
             mock_asyncpg.create_pool = AsyncMock(return_value=new_pool)
             pool = await buf._ensure_pool()
             assert pool is new_pool
@@ -155,6 +161,7 @@ class TestEnsurePool:
 # ===================================================================
 # close()
 # ===================================================================
+
 
 class TestClose:
     """Tests for the close() method."""
@@ -189,6 +196,7 @@ class TestClose:
 # add()
 # ===================================================================
 
+
 class TestAdd:
     """Tests for the add() method with mocked DB."""
 
@@ -210,9 +218,7 @@ class TestAdd:
         buf._pool = mock_pool
 
         rids = [{"id": "abc123"}, {"id": "def456"}]
-        result = await buf.add(
-            query="q", agent_response="r", result_ids=rids
-        )
+        result = await buf.add(query="q", agent_response="r", result_ids=rids)
         assert result is not None
         uuid.UUID(result)
 
@@ -222,9 +228,7 @@ class TestAdd:
         mock_pool = _mock_pool()
         buf._pool = mock_pool
 
-        result = await buf.add(
-            query="q", agent_response="r", result_ids=None
-        )
+        result = await buf.add(query="q", agent_response="r", result_ids=None)
         assert result is not None
 
     @pytest.mark.asyncio
@@ -236,9 +240,7 @@ class TestAdd:
         buf.has_search_log = AsyncMock(return_value=False)
 
         log_id = str(uuid.uuid4())
-        result = await buf.add(
-            query="q", agent_response="r", search_log_id=log_id
-        )
+        result = await buf.add(query="q", agent_response="r", search_log_id=log_id)
         assert result is not None
         uuid.UUID(result)
 
@@ -369,6 +371,7 @@ class TestAdd:
 # pending_count()
 # ===================================================================
 
+
 class TestPendingCount:
     """Tests for the pending_count() method."""
 
@@ -406,6 +409,7 @@ class TestPendingCount:
 # ===================================================================
 # should_batch()
 # ===================================================================
+
 
 class TestShouldBatch:
     """Tests for the should_batch() method."""
@@ -473,6 +477,7 @@ class TestShouldBatch:
 # ===================================================================
 # fetch_pending()
 # ===================================================================
+
 
 class TestFetchPending:
     """Tests for the fetch_pending() method."""
@@ -559,6 +564,7 @@ class TestFetchPending:
 # mark_evaluated()
 # ===================================================================
 
+
 class TestMarkEvaluated:
     """Tests for the mark_evaluated() method."""
 
@@ -569,9 +575,7 @@ class TestMarkEvaluated:
         buf._pool = mock_pool
 
         entry_id = str(uuid.uuid4())
-        await buf.mark_evaluated(
-            entry_id, faithfulness_score=0.85, judge_reasoning="Good answer"
-        )
+        await buf.mark_evaluated(entry_id, faithfulness_score=0.85, judge_reasoning="Good answer")
 
         conn = mock_pool.acquire.return_value.__aenter__.return_value
         conn.execute.assert_awaited_once()
@@ -609,9 +613,7 @@ class TestMarkEvaluated:
         buf._pool = pool
 
         # Should not raise
-        await buf.mark_evaluated(
-            str(uuid.uuid4()), faithfulness_score=0.5
-        )
+        await buf.mark_evaluated(str(uuid.uuid4()), faithfulness_score=0.5)
 
     @pytest.mark.asyncio
     async def test_default_reasoning_is_empty(self):
@@ -620,9 +622,7 @@ class TestMarkEvaluated:
         mock_pool = _mock_pool()
         buf._pool = mock_pool
 
-        await buf.mark_evaluated(
-            str(uuid.uuid4()), faithfulness_score=0.5
-        )
+        await buf.mark_evaluated(str(uuid.uuid4()), faithfulness_score=0.5)
 
         conn = mock_pool.acquire.return_value.__aenter__.return_value
         call_args = conn.execute.call_args
@@ -632,6 +632,7 @@ class TestMarkEvaluated:
 # ===================================================================
 # sync_to_search_log()
 # ===================================================================
+
 
 class TestSyncToSearchLog:
     """Tests for the sync_to_search_log() method."""
@@ -646,9 +647,7 @@ class TestSyncToSearchLog:
         mock_pool = _mock_pool(row_fetchrow=row)
         buf._pool = mock_pool
 
-        await buf.sync_to_search_log(
-            str(entry_id), faithfulness_score=0.5
-        )
+        await buf.sync_to_search_log(str(entry_id), faithfulness_score=0.5)
 
         conn = mock_pool.acquire.return_value.__aenter__.return_value
         conn.execute.assert_awaited_once()
@@ -665,9 +664,7 @@ class TestSyncToSearchLog:
         mock_pool = _mock_pool(row_fetchrow=row)
         buf._pool = mock_pool
 
-        await buf.sync_to_search_log(
-            str(entry_id), faithfulness_score=0.9
-        )
+        await buf.sync_to_search_log(str(entry_id), faithfulness_score=0.9)
 
         conn = mock_pool.acquire.return_value.__aenter__.return_value
         call_args = conn.execute.call_args
@@ -683,9 +680,7 @@ class TestSyncToSearchLog:
         mock_pool = _mock_pool(row_fetchrow=row)
         buf._pool = mock_pool
 
-        await buf.sync_to_search_log(
-            str(entry_id), faithfulness_score=0.3
-        )
+        await buf.sync_to_search_log(str(entry_id), faithfulness_score=0.3)
 
         conn = mock_pool.acquire.return_value.__aenter__.return_value
         call_args = conn.execute.call_args
@@ -700,9 +695,7 @@ class TestSyncToSearchLog:
         mock_pool = _mock_pool(row_fetchrow=row)
         buf._pool = mock_pool
 
-        await buf.sync_to_search_log(
-            str(entry_id), faithfulness_score=0.8
-        )
+        await buf.sync_to_search_log(str(entry_id), faithfulness_score=0.8)
 
         conn = mock_pool.acquire.return_value.__aenter__.return_value
         # execute should not be called (only fetchrow was called)
@@ -715,9 +708,7 @@ class TestSyncToSearchLog:
         mock_pool = _mock_pool(row_fetchrow=None)
         buf._pool = mock_pool
 
-        await buf.sync_to_search_log(
-            str(uuid.uuid4()), faithfulness_score=0.8
-        )
+        await buf.sync_to_search_log(str(uuid.uuid4()), faithfulness_score=0.8)
 
         conn = mock_pool.acquire.return_value.__aenter__.return_value
         conn.execute.assert_not_awaited()
@@ -731,9 +722,7 @@ class TestSyncToSearchLog:
         buf._pool = pool
 
         # Should not raise
-        await buf.sync_to_search_log(
-            str(uuid.uuid4()), faithfulness_score=0.8
-        )
+        await buf.sync_to_search_log(str(uuid.uuid4()), faithfulness_score=0.8)
 
     @pytest.mark.asyncio
     async def test_was_used_boundary_at_exactly_0_5(self):
@@ -755,6 +744,7 @@ class TestSyncToSearchLog:
 # ===================================================================
 # get_stats()
 # ===================================================================
+
 
 class TestGetStats:
     """Tests for the get_stats() method."""
@@ -842,6 +832,7 @@ class TestGetStats:
 # Error handling edge cases
 # ===================================================================
 
+
 class TestErrorHandling:
     """Edge cases for error handling across all methods."""
 
@@ -859,9 +850,7 @@ class TestErrorHandling:
         pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
         buf._pool = pool
 
-        result = await buf.add(
-            query="q", agent_response="r", search_log_id="not-a-uuid"
-        )
+        result = await buf.add(query="q", agent_response="r", search_log_id="not-a-uuid")
         assert result is None
 
     @pytest.mark.asyncio

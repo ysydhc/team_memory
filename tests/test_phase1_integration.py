@@ -17,10 +17,17 @@ import pytest
 
 from team_memory.config.janitor import JanitorConfig
 from team_memory.server import mcp
-from team_memory.services.janitor import MemoryJanitor
-from team_memory.services.search_orchestrator import OrchestratedSearchResult
-from tests.conftest import _O, _patch_expansion, _patch_user
-
+from team_memory.services.maintenance.janitor import MemoryJanitor
+from team_memory.services.search.search_orchestrator import OrchestratedSearchResult
+from tests.conftest import (
+    _O,
+    _P,
+    _patch_app_context,
+    _patch_expansion,
+    _patch_user,
+    make_mcp_tool_settings_stub,
+    make_mock_app_context,
+)
 
 # ============================================================
 # Helpers
@@ -147,19 +154,20 @@ class TestDraftPublishRecallFlow:
         exp_id = str(uuid.uuid4())
         mock_result = _make_draft_save_result(exp_id)
 
+        mock_service = MagicMock()
+        mock_service.save = AsyncMock(return_value=mock_result)
+        mock_app = make_mock_app_context(service=mock_service, db_url="sqlite://")
+
         with (
-            patch(f"{_O}._get_service") as mock_get_service,
-            patch(f"{_O}._get_db_url", return_value="sqlite://"),
+            _patch_app_context(mock_app),
             _patch_user(),
-            patch(f"{_O}._resolve_project", return_value="default"),
+            patch(f"{_P}._resolve_project", return_value="default"),
             patch(f"{_O}.get_session") as mock_get_session,
         ):
-            mock_service = MagicMock()
-            mock_service.save = AsyncMock(return_value=mock_result)
-            mock_get_service.return_value = mock_service
-
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aenter__ = AsyncMock(
+                return_value=mock_session
+            )
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
             tools = {t.name: t for t in await mcp.list_tools()}
@@ -185,15 +193,15 @@ class TestDraftPublishRecallFlow:
         mock_exp = _make_draft_get_by_id(exp_id)
         mock_updated = _make_published_get_by_id(exp_id)
 
+        mock_service = MagicMock()
+        mock_service.get_by_id = AsyncMock(return_value=mock_exp)
+        mock_service.update = AsyncMock(return_value=mock_updated)
+        mock_app = make_mock_app_context(service=mock_service)
+
         with (
-            patch(f"{_O}._get_service") as mock_get_service,
+            _patch_app_context(mock_app),
             _patch_user(),
         ):
-            mock_service = MagicMock()
-            mock_service.get_by_id = AsyncMock(return_value=mock_exp)
-            mock_service.update = AsyncMock(return_value=mock_updated)
-            mock_get_service.return_value = mock_service
-
             tools = {t.name: t for t in await mcp.list_tools()}
             fn = tools["memory_draft_publish"].fn
             result = await fn(draft_id=exp_id)
@@ -213,24 +221,28 @@ class TestDraftPublishRecallFlow:
         exp_id = str(uuid.uuid4())
         mock_results = _make_recall_result(exp_id)
 
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.search = AsyncMock(
+            return_value=OrchestratedSearchResult(results=mock_results)
+        )
+        mock_app = make_mock_app_context(
+            db_url="sqlite://",
+            search_orchestrator=mock_orchestrator,
+            embedding=MagicMock(),
+            settings=make_mcp_tool_settings_stub(),
+        )
+
         with (
-            patch(f"{_O}._get_search_orchestrator") as mock_get_orch,
-            patch(f"{_O}._get_db_url", return_value="sqlite://"),
+            _patch_app_context(mock_app),
             _patch_user(),
-            patch(f"{_O}._resolve_project", return_value="default"),
-            patch(f"{_O}.get_session") as mock_get_session,
+            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(
+                f"{_O}.write_search_log",
+                new_callable=AsyncMock,
+                return_value="00000000-0000-0000-0000-000000000001",
+            ),
             _patch_expansion(),
         ):
-            mock_orchestrator = MagicMock()
-            mock_orchestrator.search = AsyncMock(
-                return_value=OrchestratedSearchResult(results=mock_results)
-            )
-            mock_get_orch.return_value = mock_orchestrator
-
-            mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
             tools = {t.name: t for t in await mcp.list_tools()}
             fn = tools["memory_recall"].fn
             result = await fn(problem="Connection pool exhausted")
@@ -255,17 +267,16 @@ class TestDraftPublishRecallFlow:
 
         # ---- Step 1: draft_save ----
         draft_result = _make_draft_save_result(exp_id)
+        svc = MagicMock()
+        svc.save = AsyncMock(return_value=draft_result)
+        mock_app = make_mock_app_context(service=svc, db_url="sqlite://")
+
         with (
-            patch(f"{_O}._get_service") as mock_get_service,
-            patch(f"{_O}._get_db_url", return_value="sqlite://"),
+            _patch_app_context(mock_app),
             _patch_user("pipeline_user"),
-            patch(f"{_O}._resolve_project", return_value="default"),
+            patch(f"{_P}._resolve_project", return_value="default"),
             patch(f"{_O}.get_session") as mock_gs,
         ):
-            svc = MagicMock()
-            svc.save = AsyncMock(return_value=draft_result)
-            mock_get_service.return_value = svc
-
             s = AsyncMock()
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=s)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -284,15 +295,15 @@ class TestDraftPublishRecallFlow:
         # ---- Step 2: draft_publish ----
         mock_exp_dict = _make_draft_get_by_id(exp_id)
         mock_published_dict = _make_published_get_by_id(exp_id)
+        svc = MagicMock()
+        svc.get_by_id = AsyncMock(return_value=mock_exp_dict)
+        svc.update = AsyncMock(return_value=mock_published_dict)
+        mock_app = make_mock_app_context(service=svc)
+
         with (
-            patch(f"{_O}._get_service") as mock_get_service,
+            _patch_app_context(mock_app),
             _patch_user("pipeline_user"),
         ):
-            svc = MagicMock()
-            svc.get_by_id = AsyncMock(return_value=mock_exp_dict)
-            svc.update = AsyncMock(return_value=mock_published_dict)
-            mock_get_service.return_value = svc
-
             publish_result = await tools["memory_draft_publish"].fn(
                 draft_id=exp_id,
                 refined_content="Increased pool size and added retry logic",
@@ -318,24 +329,28 @@ class TestDraftPublishRecallFlow:
                 "type": "experience",
             }
         ]
+        orch = MagicMock()
+        orch.search = AsyncMock(
+            return_value=OrchestratedSearchResult(results=recall_results)
+        )
+        mock_app = make_mock_app_context(
+            db_url="sqlite://",
+            search_orchestrator=orch,
+            embedding=MagicMock(),
+            settings=make_mcp_tool_settings_stub(),
+        )
+
         with (
-            patch(f"{_O}._get_search_orchestrator") as mock_get_orch,
-            patch(f"{_O}._get_db_url", return_value="sqlite://"),
+            _patch_app_context(mock_app),
             _patch_user("pipeline_user"),
-            patch(f"{_O}._resolve_project", return_value="default"),
-            patch(f"{_O}.get_session") as mock_gs,
+            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(
+                f"{_O}.write_search_log",
+                new_callable=AsyncMock,
+                return_value="00000000-0000-0000-0000-000000000001",
+            ),
             _patch_expansion(),
         ):
-            orch = MagicMock()
-            orch.search = AsyncMock(
-                return_value=OrchestratedSearchResult(results=recall_results)
-            )
-            mock_get_orch.return_value = orch
-
-            s = AsyncMock()
-            mock_gs.return_value.__aenter__ = AsyncMock(return_value=s)
-            mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
-
             recall_result = await tools["memory_recall"].fn(
                 problem="DB connection pool exhaustion under high concurrency",
             )
@@ -432,17 +447,16 @@ class TestPublishedUseCountPromotionFlow:
             "title": "Redis caching pattern",
             "exp_status": "published",
         }
+        svc = MagicMock()
+        svc.save = AsyncMock(return_value=mock_save_result)
+        mock_app = make_mock_app_context(service=svc, db_url="sqlite://")
+
         with (
-            patch(f"{_O}._get_service") as mock_get_service,
-            patch(f"{_O}._get_db_url", return_value="sqlite://"),
+            _patch_app_context(mock_app),
             _patch_user(),
-            patch(f"{_O}._resolve_project", return_value="default"),
+            patch(f"{_P}._resolve_project", return_value="default"),
             patch(f"{_O}.get_session") as mock_gs,
         ):
-            svc = MagicMock()
-            svc.save = AsyncMock(return_value=mock_save_result)
-            mock_get_service.return_value = svc
-
             s = AsyncMock()
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=s)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -497,7 +511,9 @@ class TestPublishedUseCountPromotionFlow:
         """Multiple published experiences with same group_key get promoted together."""
         group_key = "auth-patterns"
         exps = [
-            _make_experience(exp_status="published", recall_count=0, group_key=group_key)
+            _make_experience(
+                exp_status="published", recall_count=0, group_key=group_key
+            )
             for _ in range(5)
         ]
         janitor = MemoryJanitor(
@@ -546,17 +562,16 @@ class TestMemorySaveRecallRegression:
             "exp_status": "published",
         }
 
+        svc = MagicMock()
+        svc.save = AsyncMock(return_value=mock_result)
+        mock_app = make_mock_app_context(service=svc, db_url="sqlite://")
+
         with (
-            patch(f"{_O}._get_service") as mock_get_service,
-            patch(f"{_O}._get_db_url", return_value="sqlite://"),
+            _patch_app_context(mock_app),
             _patch_user(),
-            patch(f"{_O}._resolve_project", return_value="default"),
+            patch(f"{_P}._resolve_project", return_value="default"),
             patch(f"{_O}.get_session") as mock_gs,
         ):
-            svc = MagicMock()
-            svc.save = AsyncMock(return_value=mock_result)
-            mock_get_service.return_value = svc
-
             s = AsyncMock()
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=s)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -589,24 +604,28 @@ class TestMemorySaveRecallRegression:
             }
         ]
 
+        orch = MagicMock()
+        orch.search = AsyncMock(
+            return_value=OrchestratedSearchResult(results=mock_results)
+        )
+        mock_app = make_mock_app_context(
+            db_url="sqlite://",
+            search_orchestrator=orch,
+            embedding=MagicMock(),
+            settings=make_mcp_tool_settings_stub(),
+        )
+
         with (
-            patch(f"{_O}._get_search_orchestrator") as mock_get_orch,
-            patch(f"{_O}._get_db_url", return_value="sqlite://"),
+            _patch_app_context(mock_app),
             _patch_user(),
-            patch(f"{_O}._resolve_project", return_value="default"),
-            patch(f"{_O}.get_session") as mock_gs,
+            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(
+                f"{_O}.write_search_log",
+                new_callable=AsyncMock,
+                return_value="00000000-0000-0000-0000-000000000001",
+            ),
             _patch_expansion(),
         ):
-            orch = MagicMock()
-            orch.search = AsyncMock(
-                return_value=OrchestratedSearchResult(results=mock_results)
-            )
-            mock_get_orch.return_value = orch
-
-            s = AsyncMock()
-            mock_gs.return_value.__aenter__ = AsyncMock(return_value=s)
-            mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
-
             tools = {t.name: t for t in await mcp.list_tools()}
             fn = tools["memory_recall"].fn
             result = await fn(problem="Database connection timeout", language="python")
@@ -630,19 +649,28 @@ class TestMemorySaveRecallRegression:
             }
         ]
 
+        orch = MagicMock()
+        orch.search = AsyncMock(
+            return_value=OrchestratedSearchResult(results=mock_results)
+        )
+        mock_app = make_mock_app_context(
+            db_url="sqlite://",
+            search_orchestrator=orch,
+            embedding=MagicMock(),
+            settings=make_mcp_tool_settings_stub(),
+        )
+
         with (
-            patch(f"{_O}._get_search_orchestrator") as mock_get_orch,
-            patch(f"{_O}._get_db_url", return_value="sqlite://"),
+            _patch_app_context(mock_app),
             _patch_user(),
-            patch(f"{_O}._resolve_project", return_value="default"),
+            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(
+                f"{_O}.write_search_log",
+                new_callable=AsyncMock,
+                return_value="00000000-0000-0000-0000-000000000001",
+            ),
             _patch_expansion(),
         ):
-            orch = MagicMock()
-            orch.search = AsyncMock(
-                return_value=OrchestratedSearchResult(results=mock_results)
-            )
-            mock_get_orch.return_value = orch
-
             tools = {t.name: t for t in await mcp.list_tools()}
             fn = tools["memory_recall"].fn
             result = await fn(query="redis caching best practices")
@@ -676,24 +704,28 @@ class TestMemorySaveRecallRegression:
         mock_settings.mcp.max_tags = 20
         mock_settings.mcp.max_tag_length = 50
 
+        svc = MagicMock()
+        svc.save = AsyncMock(return_value=mock_result)
+        mock_app = make_mock_app_context(
+            service=svc,
+            settings=mock_settings,
+            db_url="sqlite://",
+        )
+
         with (
-            patch(f"{_O}._get_service") as mock_get_service,
-            patch(f"{_O}._get_settings", return_value=mock_settings),
-            patch(f"{_O}._get_db_url", return_value="sqlite://"),
+            _patch_app_context(mock_app),
             _patch_user(),
-            patch(f"{_O}._resolve_project", return_value="default"),
+            patch(f"{_P}._resolve_project", return_value="default"),
             patch(f"{_O}.get_session") as mock_gs,
             patch(
-                "team_memory.services.llm_parser.parse_content",
+                "team_memory.services.llm.llm_parser.parse_content",
                 new_callable=AsyncMock,
                 return_value=mock_parsed,
             ),
-            patch(f"{_O}._try_extract_and_save_personal_memory", new_callable=AsyncMock),
+            patch(
+                f"{_O}._try_extract_and_save_personal_memory", new_callable=AsyncMock
+            ),
         ):
-            svc = MagicMock()
-            svc.save = AsyncMock(return_value=mock_result)
-            mock_get_service.return_value = svc
-
             s = AsyncMock()
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=s)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)

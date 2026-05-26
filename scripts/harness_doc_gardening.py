@@ -74,11 +74,7 @@ def _resolve_link_target(source_file: Path, link_url: str, root: Path) -> Path |
             return None
 
     # Relative to source file's directory
-    if (
-        url.startswith("./")
-        or url.startswith("../")
-        or (not url.startswith("/") and "://" not in url)
-    ):
+    if url.startswith("./") or url.startswith("../") or (not url.startswith("/") and "://" not in url):
         base = source_file.parent
         try:
             resolved = (base / url).resolve()
@@ -258,9 +254,7 @@ def collect_md_files(root: Path, dirs: list[str]) -> list[Path]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Doc gardening: scan markdown for broken/deprecated refs"
-    )
+    parser = argparse.ArgumentParser(description="Doc gardening: scan markdown for broken/deprecated refs")
     parser.add_argument(
         "--root",
         type=Path,

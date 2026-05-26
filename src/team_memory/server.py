@@ -16,13 +16,16 @@ import functools
 import json
 import logging
 import os
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from fastmcp import FastMCP
 
 from team_memory import io_logger
 from team_memory.bootstrap import bootstrap
-from team_memory.services import memory_operations
+from team_memory.bootstrap import get_context as _app_context
+from team_memory.config.mcp import MCPConfig
+from team_memory.services.memory import memory_operations
 
 if TYPE_CHECKING:
     from team_memory.remote_client import RemoteTMClient
@@ -110,7 +113,6 @@ def track_usage(func):
 
 async def _get_current_user() -> str:
     """Resolve authenticated user: HTTP header (remote) → env API Key (stdio) → error."""
-    from team_memory.bootstrap import get_context
 
     # Step 1: HTTP MCP — read user injected by MCPAuthMiddleware
     try:
@@ -128,7 +130,7 @@ async def _get_current_user() -> str:
     api_key = os.environ.get("TEAM_MEMORY_API_KEY", "")
     if api_key:
         try:
-            ctx = get_context()
+            ctx = _app_context()
             if ctx.auth:
                 user = await ctx.auth.authenticate({"api_key": api_key})
                 if user is not None:
@@ -142,19 +144,23 @@ async def _get_current_user() -> str:
 
     # Step 3: no identity — error
     raise RuntimeError(
-        "No authenticated user. Set TEAM_MEMORY_API_KEY env var "
-        "or provide Authorization header for HTTP MCP."
+        "No authenticated user. Set TEAM_MEMORY_API_KEY env var or provide Authorization header for HTTP MCP."
     )
 
 
-def _guard_output(result_json: str, max_tokens: int | None = None) -> str:
+def _guard_output(
+    result_json: str,
+    *,
+    settings: object | None = None,
+    max_tokens: int | None = None,
+) -> str:
     """Enforce token budget on MCP tool output.
 
     Progressively trims: low-confidence results → long fields → trailing results.
     """
-    settings = memory_operations._get_settings()
+    effective = settings if settings is not None else SimpleNamespace(mcp=MCPConfig())
     if max_tokens is None:
-        max_tokens = settings.mcp.max_output_tokens
+        max_tokens = effective.mcp.max_output_tokens
 
     try:
         data = json.loads(result_json)
@@ -166,11 +172,13 @@ def _guard_output(result_json: str, max_tokens: int | None = None) -> str:
         return result_json
 
     truncated = False
-    max_solution_chars = settings.mcp.truncate_solution_at
+    max_solution_chars = effective.mcp.truncate_solution_at
 
     # Step 1: Remove low-confidence results
     if len(results) > 1:
-        high_medium = [r for r in results if r.get("confidence", "high") in ("high", "medium")]
+        high_medium = [
+            r for r in results if r.get("confidence", "high") in ("high", "medium")
+        ]
         if high_medium and len(high_medium) < len(results):
             results = high_medium
             truncated = True
@@ -270,6 +278,7 @@ logger.info(
 # Register aliases so recall/search can resolve historical names
 if _inferred_aliases:
     from team_memory.project_resolver import register_aliases
+
     register_aliases(_inferred_project, _inferred_aliases)
 
 
@@ -283,6 +292,7 @@ def _resolve_project(project: str | None) -> str | None:
     if project:
         try:
             from team_memory.utils.project import normalize_project_name
+
             normalized = normalize_project_name(project)
             if normalized:
                 return normalized
@@ -329,6 +339,7 @@ async def memory_save(
     """Unified write: route to direct save or LLM parse based on input."""
     user = await _get_current_user()
     resolved_project = _resolve_project(project)
+    truncate_settings = None
     if _remote_client:
         result = await _remote_client.op_save(
             user,
@@ -343,8 +354,14 @@ async def memory_save(
             group_key=group_key,
         )
     else:
+        ctx = _app_context()
+        truncate_settings = ctx.settings
         result = await memory_operations.op_save(
             user,
+            service=ctx.service,
+            settings=ctx.settings,
+            db_url=ctx.db_url,
+            embedding_provider=ctx.embedding,
             title=title,
             problem=problem,
             solution=solution,
@@ -355,7 +372,9 @@ async def memory_save(
             project=resolved_project,
             group_key=group_key,
         )
-    return _guard_output(json.dumps(result, ensure_ascii=False))
+    return _guard_output(
+        json.dumps(result, ensure_ascii=False), settings=truncate_settings
+    )
 
 
 # ============================================================
@@ -390,10 +409,12 @@ async def memory_recall(
     project: str | None = None,
     include_archives: bool | None = None,
     include_user_profile: bool = False,
+    adaptive: bool = True,
 ) -> str:
     """Unified read: route to solve/search/suggest mode based on input."""
     user = await _get_current_user()
     resolved_project = _resolve_project(project)
+    truncate_settings = None
     if _remote_client:
         result = await _remote_client.op_recall(
             user,
@@ -409,8 +430,14 @@ async def memory_recall(
             include_user_profile=include_user_profile,
         )
     else:
+        ctx = _app_context()
+        truncate_settings = ctx.settings
         result = await memory_operations.op_recall(
             user,
+            search_orchestrator=ctx.search_orchestrator,
+            db_url=ctx.db_url,
+            settings=ctx.settings,
+            embedding_provider=ctx.embedding,
             query=query,
             problem=problem,
             file_path=file_path,
@@ -421,8 +448,12 @@ async def memory_recall(
             project=resolved_project,
             include_archives=include_archives,
             include_user_profile=include_user_profile,
+            adaptive=adaptive,
+            adaptive_retriever=ctx.adaptive_retriever,
         )
-    return _guard_output(json.dumps(result, ensure_ascii=False))
+    return _guard_output(
+        json.dumps(result, ensure_ascii=False), settings=truncate_settings
+    )
 
 
 # ============================================================
@@ -448,13 +479,31 @@ async def memory_context(
 ) -> str:
     """Return user profile + relevant experiences for current context."""
     user = await _get_current_user()
-    result = await memory_operations.op_context(
-        user,
-        file_paths=file_paths,
-        task_description=task_description,
-        project=_resolve_project(project),
+    resolved_project = _resolve_project(project)
+    truncate_settings = None
+    if _remote_client:
+        result = await _remote_client.op_context(
+            user,
+            file_paths=file_paths,
+            task_description=task_description,
+            project=resolved_project,
+        )
+    else:
+        ctx = _app_context()
+        truncate_settings = ctx.settings
+        result = await memory_operations.op_context(
+            user,
+            search_orchestrator=ctx.search_orchestrator,
+            settings=ctx.settings,
+            embedding_provider=ctx.embedding,
+            db_url=ctx.db_url,
+            file_paths=file_paths,
+            task_description=task_description,
+            project=resolved_project,
+        )
+    return _guard_output(
+        json.dumps(result, ensure_ascii=False), settings=truncate_settings
     )
-    return _guard_output(json.dumps(result, ensure_ascii=False))
 
 
 # ============================================================
@@ -474,12 +523,14 @@ async def memory_context(
 async def memory_get_archive(archive_id: str, project: str | None = None) -> str:
     """Return L2 JSON or 404-style error."""
     user = await _get_current_user()
+    ctx = _app_context()
     result = await memory_operations.op_get_archive(
         user,
+        archive_service=ctx.archive_service,
         archive_id=archive_id,
         project=_resolve_project(project),
     )
-    return _guard_output(json.dumps(result, ensure_ascii=False))
+    return _guard_output(json.dumps(result, ensure_ascii=False), settings=ctx.settings)
 
 
 # ============================================================
@@ -513,8 +564,11 @@ async def memory_archive_upsert(
 ) -> str:
     """Upsert archive via ArchiveService (embedding + DB); JSON success or error."""
     user = await _get_current_user()
+    ctx = _app_context()
     result = await memory_operations.op_archive_upsert(
         user,
+        archive_service=ctx.archive_service,
+        settings=ctx.settings,
         title=title,
         solution_doc=solution_doc,
         content_type=content_type,
@@ -528,7 +582,7 @@ async def memory_archive_upsert(
         scope=scope,
         scope_ref=scope_ref,
     )
-    return _guard_output(json.dumps(result, ensure_ascii=False))
+    return _guard_output(json.dumps(result, ensure_ascii=False), settings=ctx.settings)
 
 
 # ============================================================
@@ -551,13 +605,15 @@ async def memory_feedback(
 ) -> str:
     """Submit feedback for an experience."""
     user = await _get_current_user()
+    ctx = _app_context()
     result = await memory_operations.op_feedback(
         user,
+        service=ctx.service,
         experience_id=experience_id,
         rating=rating,
         comment=comment,
     )
-    return _guard_output(json.dumps(result, ensure_ascii=False))
+    return _guard_output(json.dumps(result, ensure_ascii=False), settings=ctx.settings)
 
 
 # ============================================================
@@ -568,8 +624,7 @@ async def memory_feedback(
 @mcp.tool(
     name="memory_draft_save",
     description=(
-        "Pipeline-only: save a draft memory. "
-        "source is always 'pipeline', exp_status is always 'draft'."
+        "Pipeline-only: save a draft memory. source is always 'pipeline', exp_status is always 'draft'."
     ),
 )
 @track_usage
@@ -583,8 +638,11 @@ async def memory_draft_save(
 ) -> str:
     """Pipeline write: save a draft memory with forced source='pipeline', exp_status='draft'."""
     user = await _get_current_user()
+    ctx = _app_context()
     result = await memory_operations.op_draft_save(
         user,
+        service=ctx.service,
+        db_url=ctx.db_url,
         title=title,
         content=content,
         tags=tags,
@@ -592,7 +650,7 @@ async def memory_draft_save(
         group_key=group_key,
         conversation_id=conversation_id,
     )
-    return _guard_output(json.dumps(result, ensure_ascii=False))
+    return _guard_output(json.dumps(result, ensure_ascii=False), settings=ctx.settings)
 
 
 # ============================================================
@@ -614,12 +672,14 @@ async def memory_draft_publish(
 ) -> str:
     """Pipeline write: promote a pipeline draft to published."""
     user = await _get_current_user()
+    ctx = _app_context()
     result = await memory_operations.op_draft_publish(
         user,
+        service=ctx.service,
         draft_id=draft_id,
         refined_content=refined_content,
     )
-    return _guard_output(json.dumps(result, ensure_ascii=False))
+    return _guard_output(json.dumps(result, ensure_ascii=False), settings=ctx.settings)
 
 
 # ============================================================
@@ -641,6 +701,7 @@ async def memory_submit_response(
     query: str,
     response: str,
     result_ids: list[str] | None = None,
+    project: str | None = None,
 ) -> str:
     """Submit agent response for faithfulness evaluation.
 
@@ -648,42 +709,41 @@ async def memory_submit_response(
         query: The original search query used in memory_recall
         response: Your response text that used the search results
         result_ids: Optional list of experience IDs from the search results
+        project: Optional project scope (resolved like other memory_* tools)
     """
-    try:
-        import uuid as _uuid
-        from datetime import datetime, timezone
-
-        import asyncpg
-
-        dsn = os.environ.get(
-            "TEAM_MEMORY_DB_URL",
-            "postgresql://developer:devpass@localhost:5433/team_memory",
+    user = await _get_current_user()
+    resolved_project = _resolve_project(project)
+    truncate_settings = None
+    if _remote_client:
+        result = await _remote_client.op_submit_response(
+            user,
+            query=query,
+            response=response,
+            result_ids=result_ids,
+            project=resolved_project,
         )
-        conn = await asyncpg.connect(dsn)
-        try:
-            entry_id = _uuid.uuid4()
-            parsed_ids = [{"": rid} for rid in (result_ids or [])]
-            await conn.execute(
-                """
-                INSERT INTO response_buffer
-                    (id, query, agent_response, result_ids, created_at)
-                VALUES ($1, $2, $3, $4, $5)
-                """,
-                entry_id,
-                query[:2000],
-                response[:10000],
-                json.dumps(parsed_ids) if parsed_ids else None,
-                datetime.now(timezone.utc),
-            )
-            return json.dumps({
-                "status": "buffered",
-                "entry_id": str(entry_id),
-                "message": "Response submitted for faithfulness evaluation.",
-            })
-        finally:
-            await conn.close()
-    except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)})
+    else:
+        ctx = _app_context()
+        truncate_settings = ctx.settings
+        result = await memory_operations.op_submit_response(
+            user,
+            db_url=ctx.db_url,
+            query=query,
+            response=response,
+            result_ids=result_ids,
+            project=resolved_project,
+        )
+
+    if not isinstance(result, dict):
+        result = {"error": True, "code": "internal_error", "message": str(result)}
+    elif result.get("status") == "buffered" and result.get("buffer_id"):
+        result = {
+            **result,
+            "message": "Response submitted for faithfulness evaluation.",
+        }
+    return _guard_output(
+        json.dumps(result, ensure_ascii=False), settings=truncate_settings
+    )
 
 
 # ============================================================
@@ -715,6 +775,7 @@ def main() -> None:
     if remote_url:
         # Remote mode: patch memory_operations with HTTP client, skip bootstrap
         from team_memory.remote_client import setup_remote_ops
+
         api_key = os.environ.get("TEAM_MEMORY_API_KEY", "")
         setup_remote_ops(base_url=remote_url, api_key=api_key)
     else:

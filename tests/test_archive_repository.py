@@ -27,10 +27,7 @@ DB_URL = os.environ.get(
     "postgresql+asyncpg://developer:devpass@localhost:5432/team_memory_test",
 )
 if DB_URL.endswith("/team_memory"):
-    raise RuntimeError(
-        "Refusing to run on non-test database 'team_memory'. "
-        "Set TEAM_MEMORY_TEST_DB_URL to a test DB."
-    )
+    raise RuntimeError("Refusing to run on non-test database 'team_memory'. Set TEAM_MEMORY_TEST_DB_URL to a test DB.")
 
 _db_available = None
 
@@ -77,9 +74,7 @@ async def engine():
 
 @pytest.fixture
 async def session(engine) -> AsyncSession:
-    factory = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as sess:
         yield sess
         await sess.rollback()
@@ -138,11 +133,7 @@ async def test_create_archive_and_links(session: AsyncSession):
     )
     await session.commit()
 
-    result = await session.execute(
-        select(ArchiveExperienceLink).where(
-            ArchiveExperienceLink.archive_id == archive_id
-        )
-    )
+    result = await session.execute(select(ArchiveExperienceLink).where(ArchiveExperienceLink.archive_id == archive_id))
     links = result.scalars().all()
     assert len(links) == 2
 
@@ -163,8 +154,6 @@ async def test_create_archive_with_attachments(session: AsyncSession):
     )
     await session.commit()
 
-    result = await session.execute(
-        select(ArchiveAttachment).where(ArchiveAttachment.archive_id == archive_id)
-    )
+    result = await session.execute(select(ArchiveAttachment).where(ArchiveAttachment.archive_id == archive_id))
     atts = result.scalars().all()
     assert len(atts) == 2

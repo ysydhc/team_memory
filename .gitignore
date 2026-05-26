@@ -61,3 +61,22 @@ wiki/queries/
 wiki/index.md
 wiki/log.md
 .wiki/
+
+# Process and Plan Artifacts
+plans/
+backlog/
+specs/
+.specify/
+.harness/
+.hermes/plans/
+docs/2026/
+*.excalidraw
+
+# Docs directory (ignored but kept locally)
+docs/
+
+# Runtime files (KuzuDB, task worker state)
+.kuzu_db
+.kuzu_db.wal
+.task_worker.log
+.task_worker.state

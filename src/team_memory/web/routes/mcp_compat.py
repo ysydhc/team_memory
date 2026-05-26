@@ -9,7 +9,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from team_memory.auth.provider import User
-from team_memory.services import memory_operations
+from team_memory.bootstrap import get_context
+from team_memory.services.memory import memory_operations
 from team_memory.web.auth_session import get_current_user
 
 logger = logging.getLogger("team_memory.web")
@@ -53,6 +54,13 @@ class McpSaveRequest(BaseModel):
     experience_type: str | None = None
     project: str | None = None
     group_key: str | None = None
+
+
+class McpSubmitResponseRequest(BaseModel):
+    query: str
+    response: str
+    result_ids: list[str] | None = None
+    project: str | None = None
 
 
 class McpRecallRequest(BaseModel):
@@ -106,8 +114,13 @@ async def mcp_save(
     """POST /mcp/save — same contract as memory_save."""
     uid = user.name
     try:
+        ctx = get_context()
         result = await memory_operations.op_save(
             uid,
+            service=ctx.service,
+            settings=ctx.settings,
+            db_url=ctx.db_url,
+            embedding_provider=ctx.embedding,
             title=body.title,
             problem=body.problem,
             solution=body.solution,
@@ -134,8 +147,13 @@ async def mcp_recall(
     """POST /mcp/recall — same contract as memory_recall."""
     uid = user.name
     try:
+        ctx = get_context()
         result = await memory_operations.op_recall(
             uid,
+            search_orchestrator=ctx.search_orchestrator,
+            db_url=ctx.db_url,
+            settings=ctx.settings,
+            embedding_provider=ctx.embedding,
             query=body.query,
             problem=body.problem,
             file_path=body.file_path,
@@ -155,6 +173,31 @@ async def mcp_recall(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@router.post("/submit-response")
+async def mcp_submit_response(
+    body: McpSubmitResponseRequest,
+    user: User = Depends(get_current_user),
+):
+    """POST /mcp/submit-response — same contract as memory_submit_response buffer step."""
+    uid = user.name
+    try:
+        ctx = get_context()
+        result = await memory_operations.op_submit_response(
+            uid,
+            db_url=ctx.db_url,
+            query=body.query,
+            response=body.response,
+            result_ids=body.result_ids,
+            project=body.project,
+        )
+        return _json_response(result, user=uid, tool_name="submit_response")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("mcp_compat submit_response failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @router.post("/context")
 async def mcp_context(
     body: McpContextRequest,
@@ -163,8 +206,13 @@ async def mcp_context(
     """POST /mcp/context — same contract as memory_context."""
     uid = user.name
     try:
+        ctx = get_context()
         result = await memory_operations.op_context(
             uid,
+            search_orchestrator=ctx.search_orchestrator,
+            settings=ctx.settings,
+            embedding_provider=ctx.embedding,
+            db_url=ctx.db_url,
             file_paths=body.file_paths,
             task_description=body.task_description,
             project=body.project,
@@ -186,8 +234,10 @@ async def mcp_get_archive(
     """GET /mcp/archive/{archive_id} — same contract as memory_get_archive."""
     uid = user.name
     try:
+        ctx = get_context()
         result = await memory_operations.op_get_archive(
             uid,
+            archive_service=ctx.archive_service,
             archive_id=archive_id,
             project=project,
         )
@@ -207,8 +257,11 @@ async def mcp_archive_upsert(
     """POST /mcp/archive-upsert — same contract as memory_archive_upsert."""
     uid = user.name
     try:
+        ctx = get_context()
         result = await memory_operations.op_archive_upsert(
             uid,
+            archive_service=ctx.archive_service,
+            settings=ctx.settings,
             title=body.title,
             solution_doc=body.solution_doc,
             content_type=body.content_type,
@@ -238,8 +291,10 @@ async def mcp_feedback(
     """POST /mcp/feedback — same contract as memory_feedback."""
     uid = user.name
     try:
+        ctx = get_context()
         result = await memory_operations.op_feedback(
             uid,
+            service=ctx.service,
             experience_id=body.experience_id,
             rating=body.rating,
             comment=body.comment,
@@ -283,14 +338,18 @@ async def mcp_draft_save(
     """
     uid = user.name
     try:
+        ctx = get_context()
         result = await memory_operations.op_draft_save(
             uid,
+            service=ctx.service,
+            db_url=ctx.db_url,
             title=body.title,
             content=body.content,
             tags=body.tags,
             project=body.project,
             group_key=body.group_key,
             conversation_id=body.conversation_id,
+            skip_dedup=body.skip_dedup,
         )
         return _json_response(result, user=uid, tool_name="draft_save")
     except HTTPException:
@@ -311,8 +370,10 @@ async def mcp_draft_publish(
     """
     uid = user.name
     try:
+        ctx = get_context()
         result = await memory_operations.op_draft_publish(
             uid,
+            service=ctx.service,
             draft_id=body.draft_id,
             refined_content=body.refined_content,
         )

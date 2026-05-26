@@ -2,21 +2,18 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
-import textwrap
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
 
-from team_memory.hooks.initial_index import _is_untracked, initial_index
-from team_memory.daemon.markdown_indexer import MarkdownIndexer
-
+from team_memory.hooks.integrations.initial_index import _is_untracked, initial_index
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def vault_dir(tmp_path):
@@ -90,18 +87,19 @@ def multi_vault_config(tmp_path):
 # dry_run mode
 # ---------------------------------------------------------------------------
 
+
 class TestDryRun:
     """initial_index with dry_run=True should not call TMClient."""
 
     @pytest.mark.asyncio
     async def test_dry_run_does_not_call_tm(self, config_file, vault_dir):
         """dry_run=True should only print, not call tm.save()."""
-        with patch("team_memory.hooks.initial_index.TMClient") as MockTM:
+        with patch("team_memory.hooks.integrations.initial_index.TMClient") as MockTM:
             mock_tm_instance = MagicMock()
             mock_tm_instance.save = AsyncMock(return_value={"id": "abc"})
             MockTM.return_value = mock_tm_instance
 
-            with patch("team_memory.hooks.initial_index._is_untracked", return_value=False):
+            with patch("team_memory.hooks.integrations.initial_index._is_untracked", return_value=False):
                 stats = await initial_index(config_file, "http://localhost:3900", dry_run=True)
 
             mock_tm_instance.save.assert_not_called()
@@ -110,7 +108,7 @@ class TestDryRun:
     @pytest.mark.asyncio
     async def test_dry_run_counts_files(self, config_file, vault_dir):
         """dry_run=True should count files correctly."""
-        with patch("team_memory.hooks.initial_index._is_untracked", return_value=False):
+        with patch("team_memory.hooks.integrations.initial_index._is_untracked", return_value=False):
             stats = await initial_index(config_file, "http://localhost:3900", dry_run=True)
 
         # vault has docs/guide.md, docs/tips.md, drafts/wip.md
@@ -125,13 +123,14 @@ class TestDryRun:
 # Skip untracked files
 # ---------------------------------------------------------------------------
 
+
 class TestSkipUntracked:
     """Files untracked by git should be skipped."""
 
     @pytest.mark.asyncio
     async def test_untracked_files_are_skipped(self, config_file, vault_dir):
         """Files where _is_untracked returns True should be skipped."""
-        with patch("team_memory.hooks.initial_index._is_untracked", return_value=True):
+        with patch("team_memory.hooks.integrations.initial_index._is_untracked", return_value=True):
             stats = await initial_index(config_file, "http://localhost:3900", dry_run=True)
 
         # All files are "untracked" → all skipped after should_index pass
@@ -143,13 +142,14 @@ class TestSkipUntracked:
 # Skip should_index=False files
 # ---------------------------------------------------------------------------
 
+
 class TestSkipShouldIndex:
     """Files where should_index returns False should be skipped."""
 
     @pytest.mark.asyncio
     async def test_excluded_patterns_are_skipped(self, config_file, vault_dir):
         """Files matching exclude_patterns should be skipped."""
-        with patch("team_memory.hooks.initial_index._is_untracked", return_value=False):
+        with patch("team_memory.hooks.integrations.initial_index._is_untracked", return_value=False):
             stats = await initial_index(config_file, "http://localhost:3900", dry_run=True)
 
         # drafts/wip.md should be skipped (excluded by exclude_patterns)
@@ -174,7 +174,7 @@ class TestSkipShouldIndex:
         p = tmp_path / "cfg.yaml"
         p.write_text(yaml.dump(cfg), encoding="utf-8")
 
-        with patch("team_memory.hooks.initial_index._is_untracked", return_value=False):
+        with patch("team_memory.hooks.integrations.initial_index._is_untracked", return_value=False):
             stats = await initial_index(str(p), "http://localhost:3900", dry_run=True)
 
         # .txt files should not appear in total_files (glob only matches *.md)
@@ -187,6 +187,7 @@ class TestSkipShouldIndex:
 # Skip non-existent vault path
 # ---------------------------------------------------------------------------
 
+
 class TestSkipNonExistentVault:
     """Vaults with non-existent paths should be skipped."""
 
@@ -195,7 +196,7 @@ class TestSkipNonExistentVault:
         """Vaults whose path does not exist should be skipped entirely."""
         config_path, vault1 = multi_vault_config
 
-        with patch("team_memory.hooks.initial_index._is_untracked", return_value=False):
+        with patch("team_memory.hooks.integrations.initial_index._is_untracked", return_value=False):
             stats = await initial_index(config_path, "http://localhost:3900", dry_run=True)
 
         # Only vault1 files should be counted, ghost vault should be skipped
@@ -207,13 +208,14 @@ class TestSkipNonExistentVault:
 # Stats correctness
 # ---------------------------------------------------------------------------
 
+
 class TestStatsCorrectness:
     """Stats dict should accurately reflect operations."""
 
     @pytest.mark.asyncio
     async def test_stats_with_mixed_files(self, config_file, vault_dir):
         """Stats should reflect indexed, skipped, and total correctly."""
-        with patch("team_memory.hooks.initial_index._is_untracked", return_value=False):
+        with patch("team_memory.hooks.integrations.initial_index._is_untracked", return_value=False):
             stats = await initial_index(config_file, "http://localhost:3900", dry_run=True)
 
         assert stats["total_files"] == stats["indexed"] + stats["skipped"] + stats["errors"]
@@ -221,12 +223,12 @@ class TestStatsCorrectness:
     @pytest.mark.asyncio
     async def test_error_count_on_tm_failure(self, config_file, vault_dir):
         """Errors should be counted when tm.save() raises."""
-        with patch("team_memory.hooks.initial_index.TMClient") as MockTM:
+        with patch("team_memory.hooks.integrations.initial_index.TMClient") as MockTM:
             mock_tm_instance = MagicMock()
             mock_tm_instance.save = AsyncMock(side_effect=ConnectionError("tm down"))
             MockTM.return_value = mock_tm_instance
 
-            with patch("team_memory.hooks.initial_index._is_untracked", return_value=False):
+            with patch("team_memory.hooks.integrations.initial_index._is_untracked", return_value=False):
                 stats = await initial_index(config_file, "http://localhost:3900", dry_run=False)
 
         # guide.md and tips.md pass should_index, .obsidian/config.md is excluded
@@ -239,7 +241,9 @@ class TestStatsCorrectness:
         vault = tmp_path / "empty_vault"
         vault.mkdir()
 
-        cfg = {"vaults": [{"path": str(vault), "project": "empty", "index_patterns": ["**/*.md"], "exclude_patterns": []}]}
+        cfg = {
+            "vaults": [{"path": str(vault), "project": "empty", "index_patterns": ["**/*.md"], "exclude_patterns": []}]
+        }
         p = tmp_path / "cfg.yaml"
         p.write_text(yaml.dump(cfg), encoding="utf-8")
 
@@ -253,12 +257,12 @@ class TestStatsCorrectness:
     @pytest.mark.asyncio
     async def test_successful_indexing_counts(self, config_file, vault_dir):
         """Successfully indexed files should increment indexed count."""
-        with patch("team_memory.hooks.initial_index.TMClient") as MockTM:
+        with patch("team_memory.hooks.integrations.initial_index.TMClient") as MockTM:
             mock_tm_instance = MagicMock()
             mock_tm_instance.save = AsyncMock(return_value={"id": "new-id"})
             MockTM.return_value = mock_tm_instance
 
-            with patch("team_memory.hooks.initial_index._is_untracked", return_value=False):
+            with patch("team_memory.hooks.integrations.initial_index._is_untracked", return_value=False):
                 stats = await initial_index(config_file, "http://localhost:3900", dry_run=False)
 
         assert stats["indexed"] == 2  # guide.md + tips.md
@@ -268,12 +272,12 @@ class TestStatsCorrectness:
     @pytest.mark.asyncio
     async def test_save_called_with_correct_args(self, config_file, vault_dir):
         """tm.save() should be called with source='obsidian' and correct project."""
-        with patch("team_memory.hooks.initial_index.TMClient") as MockTM:
+        with patch("team_memory.hooks.integrations.initial_index.TMClient") as MockTM:
             mock_tm_instance = MagicMock()
             mock_tm_instance.save = AsyncMock(return_value={"id": "new-id"})
             MockTM.return_value = mock_tm_instance
 
-            with patch("team_memory.hooks.initial_index._is_untracked", return_value=False):
+            with patch("team_memory.hooks.integrations.initial_index._is_untracked", return_value=False):
                 await initial_index(config_file, "http://localhost:3900", dry_run=False)
 
         for call in mock_tm_instance.save.call_args_list:
@@ -287,6 +291,7 @@ class TestStatsCorrectness:
 # ---------------------------------------------------------------------------
 # _is_untracked
 # ---------------------------------------------------------------------------
+
 
 class TestIsUntracked:
     """_is_untracked should correctly determine git tracking status."""
@@ -325,6 +330,7 @@ class TestIsUntracked:
 # ---------------------------------------------------------------------------
 # No vaults in config
 # ---------------------------------------------------------------------------
+
 
 class TestNoVaults:
     """Edge case: config with no vaults."""

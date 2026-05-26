@@ -1,10 +1,12 @@
 """Tests for WikiCompiler — compile PG experiences into markdown wiki files."""
+
 from __future__ import annotations
 
 import os
 
 import pytest
-from team_memory.daemon.wiki_compiler import WikiCompiler
+
+from team_memory.daemon.wiki.wiki_compiler import WikiCompiler
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -397,9 +399,7 @@ class TestQueryAPI:
             exps = [_make_experience(id="stale-1")]
             await compiler.compile_incremental(exps)
             db = compiler._require_db()
-            await db.execute(
-                "UPDATE wiki_cache SET status = 'stale' WHERE experience_id = 'stale-1'"
-            )
+            await db.execute("UPDATE wiki_cache SET status = 'stale' WHERE experience_id = 'stale-1'")
             await db.commit()
             stale = await compiler.get_stale()
             assert "stale-1" in stale
@@ -462,6 +462,7 @@ class TestPageRendering:
     async def test_date_formatting(self, compiler):
         async with compiler:
             from datetime import datetime, timezone
+
             dt = datetime(2026, 5, 1, 10, 0, 0, tzinfo=timezone.utc)
             exp = _make_experience()
             exp["created_at"] = dt

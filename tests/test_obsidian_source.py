@@ -17,8 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from team_memory.services.experience import ExperienceService, _validate_source_status
-
+from team_memory.services.memory.experience import ExperienceService, _validate_source_status
 
 # ============================================================
 # Fixtures
@@ -139,7 +138,7 @@ class TestObsidianDraftCreation:
                 lambda _url: _mock_get_session(mock_session),
             ),
             patch(
-                "team_memory.services.experience.ExperienceRepository",
+                "team_memory.services.memory.experience.ExperienceRepository",
                 return_value=mock_repo_instance,
             ),
         ):
@@ -166,7 +165,7 @@ class TestObsidianDraftCreation:
                 lambda _url: _mock_get_session(mock_session),
             ),
             patch(
-                "team_memory.services.experience.ExperienceRepository",
+                "team_memory.services.memory.experience.ExperienceRepository",
                 return_value=mock_repo_instance,
             ),
         ):
@@ -227,7 +226,7 @@ class TestObsidianDraftPublish:
     @pytest.mark.asyncio
     async def test_obsidian_draft_can_be_published(self):
         """source=obsidian draft should be publishable via op_draft_publish."""
-        from team_memory.services.memory_operations import op_draft_publish
+        from team_memory.services.memory.memory_operations import op_draft_publish
 
         mock_service = MagicMock()
         exp_id = str(uuid.uuid4())
@@ -238,18 +237,13 @@ class TestObsidianDraftPublish:
             "title": "Obsidian Draft",
         }
         mock_service.get_by_id = AsyncMock(return_value=mock_exp)
-        mock_service.update = AsyncMock(
-            return_value={**mock_exp, "status": "published"}
-        )
+        mock_service.update = AsyncMock(return_value={**mock_exp, "status": "published"})
 
-        with patch(
-            "team_memory.services.memory_operations._get_service",
-            return_value=mock_service,
-        ):
-            result = await op_draft_publish(
-                user="test_user",
-                draft_id=exp_id,
-            )
+        result = await op_draft_publish(
+            user="test_user",
+            service=mock_service,
+            draft_id=exp_id,
+        )
 
         assert result.get("error") is not True
         mock_service.update.assert_called_once()
@@ -257,7 +251,7 @@ class TestObsidianDraftPublish:
     @pytest.mark.asyncio
     async def test_api_draft_cannot_be_published_via_op(self):
         """source=api draft should NOT be publishable via op_draft_publish."""
-        from team_memory.services.memory_operations import op_draft_publish
+        from team_memory.services.memory.memory_operations import op_draft_publish
 
         mock_service = MagicMock()
         exp_id = str(uuid.uuid4())
@@ -269,14 +263,11 @@ class TestObsidianDraftPublish:
         }
         mock_service.get_by_id = AsyncMock(return_value=mock_exp)
 
-        with patch(
-            "team_memory.services.memory_operations._get_service",
-            return_value=mock_service,
-        ):
-            result = await op_draft_publish(
-                user="test_user",
-                draft_id=exp_id,
-            )
+        result = await op_draft_publish(
+            user="test_user",
+            service=mock_service,
+            draft_id=exp_id,
+        )
 
         assert result.get("error") is True
         assert "validation_error" in result.get("code", "")
@@ -315,7 +306,7 @@ class TestObsidianExperienceRetrieval:
                 lambda _url: _mock_get_session(mock_session),
             ),
             patch(
-                "team_memory.services.experience.ExperienceRepository",
+                "team_memory.services.memory.experience.ExperienceRepository",
                 return_value=mock_repo_instance,
             ),
         ):
@@ -349,7 +340,7 @@ class TestObsidianExperienceRetrieval:
                 lambda _url: _mock_get_session(mock_session),
             ),
             patch(
-                "team_memory.services.experience.ExperienceRepository",
+                "team_memory.services.memory.experience.ExperienceRepository",
                 return_value=mock_repo_instance,
             ),
         ):

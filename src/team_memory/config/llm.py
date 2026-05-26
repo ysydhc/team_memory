@@ -8,9 +8,9 @@ from pydantic import BaseModel
 class LLMConfig(BaseModel):
     """LLM configuration for document parsing and other AI tasks."""
 
-    provider: str = "ollama"  # ollama | openai | generic
-    model: str = "gpt-oss:120b-cloud"
-    base_url: str = "http://localhost:11434"
+    provider: str = ""  # openai | generic | ollama (must be configured)
+    model: str = ""
+    base_url: str = ""
     api_key: str = ""
     prompt_dir: str | None = None
     monthly_budget: float = 0.0

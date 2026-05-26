@@ -44,9 +44,7 @@ class PersonalMemoryRepository:
         if not context_embedding:
             dynamic_rows = await self.list_by_user(user_id, profile_kind="dynamic")
             return static_rows + dynamic_rows
-        similarity_expr = (1 - PersonalMemory.embedding.cosine_distance(context_embedding)).label(
-            "similarity"
-        )
+        similarity_expr = (1 - PersonalMemory.embedding.cosine_distance(context_embedding)).label("similarity")
         q = (
             select(PersonalMemory)
             .where(PersonalMemory.user_id == user_id)
@@ -77,9 +75,7 @@ class PersonalMemoryRepository:
     ) -> PersonalMemory | None:
         if not embedding:
             return None
-        similarity_expr = (1 - PersonalMemory.embedding.cosine_distance(embedding)).label(
-            "similarity"
-        )
+        similarity_expr = (1 - PersonalMemory.embedding.cosine_distance(embedding)).label("similarity")
         q = (
             select(PersonalMemory, similarity_expr)
             .where(PersonalMemory.user_id == user_id)
@@ -227,7 +223,5 @@ class PersonalMemoryRepository:
         oldest_id = result.scalar_one_or_none()
         if oldest_id is None:
             return False
-        await self._session.execute(
-            delete(PersonalMemory).where(PersonalMemory.id == oldest_id)
-        )
+        await self._session.execute(delete(PersonalMemory).where(PersonalMemory.id == oldest_id))
         return True

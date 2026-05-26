@@ -20,7 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from team_memory.auth.provider import NoAuth
-from team_memory.services.experience import ExperienceService
+from team_memory.services.memory.experience import ExperienceService
 from team_memory.storage.models import Base
 from team_memory.storage.repository import ExperienceRepository
 from tests.conftest import MockEmbeddingProvider
@@ -209,9 +209,7 @@ class TestRepositoryIntegration:
             assert "python" in r.get("tags", [])
 
     @pytest.mark.asyncio
-    async def test_find_duplicates_excludes_groups_with_different_children(
-        self, session, mock_embed
-    ):
+    async def test_find_duplicates_excludes_groups_with_different_children(self, session, mock_embed):
         """Regression: two groups, same parent embedding, different child titles
         must be excluded from duplicate list (Jaccard < 0.2)."""
         repo = ExperienceRepository(session)
@@ -273,9 +271,7 @@ class TestRepositoryIntegration:
         from team_memory.storage.models import ExperienceFeedback
 
         res = await session.execute(
-            select(func.avg(ExperienceFeedback.rating)).where(
-                ExperienceFeedback.experience_id == exp.id
-            )
+            select(func.avg(ExperienceFeedback.rating)).where(ExperienceFeedback.experience_id == exp.id)
         )
         avg = res.scalar_one()
         assert avg is not None
@@ -423,4 +419,3 @@ class TestServiceIntegration:
         assert "Additional approach" in updated["solution"]
         # In-place update replaces tags (not merge)
         assert "operations" in updated["tags"]
-

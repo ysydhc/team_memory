@@ -6,8 +6,13 @@ Usage:
   python scripts/filter-logs.py --source cursor --level ERROR
   python scripts/filter-logs.py --tail 50
 """
+
 from __future__ import annotations
-import argparse, json, sys
+
+import argparse
+import json
+import sys
+
 
 def main():
     p = argparse.ArgumentParser()
@@ -19,7 +24,7 @@ def main():
 
     lines = sys.stdin.readlines()
     if args.tail:
-        lines = lines[-args.tail:]
+        lines = lines[-args.tail :]
 
     for line in lines:
         line = line.rstrip("\n")
@@ -37,16 +42,17 @@ def main():
             if args.level and d.get("level", "").upper() != args.level.upper():
                 continue
             # Pretty print
-            ts = d.get("ts","")[:19]
-            lv = d.get("level","")[:5]
-            ev = d.get("event","")
-            sid = d.get("session","")[:12]
-            src = d.get("source","")
-            extra = {k:v for k,v in d.items() if k not in ("ts","level","event","session","source")}
-            extra_str = " ".join(f"{k}={v}" for k,v in extra.items())
+            ts = d.get("ts", "")[:19]
+            lv = d.get("level", "")[:5]
+            ev = d.get("event", "")
+            sid = d.get("session", "")[:12]
+            src = d.get("source", "")
+            extra = {k: v for k, v in d.items() if k not in ("ts", "level", "event", "session", "source")}
+            extra_str = " ".join(f"{k}={v}" for k, v in extra.items())
             print(f"{ts} {lv:5s} [{src:6s}] {ev:20s} sid={sid:12s} {extra_str}"[:160])
         else:
             print(line)
+
 
 if __name__ == "__main__":
     main()

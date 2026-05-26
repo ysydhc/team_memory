@@ -9,13 +9,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from team_memory import cli as cli_module
 from team_memory.auth.provider import ApiKeyAuth
 from team_memory.config import UploadsConfig, WebConfig
-from team_memory.services.search_orchestrator import OrchestratedSearchResult
+from team_memory.services.search.search_orchestrator import OrchestratedSearchResult
 from team_memory.web import app as web_module
 from team_memory.web.app import app
-
-from team_memory import cli as cli_module
 
 # ============================================================
 # Fixtures (aligned with tests/test_web.py — local copy so we do not
@@ -34,7 +33,9 @@ def setup_app():
     auth.register_key("测试-key-123", "unicode_admin", "admin")
     web_module._auth = auth
     web_module._settings = MagicMock()
-    web_module._settings.database.url = "postgresql+asyncpg://test:test@localhost:5432/team_memory"
+    web_module._settings.database.url = (
+        "postgresql+asyncpg://test:test@localhost:5432/team_memory"
+    )
     web_module._settings.default_project = "default"
     web_module._settings.retrieval = MagicMock(
         max_tokens=None,
@@ -136,7 +137,9 @@ def setup_app():
     web_module._service = mock_service
 
     mock_search_orchestrator = MagicMock()
-    mock_search_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=[]))
+    mock_search_orchestrator.search = AsyncMock(
+        return_value=OrchestratedSearchResult(results=[])
+    )
     mock_search_orchestrator.invalidate_cache = AsyncMock(return_value=None)
     mock_service._search_orchestrator = mock_search_orchestrator
 
@@ -168,7 +171,8 @@ def setup_app():
         patch("team_memory.web.routes.archives.get_context", return_value=mock_ctx),
         patch("team_memory.web.routes.search.get_context", return_value=mock_ctx),
         patch("team_memory.web.routes.config.get_context", return_value=mock_ctx),
-        patch("team_memory.services.memory_operations.get_context", return_value=mock_ctx),
+        patch("team_memory.web.routes.mcp_compat.get_context", return_value=mock_ctx),
+        patch("team_memory.web.routes.janitor.get_context", return_value=mock_ctx),
         patch("team_memory.web.app.start_background_tasks", new_callable=AsyncMock),
         patch("team_memory.web.app.stop_background_tasks", new_callable=AsyncMock),
     ):
@@ -258,7 +262,9 @@ class TestMcpCompatRoutes:
             "attachments": [],
             "document_tree_nodes": [],
         }
-        with patch(f"{_MCP}.op_get_archive", new_callable=AsyncMock, return_value=payload):
+        with patch(
+            f"{_MCP}.op_get_archive", new_callable=AsyncMock, return_value=payload
+        ):
             resp = client.get(
                 f"/api/v1/mcp/archive/{aid}",
                 headers=auth_headers,
@@ -274,7 +280,9 @@ class TestMcpCompatRoutes:
             "message": "Created successfully",
             "item": {"archive_id": aid, "action": "created"},
         }
-        with patch(f"{_MCP}.op_archive_upsert", new_callable=AsyncMock, return_value=payload):
+        with patch(
+            f"{_MCP}.op_archive_upsert", new_callable=AsyncMock, return_value=payload
+        ):
             resp = client.post(
                 "/api/v1/mcp/archive-upsert",
                 headers={**auth_headers, "Content-Type": "application/json"},

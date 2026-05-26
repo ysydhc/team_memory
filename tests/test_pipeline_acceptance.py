@@ -7,6 +7,7 @@ Pipeline 验收测试 — T2 集成测试。
 从 hook 输入到 ConversationBuffer 存储的全流程测试。
 使用真实 ConversationBuffer（内存 SQLite），sink/wiki 使用 AsyncMock。
 """
+
 from __future__ import annotations  # noqa: I001
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -14,10 +15,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 
-from team_memory.daemon.config import DaemonConfig, load_config
-from team_memory.daemon.conversation_buffer import ConversationBuffer
-from team_memory.daemon.convergence_detector import ConvergenceDetector
-from team_memory.daemon.pipeline import (
+from team_memory.daemon.runtime.config import DaemonConfig, load_config
+from team_memory.daemon.buffers.conversation_buffer import ConversationBuffer
+from team_memory.daemon.quality.convergence_detector import ConvergenceDetector
+from team_memory.daemon.refinement.pipeline import (
     process_after_response,
     process_before_prompt,
 )
@@ -124,7 +125,7 @@ class TestHookPayloadFormats:
 
     def test_cursor_format(self):
         """Cursor sends agent_response field / Cursor 发送 agent_response 字段。"""
-        from team_memory.daemon.app import HookPayload
+        from team_memory.daemon.runtime.app import HookPayload
 
         payload = HookPayload.model_validate(
             {
@@ -138,7 +139,7 @@ class TestHookPayloadFormats:
 
     def test_claude_format(self):
         """Claude sends response_text field / Claude 发送 response_text 字段。"""
-        from team_memory.daemon.app import HookPayload
+        from team_memory.daemon.runtime.app import HookPayload
 
         payload = HookPayload.model_validate(
             {
@@ -151,7 +152,7 @@ class TestHookPayloadFormats:
 
     def test_hermes_format(self):
         """Hermes sends prompt field / Hermes 发送 prompt 字段。"""
-        from team_memory.daemon.app import HookPayload
+        from team_memory.daemon.runtime.app import HookPayload
 
         payload = HookPayload.model_validate(
             {
@@ -164,7 +165,7 @@ class TestHookPayloadFormats:
 
     def test_unknown_fields_accepted(self):
         """Extra fields should not crash / 额外字段不应导致崩溃。"""
-        from team_memory.daemon.app import HookPayload
+        from team_memory.daemon.runtime.app import HookPayload
 
         payload = HookPayload.model_validate(
             {
@@ -180,7 +181,7 @@ class TestHookPayloadFormats:
         """Empty response_text should result in action=ok (skipped).
         空 response_text 应返回 action=ok（跳过）。
         """
-        from team_memory.daemon.app import HookPayload
+        from team_memory.daemon.runtime.app import HookPayload
 
         payload = HookPayload.model_validate(
             {
@@ -310,13 +311,18 @@ class TestConvergenceThreshold:
         assert result["convergence"] is False
 
     async def test_three_messages_triggers_convergence(
-        self, config, sink, buf, detector, refiner,
+        self,
+        config,
+        sink,
+        buf,
+        detector,
+        refiner,
     ):
         """3 assistant messages should trigger convergence / 3 条助手消息应触发收敛。"""
         # Patch personal memory extraction to avoid real LLM calls
         # Mock 个人记忆提取以避免真实 LLM 调用
         with patch(
-            "team_memory.daemon.pipeline._try_extract_personal_memory",
+            "team_memory.daemon.refinement.pipeline._try_extract_personal_memory",
             new_callable=AsyncMock,
         ):
             await buf.ensure_session("test-sess-6", "team_memory")
@@ -332,7 +338,12 @@ class TestConvergenceThreshold:
                     "workspace_roots": ["/Users/yeshouyou/Work/agent/team_doc"],
                 }
                 result = await process_after_response(
-                    input_data, config, sink, buf, detector, refiner,
+                    input_data,
+                    config,
+                    sink,
+                    buf,
+                    detector,
+                    refiner,
                 )
 
             assert result["convergence"] is True
@@ -358,7 +369,7 @@ class TestConvergenceReTrigger:
         # Patch personal memory extraction to avoid real LLM calls
         # Mock 个人记忆提取以避免真实 LLM 调用
         with patch(
-            "team_memory.daemon.pipeline._try_extract_personal_memory",
+            "team_memory.daemon.refinement.pipeline._try_extract_personal_memory",
             new_callable=AsyncMock,
         ):
             await buf.ensure_session("test-sess-7", "team_memory")
@@ -367,7 +378,10 @@ class TestConvergenceReTrigger:
             # First 3 messages → converge / 前 3 条消息 → 收敛
             for i in range(3):
                 await buf.add_message(
-                    "test-sess-7", "user", f"q{i + 1}", project="team_memory",
+                    "test-sess-7",
+                    "user",
+                    f"q{i + 1}",
+                    project="team_memory",
                 )
                 input_data = {
                     "conversation_id": "test-sess-7",
@@ -375,7 +389,12 @@ class TestConvergenceReTrigger:
                     "workspace_roots": ["/Users/yeshouyou/Work/agent/team_doc"],
                 }
                 result = await process_after_response(
-                    input_data, config, sink, buf, detector, refiner,
+                    input_data,
+                    config,
+                    sink,
+                    buf,
+                    detector,
+                    refiner,
                 )
 
             assert result["convergence"] is True
@@ -387,7 +406,12 @@ class TestConvergenceReTrigger:
                 "workspace_roots": ["/Users/yeshouyou/Work/agent/team_doc"],
             }
             result = await process_after_response(
-                input_data, config, sink, buf, detector, refiner,
+                input_data,
+                config,
+                sink,
+                buf,
+                detector,
+                refiner,
             )
             assert result["convergence"] is False
 
@@ -417,7 +441,12 @@ class TestProjectDefault:
             "workspace_roots": [],  # no workspace → no project resolution
         }
         result = await process_after_response(
-            input_data, config, sink, buf, detector, refiner,
+            input_data,
+            config,
+            sink,
+            buf,
+            detector,
+            refiner,
         )
 
         # Message should be stored (with default project from session)
@@ -442,7 +471,7 @@ class TestRefinementWorkerProcessing:
     @pytest.mark.asyncio
     async def test_tick_processes_needs_refinement(self, config, sink, buf, refiner):
         """Mark session needs_refinement, call _tick, verify session published."""
-        from team_memory.daemon.refinement_worker import RefinementWorker
+        from team_memory.daemon.refinement.refinement_worker import RefinementWorker
 
         # Setup: create session with messages
         await buf.ensure_session("test-sess-rw-1", "team_memory")
@@ -457,6 +486,7 @@ class TestRefinementWorkerProcessing:
         # Mock _refine_one to just mark as published
         async def mock_refine_one(draft):
             await buf.mark_published(draft["id"])
+
         worker._refine_one = mock_refine_one
 
         # Execute
@@ -469,7 +499,7 @@ class TestRefinementWorkerProcessing:
     @pytest.mark.asyncio
     async def test_tick_ignores_active_sessions(self, config, sink, buf, refiner):
         """Active sessions should not be processed."""
-        from team_memory.daemon.refinement_worker import RefinementWorker
+        from team_memory.daemon.refinement.refinement_worker import RefinementWorker
 
         await buf.ensure_session("test-sess-rw-2", "team_memory")
         await buf.add_message("test-sess-rw-2", "user", "hello", project="team_memory")
@@ -478,8 +508,10 @@ class TestRefinementWorkerProcessing:
         worker._cfg.enabled = True
 
         processed = []
+
         async def mock_refine_one(draft):
             processed.append(draft["id"])
+
         worker._refine_one = mock_refine_one
 
         await worker._tick()
@@ -499,15 +531,17 @@ class TestSearchRetrieval:
     @pytest.mark.asyncio
     async def test_sink_recall_returns_results(self, sink):
         """Mock sink.recall returns expected results."""
-        sink.recall = AsyncMock(return_value=[
-            {
-                "id": "exp-001",
-                "title": "Fish shell config",
-                "description": "How to configure fish",
-                "score": 0.95,
-                "project": "team_memory",
-            },
-        ])
+        sink.recall = AsyncMock(
+            return_value=[
+                {
+                    "id": "exp-001",
+                    "title": "Fish shell config",
+                    "description": "How to configure fish",
+                    "score": 0.95,
+                    "project": "team_memory",
+                },
+            ]
+        )
 
         results = await sink.recall(query="fish shell", project="team_memory", max_results=5)
         assert len(results) == 1
@@ -517,90 +551,11 @@ class TestSearchRetrieval:
     @pytest.mark.asyncio
     async def test_project_filtering(self, sink):
         """Results are filtered by project."""
-        sink.recall = AsyncMock(return_value=[
-            {"id": "exp-002", "title": "Team doc setup", "project": "team_memory", "score": 0.9},
-        ])
+        sink.recall = AsyncMock(
+            return_value=[
+                {"id": "exp-002", "title": "Team doc setup", "project": "team_memory", "score": 0.9},
+            ]
+        )
 
         results = await sink.recall(query="setup", project="team_memory", max_results=5)
         assert all(r["project"] == "team_memory" for r in results)
-
-
-# ---------------------------------------------------------------------------
-# T10: search_log creation
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.integration
-class TestSearchLogCreation:
-    """T10: search_log is created when recall is called."""
-
-    @pytest.mark.asyncio
-    async def test_search_log_writer_creates_entry(self):
-        """SearchLogWriter.log_search creates entry in PostgreSQL."""
-        import os
-
-        from team_memory.daemon.search_log_writer import SearchLogWriter
-
-        dsn = os.environ.get("TEAM_MEMORY_DB_URL", "postgresql://developer:devpass@localhost:5433/team_memory")
-        if "postgresql+asyncpg" in dsn:
-            dsn = dsn.replace("+asyncpg", "")
-
-        writer = SearchLogWriter(dsn=dsn)
-        try:
-            log_id = await writer.log_search(
-                query="test acceptance query",
-                project="team_memory",
-                source="acceptance_test",
-            )
-            assert log_id is not None
-            assert len(log_id) > 0
-        finally:
-            if writer._pool and not writer._pool._closed:
-                await writer._pool.close()
-
-
-# ---------------------------------------------------------------------------
-# T11: Evaluation markers
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.integration
-class TestEvaluationMarkers:
-    """T11: [mem:xxx] markers are injected and was_used detected."""
-
-    def test_marker_injection(self):
-        """EvaluationService.inject_markers adds [mem:xxx] to results."""
-        from team_memory.services.evaluation import EvaluationService
-
-        svc = EvaluationService()
-        results = [
-            {"id": "exp-001", "title": "Test", "solution": "Do this"},
-            {"id": "exp-002", "title": "Test2", "description": "Do that"},
-        ]
-        processed = svc.inject_markers(results)
-
-        assert "[mem:exp-001]" in processed[0]["solution"]
-        assert "[mem:exp-002]" in processed[1]["description"]
-
-    def test_was_used_detection(self):
-        """EvaluationService.check_was_used detects markers in response."""
-        from team_memory.services.evaluation import EvaluationService
-
-        svc = EvaluationService()
-        response = "You should use fish shell [mem:exp-001] for better experience"
-        result_ids = ["exp-001", "exp-002"]
-
-        used = svc.check_was_used(response, result_ids)
-        assert used["exp-001"] is True
-        assert used["exp-002"] is False
-
-    def test_was_used_no_markers(self):
-        """Response without markers returns all False."""
-        from team_memory.services.evaluation import EvaluationService
-
-        svc = EvaluationService()
-        response = "Just use fish shell"
-        result_ids = ["exp-001", "exp-002"]
-
-        used = svc.check_was_used(response, result_ids)
-        assert all(v is False for v in used.values())

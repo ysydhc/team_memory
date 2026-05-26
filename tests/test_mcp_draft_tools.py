@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from team_memory.server import mcp
-from tests.conftest import _O, _patch_user
+from tests.conftest import _O, _P, _patch_app_context, _patch_user, make_mock_app_context
 
 # ============================================================
 # memory_draft_save
@@ -30,17 +30,16 @@ class TestMemoryDraftSave:
             "source": "pipeline",
         }
 
+        mock_service = MagicMock()
+        mock_service.save = AsyncMock(return_value=mock_result)
+        mock_app = make_mock_app_context(service=mock_service, db_url="sqlite://")
+
         with (
-            patch(f"{_O}._get_service") as mock_get_service,
-            patch(f"{_O}._get_db_url", return_value="sqlite://"),
+            _patch_app_context(mock_app),
             _patch_user(),
-            patch(f"{_O}._resolve_project", return_value="default"),
+            patch(f"{_P}._resolve_project", return_value="default"),
             patch(f"{_O}.get_session") as mock_get_session,
         ):
-            mock_service = MagicMock()
-            mock_service.save = AsyncMock(return_value=mock_result)
-            mock_get_service.return_value = mock_service
-
             mock_session = AsyncMock()
             mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -75,17 +74,16 @@ class TestMemoryDraftSave:
             "source": "pipeline",
         }
 
+        mock_service = MagicMock()
+        mock_service.save = AsyncMock(return_value=mock_result)
+        mock_app = make_mock_app_context(service=mock_service, db_url="sqlite://")
+
         with (
-            patch(f"{_O}._get_service") as mock_get_service,
-            patch(f"{_O}._get_db_url", return_value="sqlite://"),
+            _patch_app_context(mock_app),
             _patch_user(),
-            patch(f"{_O}._resolve_project", return_value="myproj"),
+            patch(f"{_P}._resolve_project", return_value="myproj"),
             patch(f"{_O}.get_session") as mock_get_session,
         ):
-            mock_service = MagicMock()
-            mock_service.save = AsyncMock(return_value=mock_result)
-            mock_get_service.return_value = mock_service
-
             mock_session = AsyncMock()
             mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -133,15 +131,15 @@ class TestMemoryDraftPublish:
             "source": "pipeline",
         }
 
+        mock_service = MagicMock()
+        mock_service.get_by_id = AsyncMock(return_value=mock_exp)
+        mock_service.update = AsyncMock(return_value=mock_updated)
+        mock_app = make_mock_app_context(service=mock_service)
+
         with (
-            patch(f"{_O}._get_service") as mock_get_service,
+            _patch_app_context(mock_app),
             _patch_user(),
         ):
-            mock_service = MagicMock()
-            mock_service.get_by_id = AsyncMock(return_value=mock_exp)
-            mock_service.update = AsyncMock(return_value=mock_updated)
-            mock_get_service.return_value = mock_service
-
             tools = {t.name: t for t in await mcp.list_tools()}
             fn = tools["memory_draft_publish"].fn
             result = await fn(draft_id=draft_id)
@@ -170,15 +168,15 @@ class TestMemoryDraftPublish:
             "exp_status": "published",
         }
 
+        mock_service = MagicMock()
+        mock_service.get_by_id = AsyncMock(return_value=mock_exp)
+        mock_service.update = AsyncMock(return_value=mock_updated)
+        mock_app = make_mock_app_context(service=mock_service)
+
         with (
-            patch(f"{_O}._get_service") as mock_get_service,
+            _patch_app_context(mock_app),
             _patch_user(),
         ):
-            mock_service = MagicMock()
-            mock_service.get_by_id = AsyncMock(return_value=mock_exp)
-            mock_service.update = AsyncMock(return_value=mock_updated)
-            mock_get_service.return_value = mock_service
-
             tools = {t.name: t for t in await mcp.list_tools()}
             fn = tools["memory_draft_publish"].fn
             result = await fn(draft_id=draft_id, refined_content="Improved solution")
@@ -199,14 +197,14 @@ class TestMemoryDraftPublish:
             "status": "draft",
         }
 
+        mock_service = MagicMock()
+        mock_service.get_by_id = AsyncMock(return_value=mock_exp)
+        mock_app = make_mock_app_context(service=mock_service)
+
         with (
-            patch(f"{_O}._get_service") as mock_get_service,
+            _patch_app_context(mock_app),
             _patch_user(),
         ):
-            mock_service = MagicMock()
-            mock_service.get_by_id = AsyncMock(return_value=mock_exp)
-            mock_get_service.return_value = mock_service
-
             tools = {t.name: t for t in await mcp.list_tools()}
             fn = tools["memory_draft_publish"].fn
             result = await fn(draft_id=draft_id)
@@ -225,14 +223,14 @@ class TestMemoryDraftPublish:
             "status": "published",
         }
 
+        mock_service = MagicMock()
+        mock_service.get_by_id = AsyncMock(return_value=mock_exp)
+        mock_app = make_mock_app_context(service=mock_service)
+
         with (
-            patch(f"{_O}._get_service") as mock_get_service,
+            _patch_app_context(mock_app),
             _patch_user(),
         ):
-            mock_service = MagicMock()
-            mock_service.get_by_id = AsyncMock(return_value=mock_exp)
-            mock_get_service.return_value = mock_service
-
             tools = {t.name: t for t in await mcp.list_tools()}
             fn = tools["memory_draft_publish"].fn
             result = await fn(draft_id=draft_id)
@@ -246,14 +244,14 @@ class TestMemoryDraftPublish:
         """Cannot publish a non-existent experience."""
         draft_id = str(uuid.uuid4())
 
+        mock_service = MagicMock()
+        mock_service.get_by_id = AsyncMock(return_value=None)
+        mock_app = make_mock_app_context(service=mock_service)
+
         with (
-            patch(f"{_O}._get_service") as mock_get_service,
+            _patch_app_context(mock_app),
             _patch_user(),
         ):
-            mock_service = MagicMock()
-            mock_service.get_by_id = AsyncMock(return_value=None)
-            mock_get_service.return_value = mock_service
-
             tools = {t.name: t for t in await mcp.list_tools()}
             fn = tools["memory_draft_publish"].fn
             result = await fn(draft_id=draft_id)
@@ -280,17 +278,16 @@ class TestMemorySaveRegression:
             "exp_status": "published",
         }
 
+        mock_service = MagicMock()
+        mock_service.save = AsyncMock(return_value=mock_result)
+        mock_app = make_mock_app_context(service=mock_service, db_url="sqlite://")
+
         with (
-            patch(f"{_O}._get_service") as mock_get_service,
-            patch(f"{_O}._get_db_url", return_value="sqlite://"),
+            _patch_app_context(mock_app),
             _patch_user(),
-            patch(f"{_O}._resolve_project", return_value="default"),
+            patch(f"{_P}._resolve_project", return_value="default"),
             patch(f"{_O}.get_session") as mock_get_session,
         ):
-            mock_service = MagicMock()
-            mock_service.save = AsyncMock(return_value=mock_result)
-            mock_get_service.return_value = mock_service
-
             mock_session = AsyncMock()
             mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)

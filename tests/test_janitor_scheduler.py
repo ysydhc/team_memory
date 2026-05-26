@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from team_memory.services.janitor_scheduler import JanitorScheduler
+from team_memory.services.maintenance.janitor_scheduler import JanitorScheduler
 
 
 class TestJanitorScheduler:

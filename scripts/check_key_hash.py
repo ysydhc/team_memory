@@ -15,10 +15,11 @@ def hash_key(api_key: str) -> str:
 
 
 async def main():
+    from sqlalchemy import select
+
     from team_memory.config import get_settings
     from team_memory.storage.database import get_session
     from team_memory.storage.models import ApiKey
-    from sqlalchemy import select
 
     settings = get_settings()
     db_url = settings.database.url
@@ -35,9 +36,7 @@ async def main():
 
     async with get_session(db_url) as session:
         # Find by prefix (key_hash is full 64-char SHA256)
-        result = await session.execute(
-            select(ApiKey).where(ApiKey.key_hash.like(f"{target_prefix}%"))
-        )
+        result = await session.execute(select(ApiKey).where(ApiKey.key_hash.like(f"{target_prefix}%")))
         keys = result.scalars().all()
         if keys:
             for k in keys:
@@ -48,9 +47,7 @@ async def main():
         # Also show admin row
         print()
         print("admin 账户当前状态:")
-        result2 = await session.execute(
-            select(ApiKey).where(ApiKey.user_name == "admin")
-        )
+        result2 = await session.execute(select(ApiKey).where(ApiKey.user_name == "admin"))
         admin = result2.scalar_one_or_none()
         if admin:
             prefix = (admin.key_hash or "")[:16]

@@ -7,9 +7,9 @@ Revision ID: 016_response_buffer
 Revises: 015_evaluation_fields
 """
 
-from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID, JSON
+from alembic import op
+from sqlalchemy.dialects.postgresql import JSON, UUID
 
 revision = "016_response_buffer"
 down_revision = "015_evaluation_fields"

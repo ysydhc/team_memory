@@ -2,12 +2,13 @@
 
 Run with: python -m team_memory.daemon
 """
+
 import logging
 
 import uvicorn
 
-from team_memory.daemon.app import create_app
-from team_memory.daemon.config import load_config
+from team_memory.daemon.runtime.app import create_app
+from team_memory.daemon.runtime.config import load_config
 
 
 def main() -> None:
@@ -25,6 +26,7 @@ def main() -> None:
         host=config.daemon.host,
         port=config.daemon.port,
         log_level="info",
+        loop="asyncio",
         # Preserve app loggers (don't let uvicorn override them)
         log_config={
             "version": 1,

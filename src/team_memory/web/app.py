@@ -9,6 +9,11 @@ Authentication is via API Key (same keys used for MCP access).
 from __future__ import annotations
 
 import asyncio
+import sys
+
+if sys.platform != "win32":
+    asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+
 import logging
 import os
 import time
@@ -35,7 +40,7 @@ from team_memory.bootstrap import (
     stop_background_tasks,
 )
 from team_memory.config import Settings, load_settings
-from team_memory.services.experience import ExperienceService
+from team_memory.services.memory.experience import ExperienceService
 from team_memory.storage.database import get_session  # noqa: F401 -- used by route modules
 from team_memory.web.auth_session import (  # noqa: F401 -- re-exported for backward compat
     _decode_session_token,
@@ -123,20 +128,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Ensure default admin when db_api_key auth and no users exist
     if ctx.settings.auth.type == "db_api_key":
-        password = (
-            os.environ.get("TEAM_MEMORY_ADMIN_PASSWORD")
-            or ctx.settings.auth.default_admin_password
-            or ""
-        )
+        password = os.environ.get("TEAM_MEMORY_ADMIN_PASSWORD") or ctx.settings.auth.default_admin_password or ""
         db_url = ctx.db_url
         if not password:
             from team_memory.auth.init_admin import is_api_keys_empty
 
             if await is_api_keys_empty(db_url):
-                raise RuntimeError(
-                    "首次启动需设置 TEAM_MEMORY_ADMIN_PASSWORD 以创建默认 admin，"
-                    "或手动在 DB 中创建用户"
-                )
+                raise RuntimeError("首次启动需设置 TEAM_MEMORY_ADMIN_PASSWORD 以创建默认 admin，或手动在 DB 中创建用户")
         else:
             from team_memory.auth.init_admin import ensure_default_admin
 
@@ -154,16 +152,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Start heartbeat
     import sys as _sys
+
     _scripts_dir = str(Path(__file__).resolve().parents[3] / "scripts")
     if _scripts_dir not in _sys.path:
         _sys.path.insert(0, _scripts_dir)
     from team_memory.monitoring.heartbeat import start_heartbeat
+
     app.state.heartbeat = start_heartbeat()
 
     logger.info("TeamMemory web server started")
     yield
     # Stop heartbeat
     from team_memory.monitoring.heartbeat import stop_heartbeat
+
     stop_heartbeat(app.state.heartbeat)
     await stop_background_tasks(ctx)
     # Ensure DB connections are released even if stop_background_tasks changes
@@ -214,80 +215,38 @@ async def _check_database() -> dict:
         return {"status": "down", "error": str(e)}
 
 
-async def _check_ollama() -> dict:
+async def _check_embedding_health() -> dict:
+    """Check embedding provider health by pinging its base URL."""
     try:
-        base_url = "http://localhost:11434"
-        if _settings and _settings.embedding.provider == "ollama":
-            base_url = _settings.embedding.ollama.base_url
-        start = time.monotonic()
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{base_url}/api/tags")
-            resp.raise_for_status()
-        latency_ms = round((time.monotonic() - start) * 1000, 1)
-        return {"status": "up", "latency_ms": latency_ms}
+        if _settings and _settings.embedding.provider:
+            provider = _settings.embedding.provider
+            if provider == "openai":
+                cfg = _settings.embedding.openai
+                base_url = cfg.base_url or "http://localhost:4000/v1"
+            else:
+                return {"status": "up", "provider": provider, "note": "health check not implemented"}
+            start = time.monotonic()
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{base_url}/models")
+                resp.raise_for_status()
+            latency_ms = round((time.monotonic() - start) * 1000, 1)
+            return {"status": "up", "provider": provider, "latency_ms": latency_ms}
+        return {"status": "down", "error": "no embedding provider configured"}
     except Exception as e:
-        return {"status": "down", "error": str(e)}
+        return {"status": "down", "error": str(e)[:80]}
 
 
 async def _check_embedding_provider() -> dict:
-    """Check embedding provider availability without loading the model.
-
-    健康检查嵌入提供者可达性（不加载模型）。
-    With keep_alive=0, models are unloaded after each call.
-    Checking by actually calling encode_single would reload the model
-    every health check, defeating the purpose of keep_alive=0.
-    Instead, just verify Ollama is reachable and the model exists.
-    """
+    """Check embedding provider availability — generic, provider-agnostic."""
     try:
         ctx = get_context()
         provider_name = ctx.settings.embedding.provider
-        base_url = getattr(
-            ctx.settings.embedding.ollama, "base_url", "http://localhost:11434"
-        )
-        model = getattr(ctx.settings.embedding.ollama, "model", "")
-        dimension = getattr(ctx.settings.embedding.ollama, "dimension", 0)
-
-        if provider_name == "ollama":
-            # Light check: just ping /api/tags to see if model exists
-            # 轻量检查：只 ping /api/tags 确认模型存在，不实际加载
-            import httpx
-
-            try:
-                resp = await httpx.AsyncClient(timeout=5.0).get(
-                    f"{base_url}/api/tags"
-                )
-                if resp.status_code == 200:
-                    models = resp.json().get("models", [])
-                    model_base = model.split(":")[0]
-                    found = any(
-                        m.get("name", "").split(":")[0] == model_base
-                        for m in models
-                    )
-                    if found:
-                        return {
-                            "status": "up",
-                            "provider": provider_name,
-                            "dimension": dimension,
-                            "note": "light check (model not loaded)",
-                        }
-                    return {
-                        "status": "down",
-                        "provider": provider_name,
-                        "error": f"model '{model}' not found in Ollama",
-                    }
-                return {
-                    "status": "down",
-                    "provider": provider_name,
-                    "error": f"Ollama returned {resp.status_code}",
-                }
-            except httpx.ConnectError:
-                return {
-                    "status": "down",
-                    "provider": provider_name,
-                    "error": "Ollama not reachable",
-                }
-        # Non-ollama providers: just report configured
-        return {"status": "up", "provider": provider_name, "dimension": dimension}
+        if not provider_name:
+            return {"status": "down", "error": "no embedding.provider configured"}
+        if provider_name == "openai":
+            cfg = ctx.settings.embedding.openai
+            return {"status": "up", "provider": provider_name, "model": cfg.model, "dimension": cfg.dimension}
+        return {"status": "up", "provider": provider_name, "note": "configured"}
     except RuntimeError:
         return {"status": "down", "reason": "not bootstrapped"}
     except Exception as e:
@@ -317,11 +276,7 @@ async def _check_cache() -> dict:
     """Check cache backend availability."""
     try:
         ctx = get_context()
-        pipeline = (
-            ctx.search_orchestrator._search_pipeline
-            if hasattr(ctx, "search_orchestrator")
-            else None
-        )
+        pipeline = ctx.search_orchestrator._search_pipeline if hasattr(ctx, "search_orchestrator") else None
         if pipeline and pipeline._cache:
             return {"status": "up", "backend": ctx.settings.cache.backend}
         return {"status": "up", "backend": "none"}
@@ -332,9 +287,9 @@ async def _check_cache() -> dict:
 @app.get("/health")
 async def health_check():
     """Health check endpoint -- no authentication required."""
-    db_check, ollama_check, embed_check, llm_check, cache_check = await asyncio.gather(
+    db_check, embed_health, embed_check, llm_check, cache_check = await asyncio.gather(
         _check_database(),
-        _check_ollama(),
+        _check_embedding_health(),
         _check_embedding_provider(),
         _check_llm_provider(),
         _check_cache(),
@@ -342,7 +297,7 @@ async def health_check():
 
     checks = {
         "database": db_check,
-        "ollama": ollama_check,
+        "embedding_health": embed_health,
         "embedding_provider": embed_check,
         "llm_provider": llm_check,
         "cache": cache_check,
@@ -425,9 +380,7 @@ async def rate_limit(request: Request, call_next):
 async def limit_request_body(request: Request, call_next):
     """Return 413 when Content-Length exceeds the configured maximum."""
     content_length = request.headers.get("content-length")
-    max_bytes = (
-        getattr(getattr(_settings, "web", None), "max_request_body_bytes", None) or 20_971_520
-    )
+    max_bytes = getattr(getattr(_settings, "web", None), "max_request_body_bytes", None) or 20_971_520
     if content_length and int(content_length) > int(max_bytes):
         return JSONResponse(
             status_code=413,
@@ -529,6 +482,7 @@ def main():
         "host": host,
         "port": port,
         "reload": False,
+        "loop": "asyncio",
         "log_level": "info",
     }
     if use_ssl:

@@ -55,9 +55,7 @@ def test_configure_logging_uses_rotating_handler_when_not_debug(tmp_path: Path) 
     assert isinstance(listener.handlers[0], RotatingFileHandler)
 
 
-def test_configure_logging_uses_file_handler_when_debug(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_configure_logging_uses_file_handler_when_debug(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """When TEAM_MEMORY_DEBUG=1, _configure_logging uses FileHandler (no size limit)."""
     from logging.handlers import RotatingFileHandler
 

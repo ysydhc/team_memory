@@ -23,8 +23,8 @@ import uuid
 
 from sqlalchemy import text
 
-
 # ── helpers ────────────────────────────────────────────────────────────── #
+
 
 def _ok(msg: str) -> None:
     print(f"  ✔ {msg}")
@@ -39,6 +39,7 @@ def _section(n: int, title: str) -> None:
 
 
 # ── step 1: tables ────────────────────────────────────────────────────── #
+
 
 async def step1_check_tables(db_url: str) -> bool:
     """Verify entity graph tables exist and are queryable."""
@@ -59,6 +60,7 @@ async def step1_check_tables(db_url: str) -> bool:
 
 
 # ── step 2: rule-based extraction ────────────────────────────────────── #
+
 
 async def step2_rule_extraction() -> bool:
     """Test rule-based entity extraction from query strings."""
@@ -94,9 +96,10 @@ async def step3_seed_data(db_url: str) -> bool:
     """Insert sample entities and a relationship, return IDs for step 4."""
     global _SEED_EID1, _SEED_EID2
     _section(3, "Seed sample entities + relationship")
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
     from team_memory.storage.database import get_session
     from team_memory.storage.models import Entity, Relationship
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     eid1 = uuid.uuid4()
     eid2 = uuid.uuid4()
@@ -115,13 +118,9 @@ async def step3_seed_data(db_url: str) -> bool:
                 .on_conflict_do_nothing(constraint="uq_entity_name_project")
             )
             # Fetch actual IDs in case of conflict
-            r1 = await s.execute(
-                text("SELECT id FROM entities WHERE name = 'LiteLLM' AND project = 'default'")
-            )
+            r1 = await s.execute(text("SELECT id FROM entities WHERE name = 'LiteLLM' AND project = 'default'"))
             row1 = r1.fetchone()
-            r2 = await s.execute(
-                text("SELECT id FROM entities WHERE name = 'Clash' AND project = 'default'")
-            )
+            r2 = await s.execute(text("SELECT id FROM entities WHERE name = 'Clash' AND project = 'default'"))
             row2 = r2.fetchone()
             eid1 = row1[0]
             eid2 = row2[0]
@@ -151,6 +150,7 @@ async def step3_seed_data(db_url: str) -> bool:
 
 
 # ── step 4: search + graph traversal ─────────────────────────────────── #
+
 
 async def step4_search_and_graph(db_url: str) -> bool:
     """Test entity search and graph traversal APIs."""
@@ -194,6 +194,7 @@ async def step4_search_and_graph(db_url: str) -> bool:
 
 
 # ── main ──────────────────────────────────────────────────────────────── #
+
 
 async def main(steps: set[int] | None = None) -> int:
     db_url = os.environ.get("TEAM_MEMORY_DB_URL")

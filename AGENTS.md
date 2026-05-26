@@ -40,28 +40,34 @@ pytest -k "search" -v
 **TeamMemory** — 基于 MCP 的团队经验库，为 AI 提供跨会话记忆。
 
 ```
-┌─────────────────────────────────────────┐
-│  MCP Server / CLI (server.py, cli.py)   │  ← AI 入口，memory_* 工具
-│  Web Routes (web/routes/)               │  ← HTTP API 入口
-├─────────────────────────────────────────┤
-│  Services (services/)                   │  ← 业务逻辑
-│  Auth / Embedding / Reranker            │  ← 认证、向量、重排
-├─────────────────────────────────────────┤
-│  Storage (storage/)                     │  ← 数据访问（repository + DB）
-├─────────────────────────────────────────┤
-│  Models (storage/models.py, schemas.py) │  ← ORM + Pydantic
-├─────────────────────────────────────────┤
-│  Infrastructure (PostgreSQL + pgvector) │
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│  MCP Server / CLI (server.py, cli.py)        │  ← AI 入口，memory_* 工具
+│  Web Routes (web/routes/)                    │  ← HTTP API 入口
+├──────────────────────────────────────────────┤
+│  Services (services/)                        │  ← 业务逻辑
+│    search/   memory/   llm/   entity/        │
+│    archive/  maintenance/ analysis/ infra/   │
+│  Auth / Embedding (+ factory) / Reranker     │  ← 认证、向量、重排
+├──────────────────────────────────────────────┤
+│  Storage (storage/)                          │  ← 数据访问（repository + DB）
+├──────────────────────────────────────────────┤
+│  Models (storage/models.py, schemas.py)      │  ← ORM + Pydantic
+├──────────────────────────────────────────────┤
+│  Infrastructure (PostgreSQL + pgvector)      │
+└──────────────────────────────────────────────┘
 
 客户端组件（PYTHONPATH 只需 src/）:
-┌─────────────────────────────────────────┐
-│  client_config.py                       │  ← ClientConfig（~/.config/tm/config.toml）
-│  project_resolver.py                    │  ← 项目名零配置推断 + 别名注册
-│  daemon/  (原 scripts/daemon/)           │  ← TM Daemon（tm-daemon 入口）
-│  hooks/   (原 scripts/hooks/)            │  ← 平台 Hook（Claude/Cursor/Hermes）
-│  cli.py                                 │  ← tm-cli + config/setup 子命令
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│  client_config.py                            │  ← ClientConfig（~/.config/tm/config.toml）
+│  project_resolver.py                         │  ← 项目名零配置推断 + 别名注册
+│  daemon/                                     │  ← TM Daemon（tm-daemon 入口）
+│    runtime/ buffers/ refinement/ backfill/   │
+│    quality/ wiki/ observe/ integration/      │
+│  hooks/                                      │  ← 平台 Hook
+│    core/ platforms/{claude,cursor,hermes}/   │
+│    integrations/                             │
+│  cli.py                                      │  ← tm-cli + config/setup 子命令
+└──────────────────────────────────────────────┘
 ```
 
 **依赖方向（仅自上而下）**：Server/Web → Services → Storage → Models。禁止反向 import。
@@ -72,6 +78,39 @@ pytest -k "search" -v
 
 **项目名推断 / Project Name Inference**：`.tm.toml` > git 仓库名 > 目录名。别名注册：`project_resolver.register_aliases()`。
 
+### 代码目录结构规范
+
+**新增文件必须放入正确的子包**，禁止在 `hooks/`、`daemon/`、`services/` 根目录直接创建业务模块。
+
+| 包 | 子包 | 职责 |
+|----|------|------|
+| `hooks/` | `core/` | 共享基础设施（daemon_http、stdin、mcp_callback、output） |
+| | `platforms/{claude,cursor,hermes}/` | 各平台 Hook 脚本 |
+| | `integrations/` | 跨平台集成（git_watcher、weekly_report 等） |
+| `daemon/` | `runtime/` | 启动、配置、热重载、健康检查 |
+| | `buffers/` | 会话/草稿/响应缓冲、待处理队列 |
+| | `refinement/` | 处理管线、草稿精炼 |
+| | `backfill/` | 向量/实体/方案回填、实体去重 |
+| | `quality/` | 忠实度判断、搜索评估、收敛检测 |
+| | `wiki/` | Wiki 编译、Markdown 索引 |
+| | `observe/` | 指标采集、搜索日志、统计、文件监控 |
+| | `integration/` | TM Sink、自动梦境、个人记忆提取 |
+| `services/` | `search/` | search_pipeline、search_orchestrator、cache |
+| | `memory/` | memory_operations、experience、personal_memory |
+| | `llm/` | llm_client、llm_parser、llm_provider |
+| | `entity/` | entity_extractor、entity_search |
+| | `archive/` | ArchiveService（`__init__.py` re-export） |
+| | `maintenance/` | janitor、janitor_scheduler、promotion_compiler |
+| | `analysis/` | evaluation、contradiction_detector、pattern_extractor |
+| | `infra/` | event_bus、task_runner、tokenizer、intent_router |
+| `embedding/` | `factory.py` | create_embedding_provider()（从 bootstrap 迁出） |
+
+**禁止事项**：
+- 禁止在子包父目录创建平铺模块（如 `daemon/xxx.py`，应为 `daemon/<subpkg>/xxx.py`）
+- 禁止创建 shim / re-export 兼容文件，保持项目简洁
+- 禁止跨层 import（Storage ↛ Services；Services ↛ Server/Web）
+- import 路径必须完整：`from team_memory.daemon.runtime.config import ...`，不允许 `from team_memory.daemon.config import ...`
+
 ### 核心领域
 
 - **Experience**：title/problem/solution/tags/score/status；状态流 draft → review → published/rejected
@@ -80,11 +119,11 @@ pytest -k "search" -v
 
 ## 开发指南
 
-新进仓库或要做跨模块改动时，建议先读 [README.md](README.md)，再按需查 [docs/README.md](docs/README.md) 索引。
+新进仓库或要做跨模块改动时，建议先读 [README.md](README.md)。
 
 ### MCP 工具开发
 
-1. 在 [README.md](README.md)（MCP 工具表）与 [docs/guide/mcp-server.md](docs/guide/mcp-server.md) 保持叙述一致；契约以 [src/team_memory/server.py](src/team_memory/server.py) 为准
+1. 在 [README.md](README.md)（MCP 工具表）保持叙述一致；契约以 [src/team_memory/server.py](src/team_memory/server.py) 为准
 2. `@mcp.tool` + `@track_usage` 装饰 `async def memory_xxx(...) -> str`
 3. 在 `tests/test_server.py` 补充测试
 4. `make verify` 验收
@@ -115,10 +154,10 @@ alembic upgrade head
 - [ ] `make lint` 零报错
 - [ ] `make test` 全绿（新功能须有测试）
 - [ ] 若修改 model，须有 Alembic 迁移
-- [ ] 若新增 MCP 工具，已更新 [README.md](README.md) / [docs/guide/mcp-server.md](docs/guide/mcp-server.md) 且 `tests/test_server.py` 覆盖
+- [ ] 若新增 MCP 工具，已更新 [README.md](README.md) 且 `tests/test_server.py` 覆盖
 - [ ] 无硬编码密钥、无裸 `print()`
 - [ ] Web 改动通过 `make lint-js`
-- [ ] 若变更架构分层、MCP 对外契约或用户可见文档，已同步更新 [README.md](README.md)、本文件与 [docs/](docs/) 相关篇目
+- [ ] 若变更架构分层、MCP 对外契约或用户可见文档，已同步更新 [README.md](README.md) 与本文件
 - [ ] 若新增配置项，已在 `ClientConfig`（`client_config.py`）中添加，并在 `load_with_sources()` 中标注来源
 - [ ] 若修改 daemon/hooks 代码，确认 import 路径为 `from team_memory.daemon/...` 而非旧 `from daemon/...`
 
@@ -127,19 +166,14 @@ alembic upgrade head
 | 主题 | 文件 |
 |------|------|
 | 人类指南与 MCP 说明 | [README.md](README.md) |
-| 分层 / import 门禁 | `scripts/harness_import_check.py`（`LAYER_MAP`）；设计文档索引 [docs/README.md](docs/README.md) |
+| 分层 / import 门禁 | `scripts/harness_import_check.py`（`LAYER_MAP`） |
 | Import 分层（L0–L3） | `scripts/harness_import_check.py`（`LAYER_MAP`） |
 | MCP 实现 | [src/team_memory/server.py](src/team_memory/server.py) |
-| CLI 兼容层 + config/setup | [src/team_memory/cli.py](src/team_memory/cli.py)、[docs/guide/mcp-server.md](docs/guide/mcp-server.md) |
+| CLI 兼容层 + config/setup | [src/team_memory/cli.py](src/team_memory/cli.py) |
 | 统一客户端配置 | [src/team_memory/client_config.py](src/team_memory/client_config.py)（ClientConfig） |
 | 项目名零配置推断 | [src/team_memory/project_resolver.py](src/team_memory/project_resolver.py) |
 | TM Daemon | [src/team_memory/daemon/](src/team_memory/daemon/)（`tm-daemon` 入口） |
 | 平台 Hook | [src/team_memory/hooks/](src/team_memory/hooks/)（Claude/Cursor/Hermes） |
-| MCP 运维与配置 | [docs/guide/mcp-server.md](docs/guide/mcp-server.md)、[docs/decision/mcp-lite-default.md](docs/decision/mcp-lite-default.md) |
-| 配置重构 RFC | [docs/plan/configuration-refactor-rfc.md](docs/plan/configuration-refactor-rfc.md) |
-| 设计文档索引 | [docs/README.md](docs/README.md) |
-| Harness 框架 | [.harness/docs/harness-spec.md](.harness/docs/harness-spec.md) |
-| Harness 配置 | [.harness/harness-config.yaml](.harness/harness-config.yaml) |
 
 ## 调试
 
@@ -162,6 +196,80 @@ docker compose exec postgres psql -U developer -d team_memory  # DB 调试
 
 ## 不确定时
 
-1. 查 `docs/` 对应规范
-2. 找代码库同类实现
-3. **停下询问，不要臆测**
+1. 找代码库同类实现
+2. **停下询问，不要臆测**
+
+# Agent Workflow & Skills (Superpowers)
+This project uses the **Superpowers** framework for AI agent execution.
+- **DO NOT** use Speckit or generate `spec.md`, `plan.md`, or `tasks.md` files.
+- **DO NOT** create `.specify` or `specs` directories.
+- **DO** use `/brainstorming` for planning and `/subagent-driven-development` or `/executing-plans` for execution.
+- Keep the project clean. Do not leave process artifacts in the repository.
+
+## LLM Behavioral Guidelines
+
+
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+## 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+

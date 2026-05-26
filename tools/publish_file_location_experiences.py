@@ -25,10 +25,11 @@ def main() -> int:
     if str(repo_root / "src") not in sys.path:
         sys.path.insert(0, str(repo_root / "src"))
 
+    from sqlalchemy import select
+
     from team_memory.bootstrap import bootstrap, get_context
     from team_memory.storage.database import get_session
     from team_memory.storage.models import Experience
-    from sqlalchemy import select
 
     bootstrap(enable_background=False)
     ctx = get_context()

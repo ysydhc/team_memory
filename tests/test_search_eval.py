@@ -7,11 +7,12 @@ Unit tests cover:
 Integration tests (marked @pytest.mark.integration) cover:
 - Full evaluation with real DB and search pipeline
 """
+
 from __future__ import annotations
 
 import pytest
 
-from team_memory.daemon.search_eval import DEFAULT_TEST_QUERIES
+from team_memory.daemon.quality.search_eval import DEFAULT_TEST_QUERIES
 
 pytestmark = pytest.mark.unit
 

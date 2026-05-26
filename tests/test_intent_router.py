@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from team_memory.services.intent_router import DefaultIntentRouter, IntentResult, IntentRouter
-from team_memory.services.search_orchestrator import SearchOrchestrator
+from team_memory.services.infra.intent_router import DefaultIntentRouter, IntentResult, IntentRouter
+from team_memory.services.search.search_orchestrator import SearchOrchestrator
 
 # ============================================================
 # IntentResult dataclass
@@ -137,9 +137,7 @@ class TestSearchOrchestratorIntentIntegration:
     async def test_intent_classify_called_during_search(self):
         """SearchOrchestrator.search() calls intent_router.classify()."""
         mock_router = MagicMock(spec=IntentRouter)
-        mock_router.classify = AsyncMock(
-            return_value=IntentResult(intent_type="factual", params={})
-        )
+        mock_router.classify = AsyncMock(return_value=IntentResult(intent_type="factual", params={}))
 
         mock_pipeline = MagicMock()
         mock_pipeline_result = MagicMock()
@@ -166,7 +164,7 @@ class TestSearchOrchestratorIntentIntegration:
                 "team_memory.storage.database.get_session",
             ) as mock_gs,
             patch(
-                "team_memory.services.search_orchestrator.ExperienceRepository",
+                "team_memory.services.search.search_orchestrator.ExperienceRepository",
                 return_value=mock_repo,
             ),
         ):
@@ -188,9 +186,7 @@ class TestSearchOrchestratorIntentIntegration:
     async def test_intent_stored_on_result(self):
         """SearchOrchestrator stores intent_type from classify on the result."""
         mock_router = MagicMock(spec=IntentRouter)
-        mock_router.classify = AsyncMock(
-            return_value=IntentResult(intent_type="exploratory", params={})
-        )
+        mock_router.classify = AsyncMock(return_value=IntentResult(intent_type="exploratory", params={}))
 
         mock_pipeline = MagicMock()
         mock_pipeline_result = MagicMock()
@@ -217,7 +213,7 @@ class TestSearchOrchestratorIntentIntegration:
                 "team_memory.storage.database.get_session",
             ) as mock_gs,
             patch(
-                "team_memory.services.search_orchestrator.ExperienceRepository",
+                "team_memory.services.search.search_orchestrator.ExperienceRepository",
                 return_value=mock_repo,
             ),
         ):
@@ -258,7 +254,7 @@ class TestSearchOrchestratorIntentIntegration:
                 "team_memory.storage.database.get_session",
             ) as mock_gs,
             patch(
-                "team_memory.services.search_orchestrator.ExperienceRepository",
+                "team_memory.services.search.search_orchestrator.ExperienceRepository",
                 return_value=mock_repo,
             ),
         ):

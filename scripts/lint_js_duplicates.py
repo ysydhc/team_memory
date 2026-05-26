@@ -5,6 +5,7 @@ Catches issues like 'async function collectFilesFromEntry' declared twice,
 which causes 'Identifier has already been declared' at runtime.
 Only checks function/async function (not const/let/var, which may be valid in different scopes).
 """
+
 from __future__ import annotations
 
 import re

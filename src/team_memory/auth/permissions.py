@@ -22,8 +22,16 @@ from __future__ import annotations
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "admin": {"*"},  # Wildcard: all operations
     "editor": {
-        "read", "search", "create", "update", "delete",
-        "review", "publish", "feedback", "export", "import",
+        "read",
+        "search",
+        "create",
+        "update",
+        "delete",
+        "review",
+        "publish",
+        "feedback",
+        "export",
+        "import",
     },
     "viewer": {"read", "search", "feedback"},
 }

@@ -7,10 +7,11 @@ Phase A of the use_rate fix:
 - after_response processes mcp_calls into response_buffer
 - response_buffer.has_search_log for dedup
 """
-import pytest
-import json
+
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 class TestWriteSearchLogReturnsId:
@@ -18,7 +19,7 @@ class TestWriteSearchLogReturnsId:
 
     @pytest.mark.asyncio
     async def test_returns_log_id_on_success(self):
-        from team_memory.services.memory_operations import write_search_log
+        from team_memory.services.memory.memory_operations import write_search_log
 
         mock_log = MagicMock()
         mock_log.id = uuid.uuid4()
@@ -29,12 +30,15 @@ class TestWriteSearchLogReturnsId:
         mock_session.__aexit__ = AsyncMock(return_value=False)
         mock_session.commit = AsyncMock()
 
-        with patch(
-            "team_memory.services.memory_operations.get_session",
-            return_value=mock_session,
-        ), patch(
-            "team_memory.services.memory_operations.SearchLogRepository",
-            return_value=mock_repo,
+        with (
+            patch(
+                "team_memory.services.memory.memory_operations.get_session",
+                return_value=mock_session,
+            ),
+            patch(
+                "team_memory.services.memory.memory_operations.SearchLogRepository",
+                return_value=mock_repo,
+            ),
         ):
             result = await write_search_log(
                 db_url="postgresql://test",
@@ -46,10 +50,10 @@ class TestWriteSearchLogReturnsId:
 
     @pytest.mark.asyncio
     async def test_returns_none_on_failure(self):
-        from team_memory.services.memory_operations import write_search_log
+        from team_memory.services.memory.memory_operations import write_search_log
 
         with patch(
-            "team_memory.services.memory_operations.get_session",
+            "team_memory.services.memory.memory_operations.get_session",
             side_effect=Exception("db error"),
         ):
             result = await write_search_log(
@@ -64,13 +68,13 @@ class TestMaybeWriteSearchLogInjectsId:
 
     @pytest.mark.asyncio
     async def test_injects_search_log_id(self):
-        from team_memory.services.memory_operations import _maybe_write_search_log
+        from team_memory.services.memory.memory_operations import _maybe_write_search_log
 
         log_id = str(uuid.uuid4())
         result = {"results": [{"id": "exp1", "score": 0.9}], "intent_type": "solve"}
 
         with patch(
-            "team_memory.services.memory_operations.write_search_log",
+            "team_memory.services.memory.memory_operations.write_search_log",
             new_callable=AsyncMock,
             return_value=log_id,
         ):
@@ -81,12 +85,12 @@ class TestMaybeWriteSearchLogInjectsId:
 
     @pytest.mark.asyncio
     async def test_no_inject_when_write_fails(self):
-        from team_memory.services.memory_operations import _maybe_write_search_log
+        from team_memory.services.memory.memory_operations import _maybe_write_search_log
 
         result = {"results": [], "intent_type": "general"}
 
         with patch(
-            "team_memory.services.memory_operations.write_search_log",
+            "team_memory.services.memory.memory_operations.write_search_log",
             new_callable=AsyncMock,
             return_value=None,
         ):
@@ -101,8 +105,9 @@ class TestMcpCallbackEndpoint:
     @pytest.fixture
     def app_client(self):
         """Create a test client for the daemon app."""
-        from httpx import AsyncClient, ASGITransport
-        from team_memory.daemon.app import create_app
+        from httpx import ASGITransport, AsyncClient
+
+        from team_memory.daemon.runtime.app import create_app
 
         app = create_app()
         app.state.recent_searches = {}
@@ -124,13 +129,16 @@ class TestMcpCallbackEndpoint:
                 "mcp_calls": [],
             }
 
-            resp = await client.post("/hooks/mcp_callback", json={
-                "session_id": "sess-123",
-                "tool_use_id": "tool-456",
-                "search_log_id": str(uuid.uuid4()),
-                "tool_name": "mcp__team_memory__recall",
-                "result_ids": [{"id": "exp1", "score": 0.9}],
-            })
+            resp = await client.post(
+                "/hooks/mcp_callback",
+                json={
+                    "session_id": "sess-123",
+                    "tool_use_id": "tool-456",
+                    "search_log_id": str(uuid.uuid4()),
+                    "tool_name": "mcp__team_memory__recall",
+                    "result_ids": [{"id": "exp1", "score": 0.9}],
+                },
+            )
 
             assert resp.status_code == 200
             data = resp.json()
@@ -146,13 +154,16 @@ class TestMcpCallbackEndpoint:
     async def test_callback_creates_stub_when_no_before_prompt(self, app_client):
         """When no before_prompt entry exists, creates a stub."""
         async with app_client as client:
-            resp = await client.post("/hooks/mcp_callback", json={
-                "session_id": "new-session",
-                "tool_use_id": "tool-789",
-                "search_log_id": str(uuid.uuid4()),
-                "tool_name": "mcp__team_memory__recall",
-                "result_ids": [],
-            })
+            resp = await client.post(
+                "/hooks/mcp_callback",
+                json={
+                    "session_id": "new-session",
+                    "tool_use_id": "tool-789",
+                    "search_log_id": str(uuid.uuid4()),
+                    "tool_name": "mcp__team_memory__recall",
+                    "result_ids": [],
+                },
+            )
 
             assert resp.status_code == 200
             data = resp.json()
@@ -178,13 +189,16 @@ class TestMcpCallbackEndpoint:
             }
 
             for i in range(3):
-                resp = await client.post("/hooks/mcp_callback", json={
-                    "session_id": "multi-sess",
-                    "tool_use_id": f"tool-{i}",
-                    "search_log_id": str(uuid.uuid4()),
-                    "tool_name": "mcp__team_memory__recall",
-                    "result_ids": [],
-                })
+                resp = await client.post(
+                    "/hooks/mcp_callback",
+                    json={
+                        "session_id": "multi-sess",
+                        "tool_use_id": f"tool-{i}",
+                        "search_log_id": str(uuid.uuid4()),
+                        "tool_name": "mcp__team_memory__recall",
+                        "result_ids": [],
+                    },
+                )
                 assert resp.status_code == 200
 
             entry = client._transport.app.state.recent_searches["multi-sess"]
@@ -196,7 +210,7 @@ class TestResponseBufferHasSearchLog:
 
     @pytest.mark.asyncio
     async def test_has_search_log_returns_true_for_existing(self):
-        from team_memory.daemon.response_buffer import ResponseBuffer
+        from team_memory.daemon.buffers.response_buffer import ResponseBuffer
 
         buf = ResponseBuffer(dsn="postgresql://test")
         log_id = str(uuid.uuid4())
@@ -214,7 +228,7 @@ class TestResponseBufferHasSearchLog:
 
     @pytest.mark.asyncio
     async def test_has_search_log_returns_false_for_missing(self):
-        from team_memory.daemon.response_buffer import ResponseBuffer
+        from team_memory.daemon.buffers.response_buffer import ResponseBuffer
 
         buf = ResponseBuffer(dsn="postgresql://test")
         log_id = str(uuid.uuid4())
@@ -235,7 +249,7 @@ class TestResponseBufferHasSearchLog:
 
     @pytest.mark.asyncio
     async def test_has_search_log_returns_false_on_error(self):
-        from team_memory.daemon.response_buffer import ResponseBuffer
+        from team_memory.daemon.buffers.response_buffer import ResponseBuffer
 
         buf = ResponseBuffer(dsn="postgresql://test")
 

@@ -25,6 +25,5 @@ def test_harness_import_check_exit_code() -> None:
         cwd=str(root),
     )
     assert result.returncode == 0, (
-        f"harness_import_check failed (exit {result.returncode}). "
-        f"stdout: {result.stdout!r} stderr: {result.stderr!r}"
+        f"harness_import_check failed (exit {result.returncode}). stdout: {result.stdout!r} stderr: {result.stderr!r}"
     )

@@ -7,8 +7,8 @@ Revision ID: 015_evaluation_fields
 Revises: 014_add_entity_graph
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "015_evaluation_fields"
 down_revision = "014_add_entity_graph"

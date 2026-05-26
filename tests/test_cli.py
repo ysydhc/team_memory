@@ -39,9 +39,7 @@ class TestCliArchive:
     """Test tm-cli archive subcommand."""
 
     @patch("team_memory.cli.httpx")
-    def test_archive_create_success(
-        self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_archive_create_success(self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TEAM_MEMORY_API_KEY", "test-key")
         monkeypatch.setenv("TM_BASE_URL", "http://test:9111")
 
@@ -74,9 +72,7 @@ class TestCliArchive:
         assert "created" in captured.getvalue()
 
     @patch("team_memory.cli.httpx")
-    def test_archive_update_response(
-        self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_archive_update_response(self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TEAM_MEMORY_API_KEY", "test-key")
         monkeypatch.setenv("TM_BASE_URL", "http://test:9111")
 
@@ -104,9 +100,7 @@ class TestCliArchive:
         assert "previous version" in output
 
     @patch("team_memory.cli.httpx")
-    def test_archive_with_optional_fields(
-        self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_archive_with_optional_fields(self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify optional CLI flags are passed through to the request body."""
         monkeypatch.setenv("TEAM_MEMORY_API_KEY", "test-key")
         monkeypatch.setenv("TM_BASE_URL", "http://test:9111")
@@ -244,18 +238,14 @@ class TestCliArchive:
         assert body["solution_doc"] == "File-based solution"
 
     @patch("team_memory.cli.httpx")
-    def test_archive_http_error(
-        self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_archive_http_error(self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
         """HTTP error causes sys.exit(1) and prints error to stderr."""
         monkeypatch.setenv("TEAM_MEMORY_API_KEY", "test-key")
 
         error_resp = MagicMock(spec=httpx.Response)
         error_resp.status_code = 422
         error_resp.text = "Validation error"
-        error_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "422", request=MagicMock(), response=error_resp
-        )
+        error_resp.raise_for_status.side_effect = httpx.HTTPStatusError("422", request=MagicMock(), response=error_resp)
         mock_httpx.post.return_value = error_resp
         mock_httpx.HTTPStatusError = httpx.HTTPStatusError
         mock_httpx.ConnectError = httpx.ConnectError
@@ -273,9 +263,7 @@ class TestCliArchive:
         assert "422" in captured_err.getvalue() or "Error" in captured_err.getvalue()
 
     @patch("team_memory.cli.httpx")
-    def test_archive_connect_error(
-        self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_archive_connect_error(self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
         """Connection error causes sys.exit(1) with helpful message."""
         monkeypatch.setenv("TEAM_MEMORY_API_KEY", "test-key")
 
@@ -365,9 +353,7 @@ class TestCliUpload:
         )
 
     @patch("team_memory.cli.httpx")
-    def test_upload_success(
-        self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_upload_success(self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setenv("TEAM_MEMORY_API_KEY", "test-key")
         monkeypatch.setenv("TM_BASE_URL", "http://test:9111")
 
@@ -405,9 +391,7 @@ class TestCliUpload:
         assert "Download" in output
 
     @patch("team_memory.cli.httpx")
-    def test_upload_with_snippet(
-        self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_upload_with_snippet(self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """--snippet flag is forwarded as form data 'note'."""
         monkeypatch.setenv("TEAM_MEMORY_API_KEY", "test-key")
 
@@ -444,9 +428,7 @@ class TestCliUpload:
         assert call_data.get("note") == "my note"
 
     @patch("team_memory.cli.httpx")
-    def test_upload_with_project(
-        self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_upload_with_project(self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setenv("TEAM_MEMORY_API_KEY", "test-key")
         test_file = tmp_path / "a.md"
         test_file.write_text("x")
@@ -489,9 +471,7 @@ class TestCliUpload:
         assert exc_info.value.code == 1
 
     @patch("team_memory.cli.httpx")
-    def test_upload_http_error(
-        self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_upload_http_error(self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setenv("TEAM_MEMORY_API_KEY", "test-key")
 
         test_file = tmp_path / "big.bin"
@@ -500,9 +480,7 @@ class TestCliUpload:
         error_resp = MagicMock(spec=httpx.Response)
         error_resp.status_code = 413
         error_resp.text = "Payload Too Large"
-        error_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "413", request=MagicMock(), response=error_resp
-        )
+        error_resp.raise_for_status.side_effect = httpx.HTTPStatusError("413", request=MagicMock(), response=error_resp)
         mock_httpx.post.return_value = error_resp
         mock_httpx.HTTPStatusError = httpx.HTTPStatusError
         mock_httpx.ConnectError = httpx.ConnectError
@@ -517,9 +495,7 @@ class TestCliUpload:
         assert exc_info.value.code == 1
 
     @patch("team_memory.cli.httpx")
-    def test_upload_connect_error(
-        self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_upload_connect_error(self, mock_httpx: MagicMock, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setenv("TEAM_MEMORY_API_KEY", "test-key")
 
         test_file = tmp_path / "f.md"

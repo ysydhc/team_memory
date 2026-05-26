@@ -1,18 +1,19 @@
 """Tests for daemon Obsidian file watcher."""
+
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import ANY, AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 
-from team_memory.daemon.config import DaemonConfig, ObsidianSettings, VaultConfig
-from team_memory.daemon.watcher import _find_vault, _process_changes
-
+from team_memory.daemon.runtime.config import DaemonConfig, ObsidianSettings, VaultConfig
+from team_memory.daemon.observe.watcher import _find_vault, _process_changes
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_config(vault_path: str = "/tmp/test_vault") -> DaemonConfig:
     return DaemonConfig(
@@ -36,15 +37,22 @@ def _make_sink() -> AsyncMock:
 
 def _make_indexer(entry: dict | None = None) -> MagicMock:
     indexer = MagicMock()
-    indexer.parse_file = MagicMock(return_value=entry or {
-        "title": "Test Note", "description": "test desc", "solution": "test content", "tags": ["test"],
-    })
+    indexer.parse_file = MagicMock(
+        return_value=entry
+        or {
+            "title": "Test Note",
+            "description": "test desc",
+            "solution": "test content",
+            "tags": ["test"],
+        }
+    )
     return indexer
 
 
 # ---------------------------------------------------------------------------
 # _find_vault
 # ---------------------------------------------------------------------------
+
 
 class TestFindVault:
     def test_file_in_vault(self, tmp_path):
@@ -83,6 +91,7 @@ class TestFindVault:
 # ---------------------------------------------------------------------------
 # _process_changes
 # ---------------------------------------------------------------------------
+
 
 class TestProcessChanges:
     @pytest.mark.asyncio
@@ -212,9 +221,14 @@ class TestProcessChanges:
 
         config = _make_config(str(vault_dir))
         sink = _make_sink()
-        indexer = _make_indexer(entry={
-            "title": "Single Entry", "description": "desc", "solution": "body text", "tags": ["x"],
-        })
+        indexer = _make_indexer(
+            entry={
+                "title": "Single Entry",
+                "description": "desc",
+                "solution": "body text",
+                "tags": ["x"],
+            }
+        )
 
         changes = {(Change.added, str(md_file))}
         await _process_changes(changes, config, indexer, sink)

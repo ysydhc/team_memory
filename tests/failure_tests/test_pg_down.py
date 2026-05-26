@@ -24,7 +24,9 @@ class TestPgDown:
         # 1. Stop PG
         subprocess.run(
             ["docker", "compose", "stop", "postgres"],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         time.sleep(2)
 
@@ -55,7 +57,9 @@ class TestPgDown:
         # 4. Start PG
         subprocess.run(
             ["docker", "compose", "start", "postgres"],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         # Wait for PG to be ready + retry (backoff 30s)
         time.sleep(50)
@@ -68,9 +72,7 @@ class TestPgDown:
 
         db_path = Path.home() / ".cache" / "tm-pipeline" / "drafts.db"
         db = sqlite3.connect(str(db_path))
-        row = db.execute(
-            "SELECT status FROM sessions WHERE id = ?", (sid,)
-        ).fetchone()
+        row = db.execute("SELECT status FROM sessions WHERE id = ?", (sid,)).fetchone()
         assert row is not None, f"Session {sid} not found in SQLite"
         # Status may be published or needs_refinement depending on timing
         assert row[0] in ("needs_refinement", "published", "refining", "publishing")

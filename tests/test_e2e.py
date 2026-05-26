@@ -30,7 +30,7 @@ async def run_e2e():
     import team_memory.server as srv
     from team_memory.auth.provider import NoAuth
     from team_memory.server import mcp
-    from team_memory.services.experience import ExperienceService
+    from team_memory.services.memory.experience import ExperienceService
 
     sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
     from conftest import MockEmbeddingProvider
@@ -140,9 +140,7 @@ async def run_e2e():
             "update_experience",
             {
                 "experience_id": exp_id,
-                "solution_addendum": (
-                    "Alternative: Use nginx reverse proxy to avoid CORS entirely in production."
-                ),
+                "solution_addendum": ("Alternative: Use nginx reverse proxy to avoid CORS entirely in production."),
                 "tags": ["nginx", "deployment"],
             },
         )

@@ -16,7 +16,7 @@ pytestmark = pytest.mark.integration
 from team_memory.auth.provider import ApiKeyAuth
 from team_memory.config import UploadsConfig, WebConfig
 from team_memory.services.archive import ArchiveUploadError
-from team_memory.services.search_orchestrator import OrchestratedSearchResult
+from team_memory.services.search.search_orchestrator import OrchestratedSearchResult
 from team_memory.web import app as web_module
 from team_memory.web.app import app
 
@@ -40,7 +40,9 @@ def setup_app():
     auth.register_key("测试-key-123", "unicode_admin", "admin")
     web_module._auth = auth
     web_module._settings = MagicMock()
-    web_module._settings.database.url = "postgresql+asyncpg://test:test@localhost:5432/team_memory"
+    web_module._settings.database.url = (
+        "postgresql+asyncpg://test:test@localhost:5432/team_memory"
+    )
     web_module._settings.default_project = "default"
     web_module._settings.retrieval = MagicMock(
         max_tokens=None,
@@ -142,7 +144,9 @@ def setup_app():
     web_module._service = mock_service
 
     mock_search_orchestrator = MagicMock()
-    mock_search_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=[]))
+    mock_search_orchestrator.search = AsyncMock(
+        return_value=OrchestratedSearchResult(results=[])
+    )
     mock_search_orchestrator.invalidate_cache = AsyncMock(return_value=None)
     # Attach for test access via setup_app._search_orchestrator
     mock_service._search_orchestrator = mock_search_orchestrator
@@ -177,7 +181,8 @@ def setup_app():
         patch("team_memory.web.routes.archives.get_context", return_value=mock_ctx),
         patch("team_memory.web.routes.search.get_context", return_value=mock_ctx),
         patch("team_memory.web.routes.config.get_context", return_value=mock_ctx),
-        patch("team_memory.services.memory_operations.get_context", return_value=mock_ctx),
+        patch("team_memory.web.routes.mcp_compat.get_context", return_value=mock_ctx),
+        patch("team_memory.web.routes.janitor.get_context", return_value=mock_ctx),
         patch("team_memory.web.app.start_background_tasks", new_callable=AsyncMock),
         patch("team_memory.web.app.stop_background_tasks", new_callable=AsyncMock),
     ):
@@ -357,7 +362,9 @@ class TestAuth:
         db_auth = TestDbApiKeyAuth(db_url="sqlite+aiosqlite:///:memory:", keys={})
         with (
             patch("team_memory.web.routes.auth.app_module._auth", db_auth),
-            patch("team_memory.web.routes.auth.get_session", side_effect=mock_get_session),
+            patch(
+                "team_memory.web.routes.auth.get_session", side_effect=mock_get_session
+            ),
         ):
             resp = client.post(
                 "/api/v1/auth/admin/reset-password",
@@ -369,7 +376,9 @@ class TestAuth:
         assert mock_key.password_hash != "old_hash"
         mock_sess.flush.assert_awaited_once()
 
-    def test_change_password_validation_neither_old_nor_api_key(self, client, auth_headers):
+    def test_change_password_validation_neither_old_nor_api_key(
+        self, client, auth_headers
+    ):
         """PUT /auth/password with only new_password returns 422."""
         resp = client.put(
             "/api/v1/auth/password",
@@ -403,12 +412,16 @@ class TestExperienceList:
         assert resp.status_code == 401
 
     def test_list_experiences(self, client, auth_headers):
-        with patch("team_memory.web.routes.experiences.app_module.get_session") as mock_gs:
+        with patch(
+            "team_memory.web.routes.experiences.app_module.get_session"
+        ) as mock_gs:
             mock_sess = AsyncMock()
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch("team_memory.storage.repository.ExperienceRepository") as mock_repo_cls:
+            with patch(
+                "team_memory.storage.repository.ExperienceRepository"
+            ) as mock_repo_cls:
                 mock_repo = MagicMock()
                 mock_repo.count = AsyncMock(return_value=2)
                 mock_repo.list_recent = AsyncMock(return_value=[])
@@ -490,19 +503,25 @@ class TestDeleteExperience:
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            resp = client.delete(f"/api/v1/experiences/{uuid.uuid4()}", headers=auth_headers)
+            resp = client.delete(
+                f"/api/v1/experiences/{uuid.uuid4()}", headers=auth_headers
+            )
             assert resp.status_code == 200
             assert "deleted" in resp.json()["message"].lower()
             setup_app.soft_delete.assert_called_once()
 
     def test_hard_delete(self, client, auth_headers):
         """Hard delete with ?hard=true."""
-        with patch("team_memory.web.routes.experiences.app_module.get_session") as mock_gs:
+        with patch(
+            "team_memory.web.routes.experiences.app_module.get_session"
+        ) as mock_gs:
             mock_sess = AsyncMock()
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch("team_memory.storage.repository.ExperienceRepository") as mock_repo_cls:
+            with patch(
+                "team_memory.storage.repository.ExperienceRepository"
+            ) as mock_repo_cls:
                 mock_repo = MagicMock()
                 mock_repo.delete = AsyncMock(return_value=True)
                 mock_repo_cls.return_value = mock_repo
@@ -520,7 +539,9 @@ class TestDeleteExperience:
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            resp = client.delete(f"/api/v1/experiences/{uuid.uuid4()}", headers=auth_headers)
+            resp = client.delete(
+                f"/api/v1/experiences/{uuid.uuid4()}", headers=auth_headers
+            )
             assert resp.status_code == 404
 
 
@@ -538,7 +559,9 @@ class TestSearch:
     def test_search(self, client, auth_headers, setup_app):
         setup_app._search_orchestrator.search = AsyncMock(
             return_value=OrchestratedSearchResult(
-                results=[{"id": str(uuid.uuid4()), "title": "Result", "similarity": 0.85}]
+                results=[
+                    {"id": str(uuid.uuid4()), "title": "Result", "similarity": 0.85}
+                ]
             )
         )
 
@@ -550,7 +573,11 @@ class TestSearch:
             resp = client.post(
                 "/api/v1/search",
                 headers=auth_headers,
-                json={"query": "docker networking", "max_results": 5, "min_similarity": 0.5},
+                json={
+                    "query": "docker networking",
+                    "max_results": 5,
+                    "min_similarity": 0.5,
+                },
             )
             assert resp.status_code == 200
             data = resp.json()
@@ -559,7 +586,9 @@ class TestSearch:
 
 
 class TestProjectParam:
-    def test_search_uses_default_project(self, client, auth_headers, setup_app, monkeypatch):
+    def test_search_uses_default_project(
+        self, client, auth_headers, setup_app, monkeypatch
+    ):
         """Without TEAM_MEMORY_PROJECT in env, fall back to settings.default_project."""
         monkeypatch.delenv("TEAM_MEMORY_PROJECT", raising=False)
         web_module._settings.default_project = "proj-default"
@@ -567,9 +596,14 @@ class TestProjectParam:
             mock_sess = AsyncMock()
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
-            resp = client.post("/api/v1/search", json={"query": "hello"}, headers=auth_headers)
+            resp = client.post(
+                "/api/v1/search", json={"query": "hello"}, headers=auth_headers
+            )
         assert resp.status_code == 200
-        assert setup_app._search_orchestrator.search.call_args.kwargs["project"] == "proj-default"
+        assert (
+            setup_app._search_orchestrator.search.call_args.kwargs["project"]
+            == "proj-default"
+        )
 
     def test_create_passes_project(self, client, auth_headers, setup_app):
         with patch("team_memory.web.app.get_session") as mock_gs:
@@ -597,7 +631,9 @@ class TestProjectParam:
 
 class TestFeedback:
     def test_feedback_requires_auth(self, client):
-        resp = client.post(f"/api/v1/experiences/{uuid.uuid4()}/feedback", json={"rating": 5})
+        resp = client.post(
+            f"/api/v1/experiences/{uuid.uuid4()}/feedback", json={"rating": 5}
+        )
         assert resp.status_code == 401
 
     def test_feedback_success(self, client, auth_headers, setup_app):
@@ -681,7 +717,10 @@ class TestRestore:
 
 
 def test_session_token_encode_decode_roundtrip():
-    from team_memory.web.auth_session import _decode_session_token, _encode_session_token
+    from team_memory.web.auth_session import (
+        _decode_session_token,
+        _encode_session_token,
+    )
 
     token = _encode_session_token("admin", secret="test-secret")
     assert token.startswith("sess:")
@@ -935,7 +974,9 @@ class TestArchivesApi:
 
         aid = uuid.uuid4()
         fid = uuid.uuid4()
-        get_context().archive_service.mark_upload_failure_resolved = AsyncMock(return_value=True)
+        get_context().archive_service.mark_upload_failure_resolved = AsyncMock(
+            return_value=True
+        )
         resp = client.patch(
             f"/api/v1/archives/{aid}/upload-failures/{fid}",
             json={"resolved": True},
@@ -949,7 +990,9 @@ class TestArchivesApi:
 
         aid = uuid.uuid4()
         fid = uuid.uuid4()
-        get_context().archive_service.mark_upload_failure_resolved = AsyncMock(return_value=False)
+        get_context().archive_service.mark_upload_failure_resolved = AsyncMock(
+            return_value=False
+        )
         resp = client.patch(
             f"/api/v1/archives/{aid}/upload-failures/{fid}",
             json={"resolved": True},
@@ -1523,6 +1566,40 @@ class TestMcpCompat:
         assert kw["experience_id"] == eid
         assert kw["feedback_by"] == "test_admin"
         assert kw["rating"] == 5
+
+    def test_mcp_submit_response_requires_auth(self, client):
+        resp = client.post(
+            "/api/v1/mcp/submit-response",
+            json={"query": "q", "response": "r"},
+        )
+        assert resp.status_code == 401
+
+    def test_mcp_submit_response_ok(self, client, auth_headers):
+        from unittest.mock import ANY
+
+        bid = str(uuid.uuid4())
+        with patch(
+            "team_memory.web.routes.mcp_compat.memory_operations.op_submit_response",
+            new_callable=AsyncMock,
+            return_value={"status": "buffered", "buffer_id": bid},
+        ) as mock_op:
+            resp = client.post(
+                "/api/v1/mcp/submit-response",
+                headers=auth_headers,
+                json={"query": "hello", "response": "world"},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "buffered"
+            assert data["buffer_id"] == bid
+            mock_op.assert_awaited_once_with(
+                "test_admin",
+                db_url=ANY,
+                query="hello",
+                response="world",
+                result_ids=None,
+                project=None,
+            )
 
     def test_mcp_recall_query_ok(self, client, auth_headers):
         resp = client.post(

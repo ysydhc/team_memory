@@ -7,17 +7,18 @@ error handling paths, granularity selection, result_ids parsing, and more.
 Uses @pytest.mark.unit for pure-logic and mocked-DB tests.
 Uses @pytest.mark.integration for tests that hit a real PostgreSQL.
 """
+
 from __future__ import annotations
 
 import json
 import re
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from team_memory.daemon.search_log_writer import SearchLogWriter
+from team_memory.daemon.observe.search_log_writer import SearchLogWriter
 
 pytestmark = pytest.mark.unit
 
@@ -25,6 +26,7 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_writer(dsn: str = "postgresql://test:***@localhost:5433/team_memory") -> SearchLogWriter:
     return SearchLogWriter(dsn=dsn)
@@ -71,10 +73,15 @@ def _mock_pool(rows_fetch=None, row_fetchrow=None, execute_result=None):
 class TestSearchLogWriterConstructor:
     """Tests for constructor defaults and attribute storage."""
 
-    def test_default_dsn_format(self):
+    def test_env_dsn_fallback(self, monkeypatch):
+        monkeypatch.setenv("TEAM_MEMORY_DB_URL", "postgresql://env:test@localhost:5433/tm")
         w = SearchLogWriter()
-        assert w._dsn.startswith("postgresql://")
-        assert "5433" in w._dsn
+        assert w._dsn == "postgresql://env:test@localhost:5433/tm"
+
+    def test_no_dsn_raises(self, monkeypatch):
+        monkeypatch.delenv("TEAM_MEMORY_DB_URL", raising=False)
+        with pytest.raises(RuntimeError, match="SearchLogWriter requires a DSN"):
+            SearchLogWriter()
 
     def test_custom_dsn_stored(self):
         dsn = "postgresql://x:y@other:9999/testdb"
@@ -82,22 +89,25 @@ class TestSearchLogWriterConstructor:
         assert w._dsn == dsn
 
     def test_pool_initially_none(self):
-        w = SearchLogWriter()
+        w = SearchLogWriter(dsn="postgresql://test:test@localhost:5433/tm")
         assert w._pool is None
 
     def test_default_project_in_log_search(self):
         """Check that default arg is 'default' for project in log_search."""
         import inspect
+
         sig = inspect.signature(SearchLogWriter.log_search)
         assert sig.parameters["project"].default == "default"
 
     def test_default_source_in_log_search(self):
         import inspect
+
         sig = inspect.signature(SearchLogWriter.log_search)
         assert sig.parameters["source"].default == "daemon"
 
     def test_default_threshold_fuzzy(self):
         import inspect
+
         sig = inspect.signature(SearchLogWriter.mark_used_fuzzy)
         assert sig.parameters["threshold"].default == 0.3
 
@@ -105,6 +115,7 @@ class TestSearchLogWriterConstructor:
 # ===================================================================
 # _ensure_pool
 # ===================================================================
+
 
 class TestEnsurePool:
     """Tests for pool creation and reuse."""
@@ -151,6 +162,7 @@ class TestClose:
 # ===================================================================
 # log_search
 # ===================================================================
+
 
 class TestLogSearch:
     """Tests for log_search method with mocked DB."""
@@ -272,9 +284,7 @@ class TestMarkUsedFuzzy:
         w._pool = mock_pool
 
         # Response contains all keywords → overlap ratio = 1.0 > 0.8
-        result = await w.mark_used_fuzzy(
-            "Docker PostgreSQL connection setup is important for the guide"
-        )
+        result = await w.mark_used_fuzzy("Docker PostgreSQL connection setup is important for the guide")
         assert result == 1
 
     @pytest.mark.asyncio
@@ -306,9 +316,7 @@ class TestMarkUsedFuzzy:
         w = _make_writer()
         w._pool = mock_pool
 
-        result = await w.mark_used_fuzzy(
-            "Here is the docker postgresql setup for you"
-        )
+        result = await w.mark_used_fuzzy("Here is the docker postgresql setup for you")
         assert result == 1
 
     @pytest.mark.asyncio
@@ -428,9 +436,7 @@ class TestMarkUsedFuzzy:
         w = _make_writer()
         w._pool = pool
 
-        result = await w.mark_used_fuzzy(
-            "docker postgresql setup is great"
-        )
+        result = await w.mark_used_fuzzy("docker postgresql setup is great")
         # Only 1 mark even though both experiences match
         assert result == 1
 
@@ -457,8 +463,8 @@ class TestMarkUsedFuzzy:
 # get_recent_with_results
 # ===================================================================
 
-class TestGetRecentWithResults:
 
+class TestGetRecentWithResults:
     @pytest.mark.asyncio
     async def test_returns_none_when_no_rows(self):
         w = _make_writer()
@@ -541,8 +547,8 @@ class TestGetRecentWithResults:
 # get_stats
 # ===================================================================
 
-class TestGetStats:
 
+class TestGetStats:
     @pytest.mark.asyncio
     async def test_returns_stats_dict(self):
         row = {
@@ -669,8 +675,8 @@ class TestGetStats:
 # get_trends
 # ===================================================================
 
-class TestGetTrends:
 
+class TestGetTrends:
     @pytest.mark.asyncio
     async def test_returns_empty_list_when_no_data(self):
         w = _make_writer()
@@ -826,8 +832,8 @@ class TestGetTrends:
 # get_miss_queries
 # ===================================================================
 
-class TestGetMissQueries:
 
+class TestGetMissQueries:
     @pytest.mark.asyncio
     async def test_returns_empty_when_no_misses(self):
         w = _make_writer()
@@ -889,8 +895,8 @@ class TestGetMissQueries:
 # get_low_use_queries
 # ===================================================================
 
-class TestGetLowUseQueries:
 
+class TestGetLowUseQueries:
     @pytest.mark.asyncio
     async def test_returns_empty_when_none(self):
         w = _make_writer()
@@ -940,6 +946,7 @@ class TestGetLowUseQueries:
 # ===================================================================
 # Keyword extraction logic (testing the actual regex used in mark_used_fuzzy)
 # ===================================================================
+
 
 class TestKeywordExtraction:
     """Test the tokenization logic used in mark_used_fuzzy.
@@ -999,8 +1006,8 @@ class TestKeywordExtraction:
 # Overlap ratio calculation
 # ===================================================================
 
-class TestOverlapRatioCalculation:
 
+class TestOverlapRatioCalculation:
     def test_full_overlap(self):
         keywords = ["docker", "postgresql", "setup"]
         response = "docker postgresql setup guide".lower()

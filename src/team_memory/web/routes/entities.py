@@ -29,7 +29,7 @@ async def search_entities_api(
     user: User = Depends(get_current_user),
 ):
     """Search entities by name or alias prefix."""
-    from team_memory.services.entity_search import search_entities
+    from team_memory.services.entity.entity_search import search_entities
 
     if not q or not q.strip():
         raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
@@ -56,7 +56,7 @@ async def get_entity_graph_api(
     """Return the entity and all connected nodes/edges within `depth` hops."""
     import uuid as _uuid
 
-    from team_memory.services.entity_search import get_entity_graph
+    from team_memory.services.entity.entity_search import get_entity_graph
 
     # Validate UUID format
     try:

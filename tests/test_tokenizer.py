@@ -6,7 +6,7 @@ edge cases, and tech dictionary loading.
 
 from __future__ import annotations
 
-from team_memory.services.tokenizer import (
+from team_memory.utils.tokenizer import (
     load_tech_dict,
     load_tech_dict_from_tags,
     tokenize,

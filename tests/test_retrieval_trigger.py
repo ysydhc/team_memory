@@ -1,17 +1,14 @@
 """Tests for scripts/hooks/retrieval_trigger.py — keyword-based retrieval triggering."""
+
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 # Ensure scripts/hooks/ is importable
-
-from team_memory.hooks.retrieval_trigger import KEYWORD_TRIGGERS, should_retrieve
-
+from team_memory.hooks.integrations.retrieval_trigger import KEYWORD_TRIGGERS, should_retrieve
 
 # ---------------------------------------------------------------------------
 # KEYWORD_TRIGGERS constant
 # ---------------------------------------------------------------------------
+
 
 class TestKeywordTriggers:
     """KEYWORD_TRIGGERS should contain the expected trigger words."""
@@ -41,6 +38,7 @@ class TestKeywordTriggers:
 # ---------------------------------------------------------------------------
 # should_retrieve
 # ---------------------------------------------------------------------------
+
 
 class TestShouldRetrieve:
     """should_retrieve returns True when prompt contains a keyword trigger."""

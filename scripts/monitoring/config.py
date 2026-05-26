@@ -1,9 +1,9 @@
 """Monitoring configuration loader"""
+
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 def _find_monitoring_yaml() -> Path:
@@ -21,9 +21,10 @@ def _find_monitoring_yaml() -> Path:
 @dataclass
 class ChannelConfig:
     """Single alert channel configuration / 单个告警渠道配置"""
-    type: str = ""           # feishu | wecom | webhook
-    webhook: str = ""        # full webhook URL
-    secret: str = ""         # signing secret (feishu only, optional)
+
+    type: str = ""  # feishu | wecom | webhook
+    webhook: str = ""  # full webhook URL
+    secret: str = ""  # signing secret (feishu only, optional)
 
 
 @dataclass
@@ -74,11 +75,13 @@ def load_monitoring_config(config_path: str | None = None) -> MonitoringConfig:
     for ch in admin.get("channels", []):
         if not ch:
             continue
-        channels.append(ChannelConfig(
-            type=ch.get("type", "webhook"),
-            webhook=ch.get("webhook", ch.get("url", "")),
-            secret=ch.get("secret", ""),
-        ))
+        channels.append(
+            ChannelConfig(
+                type=ch.get("type", "webhook"),
+                webhook=ch.get("webhook", ch.get("url", "")),
+                secret=ch.get("secret", ""),
+            )
+        )
 
     # Backward compat: if old-style webhook field exists, add as generic channel
     legacy_webhook = admin.get("webhook", "")

@@ -8,6 +8,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def mock_daemon_context():
+    from tests.conftest import make_mock_app_context
+
+    ctx = make_mock_app_context()
+    with patch(
+        "team_memory.daemon.integration.tm_sink._daemon_context", return_value=ctx
+    ) as mock:
+        yield mock
+
+
 # ---------------------------------------------------------------------------
 # TMSink ABC
 # ---------------------------------------------------------------------------
@@ -17,20 +29,30 @@ class TestTMSinkABC:
     """TMSink 是抽象基类，不能直接实例化。"""
 
     def test_cannot_instantiate(self):
-        from team_memory.daemon.tm_sink import TMSink
+        from team_memory.daemon.integration.tm_sink import TMSink
 
         with pytest.raises(TypeError, match="abstract"):
             TMSink()
 
     def test_has_required_abstract_methods(self):
-        from team_memory.daemon.tm_sink import TMSink
+        from team_memory.daemon.integration.tm_sink import TMSink
 
         abstracts = set(TMSink.__abstractmethods__)
-        expected = {"draft_save", "draft_publish", "save", "recall", "context", "update_experience", "increment_used_count"}
-        assert expected == abstracts, f"Missing abstract methods: {expected - abstracts}"
+        expected = {
+            "draft_save",
+            "draft_publish",
+            "save",
+            "recall",
+            "context",
+            "update_experience",
+            "increment_used_count",
+        }
+        assert (
+            expected == abstracts
+        ), f"Missing abstract methods: {expected - abstracts}"
 
     def test_is_abc_subclass(self):
-        from team_memory.daemon.tm_sink import TMSink
+        from team_memory.daemon.integration.tm_sink import TMSink
 
         assert issubclass(TMSink, ABC)
 
@@ -46,7 +68,7 @@ class TestLocalTMSink:
 
     def _make_sink(self, user: str = "test_user") -> "LocalTMSink":
         """创建 LocalTMSink 并注入 mock op_* 函数。"""
-        from team_memory.daemon.tm_sink import LocalTMSink
+        from team_memory.daemon.integration.tm_sink import LocalTMSink
 
         sink = LocalTMSink(user=user)
         # 手动注入 mock，避免依赖真实 TM 服务
@@ -54,32 +76,34 @@ class TestLocalTMSink:
         return sink
 
     def test_is_tmsink_subclass(self):
-        from team_memory.daemon.tm_sink import LocalTMSink, TMSink
+        from team_memory.daemon.integration.tm_sink import LocalTMSink, TMSink
 
         assert issubclass(LocalTMSink, TMSink)
 
     def test_init_user_default(self):
-        from team_memory.daemon.tm_sink import LocalTMSink
+        from team_memory.daemon.integration.tm_sink import LocalTMSink
 
-        with patch("team_memory.daemon.tm_sink._ensure_ops"):
+        with patch("team_memory.daemon.integration.tm_sink._ensure_ops"):
             sink = LocalTMSink()
         assert sink._user == "daemon"
 
     def test_init_custom_user(self):
-        from team_memory.daemon.tm_sink import LocalTMSink
+        from team_memory.daemon.integration.tm_sink import LocalTMSink
 
-        with patch("team_memory.daemon.tm_sink._ensure_ops"):
+        with patch("team_memory.daemon.integration.tm_sink._ensure_ops"):
             sink = LocalTMSink(user="custom")
         assert sink._user == "custom"
 
     @pytest.mark.asyncio
     async def test_draft_save_calls_op_draft_save(self):
-        from team_memory.daemon.tm_sink import LocalTMSink
+        from team_memory.daemon.integration.tm_sink import LocalTMSink
 
         mock_op = AsyncMock(return_value={"id": "abc-123", "status": "draft"})
 
-        with patch("team_memory.daemon.tm_sink._ensure_ops"), \
-             patch("team_memory.daemon.tm_sink._op_draft_save", mock_op):
+        with (
+            patch("team_memory.daemon.integration.tm_sink._ensure_ops"),
+            patch("team_memory.daemon.integration.tm_sink._op_draft_save", mock_op),
+        ):
             sink = LocalTMSink(user="test_user")
             result = await sink.draft_save(
                 title="测试标题",
@@ -89,8 +113,12 @@ class TestLocalTMSink:
                 group_key="gk1",
                 conversation_id="conv1",
             )
+            from unittest.mock import ANY
+
             mock_op.assert_awaited_once_with(
                 "test_user",
+                service=ANY,
+                db_url=ANY,
                 title="测试标题",
                 content="测试内容",
                 tags=["python"],
@@ -103,19 +131,24 @@ class TestLocalTMSink:
 
     @pytest.mark.asyncio
     async def test_draft_publish_calls_op_draft_publish(self):
-        from team_memory.daemon.tm_sink import LocalTMSink
+        from team_memory.daemon.integration.tm_sink import LocalTMSink
 
         mock_op = AsyncMock(return_value={"id": "abc-123", "status": "published"})
 
-        with patch("team_memory.daemon.tm_sink._ensure_ops"), \
-             patch("team_memory.daemon.tm_sink._op_draft_publish", mock_op):
+        with (
+            patch("team_memory.daemon.integration.tm_sink._ensure_ops"),
+            patch("team_memory.daemon.integration.tm_sink._op_draft_publish", mock_op),
+        ):
             sink = LocalTMSink(user="test_user")
             result = await sink.draft_publish(
                 draft_id="abc-123",
                 refined_content="精炼内容",
             )
+            from unittest.mock import ANY
+
             mock_op.assert_awaited_once_with(
                 "test_user",
+                service=ANY,
                 draft_id="abc-123",
                 refined_content="精炼内容",
             )
@@ -123,15 +156,19 @@ class TestLocalTMSink:
 
     @pytest.mark.asyncio
     async def test_save_calls_op_save(self):
-        from team_memory.daemon.tm_sink import LocalTMSink
+        from team_memory.daemon.integration.tm_sink import LocalTMSink
 
-        mock_op = AsyncMock(return_value={
-            "message": "Knowledge saved successfully.",
-            "data": {"id": "xyz", "title": "T", "status": "published"},
-        })
+        mock_op = AsyncMock(
+            return_value={
+                "message": "Knowledge saved successfully.",
+                "data": {"id": "xyz", "title": "T", "status": "published"},
+            }
+        )
 
-        with patch("team_memory.daemon.tm_sink._ensure_ops"), \
-             patch("team_memory.daemon.tm_sink._op_save", mock_op):
+        with (
+            patch("team_memory.daemon.integration.tm_sink._ensure_ops"),
+            patch("team_memory.daemon.integration.tm_sink._op_save", mock_op),
+        ):
             sink = LocalTMSink(user="test_user")
             result = await sink.save(
                 title="标题",
@@ -141,8 +178,14 @@ class TestLocalTMSink:
                 project="proj",
                 group_key="gk",
             )
+            from unittest.mock import ANY
+
             mock_op.assert_awaited_once_with(
                 "test_user",
+                service=ANY,
+                settings=ANY,
+                db_url=ANY,
+                embedding_provider=ANY,
                 title="标题",
                 problem="问题描述",
                 solution="解决方案",
@@ -158,19 +201,29 @@ class TestLocalTMSink:
     @pytest.mark.asyncio
     async def test_recall_with_dict_result(self):
         """op_recall 返回 dict 时，提取 results 字段。"""
-        from team_memory.daemon.tm_sink import LocalTMSink
+        from team_memory.daemon.integration.tm_sink import LocalTMSink
 
-        mock_op = AsyncMock(return_value={
-            "message": "Found 2 result(s).",
-            "results": [{"id": "1"}, {"id": "2"}],
-        })
+        mock_op = AsyncMock(
+            return_value={
+                "message": "Found 2 result(s).",
+                "results": [{"id": "1"}, {"id": "2"}],
+            }
+        )
 
-        with patch("team_memory.daemon.tm_sink._ensure_ops"), \
-             patch("team_memory.daemon.tm_sink._op_recall", mock_op):
+        with (
+            patch("team_memory.daemon.integration.tm_sink._ensure_ops"),
+            patch("team_memory.daemon.integration.tm_sink._op_recall", mock_op),
+        ):
             sink = LocalTMSink(user="test_user")
             result = await sink.recall(query="测试", project="proj")
+            from unittest.mock import ANY
+
             mock_op.assert_awaited_once_with(
                 "test_user",
+                search_orchestrator=ANY,
+                db_url=ANY,
+                settings=ANY,
+                embedding_provider=ANY,
                 query="测试",
                 problem=None,
                 file_path=None,
@@ -185,13 +238,15 @@ class TestLocalTMSink:
     @pytest.mark.asyncio
     async def test_recall_with_string_result(self):
         """op_recall 返回 JSON 字符串时，先解析再提取 results。"""
-        from team_memory.daemon.tm_sink import LocalTMSink
+        from team_memory.daemon.integration.tm_sink import LocalTMSink
 
         raw = json.dumps({"results": [{"id": "1"}]})
         mock_op = AsyncMock(return_value=raw)
 
-        with patch("team_memory.daemon.tm_sink._ensure_ops"), \
-             patch("team_memory.daemon.tm_sink._op_recall", mock_op):
+        with (
+            patch("team_memory.daemon.integration.tm_sink._ensure_ops"),
+            patch("team_memory.daemon.integration.tm_sink._op_recall", mock_op),
+        ):
             sink = LocalTMSink(user="test_user")
             result = await sink.recall(query="测试")
             assert result == [{"id": "1"}]
@@ -199,37 +254,49 @@ class TestLocalTMSink:
     @pytest.mark.asyncio
     async def test_recall_empty_results(self):
         """op_recall 返回无 results 的 dict 时返回空列表。"""
-        from team_memory.daemon.tm_sink import LocalTMSink
+        from team_memory.daemon.integration.tm_sink import LocalTMSink
 
         mock_op = AsyncMock(return_value={"message": "No matching experiences found."})
 
-        with patch("team_memory.daemon.tm_sink._ensure_ops"), \
-             patch("team_memory.daemon.tm_sink._op_recall", mock_op):
+        with (
+            patch("team_memory.daemon.integration.tm_sink._ensure_ops"),
+            patch("team_memory.daemon.integration.tm_sink._op_recall", mock_op),
+        ):
             sink = LocalTMSink(user="test_user")
             result = await sink.recall(query="不存在")
             assert result == []
 
     @pytest.mark.asyncio
     async def test_context_calls_op_context(self):
-        from team_memory.daemon.tm_sink import LocalTMSink
+        from team_memory.daemon.integration.tm_sink import LocalTMSink
 
-        mock_op = AsyncMock(return_value={
-            "user": "test_user",
-            "project": "proj",
-            "profile": {"static": [], "dynamic": []},
-            "relevant_experiences": [],
-        })
+        mock_op = AsyncMock(
+            return_value={
+                "user": "test_user",
+                "project": "proj",
+                "profile": {"static": [], "dynamic": []},
+                "relevant_experiences": [],
+            }
+        )
 
-        with patch("team_memory.daemon.tm_sink._ensure_ops"), \
-             patch("team_memory.daemon.tm_sink._op_context", mock_op):
+        with (
+            patch("team_memory.daemon.integration.tm_sink._ensure_ops"),
+            patch("team_memory.daemon.integration.tm_sink._op_context", mock_op),
+        ):
             sink = LocalTMSink(user="test_user")
             result = await sink.context(
                 file_paths=["/a/b.py"],
                 task_description="做点什么",
                 project="proj",
             )
+            from unittest.mock import ANY
+
             mock_op.assert_awaited_once_with(
                 "test_user",
+                search_orchestrator=ANY,
+                settings=ANY,
+                embedding_provider=ANY,
+                db_url=ANY,
                 file_paths=["/a/b.py"],
                 task_description="做点什么",
                 project="proj",
@@ -246,26 +313,26 @@ class TestRemoteTMSink:
     """RemoteTMSink 通过 HTTP 调用远程 TM 服务。"""
 
     def test_is_tmsink_subclass(self):
-        from team_memory.daemon.tm_sink import RemoteTMSink, TMSink
+        from team_memory.daemon.integration.tm_sink import RemoteTMSink, TMSink
 
         assert issubclass(RemoteTMSink, TMSink)
 
     def test_init(self):
-        from team_memory.daemon.tm_sink import RemoteTMSink
+        from team_memory.daemon.integration.tm_sink import RemoteTMSink
 
         sink = RemoteTMSink(base_url="http://tm:3900", user="remote_user")
         assert sink._base_url == "http://tm:3900"
         assert sink._user == "remote_user"
 
     def test_init_strips_trailing_slash(self):
-        from team_memory.daemon.tm_sink import RemoteTMSink
+        from team_memory.daemon.integration.tm_sink import RemoteTMSink
 
         sink = RemoteTMSink(base_url="http://tm:3900/")
         assert sink._base_url == "http://tm:3900"
 
     @pytest.mark.asyncio
     async def test_draft_save_posts_to_remote(self):
-        from team_memory.daemon.tm_sink import RemoteTMSink
+        from team_memory.daemon.integration.tm_sink import RemoteTMSink
 
         sink = RemoteTMSink(base_url="http://tm:3900", user="ruser")
 
@@ -273,7 +340,9 @@ class TestRemoteTMSink:
         mock_response.json.return_value = {"id": "draft-1", "status": "draft"}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("team_memory.daemon.tm_sink.httpx.AsyncClient") as MockClient:
+        with patch(
+            "team_memory.daemon.integration.tm_sink.httpx.AsyncClient"
+        ) as MockClient:
             mock_client = AsyncMock()
             mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -300,14 +369,16 @@ class TestRemoteTMSink:
 
     @pytest.mark.asyncio
     async def test_draft_publish_posts_to_remote(self):
-        from team_memory.daemon.tm_sink import RemoteTMSink
+        from team_memory.daemon.integration.tm_sink import RemoteTMSink
 
         sink = RemoteTMSink(base_url="http://tm:3900", user="ruser")
         mock_response = MagicMock()
         mock_response.json.return_value = {"id": "draft-1", "status": "published"}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("team_memory.daemon.tm_sink.httpx.AsyncClient") as MockClient:
+        with patch(
+            "team_memory.daemon.integration.tm_sink.httpx.AsyncClient"
+        ) as MockClient:
             mock_client = AsyncMock()
             mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -327,14 +398,16 @@ class TestRemoteTMSink:
 
     @pytest.mark.asyncio
     async def test_save_posts_to_remote(self):
-        from team_memory.daemon.tm_sink import RemoteTMSink
+        from team_memory.daemon.integration.tm_sink import RemoteTMSink
 
         sink = RemoteTMSink(base_url="http://tm:3900", user="ruser")
         mock_response = MagicMock()
         mock_response.json.return_value = {"message": "saved", "data": {"id": "1"}}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("team_memory.daemon.tm_sink.httpx.AsyncClient") as MockClient:
+        with patch(
+            "team_memory.daemon.integration.tm_sink.httpx.AsyncClient"
+        ) as MockClient:
             mock_client = AsyncMock()
             mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -359,7 +432,7 @@ class TestRemoteTMSink:
 
     @pytest.mark.asyncio
     async def test_recall_extracts_results(self):
-        from team_memory.daemon.tm_sink import RemoteTMSink
+        from team_memory.daemon.integration.tm_sink import RemoteTMSink
 
         sink = RemoteTMSink(base_url="http://tm:3900", user="ruser")
         mock_response = MagicMock()
@@ -369,7 +442,9 @@ class TestRemoteTMSink:
         }
         mock_response.raise_for_status = MagicMock()
 
-        with patch("team_memory.daemon.tm_sink.httpx.AsyncClient") as MockClient:
+        with patch(
+            "team_memory.daemon.integration.tm_sink.httpx.AsyncClient"
+        ) as MockClient:
             mock_client = AsyncMock()
             mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -380,14 +455,16 @@ class TestRemoteTMSink:
 
     @pytest.mark.asyncio
     async def test_recall_empty_results(self):
-        from team_memory.daemon.tm_sink import RemoteTMSink
+        from team_memory.daemon.integration.tm_sink import RemoteTMSink
 
         sink = RemoteTMSink(base_url="http://tm:3900", user="ruser")
         mock_response = MagicMock()
         mock_response.json.return_value = {"message": "No results"}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("team_memory.daemon.tm_sink.httpx.AsyncClient") as MockClient:
+        with patch(
+            "team_memory.daemon.integration.tm_sink.httpx.AsyncClient"
+        ) as MockClient:
             mock_client = AsyncMock()
             mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -398,20 +475,24 @@ class TestRemoteTMSink:
 
     @pytest.mark.asyncio
     async def test_context_posts_to_remote(self):
-        from team_memory.daemon.tm_sink import RemoteTMSink
+        from team_memory.daemon.integration.tm_sink import RemoteTMSink
 
         sink = RemoteTMSink(base_url="http://tm:3900", user="ruser")
         mock_response = MagicMock()
         mock_response.json.return_value = {"user": "ruser", "relevant_experiences": []}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("team_memory.daemon.tm_sink.httpx.AsyncClient") as MockClient:
+        with patch(
+            "team_memory.daemon.integration.tm_sink.httpx.AsyncClient"
+        ) as MockClient:
             mock_client = AsyncMock()
             mock_client.request.return_value = mock_response
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await sink.context(file_paths=["a.py"], task_description="task", project="proj")
+            result = await sink.context(
+                file_paths=["a.py"], task_description="task", project="proj"
+            )
             mock_client.request.assert_awaited_once_with(
                 "POST",
                 "http://tm:3900/api/v1/mcp/context",
@@ -434,16 +515,16 @@ class TestCreateSink:
     """create_sink 根据配置创建对应的 TMSink 实现。"""
 
     def test_local_mode(self):
-        from team_memory.daemon.tm_sink import LocalTMSink, create_sink
+        from team_memory.daemon.integration.tm_sink import LocalTMSink, create_sink
 
-        with patch("team_memory.daemon.tm_sink._ensure_ops"):
+        with patch("team_memory.daemon.integration.tm_sink._ensure_ops"):
             config = {"mode": "local", "user": "test_user"}
             sink = create_sink(config)
             assert isinstance(sink, LocalTMSink)
             assert sink._user == "test_user"
 
     def test_remote_mode(self):
-        from team_memory.daemon.tm_sink import RemoteTMSink, create_sink
+        from team_memory.daemon.integration.tm_sink import RemoteTMSink, create_sink
 
         config = {"mode": "remote", "base_url": "http://tm:3900", "user": "ruser"}
         sink = create_sink(config)
@@ -452,23 +533,23 @@ class TestCreateSink:
         assert sink._user == "ruser"
 
     def test_invalid_mode_raises(self):
-        from team_memory.daemon.tm_sink import create_sink
+        from team_memory.daemon.integration.tm_sink import create_sink
 
         config = {"mode": "invalid"}
         with pytest.raises(ValueError, match="mode"):
             create_sink(config)
 
     def test_local_mode_default_user(self):
-        from team_memory.daemon.tm_sink import LocalTMSink, create_sink
+        from team_memory.daemon.integration.tm_sink import LocalTMSink, create_sink
 
-        with patch("team_memory.daemon.tm_sink._ensure_ops"):
+        with patch("team_memory.daemon.integration.tm_sink._ensure_ops"):
             config = {"mode": "local"}
             sink = create_sink(config)
             assert isinstance(sink, LocalTMSink)
             assert sink._user == "daemon"
 
     def test_remote_mode_no_base_url_raises(self):
-        from team_memory.daemon.tm_sink import create_sink
+        from team_memory.daemon.integration.tm_sink import create_sink
 
         config = {"mode": "remote", "user": "ruser"}
         with pytest.raises(ValueError, match="base_url"):

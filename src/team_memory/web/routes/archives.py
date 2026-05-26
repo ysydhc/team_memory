@@ -188,9 +188,7 @@ async def download_archive_attachment(
     ctx = get_context()
     viewer = user.name
     resolved = _resolve_project(project)
-    pair = await ctx.archive_service.read_archive_attachment_file(
-        aid, att_id, viewer, resolved, ctx.settings.uploads
-    )
+    pair = await ctx.archive_service.read_archive_attachment_file(aid, att_id, viewer, resolved, ctx.settings.uploads)
     if pair is None:
         raise HTTPException(status_code=404, detail="Archive not found")
     path, fname = pair

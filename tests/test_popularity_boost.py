@@ -8,13 +8,13 @@ Tests cover:
 5. _extract_mem_references utility
 6. Ranking order changes due to popularity
 """
-import math
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from team_memory.config.search import SearchConfig
-from team_memory.services.search_pipeline import SearchPipeline, SearchResultItem
+from team_memory.services.search.search_pipeline import SearchPipeline, SearchResultItem
 
 
 def _make_item(
@@ -67,8 +67,7 @@ class TestPopularityBoost:
         """Experience with high recall_count gets a multiplicative boost > 1.0."""
         now = datetime.now(timezone.utc).isoformat()
         items = [
-            _make_item("a" * 36, score=0.7, recall_count=50, used_count=0,
-                       updated_at=now, created_at=now),
+            _make_item("a" * 36, score=0.7, recall_count=50, used_count=0, updated_at=now, created_at=now),
         ]
         result = self.pipeline._apply_popularity_boost(items)
         boost = result[0].data["popularity_boost"]
@@ -79,10 +78,8 @@ class TestPopularityBoost:
         """used_count has β=0.1 vs α=0.02 for recall_count, so used should boost more."""
         now = datetime.now(timezone.utc).isoformat()
         items = [
-            _make_item("a" * 36, score=0.7, recall_count=10, used_count=0,
-                       updated_at=now, created_at=now),
-            _make_item("b" * 36, score=0.7, recall_count=0, used_count=10,
-                       updated_at=now, created_at=now),
+            _make_item("a" * 36, score=0.7, recall_count=10, used_count=0, updated_at=now, created_at=now),
+            _make_item("b" * 36, score=0.7, recall_count=0, used_count=10, updated_at=now, created_at=now),
         ]
         result = self.pipeline._apply_popularity_boost(items)
         # used_count=10 with β=0.1 → α·10 + β·0 vs α·0 + β·10
@@ -95,12 +92,10 @@ class TestPopularityBoost:
         """Log compression: recall=100 should not dominate recall=10 by 10x."""
         now = datetime.now(timezone.utc).isoformat()
         items_10 = [
-            _make_item("a" * 36, score=0.7, recall_count=10, used_count=0,
-                       updated_at=now, created_at=now),
+            _make_item("a" * 36, score=0.7, recall_count=10, used_count=0, updated_at=now, created_at=now),
         ]
         items_100 = [
-            _make_item("a" * 36, score=0.7, recall_count=100, used_count=0,
-                       updated_at=now, created_at=now),
+            _make_item("a" * 36, score=0.7, recall_count=100, used_count=0, updated_at=now, created_at=now),
         ]
         r10 = self.pipeline._apply_popularity_boost(items_10)
         r100 = self.pipeline._apply_popularity_boost(items_100)
@@ -117,10 +112,8 @@ class TestPopularityBoost:
         old_created = (now - timedelta(days=90)).isoformat()
 
         items = [
-            _make_item("a" * 36, score=0.7, recall_count=20, used_count=0,
-                       updated_at=recent, created_at=old_created),
-            _make_item("b" * 36, score=0.7, recall_count=20, used_count=0,
-                       updated_at=old, created_at=old_created),
+            _make_item("a" * 36, score=0.7, recall_count=20, used_count=0, updated_at=recent, created_at=old_created),
+            _make_item("b" * 36, score=0.7, recall_count=20, used_count=0, updated_at=old, created_at=old_created),
         ]
         result = self.pipeline._apply_popularity_boost(items)
         # Recent should have higher boost
@@ -135,8 +128,9 @@ class TestPopularityBoost:
         old_created = (now - timedelta(days=90)).isoformat()
 
         items = [
-            _make_item("a" * 36, score=0.7, recall_count=20, used_count=0,
-                       updated_at=old_updated, created_at=old_created),
+            _make_item(
+                "a" * 36, score=0.7, recall_count=20, used_count=0, updated_at=old_updated, created_at=old_created
+            ),
         ]
         result = self.pipeline._apply_popularity_boost(items)
         boost_with_floor = result[0].data["popularity_boost"]
@@ -151,8 +145,14 @@ class TestPopularityBoost:
         # Create scenario where floor triggers: updated 60 days ago, created 300 days ago
         # floor = 300*0.3 = 90 → effective = max(60, 90) = 90
         items_floor = [
-            _make_item("b" * 36, score=0.7, recall_count=20, used_count=0,
-                       updated_at=old_updated, created_at=(now - timedelta(days=300)).isoformat()),
+            _make_item(
+                "b" * 36,
+                score=0.7,
+                recall_count=20,
+                used_count=0,
+                updated_at=old_updated,
+                created_at=(now - timedelta(days=300)).isoformat(),
+            ),
         ]
         result_floor = self.pipeline._apply_popularity_boost(items_floor)
         boost_with_floor_active = result_floor[0].data["popularity_boost"]
@@ -165,8 +165,14 @@ class TestPopularityBoost:
         # The floor protects when updated_at is old but created_at is recent
         # Let's test that case: updated 60 days ago, created 5 days ago
         items_protected = [
-            _make_item("c" * 36, score=0.7, recall_count=20, used_count=0,
-                       updated_at=old_updated, created_at=(now - timedelta(days=5)).isoformat()),
+            _make_item(
+                "c" * 36,
+                score=0.7,
+                recall_count=20,
+                used_count=0,
+                updated_at=old_updated,
+                created_at=(now - timedelta(days=5)).isoformat(),
+            ),
         ]
         result_protected = self.pipeline._apply_popularity_boost(items_protected)
         boost_protected = result_protected[0].data["popularity_boost"]
@@ -203,10 +209,8 @@ class TestPopularityBoost:
         """Popular experience should rank higher despite lower base score."""
         now = datetime.now(timezone.utc).isoformat()
         items = [
-            _make_item("a" * 36, score=0.6, recall_count=0, used_count=0,
-                       updated_at=now, created_at=now),
-            _make_item("b" * 36, score=0.5, recall_count=30, used_count=5,
-                       updated_at=now, created_at=now),
+            _make_item("a" * 36, score=0.6, recall_count=0, used_count=0, updated_at=now, created_at=now),
+            _make_item("b" * 36, score=0.5, recall_count=30, used_count=5, updated_at=now, created_at=now),
         ]
         result = self.pipeline._apply_popularity_boost(items)
         # b has lower base score but higher popularity
@@ -223,8 +227,7 @@ class TestPopularityBoost:
         self.pipeline._search_config = SearchConfig(popularity_enabled=False)
         now = datetime.now(timezone.utc).isoformat()
         items = [
-            _make_item("a" * 36, score=0.5, recall_count=50, used_count=10,
-                       updated_at=now, created_at=now),
+            _make_item("a" * 36, score=0.5, recall_count=50, used_count=10, updated_at=now, created_at=now),
         ]
         # Direct call to _apply_popularity_boost still works (flag is checked by caller)
         result = self.pipeline._apply_popularity_boost(items)
@@ -235,4 +238,3 @@ class TestPopularityBoost:
 
 
 # --- Unit tests for _extract_mem_references ---
-

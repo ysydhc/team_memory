@@ -13,6 +13,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from team_memory.reranker.base import RerankerProvider, RerankResult
@@ -50,9 +51,7 @@ class CrossEncoderRerankerProvider(RerankerProvider):
                 self._model_name,
                 self._device,
             )
-            self._model = CrossEncoder(
-                self._model_name, device=self._device
-            )
+            self._model = CrossEncoder(self._model_name, device=self._device)
             logger.info("Cross-encoder model loaded successfully")
         except ImportError:
             raise RuntimeError(
@@ -79,13 +78,10 @@ class CrossEncoderRerankerProvider(RerankerProvider):
 
         try:
             # Cross-encoder predicts relevance scores for all pairs
-            scores = self._model.predict(pairs)
+            scores = await asyncio.to_thread(self._model.predict, pairs)
 
             # Combine with original indices
-            scored = [
-                (i, float(score), doc)
-                for i, (score, doc) in enumerate(zip(scores, documents))
-            ]
+            scored = [(i, float(score), doc) for i, (score, doc) in enumerate(zip(scores, documents))]
 
             # Sort by score descending
             scored.sort(key=lambda x: x[1], reverse=True)
@@ -98,9 +94,7 @@ class CrossEncoderRerankerProvider(RerankerProvider):
             for idx, score, text in scored[:effective_top_k]:
                 em = meta[idx].get("exact_title_match", "") if idx < len(meta) else ""
                 score += exact_bonus.get(em, 0)
-                results.append(
-                    RerankResult(index=idx, score=score, text=text)
-                )
+                results.append(RerankResult(index=idx, score=score, text=text))
             return results
 
         except Exception as e:

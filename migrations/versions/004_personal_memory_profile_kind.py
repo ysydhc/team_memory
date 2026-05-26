@@ -25,9 +25,7 @@ def upgrade() -> None:
             server_default="static",
         ),
     )
-    op.execute(
-        "UPDATE personal_memories SET profile_kind = 'dynamic' WHERE scope = 'context'"
-    )
+    op.execute("UPDATE personal_memories SET profile_kind = 'dynamic' WHERE scope = 'context'")
     op.create_check_constraint(
         "ck_personal_memories_profile_kind",
         "personal_memories",

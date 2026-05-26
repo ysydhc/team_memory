@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from team_memory.services.experience import ExperienceService
+from team_memory.services.memory.experience import ExperienceService
 
 
 class TestExperienceServiceUnit:
@@ -44,6 +44,45 @@ class TestExperienceServiceUnit:
         user = await service.authenticate({"api_key": "test_key_123"})
         assert user is not None
         assert user.name == "test_user"
+
+    @pytest.mark.asyncio
+    async def test_event_bus_injection(self, mock_embedding, no_auth):
+        from team_memory.services.infra.event_bus import EventBus
+
+        mock_bus = MagicMock(spec=EventBus)
+        mock_bus.emit = AsyncMock()
+
+        service_with_bus = ExperienceService(
+            embedding_provider=mock_embedding,
+            auth_provider=no_auth,
+            event_bus=mock_bus,
+            db_url="sqlite+aiosqlite://",
+        )
+
+        service_no_bus = ExperienceService(
+            embedding_provider=mock_embedding,
+            auth_provider=no_auth,
+            event_bus=None,
+            db_url="sqlite+aiosqlite://",
+        )
+
+        mock_session = AsyncMock()
+        mock_repo_instance = MagicMock()
+        mock_experience = MagicMock()
+        mock_experience.id = uuid.uuid4()
+        mock_experience.to_dict.return_value = {"id": str(mock_experience.id)}
+        mock_repo_instance.create = AsyncMock(return_value=mock_experience)
+
+        with patch(
+            "team_memory.services.memory.experience.ExperienceRepository",
+            return_value=mock_repo_instance,
+        ):
+            # Test with event bus
+            await service_with_bus.save("T", "P", "S", session=mock_session)
+            mock_bus.emit.assert_awaited()
+
+            # Test without event bus (should not raise any exception)
+            await service_no_bus.save("T2", "P2", "S2", session=mock_session)
 
     @pytest.mark.asyncio
     async def test_authenticate_invalid_api_key(self, mock_embedding, api_key_auth):
@@ -84,7 +123,9 @@ class TestExperienceServiceUnit:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+            patch(
+                "team_memory.services.memory.experience.ExperienceRepository"
+            ) as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             await service.save(
@@ -123,7 +164,9 @@ class TestExperienceServiceUnit:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+            patch(
+                "team_memory.services.memory.experience.ExperienceRepository"
+            ) as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             result = await service.feedback(
@@ -151,7 +194,9 @@ class TestExperienceServiceUnit:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+            patch(
+                "team_memory.services.memory.experience.ExperienceRepository"
+            ) as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             result = await service.feedback(
@@ -185,7 +230,9 @@ class TestExperienceServiceUnit:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+            patch(
+                "team_memory.services.memory.experience.ExperienceRepository"
+            ) as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             result = await service.update(
@@ -223,7 +270,9 @@ class TestExperienceServiceUnit:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+            patch(
+                "team_memory.services.memory.experience.ExperienceRepository"
+            ) as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             result = await service.update(
@@ -278,7 +327,9 @@ class TestPhase2Fixes:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+            patch(
+                "team_memory.services.memory.experience.ExperienceRepository"
+            ) as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             await service_simple.save(
@@ -315,7 +366,9 @@ class TestPhase2Fixes:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+            patch(
+                "team_memory.services.memory.experience.ExperienceRepository"
+            ) as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             await service_simple.save(
@@ -341,13 +394,16 @@ class TestPhase2Fixes:
         mock_repo_instance.add_feedback = AsyncMock()
         mock_repo_instance.increment_quality_score = AsyncMock()
         mock_repo_instance.increment_used_count = AsyncMock()
+
         @asynccontextmanager
         async def mock_get_session(_db_url):
             yield mock_session
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+            patch(
+                "team_memory.services.memory.experience.ExperienceRepository"
+            ) as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             result = await service_simple.feedback(
@@ -371,7 +427,9 @@ class TestPhase2Fixes:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+            patch(
+                "team_memory.services.memory.experience.ExperienceRepository"
+            ) as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             result = await service_simple.feedback(
@@ -394,7 +452,10 @@ class TestPhase2Fixes:
         mock_experience.title = "Test"
         mock_experience.description = "Desc"
         mock_experience.tags = []
-        mock_experience.to_dict.return_value = {"id": "test", "solution": "Original + Addendum"}
+        mock_experience.to_dict.return_value = {
+            "id": "test",
+            "solution": "Original + Addendum",
+        }
         mock_repo_instance.get_by_id = AsyncMock(return_value=mock_experience)
         mock_repo_instance.get_children = AsyncMock(return_value=[])
         mock_repo_instance.update = AsyncMock(return_value=mock_experience)
@@ -405,7 +466,9 @@ class TestPhase2Fixes:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch("team_memory.services.experience.ExperienceRepository") as mock_repo,
+            patch(
+                "team_memory.services.memory.experience.ExperienceRepository"
+            ) as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             result = await service_simple.update(

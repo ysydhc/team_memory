@@ -38,16 +38,12 @@ async def engine():
     eng = create_async_engine(TEST_DB_URL, echo=False)
     async with eng.begin() as conn:
         await conn.run_sync(
-            lambda sync_conn: Base.metadata.create_all(
-                sync_conn, tables=[SearchLog.__table__], checkfirst=True
-            )
+            lambda sync_conn: Base.metadata.create_all(sync_conn, tables=[SearchLog.__table__], checkfirst=True)
         )
     yield eng
     async with eng.begin() as conn:
         await conn.run_sync(
-            lambda sync_conn: Base.metadata.drop_all(
-                sync_conn, tables=[SearchLog.__table__], checkfirst=True
-            )
+            lambda sync_conn: Base.metadata.drop_all(sync_conn, tables=[SearchLog.__table__], checkfirst=True)
         )
     await eng.dispose()
 
@@ -55,9 +51,7 @@ async def engine():
 @pytest.fixture
 async def session(engine) -> AsyncSession:
     """Provide an async session for tests."""
-    factory = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as sess:
         yield sess
 
@@ -77,9 +71,7 @@ class TestSearchLogCreate:
     """Test creating a SearchLog entry."""
 
     @pytest.mark.asyncio
-    async def test_create_basic(
-        self, repo: SearchLogRepository, session: AsyncSession
-    ):
+    async def test_create_basic(self, repo: SearchLogRepository, session: AsyncSession):
         """Create a minimal search log entry."""
         log = await repo.create(query="how to deploy")
         await session.commit()
@@ -97,9 +89,7 @@ class TestSearchLogCreate:
         assert log.updated_at is not None
 
     @pytest.mark.asyncio
-    async def test_create_with_all_fields(
-        self, repo: SearchLogRepository, session: AsyncSession
-    ):
+    async def test_create_with_all_fields(self, repo: SearchLogRepository, session: AsyncSession):
         """Create a search log with all fields populated."""
         results = [
             {"id": "exp-001", "score": 0.95, "source_layer": "L2"},
@@ -125,9 +115,7 @@ class TestSearchLogMarkUsed:
     """Test mark_used updates was_used to True."""
 
     @pytest.mark.asyncio
-    async def test_mark_used_sets_true(
-        self, repo: SearchLogRepository, session: AsyncSession
-    ):
+    async def test_mark_used_sets_true(self, repo: SearchLogRepository, session: AsyncSession):
         """Marking a search log as used sets was_used=True."""
         log = await repo.create(query="test query")
         await session.commit()
@@ -138,16 +126,12 @@ class TestSearchLogMarkUsed:
         await session.commit()
 
         # Re-fetch to verify persistence
-        result = await session.execute(
-            select(SearchLog).where(SearchLog.id == log.id)
-        )
+        result = await session.execute(select(SearchLog).where(SearchLog.id == log.id))
         refreshed = result.scalar_one()
         assert refreshed.was_used is True
 
     @pytest.mark.asyncio
-    async def test_mark_used_with_snippet(
-        self, repo: SearchLogRepository, session: AsyncSession
-    ):
+    async def test_mark_used_with_snippet(self, repo: SearchLogRepository, session: AsyncSession):
         """Marking as used with agent response snippet."""
         log = await repo.create(query="test query")
         await session.commit()
@@ -155,17 +139,13 @@ class TestSearchLogMarkUsed:
         await repo.mark_used(log.id, agent_snippet="I used this to fix the bug")
         await session.commit()
 
-        result = await session.execute(
-            select(SearchLog).where(SearchLog.id == log.id)
-        )
+        result = await session.execute(select(SearchLog).where(SearchLog.id == log.id))
         refreshed = result.scalar_one()
         assert refreshed.was_used is True
         assert refreshed.agent_response_snippet == "I used this to fix the bug"
 
     @pytest.mark.asyncio
-    async def test_mark_used_nonexistent_id(
-        self, repo: SearchLogRepository
-    ):
+    async def test_mark_used_nonexistent_id(self, repo: SearchLogRepository):
         """Marking a non-existent ID should not raise (silent no-op)."""
         fake_id = uuid.uuid4()
         # Should not raise
@@ -186,9 +166,7 @@ class TestSearchLogGetStats:
         assert stats["use_rate"] == 0.0
 
     @pytest.mark.asyncio
-    async def test_get_stats_with_data(
-        self, repo: SearchLogRepository, session: AsyncSession
-    ):
+    async def test_get_stats_with_data(self, repo: SearchLogRepository, session: AsyncSession):
         """get_stats returns correct counts for mixed entries."""
         # Entry with results (hit) and used
         await repo.create(
@@ -207,9 +185,7 @@ class TestSearchLogGetStats:
         await session.commit()
 
         # Mark first entry as used
-        result = await session.execute(
-            select(SearchLog).where(SearchLog.query == "query1")
-        )
+        result = await session.execute(select(SearchLog).where(SearchLog.query == "query1"))
         log1 = result.scalar_one()
         await repo.mark_used(log1.id)
         await session.commit()
@@ -222,9 +198,7 @@ class TestSearchLogGetStats:
         assert stats["use_rate"] == 0.5  # 1/2
 
     @pytest.mark.asyncio
-    async def test_get_stats_zero_hit_rate(
-        self, repo: SearchLogRepository, session: AsyncSession
-    ):
+    async def test_get_stats_zero_hit_rate(self, repo: SearchLogRepository, session: AsyncSession):
         """use_rate is 0 when hit=0."""
         await repo.create(query="no results query")
         await session.commit()
@@ -238,9 +212,7 @@ class TestSearchLogGetRecent:
     """Test get_recent returns entries within date range."""
 
     @pytest.mark.asyncio
-    async def test_get_recent_returns_entries(
-        self, repo: SearchLogRepository, session: AsyncSession
-    ):
+    async def test_get_recent_returns_entries(self, repo: SearchLogRepository, session: AsyncSession):
         """get_recent returns recent search logs ordered by created_at desc."""
         await repo.create(query="first query")
         await repo.create(query="second query")
@@ -256,9 +228,7 @@ class TestSearchLogGetRecent:
         assert recent[2].query == "first query"
 
     @pytest.mark.asyncio
-    async def test_get_recent_respects_limit(
-        self, repo: SearchLogRepository, session: AsyncSession
-    ):
+    async def test_get_recent_respects_limit(self, repo: SearchLogRepository, session: AsyncSession):
         """get_recent respects the limit parameter."""
         for i in range(5):
             await repo.create(query=f"query {i}")
@@ -268,9 +238,7 @@ class TestSearchLogGetRecent:
         assert len(recent) == 2
 
     @pytest.mark.asyncio
-    async def test_get_recent_excludes_old_entries(
-        self, repo: SearchLogRepository, session: AsyncSession
-    ):
+    async def test_get_recent_excludes_old_entries(self, repo: SearchLogRepository, session: AsyncSession):
         """get_recent only returns entries within the specified day range."""
         # Insert an entry with an old created_at
         old_log = SearchLog(

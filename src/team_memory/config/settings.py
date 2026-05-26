@@ -43,9 +43,7 @@ class Settings(BaseSettings):
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
-    entity_extraction: EntityExtractionConfig = Field(
-        default_factory=EntityExtractionConfig
-    )
+    entity_extraction: EntityExtractionConfig = Field(default_factory=EntityExtractionConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     default_project: str = "default"
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)

@@ -304,7 +304,7 @@ class TestSearchDelegation:
 
         with (
             patch("team_memory.storage.query_builders.build_fts_search") as mock_build,
-            patch("team_memory.services.tokenizer.tokenize", return_value="test query"),
+            patch("team_memory.utils.tokenizer.tokenize", return_value="test query"),
         ):
             mock_build.return_value = MagicMock()
 

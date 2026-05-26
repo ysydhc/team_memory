@@ -17,6 +17,7 @@ def normalize_project_name(project: str | None) -> str:
     # Check global alias registry (populated by .tm.toml at server startup)
     try:
         from team_memory.project_resolver import resolve_alias
+
         return resolve_alias(value)
     except ImportError:
         pass

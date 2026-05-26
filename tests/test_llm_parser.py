@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from team_memory.services.llm_parser import (
+from team_memory.services.llm.llm_parser import (
     LLMParseError,
     _extract_json,
     _normalize_single,
@@ -53,9 +53,7 @@ def _mock_httpx_post(return_json: dict, status_code: int = 200) -> AsyncMock:
     resp.raise_for_status = MagicMock()
     if status_code >= 400:
         resp.text = json.dumps(return_json)
-        resp.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "error", request=MagicMock(), response=resp
-        )
+        resp.raise_for_status.side_effect = httpx.HTTPStatusError("error", request=MagicMock(), response=resp)
     return resp
 
 
@@ -149,9 +147,7 @@ class TestParseContent:
         """LLM times out -- raises LLMParseError."""
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_post = AsyncMock(side_effect=httpx.TimeoutException("timed out"))
-            mock_client_cls.return_value.__aenter__ = AsyncMock(
-                return_value=MagicMock(post=mock_post)
-            )
+            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
             with pytest.raises(LLMParseError, match="timed out"):
@@ -162,9 +158,7 @@ class TestParseContent:
         """LLM connection refused -- raises LLMParseError."""
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_post = AsyncMock(side_effect=httpx.ConnectError("refused"))
-            mock_client_cls.return_value.__aenter__ = AsyncMock(
-                return_value=MagicMock(post=mock_post)
-            )
+            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
             with pytest.raises(LLMParseError, match="Cannot connect"):
@@ -286,9 +280,7 @@ class TestParsePersonalMemory:
         """Timeout handled gracefully -- returns empty list, no exception."""
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_post = AsyncMock(side_effect=httpx.TimeoutException("timed out"))
-            mock_client_cls.return_value.__aenter__ = AsyncMock(
-                return_value=MagicMock(post=mock_post)
-            )
+            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
             result = await parse_personal_memory("some content", llm_config=_make_llm_config())
@@ -300,9 +292,7 @@ class TestParsePersonalMemory:
         """Connection error handled gracefully -- returns empty list."""
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_post = AsyncMock(side_effect=httpx.ConnectError("refused"))
-            mock_client_cls.return_value.__aenter__ = AsyncMock(
-                return_value=MagicMock(post=mock_post)
-            )
+            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
             result = await parse_personal_memory("some content", llm_config=_make_llm_config())
@@ -445,9 +435,7 @@ class TestSuggestExperienceType:
         """Timeout -- returns default 'general' without raising."""
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_post = AsyncMock(side_effect=httpx.TimeoutException("timed out"))
-            mock_client_cls.return_value.__aenter__ = AsyncMock(
-                return_value=MagicMock(post=mock_post)
-            )
+            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
             result = await suggest_experience_type("Some title", llm_config=_make_llm_config())
@@ -524,9 +512,7 @@ class TestGenerateSummary:
         """Timeout -- raises LLMParseError."""
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_post = AsyncMock(side_effect=httpx.TimeoutException("timed out"))
-            mock_client_cls.return_value.__aenter__ = AsyncMock(
-                return_value=MagicMock(post=mock_post)
-            )
+            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
             with pytest.raises(LLMParseError, match="timed out"):
@@ -551,9 +537,7 @@ class TestGenerateSummary:
         """Connection error -- raises LLMParseError."""
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_post = AsyncMock(side_effect=httpx.ConnectError("refused"))
-            mock_client_cls.return_value.__aenter__ = AsyncMock(
-                return_value=MagicMock(post=mock_post)
-            )
+            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
             with pytest.raises(LLMParseError, match="Cannot connect"):

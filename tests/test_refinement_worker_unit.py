@@ -5,6 +5,7 @@ Markers:
   @pytest.mark.unit      — pure logic, fully mocked (no real DB)
   @pytest.mark.integration — uses real DraftBuffer DB
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -14,13 +15,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from team_memory.daemon.config import DaemonConfig, RefinementSettings
-from team_memory.daemon.refinement_worker import _MAX_REFINE_ATTEMPTS, RefinementWorker
-from team_memory.services.llm_parser import LLMParseError
+from team_memory.daemon.runtime.config import DaemonConfig, RefinementSettings
+from team_memory.daemon.refinement.refinement_worker import _MAX_REFINE_ATTEMPTS, RefinementWorker
+from team_memory.services.llm.llm_parser import LLMParseError
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_config(**overrides) -> DaemonConfig:
     """Build a DaemonConfig with sensible test defaults."""
@@ -76,6 +78,7 @@ def _make_draft(
 # ---------------------------------------------------------------------------
 # Unit tests — constructor, lifecycle, _tick logic
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.unit
 class TestRefinementWorkerInit:
@@ -266,15 +269,15 @@ class TestTickLogic:
     @pytest.mark.asyncio
     async def test_tick_max_retries_marks_failed(self):
         """When queue op hits max retries, mark_failed and fallback triggered."""
-        from team_memory.daemon.pending_queue import PendingQueue
+        from team_memory.daemon.buffers.pending_queue import PendingQueue
+
         cfg = _make_config(fallback_on_failure=True)
         buf = AsyncMock()
         buf.mark_refining = AsyncMock()
         buf.mark_published = AsyncMock()
         sink = AsyncMock()
         queue = PendingQueue(db_path=":memory:")
-        op_id = queue.enqueue("refine", "d-001",
-            {"draft_id": "d-001", "content": "test", "project": "default"})
+        op_id = queue.enqueue("refine", "d-001", {"draft_id": "d-001", "content": "test", "project": "default"})
         queue.bump_retry(op_id, "err", 0)
         queue.bump_retry(op_id, "err", 0)
         # Force next_retry_at to past so get_due_ops picks it up
@@ -288,7 +291,8 @@ class TestTickLogic:
     @pytest.mark.asyncio
     async def test_tick_failure_enqueues(self):
         """When _refine_one fails, draft enqueued to PendingQueue."""
-        from team_memory.daemon.pending_queue import PendingQueue
+        from team_memory.daemon.buffers.pending_queue import PendingQueue
+
         cfg = _make_config()
         buf = AsyncMock()
         buf.mark_refining = AsyncMock()
@@ -304,7 +308,8 @@ class TestTickLogic:
     @pytest.mark.asyncio
     async def test_tick_failure_dedup(self):
         """Second failure does not duplicate queue entry."""
-        from team_memory.daemon.pending_queue import PendingQueue
+        from team_memory.daemon.buffers.pending_queue import PendingQueue
+
         cfg = _make_config()
         buf = AsyncMock()
         buf.mark_refining = AsyncMock()
@@ -401,9 +406,7 @@ class TestRefineOne:
         cfg = _make_config()
         buf = AsyncMock()
         sink = AsyncMock()
-        sink.draft_save = AsyncMock(
-            return_value={"error": True, "message": "embedding failed"}
-        )
+        sink.draft_save = AsyncMock(return_value={"error": True, "message": "embedding failed"})
 
         worker = RefinementWorker(cfg, buf, sink)
         draft = _make_draft()
@@ -460,9 +463,7 @@ class TestRefineOne:
         buf = AsyncMock()
         sink = AsyncMock()
         sink.draft_save = AsyncMock(return_value={"id": "exp-1"})
-        sink.draft_publish = AsyncMock(
-            return_value={"error": True, "message": "publish failed"}
-        )
+        sink.draft_publish = AsyncMock(return_value={"error": True, "message": "publish failed"})
 
         worker = RefinementWorker(cfg, buf, sink)
         draft = _make_draft()
@@ -479,9 +480,7 @@ class TestRefineOne:
         sink = AsyncMock()
         sink.draft_save = AsyncMock(return_value={"id": "exp-1"})
         sink.draft_publish = AsyncMock(return_value={})
-        sink.update_experience = AsyncMock(
-            return_value={"error": True, "message": "update failed"}
-        )
+        sink.update_experience = AsyncMock(return_value={"error": True, "message": "update failed"})
 
         worker = RefinementWorker(cfg, buf, sink)
         draft = _make_draft()
@@ -563,7 +562,7 @@ class TestCallLLM:
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
         with patch(
-            "team_memory.daemon.refinement_worker._refine_via_openai",
+            "team_memory.daemon.refinement.refinement_worker._refine_via_openai",
             new_callable=AsyncMock,
         ) as mock_parse:
             mock_parse.return_value = {"title": "OK", "problem": "P", "solution": "S"}
@@ -579,7 +578,7 @@ class TestCallLLM:
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
         with patch(
-            "team_memory.daemon.refinement_worker._refine_via_openai",
+            "team_memory.daemon.refinement.refinement_worker._refine_via_openai",
             new_callable=AsyncMock,
         ) as mock_parse:
             mock_parse.return_value = {"title": "OK"}
@@ -598,7 +597,7 @@ class TestCallLLM:
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
         with patch(
-            "team_memory.daemon.refinement_worker._refine_via_openai",
+            "team_memory.daemon.refinement.refinement_worker._refine_via_openai",
             new_callable=AsyncMock,
         ) as mock_parse:
             mock_parse.side_effect = [
@@ -606,7 +605,7 @@ class TestCallLLM:
                 LLMParseError("transient again"),
                 {"title": "OK"},
             ]
-            with patch("team_memory.daemon.refinement_worker.asyncio.sleep", new_callable=AsyncMock):
+            with patch("team_memory.daemon.refinement.refinement_worker.asyncio.sleep", new_callable=AsyncMock):
                 result = await worker._call_llm("content")
 
         assert result["title"] == "OK"
@@ -618,11 +617,11 @@ class TestCallLLM:
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
         with patch(
-            "team_memory.daemon.refinement_worker._refine_via_openai",
+            "team_memory.daemon.refinement.refinement_worker._refine_via_openai",
             new_callable=AsyncMock,
         ) as mock_parse:
             mock_parse.side_effect = LLMParseError("permanent fail")
-            with patch("team_memory.daemon.refinement_worker.asyncio.sleep", new_callable=AsyncMock):
+            with patch("team_memory.daemon.refinement.refinement_worker.asyncio.sleep", new_callable=AsyncMock):
                 with pytest.raises(LLMParseError, match="permanent fail"):
                     await worker._call_llm("content")
 
@@ -646,11 +645,14 @@ class TestCallLLM:
         mock_parse_content = AsyncMock(return_value={"title": "OK", "problem": "P"})
         mock_llm_config = MagicMock()
 
-        with patch.dict("sys.modules", {
-            "team_memory.config.llm": MagicMock(LLMConfig=mock_llm_config),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "team_memory.config.llm": MagicMock(LLMConfig=mock_llm_config),
+            },
+        ):
             with patch(
-                "team_memory.services.llm_parser.parse_content",
+                "team_memory.services.llm.llm_parser.parse_content",
                 mock_parse_content,
             ):
                 result = await worker._call_llm("some content")
@@ -669,20 +671,25 @@ class TestCallLLM:
         cfg = _make_config(provider="ollama", max_retries=1)
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
-        mock_parse_content = AsyncMock(side_effect=[
-            LLMParseError("fail"),
-            {"title": "OK"},
-        ])
+        mock_parse_content = AsyncMock(
+            side_effect=[
+                LLMParseError("fail"),
+                {"title": "OK"},
+            ]
+        )
         mock_llm_config = MagicMock()
 
-        with patch.dict("sys.modules", {
-            "team_memory.config.llm": MagicMock(LLMConfig=mock_llm_config),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "team_memory.config.llm": MagicMock(LLMConfig=mock_llm_config),
+            },
+        ):
             with patch(
-                "team_memory.services.llm_parser.parse_content",
+                "team_memory.services.llm.llm_parser.parse_content",
                 mock_parse_content,
             ):
-                with patch("team_memory.daemon.refinement_worker.asyncio.sleep", new_callable=AsyncMock):
+                with patch("team_memory.daemon.refinement.refinement_worker.asyncio.sleep", new_callable=AsyncMock):
                     result = await worker._call_llm("content")
 
         assert result["title"] == "OK"
@@ -694,7 +701,7 @@ class TestCallLLM:
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
         with patch(
-            "team_memory.daemon.refinement_worker._refine_via_openai",
+            "team_memory.daemon.refinement.refinement_worker._refine_via_openai",
             new_callable=AsyncMock,
         ) as mock_parse:
             mock_parse.side_effect = LLMParseError("fail")
@@ -710,7 +717,7 @@ class TestCallLLM:
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
         with patch(
-            "team_memory.daemon.refinement_worker._refine_via_openai",
+            "team_memory.daemon.refinement.refinement_worker._refine_via_openai",
             new_callable=AsyncMock,
         ) as mock_parse:
             mock_parse.side_effect = ConnectionError("network down")
@@ -743,9 +750,7 @@ class TestFallbackPublish:
         cfg = _make_config()
         buf = AsyncMock()
         sink = AsyncMock()
-        sink.draft_save = AsyncMock(
-            return_value={"error": True, "message": "fail", "code": "some_error"}
-        )
+        sink.draft_save = AsyncMock(return_value={"error": True, "message": "fail", "code": "some_error"})
 
         worker = RefinementWorker(cfg, buf, sink)
         draft = _make_draft()
@@ -799,9 +804,7 @@ class TestFallbackPublish:
         buf = AsyncMock()
         sink = AsyncMock()
         sink.draft_save = AsyncMock(return_value={"id": "exp-1"})
-        sink.draft_publish = AsyncMock(
-            return_value={"error": True, "message": "publish fail"}
-        )
+        sink.draft_publish = AsyncMock(return_value={"error": True, "message": "publish fail"})
 
         worker = RefinementWorker(cfg, buf, sink)
         draft = _make_draft()
@@ -1144,7 +1147,7 @@ class TestQualityScore:
         cfg = _make_config(quality_gate_enabled=True)
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
-        with patch("team_memory.daemon.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
+        with patch("team_memory.daemon.refinement.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = '{"score": 75}'
             score = await worker._quality_score(_valid_llm_result())
 
@@ -1155,7 +1158,7 @@ class TestQualityScore:
         cfg = _make_config(quality_gate_enabled=True)
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
-        with patch("team_memory.daemon.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
+        with patch("team_memory.daemon.refinement.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = '{"score": 150}'
             score = await worker._quality_score(_valid_llm_result())
 
@@ -1166,7 +1169,7 @@ class TestQualityScore:
         cfg = _make_config(quality_gate_enabled=True)
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
-        with patch("team_memory.daemon.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
+        with patch("team_memory.daemon.refinement.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = '{"score": -10}'
             score = await worker._quality_score(_valid_llm_result())
 
@@ -1178,7 +1181,7 @@ class TestQualityScore:
         cfg = _make_config(quality_gate_enabled=True)
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
-        with patch("team_memory.daemon.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
+        with patch("team_memory.daemon.refinement.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
             mock_call.side_effect = RuntimeError("LLM down")
             score = await worker._quality_score(_valid_llm_result())
 
@@ -1190,7 +1193,7 @@ class TestQualityScore:
         cfg = _make_config(quality_gate_enabled=True)
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
-        with patch("team_memory.daemon.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
+        with patch("team_memory.daemon.refinement.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = "not json at all"
             score = await worker._quality_score(_valid_llm_result())
 
@@ -1199,11 +1202,11 @@ class TestQualityScore:
 
 @pytest.mark.unit
 class TestPublishingIntegration:
-    '''Tests for publishing state machine integration.'''
+    """Tests for publishing state machine integration."""
 
     @pytest.mark.asyncio
     async def test_refine_one_marks_publishing_after_llm(self):
-        '''After _call_llm succeeds, mark_publishing_in_progress called with eid+structured.'''
+        """After _call_llm succeeds, mark_publishing_in_progress called with eid+structured."""
         cfg = _make_config()
         buf = AsyncMock()
         buf.mark_refining = AsyncMock()
@@ -1225,7 +1228,7 @@ class TestPublishingIntegration:
 
     @pytest.mark.asyncio
     async def test_tick_skip_llm_when_payload_valid(self):
-        '''skip_llm=true session bypasses mark_refining and _call_llm.'''
+        """skip_llm=true session bypasses mark_refining and _call_llm."""
         cfg = _make_config()
         buf = AsyncMock()
         buf.mark_published = AsyncMock()
@@ -1233,8 +1236,11 @@ class TestPublishingIntegration:
         sink.draft_publish = AsyncMock(return_value={})
         sink.update_experience = AsyncMock(return_value={})
         draft = {
-            "id": "skip-test", "content": "x", "project": "default",
-            "conversation_id": "skip-test", "status": "needs_refinement",
+            "id": "skip-test",
+            "content": "x",
+            "project": "default",
+            "conversation_id": "skip-test",
+            "status": "needs_refinement",
             "refined_payload": {"experience_id": "exp-skip", "structured": {"title": "S"}},
             "skip_llm": True,
         }
@@ -1249,15 +1255,18 @@ class TestPublishingIntegration:
 
     @pytest.mark.asyncio
     async def test_tick_corrupt_payload_fallback(self):
-        '''Corrupt refined_payload → falls back to normal refine.'''
+        """Corrupt refined_payload → falls back to normal refine."""
         cfg = _make_config()
         buf = AsyncMock()
         buf.mark_refining = AsyncMock()
         buf.mark_published = AsyncMock()
         sink = AsyncMock()
         draft = {
-            "id": "corrupt", "content": "x", "project": "default",
-            "conversation_id": "corrupt", "status": "needs_refinement",
+            "id": "corrupt",
+            "content": "x",
+            "project": "default",
+            "conversation_id": "corrupt",
+            "status": "needs_refinement",
             "refined_payload": None,  # NULL → normal path
             "skip_llm": False,
         }
@@ -1270,7 +1279,7 @@ class TestPublishingIntegration:
 
     @pytest.mark.asyncio
     async def test_fallback_publish_clears_refined_payload(self):
-        '''_fallback_publish clears refined_payload after success.'''
+        """_fallback_publish clears refined_payload after success."""
         cfg = _make_config()
         buf = AsyncMock()
         buf.mark_published = AsyncMock()
@@ -1302,7 +1311,7 @@ class TestQualityMetrics:
         metrics = MagicMock()
         worker = RefinementWorker(cfg, buf, sink, metrics=metrics)
         worker._dedup_search = AsyncMock(return_value=(None, []))
-        worker._call_llm = AsyncMock(return_value={"title":"T","problem":"P","solution":"S"})
+        worker._call_llm = AsyncMock(return_value={"title": "T", "problem": "P", "solution": "S"})
         worker._quality_score = AsyncMock(return_value=85)
         worker._structural_check = MagicMock(return_value=(True, ""))
         await worker._refine_one(_make_draft())
@@ -1328,6 +1337,6 @@ class TestTitleQuality:
         metrics = MagicMock()
         worker = RefinementWorker(cfg, buf, sink, metrics=metrics)
         worker._dedup_search = AsyncMock(return_value=(None, []))
-        worker._call_llm = AsyncMock(return_value={"title":"Good Title","problem":"P","solution":"S"})
+        worker._call_llm = AsyncMock(return_value={"title": "Good Title", "problem": "P", "solution": "S"})
         await worker._refine_one(_make_draft())
         assert metrics.record.call_count > 0, f"Expected record called, got {metrics.record.call_args_list}"

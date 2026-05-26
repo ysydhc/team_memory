@@ -1,19 +1,14 @@
 """Tests for scripts/hooks/convergence_detector.py — convergence signal detection."""
+
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-import pytest
-
 # Ensure scripts/hooks/ is importable
-
-from team_memory.daemon.convergence_detector import ConvergenceDetector
-
+from team_memory.daemon.quality.convergence_detector import ConvergenceDetector
 
 # ---------------------------------------------------------------------------
 # ConvergenceDetector — EXPLICIT_SIGNALS
 # ---------------------------------------------------------------------------
+
 
 class TestExplicitSignals:
     """ConvergenceDetector.EXPLICIT_SIGNALS contains the expected list."""
@@ -41,6 +36,7 @@ class TestExplicitSignals:
 # ---------------------------------------------------------------------------
 # detect_convergence — positive cases
 # ---------------------------------------------------------------------------
+
 
 class TestDetectConvergencePositive:
     """detect_convergence returns True when a signal is present."""
@@ -94,6 +90,7 @@ class TestDetectConvergencePositive:
 # detect_convergence — negative cases
 # ---------------------------------------------------------------------------
 
+
 class TestDetectConvergenceNegative:
     """detect_convergence returns False when no signal is present."""
 
@@ -126,6 +123,7 @@ class TestDetectConvergenceNegative:
 # ---------------------------------------------------------------------------
 # check_tool_pattern
 # ---------------------------------------------------------------------------
+
 
 class TestCheckToolPatternGitCommit:
     """check_tool_pattern returns True when a git commit is present."""
@@ -222,6 +220,7 @@ class TestCheckToolPatternNegative:
 # check_topic_shift
 # ---------------------------------------------------------------------------
 
+
 class TestCheckTopicShift:
     """check_topic_shift detects context switches via file path changes."""
 
@@ -249,6 +248,7 @@ class TestCheckTopicShift:
 # ---------------------------------------------------------------------------
 # detect_convergence — updated signature with keyword-only params
 # ---------------------------------------------------------------------------
+
 
 class TestDetectConvergenceWithToolPattern:
     """detect_convergence delegates to check_tool_pattern."""
@@ -278,19 +278,25 @@ class TestDetectConvergenceWithTopicShift:
 
     def test_topic_shift_detected(self):
         det = ConvergenceDetector()
-        assert det.detect_convergence(
-            "no signal here",
-            current_path="src/new.py",
-            previous_path="src/old.py",
-        ) is True
+        assert (
+            det.detect_convergence(
+                "no signal here",
+                current_path="src/new.py",
+                previous_path="src/old.py",
+            )
+            is True
+        )
 
     def test_same_path_no_shift(self):
         det = ConvergenceDetector()
-        assert det.detect_convergence(
-            "no signal here",
-            current_path="src/a.py",
-            previous_path="src/a.py",
-        ) is False
+        assert (
+            det.detect_convergence(
+                "no signal here",
+                current_path="src/a.py",
+                previous_path="src/a.py",
+            )
+            is False
+        )
 
 
 class TestDetectConvergencePriority:
@@ -298,40 +304,52 @@ class TestDetectConvergencePriority:
 
     def test_explicit_signal_overrides_all(self):
         det = ConvergenceDetector()
-        assert det.detect_convergence(
-            "解决了",
-            recent_tools=[],
-            current_path=None,
-            previous_path=None,
-        ) is True
+        assert (
+            det.detect_convergence(
+                "解决了",
+                recent_tools=[],
+                current_path=None,
+                previous_path=None,
+            )
+            is True
+        )
 
     def test_tool_pattern_after_no_signal(self):
         det = ConvergenceDetector()
         tools = [{"tool": "terminal", "cmd": "git commit -m 'x'"}]
-        assert det.detect_convergence(
-            "no signal",
-            recent_tools=tools,
-            current_path="a.py",
-            previous_path="a.py",
-        ) is True
+        assert (
+            det.detect_convergence(
+                "no signal",
+                recent_tools=tools,
+                current_path="a.py",
+                previous_path="a.py",
+            )
+            is True
+        )
 
     def test_topic_shift_after_no_signal_no_tools(self):
         det = ConvergenceDetector()
-        assert det.detect_convergence(
-            "no signal",
-            recent_tools=[],
-            current_path="a.py",
-            previous_path="b.py",
-        ) is True
+        assert (
+            det.detect_convergence(
+                "no signal",
+                recent_tools=[],
+                current_path="a.py",
+                previous_path="b.py",
+            )
+            is True
+        )
 
     def test_all_false(self):
         det = ConvergenceDetector()
-        assert det.detect_convergence(
-            "no signal",
-            recent_tools=[{"tool": "terminal", "cmd": "ls"}],
-            current_path="a.py",
-            previous_path="a.py",
-        ) is False
+        assert (
+            det.detect_convergence(
+                "no signal",
+                recent_tools=[{"tool": "terminal", "cmd": "ls"}],
+                current_path="a.py",
+                previous_path="a.py",
+            )
+            is False
+        )
 
     def test_backward_compat_positional_text(self):
         """Existing callers using detect_convergence(text) still work."""

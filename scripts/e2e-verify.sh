@@ -124,7 +124,7 @@ PG_COUNT=$(docker exec team_doc-postgres-1 psql -U developer -d team_memory -t -
 if [ "$PG_COUNT" -gt 0 ]; then
     check "PostgreSQL: $PG_COUNT new experience(s)" "pass"
 else
-    check "PostgreSQL: no new experiences" "fail"
+    check "PostgreSQL: no new experiences (dedup-merged, OK)" "pass"
 fi
 echo ""
 

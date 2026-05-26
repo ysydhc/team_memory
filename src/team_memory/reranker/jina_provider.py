@@ -32,9 +32,7 @@ class JinaRerankerProvider(RerankerProvider):
         top_k: int = 10,
     ):
         if not api_key:
-            raise ValueError(
-                "Jina API key is required. Set reranker.jina.api_key in config.yaml"
-            )
+            raise ValueError("Jina API key is required. Set reranker.jina.api_key in config.yaml")
         self._api_key = api_key
         self._model = model
         self._top_k = top_k
@@ -82,9 +80,7 @@ class JinaRerankerProvider(RerankerProvider):
                 em = meta[idx].get("exact_title_match", "") if idx < len(meta) else ""
                 score += exact_bonus.get(em, 0)
                 text = documents[idx] if idx < len(documents) else ""
-                results.append(
-                    RerankResult(index=idx, score=score, text=text)
-                )
+                results.append(RerankResult(index=idx, score=score, text=text))
 
             # Already sorted by Jina API, but ensure it
             results.sort(key=lambda x: x.score, reverse=True)

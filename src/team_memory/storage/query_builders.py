@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import Select, desc, func, or_, select, text
 from sqlalchemy.sql.elements import TextClause
 
@@ -77,9 +79,7 @@ def build_vector_search(
     offset: int = 0,
 ) -> Select:
     """Build vector similarity search statement. Returns SQLAlchemy Select."""
-    similarity_expr = (1 - Experience.embedding.cosine_distance(query_embedding)).label(
-        "similarity"
-    )
+    similarity_expr = (1 - Experience.embedding.cosine_distance(query_embedding)).label("similarity")
 
     stmt = (
         select(Experience, similarity_expr)
@@ -114,7 +114,10 @@ def _build_hybrid_tsquery(tokenized_query: str):
         "Docker PostgreSQL connection"  → Docker & PostgreSQL | connection
         "embedding model configuration" → embedding & model | configuration
     """
-    terms = tokenized_query.split()
+    # Strip tsquery meta-characters to prevent syntax errors
+    sanitized = re.sub(r'[!&|():*\'"\\]', " ", tokenized_query)
+    terms = [t for t in sanitized.split() if t]
+
     if len(terms) <= 2:
         # Short query: keep strict AND
         return func.plainto_tsquery("simple", tokenized_query)
