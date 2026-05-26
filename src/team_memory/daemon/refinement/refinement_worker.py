@@ -369,7 +369,7 @@ class RefinementWorker:
         # Report worker activity for stall detection
         if self._health_check:
             self._health_check.report_worker_activity()
-        """
+
         # Step 1: auto-mark idle active sessions
         await self._mark_idle_sessions()
 
