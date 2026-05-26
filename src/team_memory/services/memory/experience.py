@@ -581,6 +581,109 @@ class ExperienceService:
                 return None
             return exp.to_dict()
 
+    async def list_published(
+        self,
+        project: str | None = None,
+        quality_tier: str | None = None,
+        since: object | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """List published/promoted experiences with optional filters.
+
+        Args:
+            project: Optional project name filter.
+            quality_tier: Optional quality tier filter.
+            since: Optional datetime — only return experiences created after this.
+            limit: Maximum number of results (default 100).
+
+        Returns:
+            List of experience dicts with exp_status in ('published', 'promoted').
+        """
+        from sqlalchemy import select
+
+        from team_memory.storage.models import Experience
+
+        async with self._session() as session:
+            stmt = select(Experience).where(
+                Experience.exp_status.in_(["published", "promoted"]),
+                Experience.is_deleted == False,  # noqa: E712
+            )
+            if project is not None:
+                stmt = stmt.where(Experience.project == project)
+            if quality_tier is not None:
+                stmt = stmt.where(Experience.quality_tier == quality_tier)
+            if since is not None:
+                stmt = stmt.where(Experience.created_at >= since)
+            stmt = stmt.limit(limit)
+            result = await session.execute(stmt)
+            return [exp.to_dict() for exp in result.scalars().all()]
+
+    async def count_published(
+        self,
+        project: str | None = None,
+        since: object | None = None,
+    ) -> int:
+        """Count published/promoted experiences.
+
+        Args:
+            project: Optional project name filter.
+            since: Optional datetime — only count experiences created after this.
+
+        Returns:
+            Integer count of matching published/promoted experiences.
+        """
+        from sqlalchemy import func, select
+
+        from team_memory.storage.models import Experience
+
+        async with self._session() as session:
+            stmt = select(func.count()).select_from(Experience).where(
+                Experience.exp_status.in_(["published", "promoted"]),
+                Experience.is_deleted == False,  # noqa: E712
+            )
+            if project is not None:
+                stmt = stmt.where(Experience.project == project)
+            if since is not None:
+                stmt = stmt.where(Experience.created_at >= since)
+            result = await session.execute(stmt)
+            return result.scalar() or 0
+
+    async def soft_delete_by_id(self, experience_id: str) -> bool:
+        """Soft-delete an experience by string ID.
+
+        Wraps soft_delete() which already accepts a string ID.
+
+        Args:
+            experience_id: String UUID of the experience.
+
+        Returns:
+            True if deleted, False if not found.
+        """
+        return await self.soft_delete(experience_id)
+
+    async def increment_used_count(self, experience_id: str) -> None:
+        """Increment the used_count field for an experience.
+
+        Args:
+            experience_id: String UUID of the experience.
+        """
+        from sqlalchemy import update
+
+        from team_memory.storage.models import Experience
+
+        exp_uuid = uuid.UUID(experience_id)
+        async with self._session() as session:
+            await session.execute(
+                update(Experience)
+                .where(Experience.id == exp_uuid)
+                .values(
+                    used_count=(
+                        Experience.used_count + 1
+                    )
+                )
+            )
+            await session.commit()
+
     async def list_projects(self) -> list[str]:
         """Return distinct project names."""
         async with self._session() as session:
