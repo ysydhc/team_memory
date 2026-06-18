@@ -1,5 +1,3 @@
-import os
-
 filepath = ".venv/lib/python3.13/site-packages/graphiti_core/driver/kuzu/operations/search_ops.py"
 
 with open(filepath, "r") as f:
@@ -15,4 +13,3 @@ if old_str in content:
     print("Patched search_ops.py")
 else:
     print("Already patched or string not found")
-

@@ -226,8 +226,12 @@ async def _check_embedding_health() -> dict:
             else:
                 return {"status": "up", "provider": provider, "note": "health check not implemented"}
             start = time.monotonic()
+            headers: dict[str, str] = {}
+            api_key = cfg.resolved_api_key
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
             async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(f"{base_url}/models")
+                resp = await client.get(f"{base_url}/models", headers=headers)
                 resp.raise_for_status()
             latency_ms = round((time.monotonic() - start) * 1000, 1)
             return {"status": "up", "provider": provider, "latency_ms": latency_ms}

@@ -8,13 +8,11 @@ a subgraph query.
 
 import asyncio
 import logging
-import sys
 import os
+import sys
 
 # Ensure src/ is in PYTHONPATH
-sys.path.insert(
-    0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
-)
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from team_memory.services.graph.graphiti_client import get_graph_client
 
@@ -72,9 +70,7 @@ async def main() -> None:
         for t in tables:
             logger.info("  %s", t)
 
-        nodes, _, _ = await driver.execute_query(
-            "MATCH (n) RETURN label(n) as label, n.name as name LIMIT 20"
-        )
+        nodes, _, _ = await driver.execute_query("MATCH (n) RETURN label(n) as label, n.name as name LIMIT 20")
         logger.info("Total nodes found: %d", len(nodes))
         for node in nodes:
             logger.info("Node: [%s] %s", node.get("label"), node.get("name"))

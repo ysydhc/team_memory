@@ -1,5 +1,3 @@
-import os
-
 filepath = ".venv/lib/python3.13/site-packages/graphiti_core/graph_queries.py"
 
 with open(filepath, "r") as f:
@@ -15,4 +13,3 @@ if old_str in content:
     print("Reverted graph_queries.py")
 else:
     print("Already reverted or string not found")
-

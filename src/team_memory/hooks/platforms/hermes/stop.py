@@ -12,14 +12,14 @@ def main():
         return
     extra = data.get("extra", {}) or {}
     session_id = data.get("session_id", "")
-    response = (data.get("response", "")
-                or data.get("response_text", "")
-                or extra.get("response_text", "")
-                or extra.get("response", "")
-                or "")
-    cwd = (data.get("cwd", "")
-           or data.get("working_directory", "")
-           or "")
+    response = (
+        data.get("response", "")
+        or data.get("response_text", "")
+        or extra.get("response_text", "")
+        or extra.get("response", "")
+        or ""
+    )
+    cwd = data.get("cwd", "") or data.get("working_directory", "") or ""
     if not response:
         print_empty()
         return

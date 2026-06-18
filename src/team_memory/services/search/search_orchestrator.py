@@ -77,24 +77,20 @@ class SearchOrchestrator:
         # Classify query intent
         intent = await self._intent_router.classify(query)
 
-        # Optional: Dual-track graph retrieval if intent suggests logical chains or dependencies
+        # Graph retrieval — always attempt as supplemental signal
         graph_summary = None
-        if intent.intent_type in ("dependency", "evolution", "blast_radius"):
-            try:
-                from team_memory.services.graph.graphiti_client import get_graph_client
+        try:
+            from team_memory.services.graph.graphiti_client import get_graph_client
 
-                graph_client = get_graph_client()
-                subgraph = await graph_client.query_subgraph(
-                    query, max_depth=2, max_nodes=20
-                )
-                graph_summary = subgraph.get("summary")
-                logger.debug(
-                    "Graphiti dual-track retrieval returned summary: %s", graph_summary
-                )
-            except ImportError:
-                logger.debug("Graphiti not installed, skipping graph query.")
-            except Exception as e:
-                logger.warning("Graphiti dual-track retrieval failed: %s", str(e))
+            graph_client = get_graph_client()
+            subgraph = await graph_client.query_subgraph(query, max_depth=2, max_nodes=20)
+            graph_summary = subgraph.get("summary")
+            if graph_summary:
+                logger.debug("Graphiti retrieval returned summary: %s", graph_summary[:100])
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug("Graphiti retrieval skipped: %s", str(e))
 
         async with get_session(self._db_url) as session:
             search_start = time.monotonic()
@@ -197,9 +193,7 @@ class SearchOrchestrator:
                 duration_ms=duration_ms,
             )
             # Apply status-based post-processing to legacy results
-            processed_legacy = self._apply_status_filter(
-                results, include_promoted=include_promoted
-            )
+            processed_legacy = self._apply_status_filter(results, include_promoted=include_promoted)
 
             # If we got a graph summary, inject it as a synthetic top result
             if graph_summary:

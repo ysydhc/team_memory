@@ -12,13 +12,8 @@ def main():
         return
     extra = data.get("extra", {}) or {}
     session_id = data.get("session_id", "")
-    prompt = (data.get("prompt", "")
-              or data.get("user_message", "")
-              or extra.get("user_message", "")
-              or "")
-    cwd = (data.get("cwd", "")
-           or data.get("working_directory", "")
-           or "")
+    prompt = data.get("prompt", "") or data.get("user_message", "") or extra.get("user_message", "") or ""
+    cwd = data.get("cwd", "") or data.get("working_directory", "") or ""
     if not prompt:
         print_empty()
         return

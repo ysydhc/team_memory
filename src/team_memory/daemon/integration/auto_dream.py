@@ -551,10 +551,12 @@ class AutoDreamWorker:
         candidates = await ctx.service.list_published(quality_tier="Bronze")
         pruned = 0
         for exp in candidates:
-            if (exp.get("recall_count", 1) == 0
-                    and not exp.get("is_pinned")
-                    and exp.get("created_at") is not None
-                    and exp["created_at"] < cutoff):
+            if (
+                exp.get("recall_count", 1) == 0
+                and not exp.get("is_pinned")
+                and exp.get("created_at") is not None
+                and exp["created_at"] < cutoff
+            ):
                 await ctx.service.soft_delete_by_id(exp["id"])
                 pruned += 1
         if pruned > 0:

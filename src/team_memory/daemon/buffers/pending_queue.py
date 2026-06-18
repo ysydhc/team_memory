@@ -151,6 +151,7 @@ class PendingQueue:
         completed items.
         """
         import json
+
         self._db.execute(
             "UPDATE pending_ops SET checkpoint_json = ? WHERE id = ?",
             (json.dumps(data), op_id),
@@ -160,8 +161,10 @@ class PendingQueue:
     def load_checkpoint(self, op_id: str) -> dict[str, Any] | None:
         """Read the last saved checkpoint. Returns None if none exists."""
         import json
+
         row = self._db.execute(
-            "SELECT checkpoint_json FROM pending_ops WHERE id = ?", (op_id,),
+            "SELECT checkpoint_json FROM pending_ops WHERE id = ?",
+            (op_id,),
         ).fetchone()
         if row and row[0]:
             return json.loads(row[0])
@@ -195,6 +198,7 @@ class PendingQueue:
             d.pop("payload_json")
             if "checkpoint_json" in d:
                 import json
+
                 raw = d.pop("checkpoint_json")
                 d["checkpoint"] = json.loads(raw) if raw else None
             results.append(d)

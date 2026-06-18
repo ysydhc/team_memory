@@ -1,5 +1,3 @@
-import os
-
 filepath = ".venv/lib/python3.13/site-packages/graphiti_core/models/nodes/node_db_queries.py"
 
 with open(filepath, "r") as f:
@@ -183,4 +181,3 @@ content = content.replace(old_com, new_com)
 with open(filepath, "w") as f:
     f.write(content)
 print("Patched node_db_queries.py")
-

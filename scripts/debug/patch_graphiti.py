@@ -3,14 +3,14 @@ import os
 files_to_patch = [
     ".venv/lib/python3.13/site-packages/graphiti_core/graph_queries.py",
     ".venv/lib/python3.13/site-packages/graphiti_core/driver/kuzu/operations/search_ops.py",
-    ".venv/lib/python3.13/site-packages/graphiti_core/search/search_utils.py"
+    ".venv/lib/python3.13/site-packages/graphiti_core/search/search_utils.py",
 ]
 
 for filepath in files_to_patch:
     if os.path.exists(filepath):
         with open(filepath, "r") as f:
             content = f.read()
-        
+
         if "graph_queries.py" in filepath:
             old_str1 = "'edge_name_and_fact': 'RELATES_TO',"
             new_str1 = "'edge_name_and_fact2': 'RELATES_TO',"
@@ -36,4 +36,3 @@ for filepath in files_to_patch:
         print(f"Patched {filepath}")
     else:
         print(f"File not found: {filepath}")
-

@@ -20,6 +20,7 @@ class OpenAIEmbeddingConfig(BaseModel):
     def resolved_api_key(self) -> str:
         """Resolve API key: env var reference > direct value."""
         import os
+
         if self.api_key_env:
             return os.environ.get(self.api_key_env, "")
         return self.api_key

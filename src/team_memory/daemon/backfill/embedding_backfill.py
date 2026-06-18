@@ -21,9 +21,7 @@ import time
 
 from team_memory.project_resolver import load_dotenv_if_exists
 
-load_dotenv_if_exists(
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-)
+load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 
 async def run_backfill(
@@ -78,9 +76,7 @@ async def run_backfill(
     _chunk_count = 0
 
     while True:
-        rows = await svc.list_experiences_missing_embedding(
-            limit=chunk_size, cursor_id=_cursor_id
-        )
+        rows = await svc.list_experiences_missing_embedding(limit=chunk_size, cursor_id=_cursor_id)
 
         if not rows:
             if _chunk_count == 0:
@@ -141,13 +137,15 @@ async def run_backfill(
         _cursor_id = _last_id
 
         # Save checkpoint after each chunk
-        _save_checkpoint({
-            "last_id": _cursor_id,
-            "type": "experiences",
-            "chunk": _chunk_count,
-            "succeeded": _total_succeeded,
-            "failed": _total_failed,
-        })
+        _save_checkpoint(
+            {
+                "last_id": _cursor_id,
+                "type": "experiences",
+                "chunk": _chunk_count,
+                "succeeded": _total_succeeded,
+                "failed": _total_failed,
+            }
+        )
         elapsed = time.monotonic() - start
         total_str = f"{_total_succeeded}/{_total_failed}"
         print(f"    Chunk done in {elapsed:.1f}s — ok={succeeded}, fail={failed}, total={total_str}")
@@ -163,9 +161,7 @@ async def run_backfill(
     _arch_chunks = 0
 
     while True:
-        rows = await svc.list_archives_missing_embedding(
-            limit=chunk_size, cursor_id=_arch_cursor
-        )
+        rows = await svc.list_archives_missing_embedding(limit=chunk_size, cursor_id=_arch_cursor)
 
         if not rows:
             if _arch_chunks == 0:
@@ -187,11 +183,9 @@ async def run_backfill(
 
         for i, row in enumerate(rows):
             arch_id = row["id"]
-            embed_text = (
-                f"{row.get('title') or ''}\n"
-                f"{row.get('overview') or ''}\n"
-                f"{row.get('solution_doc') or ''}"
-            )[:4000]
+            embed_text = (f"{row.get('title') or ''}\n{row.get('overview') or ''}\n{row.get('solution_doc') or ''}")[
+                :4000
+            ]
             try:
                 embedding = await embedding_provider.encode_single(embed_text)
                 if embedding is None:
@@ -205,10 +199,15 @@ async def run_backfill(
             _last_id = str(arch_id)
 
         _arch_cursor = _last_id
-        _save_checkpoint({
-            "last_id": _arch_cursor, "type": "archives",
-            "chunk": _arch_chunks, "succeeded": _arch_succeeded, "failed": _arch_failed,
-        })
+        _save_checkpoint(
+            {
+                "last_id": _arch_cursor,
+                "type": "archives",
+                "chunk": _arch_chunks,
+                "succeeded": _arch_succeeded,
+                "failed": _arch_failed,
+            }
+        )
         elapsed = time.monotonic() - start
         print(f"    Done {elapsed:.1f}s — ok={_arch_succeeded}, fail={_arch_failed}")
 
@@ -223,9 +222,7 @@ async def run_backfill(
         print("All personal memories have embeddings.")
     else:
         total = len(pm_rows)
-        print(
-            f"Found {total} personal memories without embedding."
-        )
+        print(f"Found {total} personal memories without embedding.")
 
         if not dry_run:
             succeeded = 0
@@ -254,48 +251,44 @@ async def run_backfill(
                 if (i + 1) % 10 == 0 or i + 1 == len(pm_rows):
                     elapsed = time.monotonic() - start
                     rate = (i + 1) / elapsed if elapsed > 0 else 0
-                    print(
-                        f"  Progress: {i + 1}/{len(pm_rows)} ({rate:.1f}/s) — failed: {failed}"
-                    )
+                    print(f"  Progress: {i + 1}/{len(pm_rows)} ({rate:.1f}/s) — failed: {failed}")
 
             elapsed = time.monotonic() - start
-            print(
-                f"Personal memories backfill complete in {elapsed:.1f}s: Succeeded {succeeded}, Failed {failed}"
-            )
+            print(f"Personal memories backfill complete in {elapsed:.1f}s: Succeeded {succeeded}, Failed {failed}")
 
 
 def main() -> None:
 
-    parser = argparse.ArgumentParser(
-        description="Embedding backfill — generate embeddings for missing experiences"
-    )
+    parser = argparse.ArgumentParser(description="Embedding backfill — generate embeddings for missing experiences")
     parser.add_argument("--dry-run", action="store_true", help="Show count only")
+    parser.add_argument("--limit", type=int, default=0, help="Max records (0=all)")
     parser.add_argument(
-        "--limit", type=int, default=0, help="Max records (0=all)"
+        "--chunk-size", type=int, default=50, help="Process N records per chunk. Saves checkpoint after each chunk."
     )
     parser.add_argument(
-        "--chunk-size", type=int, default=50,
-        help="Process N records per chunk. Saves checkpoint after each chunk."
+        "--resume-from",
+        type=str,
+        default=None,
+        help="Resume from experience/archive ID (from checkpoint file or manual)",
     )
     parser.add_argument(
-        "--resume-from", type=str, default=None,
-        help="Resume from experience/archive ID (from checkpoint file or manual)"
-    )
-    parser.add_argument(
-        "--checkpoint", type=str,
+        "--checkpoint",
+        type=str,
         default="/tmp/tm-embedding-backfill-checkpoint.json",
-        help="Checkpoint file path (auto-resume if exists)"
+        help="Checkpoint file path (auto-resume if exists)",
     )
     args = parser.parse_args()
 
     print("Running backfill...")
-    asyncio.run(run_backfill(
-        dry_run=args.dry_run,
-        limit=args.limit,
-        chunk_size=args.chunk_size,
-        resume_from=args.resume_from,
-        checkpoint_path=args.checkpoint,
-    ))
+    asyncio.run(
+        run_backfill(
+            dry_run=args.dry_run,
+            limit=args.limit,
+            chunk_size=args.chunk_size,
+            resume_from=args.resume_from,
+            checkpoint_path=args.checkpoint,
+        )
+    )
     print("Main finished.")
 
 

@@ -94,9 +94,7 @@ def _redact_sensitive(extra: dict) -> dict:
     result = {}
     for k, v in extra.items():
         key_lower = k.lower().replace("-", "_")
-        is_sensitive = key_lower in _SENSITIVE_KEYS or any(
-            s in key_lower for s in ("secret", "token", "password")
-        )
+        is_sensitive = key_lower in _SENSITIVE_KEYS or any(s in key_lower for s in ("secret", "token", "password"))
         result[k] = "***" if is_sensitive else v
     return result
 
@@ -108,12 +106,7 @@ class _JsonFormatter(logging.Formatter):
     """
 
     def format(self, record: logging.LogRecord) -> str:
-        ts = (
-            datetime.fromtimestamp(record.created, tz=timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%S.%f"
-            )[:-3]
-            + "Z"
-        )
+        ts = datetime.fromtimestamp(record.created, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
         log_record: dict = {
             "timestamp": ts,
             "level": record.levelname,
@@ -122,9 +115,7 @@ class _JsonFormatter(logging.Formatter):
         }
         if hasattr(record, "request_id") and record.request_id:
             log_record["request_id"] = record.request_id
-        extra = {
-            k: v for k, v in record.__dict__.items() if k not in _LOG_RECORD_STD_ATTRS
-        }
+        extra = {k: v for k, v in record.__dict__.items() if k not in _LOG_RECORD_STD_ATTRS}
         if extra:
             log_record["extra"] = _redact_sensitive(extra)
         return json.dumps(log_record, ensure_ascii=False)
@@ -145,9 +136,7 @@ class NonBlockingQueueHandler(QueueHandler):
         try:
             self.queue.put(record, block=False)
         except queue.Full:
-            logging.getLogger("team_memory.bootstrap").warning(
-                "io_log queue full, dropping log record"
-            )
+            logging.getLogger("team_memory.bootstrap").warning("io_log queue full, dropping log record")
 
 
 def _configure_logging(settings: Settings) -> QueueListener | None:
@@ -164,15 +153,11 @@ def _configure_logging(settings: Settings) -> QueueListener | None:
     if use_json:
         handler.setFormatter(_JsonFormatter())
     else:
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
-        )
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
     root.addHandler(handler)
 
     log_listener: QueueListener | None = None
-    if getattr(settings, "logging", None) and getattr(
-        settings.logging, "log_file_enabled", False
-    ):
+    if getattr(settings, "logging", None) and getattr(settings.logging, "log_file_enabled", False):
         log_cfg = settings.logging
         log_path = getattr(log_cfg, "log_file_path", "logs/team_memory.log")
         backup_count = getattr(log_cfg, "log_file_backup_count", 5)
@@ -192,12 +177,8 @@ def _configure_logging(settings: Settings) -> QueueListener | None:
         if use_json:
             file_handler.setFormatter(_JsonFormatter())
         else:
-            file_handler.setFormatter(
-                logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
-            )
-        log_listener = QueueListener(
-            log_queue, file_handler, respect_handler_level=True
-        )
+            file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+        log_listener = QueueListener(log_queue, file_handler, respect_handler_level=True)
         log_listener.start()
         root.addHandler(NonBlockingQueueHandler(log_queue))
 
@@ -264,9 +245,7 @@ def _configure_auth(settings: Settings) -> AuthProvider:
     auth = create_auth_provider(settings.auth.type, db_url=db_url)
     if isinstance(auth, ApiKeyAuth):
         if settings.auth.api_key:
-            auth.register_key(
-                (settings.auth.api_key or "").strip(), settings.auth.user, "admin"
-            )
+            auth.register_key((settings.auth.api_key or "").strip(), settings.auth.user, "admin")
         env_key = (os.environ.get("TEAM_MEMORY_API_KEY") or "").strip()
         if env_key:
             auth.register_key(env_key, settings.auth.user, "admin")
@@ -308,9 +287,7 @@ def bootstrap(
 
     rerank_cfg = settings.reranker
     rerank_enabled = rerank_cfg.provider != "none"
-    reranker_provider = (
-        create_reranker(rerank_cfg, settings.llm) if rerank_enabled else None
-    )
+    reranker_provider = create_reranker(rerank_cfg, settings.llm) if rerank_enabled else None
 
     search_pipeline = SearchPipeline(
         embedding_provider=embedding,
@@ -399,9 +376,7 @@ def bootstrap(
                 logger.info("Janitor scheduler started in background")
             except RuntimeError:
                 # No running event loop, scheduler will be started later
-                logger.debug(
-                    "No running event loop, janitor scheduler will start later"
-                )
+                logger.debug("No running event loop, janitor scheduler will start later")
 
     _instance = AppContext(
         settings=settings,
@@ -447,9 +422,7 @@ def reset_context() -> None:
     _instance = None
 
 
-def _register_cache_invalidation(
-    event_bus: EventBus, search_orchestrator: SearchOrchestrator
-):
+def _register_cache_invalidation(event_bus: EventBus, search_orchestrator: SearchOrchestrator):
     async def _on_data_change(payload: dict) -> None:
         await search_orchestrator.invalidate_cache()
         logger.debug("Cache invalidated by event: %s", payload)
@@ -507,13 +480,9 @@ def _register_pattern_extraction(
         await task_runner.enqueue("pattern_extraction", payload, db_url=db_url)
         # Attempt immediate execution (best-effort, like the old create_task)
         try:
-            await task_runner.poll_and_execute(
-                db_url, batch_size=1, exclude_types=["graphiti_ingest"]
-            )
+            await task_runner.poll_and_execute(db_url, batch_size=1, exclude_types=["graphiti_ingest"])
         except Exception:
-            logger.debug(
-                "Immediate task execution failed; will retry later", exc_info=True
-            )
+            logger.debug("Immediate task execution failed; will retry later", exc_info=True)
 
     event_bus.on(Events.ARCHIVE_CREATED, _on_archive_created)
 
@@ -557,9 +526,7 @@ def _register_entity_extraction(
     from team_memory.services.entity.entity_extractor import EntityExtractor
 
     # Use dedicated entity_extraction config if available, else fall back to main LLMConfig
-    if entity_extraction_config is not None and getattr(
-        entity_extraction_config, "enabled", True
-    ):
+    if entity_extraction_config is not None and getattr(entity_extraction_config, "enabled", True):
         ee_cfg = entity_extraction_config
         import os as _os
 

@@ -7,6 +7,7 @@ conversation buffer, convergence detection, refinement, and TMSink calls.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from team_memory.daemon.integration.tm_sink import TMSink
@@ -98,6 +99,36 @@ def _detect_source_pipeline(data: dict) -> str:
     return "unknown"
 
 
+_COMMAND_PREFIXES = (
+    "/memory_archive",
+    "/memory_save",
+    "/memory_feedback",
+    "/brainstorming",
+    "/review",
+    "/init",
+    "/help",
+    "/clear",
+    "/loop",
+    "/simplify",
+    "/security-review",
+)
+
+_TRIVIAL_PATTERNS = re.compile(
+    r"^(ok|好|好的|可以|确定|确认|是的|对|continue|yes|no|不|不是|行|嗯|got it|done|next|下一步)$",
+    re.IGNORECASE,
+)
+
+
+def _is_command_only(prompt: str) -> bool:
+    """Return True if the prompt is a command/confirmation that doesn't need recall."""
+    stripped = prompt.strip()
+    if any(stripped.startswith(prefix) for prefix in _COMMAND_PREFIXES):
+        return True
+    if len(stripped) <= 10 and _TRIVIAL_PATTERNS.match(stripped):
+        return True
+    return False
+
+
 async def process_before_prompt(
     input_data: dict,
     config: DaemonConfig,
@@ -105,6 +136,7 @@ async def process_before_prompt(
     buf: Any = None,
     wiki: Any = None,
     metrics: Any = None,
+    intent_gate: Any = None,
 ) -> dict[str, Any]:
     """Process before-prompt: retrieve memories and store user message.
 
@@ -114,6 +146,7 @@ async def process_before_prompt(
         sink: TMSink for retrieval.
         buf: ConversationBuffer instance (optional, for storing user prompt).
         wiki: LLMWiki instance (optional, for local wiki search).
+        intent_gate: IntentGate instance (optional, for LLM-based intent classification).
 
     Returns:
         Dict with results and project.
@@ -133,25 +166,44 @@ async def process_before_prompt(
     if buf and prompt.strip():
         await buf.add_message(session_id, "user", prompt, project=project or "default")
 
-    # Retrieve memories (existing logic)
-    if not prompt.strip():
+    # Retrieve memories (skip queries that don't benefit from recall)
+    if not prompt.strip() or _is_command_only(prompt):
         return {"results": [], "project": project}
 
-    results = await sink.recall(
-        query=prompt,
-        project=project,
-        max_results=getattr(config, "max_results", 5),
-    )
+    # Intent gate: LLM-based classification to decide retrieval scope
+    from team_memory.daemon.integration.intent_gate import IntentResult
 
-    # Normalize results to list (some sinks return dict with "results" key)
-    if isinstance(results, dict):
-        results = results.get("results", [])
-    if not isinstance(results, list):
-        results = []
+    intent = IntentResult.BOTH  # default: search everything
+    if intent_gate is not None:
+        prev_message = ""
+        if buf and session_id != "unknown":
+            user_messages = await buf.get_user_messages(session_id)
+            if len(user_messages) >= 2:
+                prev_message = user_messages[-2].get("content", "")
+        intent = await intent_gate.classify(prompt, prev_message=prev_message)
+        logger.debug("[INTENT_GATE] prompt=%s → %s", prompt[:60], intent.value)
 
-    # Dual retrieval: also search local wiki
+    if intent == IntentResult.NONE:
+        return {"results": [], "project": project or "", "intent": "none"}
+
+    # Retrieve experiences (skip if intent is wiki-only)
+    results: list[dict] = []
+    if intent in (IntentResult.EXPERIENCE, IntentResult.BOTH):
+        raw_results = await sink.recall(
+            query=prompt,
+            project=project,
+            max_results=getattr(config, "max_results", 5),
+        )
+        if isinstance(raw_results, dict):
+            results = raw_results.get("results", [])
+        elif isinstance(raw_results, list):
+            results = raw_results
+        else:
+            results = []
+
+    # Retrieve wiki (skip if intent is experience-only)
     wiki_results: list[dict] = []
-    if wiki is not None:
+    if intent in (IntentResult.WIKI, IntentResult.BOTH) and wiki is not None:
         try:
             wiki_results = await wiki.search(query=prompt, project=project, limit=3)
         except Exception:
@@ -230,6 +282,7 @@ async def process_before_prompt(
         "persona": persona,
         "persona_context": persona_context,
         "context": context,
+        "intent": intent.value,
     }
 
 
@@ -311,16 +364,25 @@ async def process_after_response(
             )
 
     if converged:
-        # Check session status first — prevent re-trigger on already processed sessions
-        # 检查 session 状态 — 防止对已处理的 session 重复触发
+        # Check session status — handle already-processed sessions
         session = await buf.get_session(session_id)
-        if session and session.get("status") != "active":
-            logger.debug(
-                "[CONVERGE] session=%s already in status=%s, skipping",
-                session_id[:8],
-                session.get("status"),
-            )
-            return {"action": "ok", "convergence": False, "draft_id": session_id}
+        if session and session.get("status") not in ("active", None):
+            if session.get("status") == "published":
+                # Session was published before but conversation continued —
+                # reset to active so new content can produce fresh experiences
+                await buf.mark_session(session_id, "active")
+                logger.info(
+                    "[CONVERGE] session=%s was published, resetting to active for new content",
+                    session_id[:8],
+                )
+            else:
+                # In-flight states (needs_refinement, refining, publishing) — skip
+                logger.debug(
+                    "[CONVERGE] session=%s in status=%s, skipping",
+                    session_id[:8],
+                    session.get("status"),
+                )
+                return {"action": "ok", "convergence": False, "draft_id": session_id}
 
         # Mark session for LLM refinement / 标记会话待精炼
         result = await refiner.mark_for_refinement(session_id)

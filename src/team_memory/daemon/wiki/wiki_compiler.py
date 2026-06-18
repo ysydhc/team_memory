@@ -194,9 +194,7 @@ class WikiCompiler:
 
     def _require_db(self) -> aiosqlite.Connection:
         if self._db is None:
-            raise RuntimeError(
-                "WikiCompiler is not initialized. Use 'async with compiler:'"
-            )
+            raise RuntimeError("WikiCompiler is not initialized. Use 'async with compiler:'")
         return self._db
 
     # ------------------------------------------------------------------
@@ -320,9 +318,7 @@ class WikiCompiler:
                 continue
         return paths
 
-    async def compile_incremental(
-        self, all_experiences: list[dict], pg_url: str | None = None
-    ) -> CompileResult:
+    async def compile_incremental(self, all_experiences: list[dict], pg_url: str | None = None) -> CompileResult:
         """Incremental compile: only process new/changed experiences.
 
         Args:
@@ -373,9 +369,7 @@ class WikiCompiler:
                 full_path = os.path.join(self._wiki_root, wiki_path)
                 if os.path.exists(full_path):
                     os.remove(full_path)
-                await db.execute(
-                    "DELETE FROM wiki_cache WHERE experience_id = ?", (exp_id,)
-                )
+                await db.execute("DELETE FROM wiki_cache WHERE experience_id = ?", (exp_id,))
                 result.deleted += 1
         await db.commit()
 
@@ -391,9 +385,7 @@ class WikiCompiler:
 
         return result
 
-    async def full_rebuild(
-        self, all_experiences: list[dict], pg_url: str | None = None
-    ) -> CompileResult:
+    async def full_rebuild(self, all_experiences: list[dict], pg_url: str | None = None) -> CompileResult:
         """Full rebuild: clear cache and recompile everything.
 
         Args:
@@ -448,9 +440,7 @@ class WikiCompiler:
     async def get_stale(self) -> list[str]:
         """Return experience_ids with status='stale'."""
         db = self._require_db()
-        cursor = await db.execute(
-            "SELECT experience_id FROM wiki_cache WHERE status = 'stale'"
-        )
+        cursor = await db.execute("SELECT experience_id FROM wiki_cache WHERE status = 'stale'")
         rows = await cursor.fetchall()
         return [row["experience_id"] for row in rows]
 
@@ -485,15 +475,11 @@ class WikiCompiler:
         row = await cursor.fetchone()
         total = row["total"] if row else 0
 
-        cursor = await db.execute(
-            "SELECT project, COUNT(*) as cnt FROM wiki_cache GROUP BY project ORDER BY cnt DESC"
-        )
+        cursor = await db.execute("SELECT project, COUNT(*) as cnt FROM wiki_cache GROUP BY project ORDER BY cnt DESC")
         rows = await cursor.fetchall()
         by_project = {row["project"]: row["cnt"] for row in rows}
 
-        cursor = await db.execute(
-            "SELECT status, COUNT(*) as cnt FROM wiki_cache GROUP BY status"
-        )
+        cursor = await db.execute("SELECT status, COUNT(*) as cnt FROM wiki_cache GROUP BY status")
         rows = await cursor.fetchall()
         by_status = {row["status"]: row["cnt"] for row in rows}
 
@@ -615,8 +601,7 @@ class WikiCompiler:
                     import numpy as np
 
                     sim = float(
-                        np.dot(exp_emb, other_emb)
-                        / (np.linalg.norm(exp_emb) * np.linalg.norm(other_emb) + 1e-8)
+                        np.dot(exp_emb, other_emb) / (np.linalg.norm(exp_emb) * np.linalg.norm(other_emb) + 1e-8)
                     )
                     if sim > 0.7:
                         score += sim * 2
@@ -701,9 +686,7 @@ class WikiCompiler:
         """Regenerate index.md from all cached wiki pages."""
         db = self._require_db()
 
-        cursor = await db.execute(
-            "SELECT title, wiki_path, project FROM wiki_cache ORDER BY project, title"
-        )
+        cursor = await db.execute("SELECT title, wiki_path, project FROM wiki_cache ORDER BY project, title")
         rows = await cursor.fetchall()
 
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
@@ -767,9 +750,7 @@ class WikiCompiler:
     async def _get_cache_by_path(self, wiki_path: str) -> dict | None:
         """Return cache record by wiki_path, or None."""
         db = self._require_db()
-        cursor = await db.execute(
-            "SELECT * FROM wiki_cache WHERE wiki_path = ?", (wiki_path,)
-        )
+        cursor = await db.execute("SELECT * FROM wiki_cache WHERE wiki_path = ?", (wiki_path,))
         row = await cursor.fetchone()
         return dict(row) if row else None
 
@@ -840,9 +821,7 @@ class WikiCompiler:
                 # Find wiki_path from cache
                 exp_cache = await self._get_cache_by_experience_id(exp_id)
                 if exp_cache:
-                    r_slug = os.path.splitext(os.path.basename(exp_cache["wiki_path"]))[
-                        0
-                    ]
+                    r_slug = os.path.splitext(os.path.basename(exp_cache["wiki_path"]))[0]
                     r_title = exp_cache.get("title", exp_id[:8])
                     exp_lines.append(f"- [[{r_slug}|{r_title}]]")
                 else:
@@ -880,9 +859,7 @@ experience_count: {len(topic.experience_ids)}
     async def _get_cache_by_experience_id(self, experience_id: str) -> dict | None:
         """Return cache record by experience_id."""
         db = self._require_db()
-        cursor = await db.execute(
-            "SELECT * FROM wiki_cache WHERE experience_id = ?", (experience_id,)
-        )
+        cursor = await db.execute("SELECT * FROM wiki_cache WHERE experience_id = ?", (experience_id,))
         row = await cursor.fetchone()
         return dict(row) if row else None
 
@@ -899,9 +876,7 @@ experience_count: {len(topic.experience_ids)}
         topic_lines = ["\n## 主题聚类\n"]
         for topic in topics:
             slug = self._slugify(topic.name)
-            topic_lines.append(
-                f"- [[topics/{slug}|{topic.name}]] ({len(topic.experience_ids)} 条经验)"
-            )
+            topic_lines.append(f"- [[topics/{slug}|{topic.name}]] ({len(topic.experience_ids)} 条经验)")
 
         content += "\n".join(topic_lines) + "\n"
         async with aiofiles.open(index_path, "w", encoding="utf-8") as f:
@@ -935,9 +910,7 @@ experience_count: {len(topic.experience_ids)}
         except Exception:
             pass
 
-        pairs = await detect_contradictions(
-            self._pg_url, max_pairs=20, llm_config=llm_config
-        )
+        pairs = await detect_contradictions(self._pg_url, max_pairs=20, llm_config=llm_config)
         if not pairs:
             return
 

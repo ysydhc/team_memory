@@ -373,6 +373,68 @@
       text-decoration: line-through;
     }
 
+    .hidden-nodes-section {
+      margin-top: 8px;
+      padding-top: 6px;
+      border-top: 1px solid var(--border);
+    }
+
+    .hidden-nodes-section .hidden-node-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+      margin: 3px 0;
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--fg-muted);
+      font-size: 10px;
+      cursor: pointer;
+    }
+
+    .hidden-nodes-section .hidden-node-item:hover {
+      background: var(--bg-hover, rgba(128, 128, 128, 0.1));
+    }
+
+    .hidden-nodes-section .btn-restore-all {
+      display: block;
+      width: 100%;
+      margin-top: 4px;
+      padding: 3px 6px;
+      font-size: 10px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: transparent;
+      color: var(--fg);
+      cursor: pointer;
+    }
+
+    .hidden-nodes-section .btn-restore-all:hover {
+      background: var(--bg-hover, rgba(128, 128, 128, 0.1));
+    }
+
+    .btn-toggle-edges {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 4px 10px;
+      font-size: 11px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: transparent;
+      color: var(--fg);
+      cursor: pointer;
+    }
+
+    .btn-toggle-edges:hover {
+      background: var(--bg-hover, rgba(128, 128, 128, 0.15));
+    }
+
+    .btn-toggle-edges.is-hidden {
+      opacity: 0.6;
+      border-color: var(--db-color);
+      color: var(--db-color);
+    }
+
     .legend-line {
       width: 24px;
       height: 0;
@@ -936,6 +998,7 @@
             style="border-color:var(--db-color)"></span> 数据库 · db</div>
         <div class="legend-row" data-edge-type="event"><span class="legend-line legend-dotted"
             style="border-color:var(--event-color)"></span> 事件 / 投递 · event</div>
+        <div class="hidden-nodes-section" id="hidden-nodes-legend" style="display:none;"></div>
       </div>
     </section>
     <div class="resizer" id="resizer-right" aria-hidden="true"></div>
@@ -984,13 +1047,7 @@
        * DAG 混合布局：3 列栅格，6 行。列宽取该列在所有行中出现域的最大 boxW。
        * 每行 [左,中,右] 为 domain key 或 null。
        */
-      const DAG_LAYOUT_ROWS = [
-        [null, "entry", null],
-        ["hooks", "web", "auth"],
-        ["daemon", "embedding", "services"],
-        ["config", "reranker", null],
-        ["monitoring", "storage", "external"],
-      ];
+      /** Band rows used by layered layout (defined in layoutDomainsLayered) */
 
       /** domain -> 子组显示顺序 */
       const SUBDOMAIN_ORDER = {
@@ -1026,8 +1083,6 @@
         minDomainCollapsedH: 44,
         minDomainInnerW: 340,
         maxCols: 4,
-        /** DAG 栅格列最小宽度：避免占位过窄时在视觉上像在「大块」中层叠 */
-        dagMinColW: 320,
       };
 
       function domainChrome(domainKey) {
@@ -1056,109 +1111,123 @@
       function M(spec) {
         const d = spec.dependencies || { in: [], out: [] };
         return {
-          inputs: spec.inputs || [],
-          outputs: spec.outputs || [],
+          ...spec,
+          inputs: Array.isArray(spec.inputs) ? spec.inputs : [],
+          outputs: Array.isArray(spec.outputs) ? spec.outputs : [],
           db_tables: spec.db_tables || [],
           cli_make: spec.cli_make || [],
           dependencies: { in: d.in || [], out: d.out || [] },
           tags: spec.tags || [],
           graphExpand: spec.graphExpand || [],
-          ...spec,
         };
       }
       const MODULES = {
         "mcp-server": M({ "id": "mcp-server", "name": "server.py", "path": "src/team_memory/server.py", "domain": "entry", "subgroup": "入口", "layer": "entry", "level": "L3", "band": "entry", "description": "9 tools: memory_save, memory_recall, memory_context, memory_get_archive, memory_archive_upsert, memory_feedback, memory_draft_save, memory_draft_publish, memory_submit_response. Dual-mode: local (direct DB) + remote (HTTP delegation).", "tags": ["MCP", "9 tools"], "dependencies": { "in": [], "out": ["memory-operations", "search-orchestrator"] } }),
         "cli": M({ "id": "cli", "name": "cli.py", "path": "src/team_memory/cli.py", "domain": "entry", "subgroup": "入口", "layer": "entry", "level": "L3", "band": "entry", "description": "21 subcommands: save/recall/context/get-archive/feedback/archive/upload/config/project/setup/queue/metrics", "tags": ["CLI"], "dependencies": { "in": [], "out": ["remote-client"] } }),
-        "bootstrap": M({ "id": "bootstrap", "name": "bootstrap.py", "path": "src/team_memory/bootstrap.py", "domain": "entry", "subgroup": "入口", "layer": "services", "level": "L2", "band": "services", "description": "AppContext。", "graphExpand": ["cfg-settings", "llm-client"], "dependencies": { "in": [], "out": ["web-app", "database", "event-bus"] } }),
+        "bootstrap": M({ "id": "bootstrap", "name": "bootstrap.py", "path": "src/team_memory/bootstrap.py", "domain": "entry", "subgroup": "入口", "layer": "services", "level": "L2", "band": "services", "description": "AppContext。", "graphExpand": ["cfg-settings", "llm-client"], "dependencies": { "in": [], "out": ["database", "event-bus"] } }),
         "client-config": M({ "id": "client-config", "name": "client_config.py", "path": "src/team_memory/client_config.py", "domain": "entry", "subgroup": "入口", "layer": "services", "level": "L3", "band": "services", "description": "客户端 TOML。", "cli_make": ["tm-cli config show"], "dependencies": { "in": [], "out": [] } }),
         "project-resolver": M({ "id": "project-resolver", "name": "project_resolver.py", "path": "src/team_memory/project_resolver.py", "domain": "entry", "subgroup": "入口", "layer": "services", "level": "L3", "band": "services", "description": "项目名推断。", "dependencies": { "in": [], "out": [] } }),
-        "remote-client": M({ "id": "remote-client", "name": "remote_client.py", "path": "src/team_memory/remote_client.py", "domain": "entry", "subgroup": "入口", "layer": "services", "level": "L3", "band": "services", "description": "HTTP 远程客户端。", "tags": ["HTTP"], "dependencies": { "in": ["cli"], "out": ["web-app"] } }),
+        "remote-client": M({ "id": "remote-client", "name": "remote_client.py", "path": "src/team_memory/remote_client.py", "domain": "entry", "subgroup": "入口", "layer": "services", "level": "L3", "band": "services", "description": "HTTP 远程客户端（纯 httpx，无 web 层 import）。", "tags": ["HTTP"], "dependencies": { "in": ["cli"], "out": [] } }),
         "web-app": M({ "id": "web-app", "name": "web/app.py", "path": "src/team_memory/web/app.py", "domain": "web", "subgroup": "核心", "layer": "entry", "level": "L2", "band": "entry", "description": "FastAPI。", "tags": ["Web"], "graphExpand": ["routes-search", "middleware-stack"], "dependencies": { "in": ["bootstrap"], "out": ["routes-search", "routes-experiences", "routes-auth", "routes-archives", "routes-janitor", "routes-entities", "routes-personal-memory", "routes-config", "routes-dedup", "routes-mcp-compat"] } }),
         "middleware-stack": M({ "id": "middleware-stack", "name": "web/middleware.py", "path": "src/team_memory/web/middleware.py", "domain": "web", "subgroup": "核心", "layer": "services", "level": "L3", "band": "services", "description": "全局中间件。", "dependencies": { "in": ["web-app"], "out": [] } }),
         "web-dependencies": M({ "id": "web-dependencies", "name": "dependencies.py", "path": "src/team_memory/web/dependencies.py", "domain": "web", "subgroup": "核心", "layer": "services", "level": "L3", "band": "services", "description": "依赖注入。", "dependencies": { "in": ["web-app"], "out": [] } }),
-        "web-mcp-auth": M({ "id": "web-mcp-auth", "name": "mcp_auth_middleware.py", "path": "src/team_memory/web/mcp_auth_middleware.py", "domain": "web", "subgroup": "核心", "layer": "services", "level": "L3", "band": "services", "tags": ["MCP"], "dependencies": { "in": ["auth-provider"], "out": ["web-app"] } }),
-        "auth-session": M({ "id": "auth-session", "name": "auth_session.py", "path": "src/team_memory/web/auth_session.py", "domain": "web", "subgroup": "核心", "layer": "services", "level": "L3", "band": "services", "dependencies": { "in": ["routes-auth"], "out": ["web-app"] } }),
+        "web-mcp-auth": M({ "id": "web-mcp-auth", "name": "mcp_auth_middleware.py", "path": "src/team_memory/web/mcp_auth_middleware.py", "domain": "web", "subgroup": "核心", "layer": "services", "level": "L3", "band": "services", "tags": ["MCP"], "dependencies": { "in": ["auth-provider"], "out": ["bootstrap"] } }),
+        "auth-session": M({ "id": "auth-session", "name": "auth_session.py", "path": "src/team_memory/web/auth_session.py", "domain": "web", "subgroup": "核心", "layer": "services", "level": "L3", "band": "services", "dependencies": { "in": ["routes-auth"], "out": ["bootstrap"] } }),
         "web-schemas": M({ "id": "web-schemas", "name": "schemas.py", "path": "src/team_memory/web/schemas.py", "domain": "web", "subgroup": "核心", "layer": "services", "level": "L3", "band": "services", "description": "Web Pydantic。", "dependencies": { "in": [], "out": ["routes-experiences"] } }),
         "routes-search": M({ "id": "routes-search", "name": "search.py", "path": "src/team_memory/web/routes/search.py", "domain": "web", "subgroup": "Routes", "layer": "services", "level": "L3", "band": "services", "tags": ["API"], "dependencies": { "in": ["web-app"], "out": ["search-orchestrator"] } }),
         "routes-experiences": M({ "id": "routes-experiences", "name": "experiences.py", "path": "src/team_memory/web/routes/experiences.py", "domain": "web", "subgroup": "Routes", "layer": "services", "level": "L3", "band": "services", "tags": ["API"], "dependencies": { "in": ["web-app"], "out": ["experience-service"] } }),
         "routes-auth": M({ "id": "routes-auth", "name": "auth.py", "path": "src/team_memory/web/routes/auth.py", "domain": "web", "subgroup": "Routes", "layer": "services", "level": "L3", "band": "services", "tags": ["API"], "dependencies": { "in": ["web-app"], "out": ["auth-provider", "auth-session"] } }),
         "routes-archives": M({ "id": "routes-archives", "name": "archives.py", "path": "src/team_memory/web/routes/archives.py", "domain": "web", "subgroup": "Routes", "layer": "services", "level": "L3", "band": "services", "tags": ["API"], "dependencies": { "in": ["web-app"], "out": ["archive-service"] } }),
-        "routes-janitor": M({ "id": "routes-janitor", "name": "janitor.py", "path": "src/team_memory/web/routes/janitor.py", "domain": "web", "subgroup": "Routes", "layer": "services", "level": "L3", "band": "services", "tags": ["API"], "dependencies": { "in": ["web-app"], "out": ["janitor"] } }),
+        "routes-janitor": M({ "id": "routes-janitor", "name": "janitor.py", "path": "src/team_memory/web/routes/janitor.py", "domain": "web", "subgroup": "Routes", "layer": "services", "level": "L3", "band": "services", "tags": ["API"], "dependencies": { "in": ["web-app"], "out": ["experience-service"] } }),
         "routes-entities": M({ "id": "routes-entities", "name": "entities.py", "path": "src/team_memory/web/routes/entities.py", "domain": "web", "subgroup": "Routes", "layer": "services", "level": "L3", "band": "services", "tags": ["API"], "dependencies": { "in": ["web-app"], "out": ["entity-extractor"] } }),
         "routes-personal-memory": M({ "id": "routes-personal-memory", "name": "personal_memory.py", "path": "src/team_memory/web/routes/personal_memory.py", "domain": "web", "subgroup": "Routes", "layer": "services", "level": "L3", "band": "services", "tags": ["API"], "dependencies": { "in": ["web-app"], "out": ["personal-memory-service"] } }),
         "routes-config": M({ "id": "routes-config", "name": "config.py", "path": "src/team_memory/web/routes/config.py", "domain": "web", "subgroup": "Routes", "layer": "services", "level": "L3", "band": "services", "tags": ["API"], "dependencies": { "in": ["web-app"], "out": ["bootstrap"] } }),
         "routes-dedup": M({ "id": "routes-dedup", "name": "dedup.py", "path": "src/team_memory/web/routes/dedup.py", "domain": "web", "subgroup": "Routes", "layer": "services", "level": "L3", "band": "services", "tags": ["API"], "dependencies": { "in": ["web-app"], "out": ["repository"] } }),
         "routes-mcp-compat": M({ "id": "routes-mcp-compat", "name": "mcp_compat.py", "path": "src/team_memory/web/routes/mcp_compat.py", "domain": "web", "subgroup": "Routes", "layer": "services", "level": "L3", "band": "services", "tags": ["API"], "dependencies": { "in": ["web-app"], "out": ["memory-operations"] } }),
-        "hook-claude-session-start": M({ "id": "hook-claude-session-start", "name": "session_start.py", "path": "src/team_memory/hooks/platforms/claude/session_start.py", "domain": "hooks", "subgroup": "Claude", "subhooksPlatform": "Claude", "subhooksLifecycle": "会话开始", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["daemon-pipeline"] } }),
-        "hook-claude-user-prompt-submit": M({ "id": "hook-claude-user-prompt-submit", "name": "user_prompt_submit.py", "path": "src/team_memory/hooks/platforms/claude/user_prompt_submit.py", "domain": "hooks", "subgroup": "Claude", "subhooksPlatform": "Claude", "subhooksLifecycle": "提示词/输入", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["daemon-pipeline"] } }),
-        "hook-claude-post-tool-use": M({ "id": "hook-claude-post-tool-use", "name": "post_tool_use.py", "path": "src/team_memory/hooks/platforms/claude/post_tool_use.py", "domain": "hooks", "subgroup": "Claude", "subhooksPlatform": "Claude", "subhooksLifecycle": "工具/响应后", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["daemon-pipeline"] } }),
-        "hook-claude-stop": M({ "id": "hook-claude-stop", "name": "stop.py", "path": "src/team_memory/hooks/platforms/claude/stop.py", "domain": "hooks", "subgroup": "Claude", "subhooksPlatform": "Claude", "subhooksLifecycle": "会话结束", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["daemon-pipeline"] } }),
-        "hook-cursor-session-start": M({ "id": "hook-cursor-session-start", "name": "session_start.py", "path": "src/team_memory/hooks/platforms/cursor/session_start.py", "domain": "hooks", "subgroup": "Cursor", "subhooksPlatform": "Cursor", "subhooksLifecycle": "会话开始", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["daemon-pipeline"] } }),
-        "hook-cursor-before-prompt": M({ "id": "hook-cursor-before-prompt", "name": "before_prompt.py", "path": "src/team_memory/hooks/platforms/cursor/before_prompt.py", "domain": "hooks", "subgroup": "Cursor", "subhooksPlatform": "Cursor", "subhooksLifecycle": "提示词/输入", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["daemon-pipeline"] } }),
-        "hook-cursor-after-response": M({ "id": "hook-cursor-after-response", "name": "after_response.py", "path": "src/team_memory/hooks/platforms/cursor/after_response.py", "domain": "hooks", "subgroup": "Cursor", "subhooksPlatform": "Cursor", "subhooksLifecycle": "工具/响应后", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["daemon-pipeline"] } }),
-        "hook-cursor-after-mcp": M({ "id": "hook-cursor-after-mcp", "name": "after_mcp.py", "path": "src/team_memory/hooks/platforms/cursor/after_mcp.py", "domain": "hooks", "subgroup": "Cursor", "subhooksPlatform": "Cursor", "subhooksLifecycle": "工具/响应后", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["daemon-pipeline"] } }),
-        "hook-hermes-user-prompt-submit": M({ "id": "hook-hermes-user-prompt-submit", "name": "user_prompt_submit.py", "path": "src/team_memory/hooks/platforms/hermes/user_prompt_submit.py", "domain": "hooks", "subgroup": "Hermes", "subhooksPlatform": "Hermes", "subhooksLifecycle": "提示词/输入", "layer": "entry", "level": "L3", "band": "entry", "description": "Hermes v13+ extra dict 格式；读取 extra.user_message → daemon before_prompt。", "tags": ["Hook"], "dependencies": { "in": [], "out": ["daemon-pipeline"] } }),
-        "hook-hermes-post-tool-call": M({ "id": "hook-hermes-post-tool-call", "name": "post_tool_call.py", "path": "src/team_memory/hooks/platforms/hermes/post_tool_call.py", "domain": "hooks", "subgroup": "Hermes", "subhooksPlatform": "Hermes", "subhooksLifecycle": "工具/响应后", "layer": "entry", "level": "L3", "band": "entry", "description": "matcher=recall|memory_recall；extract_result_ids → mcp_callback 关联。", "tags": ["Hook"], "dependencies": { "in": [], "out": ["daemon-pipeline"] } }),
-        "hook-hermes-stop": M({ "id": "hook-hermes-stop", "name": "stop.py", "path": "src/team_memory/hooks/platforms/hermes/stop.py", "domain": "hooks", "subgroup": "Hermes", "subhooksPlatform": "Hermes", "subhooksLifecycle": "会话结束", "layer": "entry", "level": "L3", "band": "entry", "description": "on_session_end → daemon after_response + session_end。", "tags": ["Hook"], "dependencies": { "in": [], "out": ["daemon-pipeline"] } }),
-        "hook-hermes-pipeline": M({ "id": "hook-hermes-pipeline", "name": "pipeline.py", "path": "src/team_memory/hooks/platforms/hermes/pipeline.py", "domain": "hooks", "subgroup": "Hermes", "subhooksPlatform": "Hermes", "subhooksLifecycle": "完整流水线", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["daemon-pipeline"] } }),
+        "hook-claude-session-start": M({ "id": "hook-claude-session-start", "name": "session_start.py", "path": "src/team_memory/hooks/platforms/claude/session_start.py", "domain": "hooks", "subgroup": "Claude", "subhooksPlatform": "Claude", "subhooksLifecycle": "会话开始", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["hook-core-daemon-http"] } }),
+        "hook-claude-user-prompt-submit": M({ "id": "hook-claude-user-prompt-submit", "name": "user_prompt_submit.py", "path": "src/team_memory/hooks/platforms/claude/user_prompt_submit.py", "domain": "hooks", "subgroup": "Claude", "subhooksPlatform": "Claude", "subhooksLifecycle": "提示词/输入", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["hook-core-daemon-http"] } }),
+        "hook-claude-post-tool-use": M({ "id": "hook-claude-post-tool-use", "name": "post_tool_use.py", "path": "src/team_memory/hooks/platforms/claude/post_tool_use.py", "domain": "hooks", "subgroup": "Claude", "subhooksPlatform": "Claude", "subhooksLifecycle": "工具/响应后", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["hook-core-mcp-callback"] } }),
+        "hook-claude-stop": M({ "id": "hook-claude-stop", "name": "stop.py", "path": "src/team_memory/hooks/platforms/claude/stop.py", "domain": "hooks", "subgroup": "Claude", "subhooksPlatform": "Claude", "subhooksLifecycle": "会话结束", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["hook-core-daemon-http"] } }),
+        "hook-cursor-session-start": M({ "id": "hook-cursor-session-start", "name": "session_start.py", "path": "src/team_memory/hooks/platforms/cursor/session_start.py", "domain": "hooks", "subgroup": "Cursor", "subhooksPlatform": "Cursor", "subhooksLifecycle": "会话开始", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["hook-core-daemon-http"] } }),
+        "hook-cursor-before-prompt": M({ "id": "hook-cursor-before-prompt", "name": "before_prompt.py", "path": "src/team_memory/hooks/platforms/cursor/before_prompt.py", "domain": "hooks", "subgroup": "Cursor", "subhooksPlatform": "Cursor", "subhooksLifecycle": "提示词/输入", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["hook-core-daemon-http"] } }),
+        "hook-cursor-after-response": M({ "id": "hook-cursor-after-response", "name": "after_response.py", "path": "src/team_memory/hooks/platforms/cursor/after_response.py", "domain": "hooks", "subgroup": "Cursor", "subhooksPlatform": "Cursor", "subhooksLifecycle": "工具/响应后", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["hook-core-daemon-http"] } }),
+        "hook-cursor-after-mcp": M({ "id": "hook-cursor-after-mcp", "name": "after_mcp.py", "path": "src/team_memory/hooks/platforms/cursor/after_mcp.py", "domain": "hooks", "subgroup": "Cursor", "subhooksPlatform": "Cursor", "subhooksLifecycle": "工具/响应后", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["hook-core-mcp-callback"] } }),
+        "hook-hermes-user-prompt-submit": M({ "id": "hook-hermes-user-prompt-submit", "name": "user_prompt_submit.py", "path": "src/team_memory/hooks/platforms/hermes/user_prompt_submit.py", "domain": "hooks", "subgroup": "Hermes", "subhooksPlatform": "Hermes", "subhooksLifecycle": "提示词/输入", "layer": "entry", "level": "L3", "band": "entry", "description": "Hermes v13+ extra dict 格式；读取 extra.user_message → daemon before_prompt。", "tags": ["Hook"], "dependencies": { "in": [], "out": ["hook-core-daemon-http"] } }),
+        "hook-hermes-post-tool-call": M({ "id": "hook-hermes-post-tool-call", "name": "post_tool_call.py", "path": "src/team_memory/hooks/platforms/hermes/post_tool_call.py", "domain": "hooks", "subgroup": "Hermes", "subhooksPlatform": "Hermes", "subhooksLifecycle": "工具/响应后", "layer": "entry", "level": "L3", "band": "entry", "description": "matcher=recall|memory_recall；extract_result_ids → mcp_callback 关联。", "tags": ["Hook"], "dependencies": { "in": [], "out": ["hook-core-mcp-callback"] } }),
+        "hook-hermes-stop": M({ "id": "hook-hermes-stop", "name": "stop.py", "path": "src/team_memory/hooks/platforms/hermes/stop.py", "domain": "hooks", "subgroup": "Hermes", "subhooksPlatform": "Hermes", "subhooksLifecycle": "会话结束", "layer": "entry", "level": "L3", "band": "entry", "description": "on_session_end → daemon after_response + session_end。", "tags": ["Hook"], "dependencies": { "in": [], "out": ["hook-core-daemon-http"] } }),
+        "hook-hermes-pipeline": M({ "id": "hook-hermes-pipeline", "name": "pipeline.py", "path": "src/team_memory/hooks/platforms/hermes/pipeline.py", "domain": "hooks", "subgroup": "Hermes", "subhooksPlatform": "Hermes", "subhooksLifecycle": "完整流水线", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["hook-core-daemon-http"] } }),
         "hook-common": M({ "id": "hook-common", "name": "common.py", "path": "src/team_memory/hooks/common.py", "domain": "hooks", "subgroup": "公共", "subhooksPlatform": "公共", "subhooksLifecycle": "公共", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": [] } }),
         "hook-shared": M({ "id": "hook-shared", "name": "shared.py", "path": "src/team_memory/hooks/shared.py", "domain": "hooks", "subgroup": "公共", "subhooksPlatform": "公共", "subhooksLifecycle": "公共", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": [] } }),
-        "hook-git-watcher": M({ "id": "hook-git-watcher", "name": "git_watcher.py", "path": "src/team_memory/hooks/integrations/git_watcher.py", "domain": "hooks", "subgroup": "integrations", "subhooksPlatform": "integrations", "subhooksLifecycle": "公共", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "description": "Obsidian vault 文件变更监听。已改为 HTTP 调 daemon POST /wiki/index，不再直接 import MarkdownIndexer。", "dependencies": { "in": [], "out": ["daemon-app", "hook-markdown-indexer"] } }),
-        "hook-initial-index": M({ "id": "hook-initial-index", "name": "initial_index.py", "path": "src/team_memory/hooks/integrations/initial_index.py", "domain": "hooks", "subgroup": "integrations", "subhooksPlatform": "integrations", "subhooksLifecycle": "公共", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "description": "初始化 wiki 索引。已改为 HTTP 调 daemon POST /wiki/index。", "dependencies": { "in": [], "out": ["daemon-app", "hook-markdown-indexer"] } }),
+        "hook-git-watcher": M({ "id": "hook-git-watcher", "name": "git_watcher.py", "path": "src/team_memory/hooks/integrations/git_watcher.py", "domain": "hooks", "subgroup": "integrations", "subhooksPlatform": "integrations", "subhooksLifecycle": "公共", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "description": "Obsidian vault 文件变更监听。已改为 HTTP 调 daemon POST /wiki/index，不再直接 import MarkdownIndexer。", "dependencies": { "in": [], "out": ["mcp-server", "hook-markdown-indexer"] } }),
+        "hook-initial-index": M({ "id": "hook-initial-index", "name": "initial_index.py", "path": "src/team_memory/hooks/integrations/initial_index.py", "domain": "hooks", "subgroup": "integrations", "subhooksPlatform": "integrations", "subhooksLifecycle": "公共", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "description": "初始化 wiki 索引。已改为 HTTP 调 daemon POST /wiki/index。", "dependencies": { "in": [], "out": ["mcp-server", "hook-markdown-indexer"] } }),
         "hook-markdown-indexer": M({ "id": "hook-markdown-indexer", "name": "markdown_indexer.py", "path": "src/team_memory/hooks/integrations/markdown_indexer.py", "domain": "hooks", "subgroup": "integrations", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Wiki", "Markdown"], "description": "MarkdownIndexer hooks 层副本（无 daemon 依赖）。parse_frontmatter、extract_entities、build_index。git_watcher/initial_index 直接使用。", "dependencies": { "in": ["hook-git-watcher", "hook-initial-index"], "out": [] } }),
-        "hook-retrieval-trigger": M({ "id": "hook-retrieval-trigger", "name": "retrieval_trigger.py", "path": "src/team_memory/hooks/integrations/retrieval_trigger.py", "domain": "hooks", "subgroup": "integrations", "subhooksPlatform": "integrations", "subhooksLifecycle": "公共", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["daemon-pipeline"] } }),
+        "hook-retrieval-trigger": M({ "id": "hook-retrieval-trigger", "name": "retrieval_trigger.py", "path": "src/team_memory/hooks/integrations/retrieval_trigger.py", "domain": "hooks", "subgroup": "integrations", "subhooksPlatform": "integrations", "subhooksLifecycle": "公共", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": [] } }),
         "hook-session-timeout": M({ "id": "hook-session-timeout", "name": "session_timeout.py", "path": "src/team_memory/hooks/session_timeout.py", "domain": "hooks", "subgroup": "公共", "subhooksPlatform": "公共", "subhooksLifecycle": "公共", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "description": "HTTP 超时检测。已从直接调 DraftRefiner/DraftBuffer 改为 HTTP。调 daemon POST /hooks/session_timeout_check 获取超时 session，再调 POST /hooks/session_end 刷新。无 daemon 内部 import。", "dependencies": { "in": [], "out": ["daemon-app"] } }),
-        "hook-weekly-report": M({ "id": "hook-weekly-report", "name": "weekly_report.py", "path": "src/team_memory/hooks/integrations/weekly_report.py", "domain": "hooks", "subgroup": "公共", "subhooksPlatform": "公共", "subhooksLifecycle": "公共", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["daemon-pipeline"] } }),
+        "hook-weekly-report": M({ "id": "hook-weekly-report", "name": "weekly_report.py", "path": "src/team_memory/hooks/integrations/weekly_report.py", "domain": "hooks", "subgroup": "公共", "subhooksPlatform": "公共", "subhooksLifecycle": "公共", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "dependencies": { "in": [], "out": ["mcp-server"] } }),
         "hook-core-daemon-http": M({ "id": "hook-core-daemon-http", "name": "daemon_http.py", "path": "src/team_memory/hooks/core/daemon_http.py", "domain": "hooks", "subgroup": "Core", "subhooksPlatform": "Core", "subhooksLifecycle": "公共", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "description": "DAEMON_URL + post_hook() + fire_and_forget()。", "dependencies": { "in": [], "out": ["daemon-app"] } }),
         "hook-core-output": M({ "id": "hook-core-output", "name": "output.py", "path": "src/team_memory/hooks/core/output.py", "domain": "hooks", "subgroup": "Core", "subhooksPlatform": "Core", "subhooksLifecycle": "公共", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "description": "print_claude_context / print_cursor_action 等输出格式。", "dependencies": { "in": [], "out": [] } }),
         "hook-core-stdin": M({ "id": "hook-core-stdin", "name": "stdin.py", "path": "src/team_memory/hooks/core/stdin.py", "domain": "hooks", "subgroup": "Core", "subhooksPlatform": "Core", "subhooksLifecycle": "公共", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "description": "parse_stdin_json() 输入解析。", "dependencies": { "in": [], "out": [] } }),
-        "hook-core-mcp-callback": M({ "id": "hook-core-mcp-callback", "name": "mcp_callback.py", "path": "src/team_memory/hooks/core/mcp_callback.py", "domain": "hooks", "subgroup": "Core", "subhooksPlatform": "Core", "subhooksLifecycle": "公共", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "description": "recall 检测 + callback 发送。", "dependencies": { "in": [], "out": ["daemon-pipeline"] } }),
+        "hook-core-mcp-callback": M({ "id": "hook-core-mcp-callback", "name": "mcp_callback.py", "path": "src/team_memory/hooks/core/mcp_callback.py", "domain": "hooks", "subgroup": "Core", "subhooksPlatform": "Core", "subhooksLifecycle": "公共", "layer": "entry", "level": "L3", "band": "entry", "tags": ["Hook"], "description": "recall 检测 + callback 发送。", "dependencies": { "in": [], "out": ["hook-core-daemon-http"] } }),
         "daemon-__main__": M({ "id": "daemon-__main__", "name": "__main__.py", "path": "src/team_memory/daemon/__main__.py", "domain": "daemon", "subgroup": "核心运行", "layer": "daemon", "level": "L3", "band": "daemon", "description": "tm-daemon CLI。", "dependencies": { "in": [], "out": ["daemon-app"] } }),
-        "daemon-app": M({ "id": "daemon-app", "name": "app.py", "path": "src/team_memory/daemon/runtime/app.py", "domain": "daemon", "subgroup": "核心运行", "layer": "daemon", "level": "L2", "band": "daemon", "description": "守护进程 HTTP + lifespan 管理。启动时 wait_for_deps() 检查 Docker/PG/LLM/Embedding；Heartbeat 注册 _on_wake_from_sleep() 恢复回调；启动/管理所有 Worker 和后台任务。新增 POST /hooks/session_timeout_check (返回超时 session 列表) 和 POST /wiki/index (代理 wiki_compiler.index_file) 端点。", "graphExpand": ["daemon-draft-buffer", "daemon-refinement-worker", "daemon-metrics"], "dependencies": { "in": [], "out": ["daemon-pipeline", "daemon-watcher", "daemon-health-check", "daemon-pending-queue", "daemon-metrics", "daemon-markdown-indexer", "daemon-reloader", "daemon-payload-capture", "daemon-response-buffer", "daemon-auto-dream", "daemon-wiki-compiler", "daemon-search-log-writer"] } }),
-        "daemon-config": M({ "id": "daemon-config", "name": "config.py", "path": "src/team_memory/daemon/runtime/config.py", "domain": "daemon", "subgroup": "核心运行", "layer": "daemon", "level": "L3", "band": "daemon", "description": "load_config() YAML + ClientConfig 合并；DraftSettings/RefinementSettings/WikiSettings 配置模型。", "dependencies": { "in": ["client-config"], "out": ["daemon-app"] } }),
-        "daemon-pipeline": M({ "id": "daemon-pipeline", "name": "pipeline.py", "path": "src/team_memory/daemon/refinement/pipeline.py", "domain": "daemon", "subgroup": "精炼/管线", "layer": "daemon", "level": "L2", "band": "daemon", "description": "Hook 事件管线。", "graphExpand": ["daemon-draft-refiner", "daemon-convergence"], "dependencies": { "in": ["daemon-app"], "out": ["daemon-conversation-buffer", "daemon-tm-sink", "daemon-draft-buffer", "daemon-draft-refiner", "daemon-convergence", "daemon-refinement-worker", "daemon-personal-memory-extractor"] } }),
+        "daemon-app": M({ "id": "daemon-app", "name": "app.py", "path": "src/team_memory/daemon/runtime/app.py", "domain": "daemon", "subgroup": "核心运行", "layer": "daemon", "level": "L2", "band": "daemon", "description": "守护进程 HTTP + lifespan 管理（629 行）。路由已提取到 daemon/runtime/routes/ 子包。启动时 wait_for_deps() 检查 Docker/PG/LLM/Embedding；Heartbeat 注册 _on_wake_from_sleep() 恢复回调；启动/管理所有 Worker 和后台任务。", "graphExpand": ["daemon-draft-buffer", "daemon-refinement-worker", "daemon-metrics", "daemon-routes-hooks", "daemon-routes-drafts", "daemon-routes-wiki", "daemon-routes-status", "daemon-routes-recall", "daemon-routes-debug"], "dependencies": { "in": [], "out": ["daemon-conversation-buffer", "daemon-draft-buffer", "daemon-tm-sink", "daemon-convergence", "daemon-draft-refiner", "daemon-config", "daemon-pending-queue", "daemon-response-buffer", "daemon-auto-dream", "daemon-watcher", "daemon-health-check", "daemon-metrics", "daemon-wiki-compiler", "daemon-search-log-writer", "daemon-refinement-worker", "daemon-reloader", "daemon-payload-capture", "daemon-markdown-indexer"] } }),
+        "daemon-routes-hooks": M({ "id": "daemon-routes-hooks", "name": "routes/hooks.py", "path": "src/team_memory/daemon/runtime/routes/hooks.py", "domain": "daemon", "subgroup": "核心运行", "layer": "daemon", "level": "L3", "band": "daemon", "description": "6 个 Hook 回调端点: after_response, session_start, before_prompt, session_end, mcp_callback, session_timeout_check。", "tags": ["路由"], "dependencies": { "in": ["daemon-app"], "out": ["daemon-pipeline", "daemon-search-log-writer"] } }),
+        "daemon-routes-drafts": M({ "id": "daemon-routes-drafts", "name": "routes/drafts.py", "path": "src/team_memory/daemon/runtime/routes/drafts.py", "domain": "daemon", "subgroup": "核心运行", "layer": "daemon", "level": "L3", "band": "daemon", "description": "草稿 save/publish 端点。", "tags": ["路由"], "dependencies": { "in": ["daemon-app"], "out": [] } }),
+        "daemon-routes-wiki": M({ "id": "daemon-routes-wiki", "name": "routes/wiki.py", "path": "src/team_memory/daemon/runtime/routes/wiki.py", "domain": "daemon", "subgroup": "核心运行", "layer": "daemon", "level": "L3", "band": "daemon", "description": "Wiki search/index/stats 端点。", "tags": ["路由"], "dependencies": { "in": ["daemon-app"], "out": ["daemon-wiki-compiler", "daemon-llm-wiki"] } }),
+        "daemon-routes-status": M({ "id": "daemon-routes-status", "name": "routes/status.py", "path": "src/team_memory/daemon/runtime/routes/status.py", "domain": "daemon", "subgroup": "核心运行", "layer": "daemon", "level": "L3", "band": "daemon", "description": "状态/监控/指标端点。", "tags": ["路由"], "dependencies": { "in": ["daemon-app"], "out": [] } }),
+        "daemon-routes-recall": M({ "id": "daemon-routes-recall", "name": "routes/recall.py", "path": "src/team_memory/daemon/runtime/routes/recall.py", "domain": "daemon", "subgroup": "核心运行", "layer": "daemon", "level": "L3", "band": "daemon", "description": "Recall 代理端点。", "tags": ["路由"], "dependencies": { "in": ["daemon-app"], "out": [] } }),
+        "daemon-routes-debug": M({ "id": "daemon-routes-debug", "name": "routes/debug.py", "path": "src/team_memory/daemon/runtime/routes/debug.py", "domain": "daemon", "subgroup": "核心运行", "layer": "daemon", "level": "L3", "band": "daemon", "description": "调试端点：alert/test、debug/payloads、debug/contracts。", "tags": ["路由"], "dependencies": { "in": ["daemon-app"], "out": [] } }),
+        "daemon-models": M({ "id": "daemon-models", "name": "models.py", "path": "src/team_memory/daemon/runtime/models.py", "domain": "daemon", "subgroup": "核心运行", "layer": "daemon", "level": "L3", "band": "daemon", "description": "Pydantic 请求模型：HookPayload, DraftSavePayload, DraftPublishPayload 等。", "dependencies": { "in": ["daemon-app"], "out": [] } }),
+        "daemon-config": M({ "id": "daemon-config", "name": "config.py", "path": "src/team_memory/daemon/runtime/config.py", "domain": "daemon", "subgroup": "核心运行", "layer": "daemon", "level": "L3", "band": "daemon", "description": "load_config() YAML + ClientConfig 合并；DraftSettings/RefinementSettings/WikiSettings 配置模型。", "dependencies": { "in": ["daemon-app"], "out": ["client-config"] } }),
+        "daemon-pipeline": M({ "id": "daemon-pipeline", "name": "pipeline.py", "path": "src/team_memory/daemon/refinement/pipeline.py", "domain": "daemon", "subgroup": "精炼/管线", "layer": "daemon", "level": "L2", "band": "daemon", "description": "Hook 事件管线。", "graphExpand": ["daemon-draft-refiner", "daemon-convergence"], "dependencies": { "in": ["daemon-routes-hooks"], "out": ["daemon-conversation-buffer", "daemon-tm-sink", "daemon-draft-buffer", "daemon-draft-refiner", "daemon-convergence", "daemon-refinement-worker", "daemon-personal-memory-extractor"] } }),
         "daemon-reloader": M({ "id": "daemon-reloader", "name": "reloader.py", "path": "src/team_memory/daemon/runtime/reloader.py", "domain": "daemon", "subgroup": "核心运行", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "dependencies": { "in": ["daemon-app"], "out": [] } }),
         "daemon-health-check": M({ "id": "daemon-health-check", "name": "health_check.py", "path": "src/team_memory/daemon/runtime/health_check.py", "domain": "daemon", "subgroup": "核心运行", "layer": "daemon", "level": "L3", "band": "daemon", "description": "进程内健康检查。_check_pending_failures(>=3 失败告警)、_check_worker_stall(>10min 停滞告警)、report_worker_activity() 活跃报告。飞书 webhook 退避告警。", "dependencies": { "in": ["daemon-app"], "out": [] } }),
-        "daemon-conversation-buffer": M({ "id": "daemon-conversation-buffer", "name": "conversation_buffer.py", "path": "src/team_memory/daemon/buffers/conversation_buffer.py", "domain": "daemon", "subgroup": "缓冲/队列", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "db_tables": ["sessions", "messages", "search_correlations"], "dependencies": { "in": ["daemon-pipeline"], "out": [] } }),
-        "daemon-draft-buffer": M({ "id": "daemon-draft-buffer", "name": "draft_buffer.py", "path": "src/team_memory/daemon/buffers/draft_buffer.py", "domain": "daemon", "subgroup": "缓冲/队列", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "db_tables": ["drafts"], "dependencies": { "in": ["daemon-pipeline"], "out": [] } }),
+        "daemon-conversation-buffer": M({ "id": "daemon-conversation-buffer", "name": "conversation_buffer.py", "path": "src/team_memory/daemon/buffers/conversation_buffer.py", "domain": "daemon", "subgroup": "缓冲/队列", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "db_tables": ["sessions", "messages", "search_correlations"], "dependencies": { "in": ["daemon-pipeline", "daemon-app", "daemon-refinement-worker"], "out": [] } }),
+        "daemon-draft-buffer": M({ "id": "daemon-draft-buffer", "name": "draft_buffer.py", "path": "src/team_memory/daemon/buffers/draft_buffer.py", "domain": "daemon", "subgroup": "缓冲/队列", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "db_tables": ["drafts"], "dependencies": { "in": ["daemon-pipeline", "daemon-app"], "out": [] } }),
         "daemon-response-buffer": M({ "id": "daemon-response-buffer", "name": "response_buffer.py", "path": "src/team_memory/daemon/buffers/response_buffer.py", "domain": "daemon", "subgroup": "缓冲/队列", "layer": "daemon", "level": "L3", "band": "daemon", "description": "PG 响应缓冲。fetch_pending(cursor_id) 支持断点续评，mark_evaluated() 逐条写入。", "db_tables": ["response_buffer"], "dependencies": { "in": ["daemon-app"], "out": [] } }),
         "daemon-pending-queue": M({ "id": "daemon-pending-queue", "name": "pending_queue.py", "path": "src/team_memory/daemon/buffers/pending_queue.py", "domain": "daemon", "subgroup": "缓冲/队列", "layer": "daemon", "level": "L3", "band": "daemon", "description": "SQLite 重试队列。checkpoint_json 断点续传: save_checkpoint()/load_checkpoint()；pending_ops 表: id/op_type/payload/retries/next_retry_at/checkpoint_json。", "tags": ["Event"], "db_tables": ["pending_ops", "checkpoint_json"], "dependencies": { "in": ["daemon-app"], "out": [] } }),
         "daemon-payload-capture": M({ "id": "daemon-payload-capture", "name": "payload_capture.py", "path": "src/team_memory/daemon/buffers/payload_capture.py", "domain": "daemon", "subgroup": "缓冲/队列", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "db_tables": ["raw_payloads"], "dependencies": { "in": ["daemon-app"], "out": [] } }),
-        "daemon-draft-refiner": M({ "id": "daemon-draft-refiner", "name": "draft_refiner.py", "path": "src/team_memory/daemon/refinement/draft_refiner.py", "domain": "daemon", "subgroup": "精炼/管线", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "dependencies": { "in": ["daemon-pipeline"], "out": ["llm-client"] } }),
-        "daemon-refinement-worker": M({ "id": "daemon-refinement-worker", "name": "refinement_worker.py", "path": "src/team_memory/daemon/refinement/refinement_worker.py", "domain": "daemon", "subgroup": "精炼/管线", "layer": "daemon", "level": "L3", "band": "daemon", "description": "pause()/resume() 休眠恢复；_llm_api_reachable() LLM 预检；LLMUnavailableError → skip(不消耗重试)；report_worker_activity() 停滞检测。", "dependencies": { "in": ["daemon-pipeline"], "out": [] } }),
+        "daemon-draft-refiner": M({ "id": "daemon-draft-refiner", "name": "draft_refiner.py", "path": "src/team_memory/daemon/refinement/draft_refiner.py", "domain": "daemon", "subgroup": "精炼/管线", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "dependencies": { "in": ["daemon-pipeline", "daemon-app"], "out": ["daemon-tm-sink"] } }),
+        "daemon-refinement-worker": M({ "id": "daemon-refinement-worker", "name": "refinement_worker.py", "path": "src/team_memory/daemon/refinement/refinement_worker.py", "domain": "daemon", "subgroup": "精炼/管线", "layer": "daemon", "level": "L3", "band": "daemon", "description": "pause()/resume() 休眠恢复；_llm_api_reachable() LLM 预检；LLMUnavailableError → skip(不消耗重试)；report_worker_activity() 停滞检测。", "dependencies": { "in": ["daemon-pipeline", "daemon-app"], "out": ["daemon-conversation-buffer", "daemon-tm-sink", "llm-client"] } }),
         "daemon-intent-classifier": M({ "id": "daemon-intent-classifier", "name": "intent_classifier.py", "path": "src/team_memory/daemon/integration/intent_classifier.py", "domain": "daemon", "subgroup": "集成", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "dependencies": { "in": ["daemon-pipeline"], "out": [] } }),
-        "daemon-convergence": M({ "id": "daemon-convergence", "name": "convergence_detector.py", "path": "src/team_memory/daemon/quality/convergence_detector.py", "domain": "daemon", "subgroup": "质量/评估", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "dependencies": { "in": ["daemon-pipeline"], "out": [] } }),
+        "daemon-convergence": M({ "id": "daemon-convergence", "name": "convergence_detector.py", "path": "src/team_memory/daemon/quality/convergence_detector.py", "domain": "daemon", "subgroup": "质量/评估", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "dependencies": { "in": ["daemon-pipeline", "daemon-app"], "out": [] } }),
         "daemon-personal-memory-extractor": M({ "id": "daemon-personal-memory-extractor", "name": "personal_memory_extractor.py", "path": "src/team_memory/daemon/integration/personal_memory_extractor.py", "domain": "daemon", "subgroup": "集成", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "dependencies": { "in": ["daemon-pipeline"], "out": ["personal-memory-service"] } }),
         "daemon-embedding-backfill": M({ "id": "daemon-embedding-backfill", "name": "embedding_backfill.py", "path": "src/team_memory/daemon/backfill/embedding_backfill.py", "domain": "daemon", "subgroup": "补全/批处理", "layer": "daemon", "level": "L3", "band": "daemon", "description": "--chunk-size N(50)/--resume-from/--checkpoint。已迁移到 BatchOpsService，不再直接访问 storage 层。", "tags": ["批处理"], "dependencies": { "in": ["bootstrap"], "out": ["batch-ops-service", "embedding-ollama", "embedding-openai", "embedding-generic", "embedding-local"] } }),
-        "daemon-entity-backfill": M({ "id": "daemon-entity-backfill", "name": "entity_backfill.py", "path": "src/team_memory/daemon/backfill/entity_backfill.py", "domain": "daemon", "subgroup": "补全/批处理", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "tags": ["批处理"], "dependencies": { "in": [], "out": ["entity-extractor", "repository"] } }),
+        "daemon-entity-backfill": M({ "id": "daemon-entity-backfill", "name": "entity_backfill.py", "path": "src/team_memory/daemon/backfill/entity_backfill.py", "domain": "daemon", "subgroup": "补全/批处理", "layer": "daemon", "level": "L3", "band": "daemon", "description": "批量为缺失实体关联的经验补全实体抽取。已迁移到 BatchOpsService。", "tags": ["批处理"], "dependencies": { "in": [], "out": ["entity-extractor", "batch-ops-service"] } }),
         "daemon-entity-dedup": M({ "id": "daemon-entity-dedup", "name": "entity_dedup.py", "path": "src/team_memory/daemon/backfill/entity_dedup.py", "domain": "daemon", "subgroup": "补全/批处理", "layer": "daemon", "level": "L3", "band": "daemon", "description": "实体去重 CLI。已迁移到 BatchOpsService.find_duplicate_entities/merge_entity_group。", "tags": ["批处理"], "dependencies": { "in": [], "out": ["batch-ops-service"] } }),
-        "daemon-solution-backfill": M({ "id": "daemon-solution-backfill", "name": "solution_backfill.py", "path": "src/team_memory/daemon/backfill/solution_backfill.py", "domain": "daemon", "subgroup": "补全/批处理", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "dependencies": { "in": [], "out": ["repository"] } }),
+        "daemon-solution-backfill": M({ "id": "daemon-solution-backfill", "name": "solution_backfill.py", "path": "src/team_memory/daemon/backfill/solution_backfill.py", "domain": "daemon", "subgroup": "补全/批处理", "layer": "daemon", "level": "L3", "band": "daemon", "description": "从仅有问题描述的经验中补全 solution 字段。已迁移到 BatchOpsService。", "dependencies": { "in": [], "out": ["batch-ops-service"] } }),
         "daemon-graph-backfill": M({ "id": "daemon-graph-backfill", "name": "graph_backfill.py", "path": "src/team_memory/daemon/backfill/graph_backfill.py", "domain": "daemon", "subgroup": "补全/批处理", "layer": "daemon", "level": "L3", "band": "daemon", "description": "--chunk-size/--resume-from。已迁移到 BatchOpsService。", "tags": ["批处理"], "dependencies": { "in": [], "out": ["batch-ops-service"] } }),
-        "daemon-faithfulness-batch": M({ "id": "daemon-faithfulness-batch", "name": "faithfulness_batch.py", "path": "src/team_memory/daemon/quality/faithfulness_batch.py", "domain": "daemon", "subgroup": "质量/评估", "layer": "daemon", "level": "L3", "band": "daemon", "description": "批量评估 CLI。--force/--db-url/--checkpoint 参数；checkpoint 文件断点续评；逐条 evaluate()→mark_evaluated()。", "dependencies": { "in": [], "out": ["repository"] } }),
+        "daemon-faithfulness-batch": M({ "id": "daemon-faithfulness-batch", "name": "faithfulness_batch.py", "path": "src/team_memory/daemon/quality/faithfulness_batch.py", "domain": "daemon", "subgroup": "质量/评估", "layer": "daemon", "level": "L3", "band": "daemon", "description": "批量评估 CLI。--force/--db-url/--checkpoint 参数；checkpoint 文件断点续评；逐条 evaluate()→mark_evaluated()。已迁移 load_experience_contexts 到 BatchOpsService。", "dependencies": { "in": [], "out": ["daemon-response-buffer", "daemon-faithfulness-judge", "batch-ops-service"] } }),
         "daemon-faithfulness-judge": M({ "id": "daemon-faithfulness-judge", "name": "faithfulness_judge.py", "path": "src/team_memory/daemon/quality/faithfulness_judge.py", "domain": "daemon", "subgroup": "质量/评估", "layer": "daemon", "level": "L3", "band": "daemon", "description": "LLM 忠实度评估。_is_retryable_error() 瞬断检测；3 次指数退避重试(2s/4s/8s)；JUDGE_PROMPT 模板。", "dependencies": { "in": [], "out": ["llm-client"] } }),
-        "daemon-search-eval": M({ "id": "daemon-search-eval", "name": "search_eval.py", "path": "src/team_memory/daemon/quality/search_eval.py", "domain": "daemon", "subgroup": "质量/评估", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "dependencies": { "in": [], "out": ["search-pipeline"] } }),
-        "daemon-search-log-writer": M({ "id": "daemon-search-log-writer", "name": "search_log_writer.py", "path": "src/team_memory/daemon/observe/search_log_writer.py", "domain": "daemon", "subgroup": "监控/统计", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "dependencies": { "in": [], "out": ["search-log-repo"] } }),
+        "daemon-search-eval": M({ "id": "daemon-search-eval", "name": "search_eval.py", "path": "src/team_memory/daemon/quality/search_eval.py", "domain": "daemon", "subgroup": "质量/评估", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "dependencies": { "in": [], "out": ["memory-operations"] } }),
+        "daemon-search-log-writer": M({ "id": "daemon-search-log-writer", "name": "search_log_writer.py", "path": "src/team_memory/services/search/search_log_writer.py", "domain": "services", "subgroup": "搜索", "layer": "services", "level": "L3", "band": "services", "description": "SearchLogWriter: asyncpg 直写 search_logs 表；fuzzy 匹配、统计、趋势。已从 daemon 迁移到 services 层。", "db_tables": ["search_logs", "experiences"], "dependencies": { "in": ["daemon-app", "daemon-routes-hooks"], "out": ["postgres"] } }),
         "daemon-llm-wiki": M({ "id": "daemon-llm-wiki", "name": "llm_wiki.py", "path": "src/team_memory/daemon/wiki/llm_wiki.py", "domain": "daemon", "subgroup": "Wiki/知识", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "db_tables": ["wiki_entries", "wiki_fts"], "dependencies": { "in": [], "out": ["llm-client"] } }),
         "daemon-wiki-cli": M({ "id": "daemon-wiki-cli", "name": "wiki_cli.py", "path": "src/team_memory/daemon/wiki/wiki_cli.py", "domain": "daemon", "subgroup": "Wiki/知识", "layer": "daemon", "level": "L3", "band": "daemon", "description": "已迁移到 BatchOpsService.load_experience_entity_map() / list_experiences_for_wiki()，不再直接访问 storage 层。", "dependencies": { "in": [], "out": ["batch-ops-service"] } }),
         "daemon-wiki-compiler": M({ "id": "daemon-wiki-compiler", "name": "wiki_compiler.py", "path": "src/team_memory/daemon/wiki/wiki_compiler.py", "domain": "daemon", "subgroup": "Wiki/知识", "layer": "daemon", "level": "L3", "band": "daemon", "description": "已迁移到 BatchOpsService.load_experience_entity_map() / list_experiences_for_wiki()，不再直接访问 storage 层。", "dependencies": { "in": [], "out": ["batch-ops-service"] } }),
-        "daemon-markdown-indexer": M({ "id": "daemon-markdown-indexer", "name": "markdown_indexer.py", "path": "src/team_memory/daemon/wiki/markdown_indexer.py", "domain": "daemon", "subgroup": "Wiki/知识", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "dependencies": { "in": ["daemon-app"], "out": ["repository"] } }),
+        "daemon-markdown-indexer": M({ "id": "daemon-markdown-indexer", "name": "markdown_indexer.py", "path": "src/team_memory/daemon/wiki/markdown_indexer.py", "domain": "daemon", "subgroup": "Wiki/知识", "layer": "daemon", "level": "L3", "band": "daemon", "description": "纯工具类：parse_frontmatter/extract_entities/build_index，无 DB 依赖。", "dependencies": { "in": ["daemon-app"], "out": [] } }),
         "daemon-metrics": M({ "id": "daemon-metrics", "name": "metrics_collector.py", "path": "src/team_memory/daemon/observe/metrics_collector.py", "domain": "daemon", "subgroup": "监控/统计", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "db_tables": ["metrics"], "dependencies": { "in": ["daemon-app"], "out": [] } }),
         "daemon-tm-stats": M({ "id": "daemon-tm-stats", "name": "tm_stats.py", "path": "src/team_memory/daemon/observe/tm_stats.py", "domain": "daemon", "subgroup": "监控/统计", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "dependencies": { "in": [], "out": [] } }),
-        "daemon-tm-sink": M({ "id": "daemon-tm-sink", "name": "tm_sink.py", "path": "src/team_memory/daemon/integration/tm_sink.py", "domain": "daemon", "subgroup": "集成", "layer": "daemon", "level": "L3", "band": "daemon", "description": "POST Web API", "dependencies": { "in": ["daemon-pipeline"], "out": ["web-app"] } }),
+        "daemon-tm-sink": M({ "id": "daemon-tm-sink", "name": "tm_sink.py", "path": "src/team_memory/daemon/integration/tm_sink.py", "domain": "daemon", "subgroup": "集成", "layer": "daemon", "level": "L3", "band": "daemon", "description": "TMSink ABC: LocalTMSink(memory_operations) / RemoteTMSink(httpx)。", "dependencies": { "in": ["daemon-pipeline", "daemon-app", "daemon-watcher", "daemon-auto-dream", "daemon-draft-refiner", "daemon-refinement-worker"], "out": ["memory-operations"] } }),
         "daemon-structured-logger": M({ "id": "daemon-structured-logger", "name": "structured_logger.py", "path": "src/team_memory/daemon/runtime/structured_logger.py", "domain": "daemon", "subgroup": "监控/统计", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "dependencies": { "in": [], "out": [] } }),
-        "daemon-watcher": M({ "id": "daemon-watcher", "name": "watcher.py", "path": "src/team_memory/daemon/observe/watcher.py", "domain": "daemon", "subgroup": "监控/统计", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "dependencies": { "in": ["daemon-app"], "out": ["daemon-pipeline"] } }),
-        "daemon-auto-dream": M({ "id": "daemon-auto-dream", "name": "auto_dream.py", "path": "src/team_memory/daemon/integration/auto_dream.py", "domain": "daemon", "subgroup": "集成", "layer": "daemon", "level": "L3", "band": "daemon", "description": "4 处 DB 调用已迁移 → ExperienceService (list_published/count_published/soft_delete_by_id)。pause()/resume() 休眠恢复。", "dependencies": { "in": ["daemon-app"], "out": ["experience-service"] } }),
+        "daemon-watcher": M({ "id": "daemon-watcher", "name": "watcher.py", "path": "src/team_memory/daemon/observe/watcher.py", "domain": "daemon", "subgroup": "监控/统计", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "dependencies": { "in": ["daemon-app"], "out": ["daemon-tm-sink", "daemon-markdown-indexer"] } }),
+        "daemon-auto-dream": M({ "id": "daemon-auto-dream", "name": "auto_dream.py", "path": "src/team_memory/daemon/integration/auto_dream.py", "domain": "daemon", "subgroup": "集成", "layer": "daemon", "level": "L3", "band": "daemon", "description": "4 处 DB 调用已迁移 → ExperienceService (list_published/count_published/soft_delete_by_id)。pause()/resume() 休眠恢复。", "dependencies": { "in": ["daemon-app"], "out": ["daemon-tm-sink"] } }),
         "daemon-test-llm": M({ "id": "daemon-test-llm", "name": "test_llm.py", "path": "src/team_memory/daemon/integration/test_llm.py", "domain": "daemon", "subgroup": "集成", "layer": "daemon", "level": "L3", "band": "daemon", "description": "", "dependencies": { "in": [], "out": ["llm-client"] } }),
-        "search-orchestrator": M({ "id": "search-orchestrator", "name": "search_orchestrator.py", "path": "src/team_memory/services/search/search_orchestrator.py", "domain": "services", "subgroup": "搜索", "layer": "services", "level": "L2", "band": "services", "description": "搜索编排。", "tags": ["RRF"], "graphExpand": ["search-pipeline", "entity-search", "tokenizer", "reranker-factory", "adaptive-retriever", "graph-client"], "db_tables": ["search_logs"], "dependencies": { "in": ["memory-operations", "routes-search"], "out": ["search-pipeline", "evaluation"] } }),
-        "search-pipeline": M({ "id": "search-pipeline", "name": "search_pipeline.py", "path": "src/team_memory/services/search/search_pipeline.py", "domain": "services", "subgroup": "搜索", "layer": "services", "level": "L3", "band": "services", "description": "RRF + rerank。", "tags": ["RRF", "向量"], "dependencies": { "in": ["search-orchestrator"], "out": ["repository", "cache-service", "reranker-factory", "embedding-ollama"] } }),
+        "search-orchestrator": M({ "id": "search-orchestrator", "name": "search_orchestrator.py", "path": "src/team_memory/services/search/search_orchestrator.py", "domain": "services", "subgroup": "搜索", "layer": "services", "level": "L2", "band": "services", "description": "搜索编排。", "tags": ["RRF"], "graphExpand": ["search-pipeline", "entity-search", "tokenizer", "reranker-factory", "adaptive-retriever", "graph-client"], "db_tables": ["search_logs"], "dependencies": { "in": ["memory-operations", "routes-search"], "out": ["evaluation", "repository", "search-pipeline"] } }),
+        "search-pipeline": M({ "id": "search-pipeline", "name": "search_pipeline.py", "path": "src/team_memory/services/search/search_pipeline.py", "domain": "services", "subgroup": "搜索", "layer": "services", "level": "L3", "band": "services", "description": "检索管线编排（RRF 由 scoring.py 提供，扩展由 query_expansion.py 提供）。", "tags": ["RRF", "向量"], "dependencies": { "in": ["search-orchestrator"], "out": ["repository", "archive-repository", "cache-service", "search-query-expansion", "search-scoring"] } }),
+        "search-scoring": M({ "id": "search-scoring", "name": "scoring.py", "path": "src/team_memory/services/search/scoring.py", "domain": "services", "subgroup": "搜索", "layer": "services", "level": "L3", "band": "services", "description": "RRF 融合、精确匹配/热度/自适应 boost、置信度标注。", "tags": ["算法"], "dependencies": { "in": ["search-pipeline"], "out": [] } }),
+        "search-query-expansion": M({ "id": "search-query-expansion", "name": "query_expansion.py", "path": "src/team_memory/services/search/query_expansion.py", "domain": "services", "subgroup": "搜索", "layer": "services", "level": "L3", "band": "services", "description": "LLM 查询扩展 + 同义词映射。", "tags": ["LLM"], "dependencies": { "in": ["search-pipeline"], "out": ["llm-client"] } }),
         "entity-search": M({ "id": "entity-search", "name": "entity_search.py", "path": "src/team_memory/services/entity/entity_search.py", "domain": "services", "subgroup": "搜索", "layer": "services", "level": "L3", "band": "services", "description": "", "dependencies": { "in": ["search-orchestrator"], "out": ["repository"] } }),
         "tokenizer": M({ "id": "tokenizer", "name": "tokenizer.py", "path": "src/team_memory/utils/tokenizer.py", "domain": "services", "subgroup": "基础", "layer": "services", "level": "L3", "band": "services", "description": "", "dependencies": { "in": ["search-pipeline"], "out": [] } }),
         "cache-service": M({ "id": "cache-service", "name": "cache.py", "path": "src/team_memory/services/search/cache.py", "domain": "services", "subgroup": "搜索", "layer": "services", "level": "L3", "band": "services", "description": "检索缓存。", "dependencies": { "in": ["search-pipeline"], "out": ["redis"] } }),
         "adaptive-retriever": M({ "id": "adaptive-retriever", "name": "adaptive_retriever.py", "path": "src/team_memory/services/search/adaptive_retriever.py", "domain": "services", "subgroup": "搜索", "layer": "services", "level": "L3", "band": "services", "description": "LLM 驱动多跳检索。IntentEvaluator 分类 + critic 循环，最多 3 轮迭代，按 faithfulness 评分筛选结果。", "tags": ["LLM", "自适应"], "dependencies": { "in": ["search-orchestrator"], "out": ["search-pipeline", "llm-client"] } }),
         "graph-client": M({ "id": "graph-client", "name": "graphiti_client.py", "path": "src/team_memory/services/graph/graphiti_client.py", "domain": "services", "subgroup": "搜索", "layer": "services", "level": "L3", "band": "services", "description": "GraphitiClient with KuzuDriver; ingest_to_graph() and query_subgraph() (445 lines).", "tags": ["KuzuDB"], "dependencies": { "in": ["search-orchestrator", "task-runner"], "out": [] } }),
         "evaluation": M({ "id": "evaluation", "name": "evaluation.py", "path": "src/team_memory/services/analysis/evaluation.py", "domain": "services", "subgroup": "搜索", "layer": "services", "level": "L3", "band": "services", "description": "", "db_tables": ["experiences"], "dependencies": { "in": ["search-orchestrator"], "out": ["experience-service"] } }),
-        "memory-operations": M({ "id": "memory-operations", "name": "memory_operations.py", "path": "src/team_memory/services/memory/memory_operations.py", "domain": "services", "subgroup": "经验管理", "layer": "services", "level": "L2", "band": "services", "description": "MCP 共享编排。", "tags": ["MCP"], "dependencies": { "in": ["mcp-server", "routes-mcp-compat"], "out": ["experience-service", "archive-service", "search-orchestrator", "personal-memory-service", "search-log-repo"] } }),
-        "experience-service": M({ "id": "experience-service", "name": "experience.py", "path": "src/team_memory/services/memory/experience.py", "domain": "services", "subgroup": "经验管理", "layer": "services", "level": "L2", "band": "services", "description": "", "graphExpand": ["janitor", "intent-router"], "db_tables": ["experiences", "experience_feedbacks", "experience_entities"], "dependencies": { "in": ["memory-operations", "routes-experiences"], "out": ["repository", "embedding-ollama"] } }),
+        "memory-operations": M({ "id": "memory-operations", "name": "memory_operations.py", "path": "src/team_memory/services/memory/memory_operations.py", "domain": "services", "subgroup": "经验管理", "layer": "services", "level": "L2", "band": "services", "description": "MCP 工具编排门面（facade）；实现分拆到 ops/ 子模块，此处仅 re-export。", "tags": ["MCP"], "graphExpand": ["ops-save", "ops-recall", "ops-archive", "ops-context", "ops-feedback"], "dependencies": { "in": ["mcp-server", "routes-mcp-compat"], "out": ["experience-service", "archive-service", "search-orchestrator", "personal-memory-service", "search-log-repo"] } }),
+        "ops-save": M({ "id": "ops-save", "name": "ops/save.py", "path": "src/team_memory/services/memory/ops/save.py", "domain": "services", "subgroup": "经验管理", "layer": "services", "level": "L3", "band": "services", "description": "op_save, op_draft_save, op_draft_publish, op_experience_update 实现。", "dependencies": { "in": ["memory-operations"], "out": ["experience-service", "llm-client"] } }),
+        "ops-recall": M({ "id": "ops-recall", "name": "ops/recall.py", "path": "src/team_memory/services/memory/ops/recall.py", "domain": "services", "subgroup": "经验管理", "layer": "services", "level": "L3", "band": "services", "description": "op_recall 实现：solve/search/adaptive/suggest 四种模式。", "dependencies": { "in": ["memory-operations"], "out": ["search-orchestrator", "adaptive-retriever", "personal-memory-service"] } }),
+        "ops-archive": M({ "id": "ops-archive", "name": "ops/archive.py", "path": "src/team_memory/services/memory/ops/archive.py", "domain": "services", "subgroup": "经验管理", "layer": "services", "level": "L3", "band": "services", "description": "op_get_archive, op_archive_upsert 实现。", "dependencies": { "in": ["memory-operations"], "out": ["archive-service"] } }),
+        "ops-context": M({ "id": "ops-context", "name": "ops/context.py", "path": "src/team_memory/services/memory/ops/context.py", "domain": "services", "subgroup": "经验管理", "layer": "services", "level": "L3", "band": "services", "description": "op_context 实现：用户画像 + 相关经验。", "dependencies": { "in": ["memory-operations"], "out": ["search-orchestrator", "personal-memory-service"] } }),
+        "ops-feedback": M({ "id": "ops-feedback", "name": "ops/feedback.py", "path": "src/team_memory/services/memory/ops/feedback.py", "domain": "services", "subgroup": "经验管理", "layer": "services", "level": "L3", "band": "services", "description": "op_feedback, op_submit_response 实现。", "dependencies": { "in": ["memory-operations"], "out": ["experience-service"] } }),
+        "experience-service": M({ "id": "experience-service", "name": "experience.py", "path": "src/team_memory/services/memory/experience.py", "domain": "services", "subgroup": "经验管理", "layer": "services", "level": "L2", "band": "services", "description": "", "graphExpand": ["janitor", "intent-router"], "db_tables": ["experiences", "experience_feedbacks", "experience_entities"], "dependencies": { "in": ["memory-operations", "routes-experiences", "ops-save", "ops-feedback", "daemon-auto-dream", "evaluation", "routes-janitor"], "out": ["repository", "embedding-ollama"] } }),
         "personal-memory-service": M({ "id": "personal-memory-service", "name": "personal_memory.py", "path": "src/team_memory/services/memory/personal_memory.py", "domain": "services", "subgroup": "经验管理", "layer": "services", "level": "L3", "band": "services", "description": "", "db_tables": ["personal_memories"], "dependencies": { "in": ["memory-operations"], "out": ["personal-memory-repo"] } }),
         "promotion-compiler": M({ "id": "promotion-compiler", "name": "promotion_compiler.py", "path": "src/team_memory/services/maintenance/promotion_compiler.py", "domain": "services", "subgroup": "维护", "layer": "services", "level": "L3", "band": "services", "description": "", "dependencies": { "in": ["experience-service"], "out": ["repository"] } }),
         "intent-router": M({ "id": "intent-router", "name": "intent_router.py", "path": "src/team_memory/services/infra/intent_router.py", "domain": "services", "subgroup": "基础", "layer": "services", "level": "L3", "band": "services", "description": "ABC + DefaultIntentRouter; classifies queries as factual/exploratory/temporal/causal/general", "dependencies": { "in": ["search-orchestrator"], "out": [] } }),
@@ -1171,7 +1240,7 @@
         "contradiction-detector": M({ "id": "contradiction-detector", "name": "contradiction_detector.py", "path": "src/team_memory/services/analysis/contradiction_detector.py", "domain": "services", "subgroup": "实体/模式", "layer": "services", "level": "L3", "band": "services", "description": "", "dependencies": { "in": ["llm-client"], "out": ["repository"] } }),
         "archive-service": M({ "id": "archive-service", "name": "archive.py", "path": "src/team_memory/services/archive/archive.py", "domain": "services", "subgroup": "归档", "layer": "services", "level": "L3", "band": "services", "description": "", "db_tables": ["archives"], "dependencies": { "in": ["memory-operations", "routes-archives"], "out": ["archive-repository"] } }),
         "janitor": M({ "id": "janitor", "name": "janitor.py", "path": "src/team_memory/services/maintenance/janitor.py", "domain": "services", "subgroup": "维护", "layer": "services", "level": "L3", "band": "services", "description": "", "dependencies": { "in": ["experience-service"], "out": ["repository"] } }),
-        "batch-ops-service": M({ "id": "batch-ops-service", "name": "batch_ops.py", "path": "src/team_memory/services/maintenance/batch_ops.py", "domain": "services", "subgroup": "维护", "layer": "services", "level": "L3", "band": "services", "description": "系统级批量读写服务（无用户认证）。list_experiences_missing_embedding/update_experience_embedding、list_published_experiences、load_experience_entity_map() wiki编译用、list_experiences_for_wiki()。backfill 脚本专用。", "tags": ["批量", "内部"], "inputs": "db_url: str (constructor)", "outputs": "list[dict] / None", "db_tables": ["experiences", "archives", "entities", "personal_memories"], "dependencies": { "in": ["daemon-embedding-backfill", "daemon-graph-backfill", "daemon-entity-dedup", "daemon-wiki-cli", "daemon-wiki-compiler"], "out": ["repository"] } }),
+        "batch-ops-service": M({ "id": "batch-ops-service", "name": "batch_ops.py", "path": "src/team_memory/services/maintenance/batch_ops.py", "domain": "services", "subgroup": "维护", "layer": "services", "level": "L3", "band": "services", "description": "系统级批量读写服务（无用户认证）。构造参数 db_url: str。list_experiences_missing_embedding/update_experience_embedding、list_published_experiences、load_experience_entity_map() wiki编译用、list_experiences_for_wiki()。backfill 脚本专用。", "tags": ["批量", "内部"], "db_tables": ["experiences", "archives", "entities", "personal_memories"], "dependencies": { "in": ["daemon-embedding-backfill", "daemon-graph-backfill", "daemon-entity-dedup", "daemon-wiki-cli", "daemon-wiki-compiler", "daemon-faithfulness-batch", "daemon-solution-backfill", "daemon-entity-backfill"], "out": ["repository"] } }),
         "janitor-scheduler": M({ "id": "janitor-scheduler", "name": "janitor_scheduler.py", "path": "src/team_memory/services/maintenance/janitor_scheduler.py", "domain": "services", "subgroup": "维护", "layer": "services", "level": "L3", "band": "services", "description": "", "tags": ["Event"], "dependencies": { "in": ["janitor"], "out": ["event-bus"] } }),
         "event-bus": M({ "id": "event-bus", "name": "event_bus.py", "path": "src/team_memory/services/infra/event_bus.py", "domain": "services", "subgroup": "维护", "layer": "services", "level": "L3", "band": "services", "description": "", "tags": ["Event"], "dependencies": { "in": ["bootstrap"], "out": [] } }),
         "task-runner": M({ "id": "task-runner", "name": "task_runner.py", "path": "src/team_memory/services/infra/task_runner.py", "domain": "services", "subgroup": "基础", "layer": "services", "level": "L3", "band": "services", "description": "Background async task executor; polls pending_ops from DB for Graphiti ingest", "dependencies": { "in": ["bootstrap"], "out": [] } }),
@@ -1207,10 +1276,10 @@
         "init-admin": M({ "id": "init-admin", "name": "init_admin.py", "path": "src/team_memory/auth/init_admin.py", "domain": "auth", "subgroup": "init_admin", "layer": "services", "level": "L3", "band": "services", "dependencies": { "in": ["bootstrap"], "out": ["postgres"] } }),
         "database": M({ "id": "database", "name": "database.py", "path": "src/team_memory/storage/database.py", "domain": "storage", "subgroup": "database", "layer": "data", "level": "L3", "band": "data", "dependencies": { "in": ["bootstrap"], "out": ["postgres"] } }),
         "models-orm": M({ "id": "models-orm", "name": "models.py", "path": "src/team_memory/storage/models.py", "domain": "storage", "subgroup": "models", "layer": "data", "level": "L3", "band": "data", "description": "SQLAlchemy ORM。", "db_tables": ["experiences", "archives", "search_logs"], "ddlPreview": "experiences / archives / entities …", "dependencies": { "in": [], "out": ["postgres"] } }),
-        "repository": M({ "id": "repository", "name": "repository.py", "path": "src/team_memory/storage/repository.py", "domain": "storage", "subgroup": "repository", "layer": "data", "level": "L3", "band": "data", "dependencies": { "in": ["experience-service", "search-pipeline", "batch-ops-service", "daemon-markdown-indexer"], "out": ["postgres"] } }),
+        "repository": M({ "id": "repository", "name": "repository.py", "path": "src/team_memory/storage/repository.py", "domain": "storage", "subgroup": "repository", "layer": "data", "level": "L3", "band": "data", "dependencies": { "in": ["experience-service", "search-pipeline", "batch-ops-service"], "out": ["postgres"] } }),
         "archive-repository": M({ "id": "archive-repository", "name": "archive_repository.py", "path": "src/team_memory/storage/archive_repository.py", "domain": "storage", "subgroup": "archive_repo", "layer": "data", "level": "L3", "band": "data", "dependencies": { "in": ["archive-service"], "out": ["postgres"] } }),
         "personal-memory-repo": M({ "id": "personal-memory-repo", "name": "personal_memory_repository.py", "path": "src/team_memory/storage/personal_memory_repository.py", "domain": "storage", "subgroup": "personal_memory_repo", "layer": "data", "level": "L3", "band": "data", "db_tables": ["personal_memories"], "dependencies": { "in": ["personal-memory-service"], "out": ["postgres"] } }),
-        "search-log-repo": M({ "id": "search-log-repo", "name": "search_log_repository.py", "path": "src/team_memory/storage/search_log_repository.py", "domain": "storage", "subgroup": "search_log_repo", "layer": "data", "level": "L3", "band": "data", "db_tables": ["search_logs"], "dependencies": { "in": ["memory-operations", "daemon-search-log-writer"], "out": ["postgres"] } }),
+        "search-log-repo": M({ "id": "search-log-repo", "name": "search_log_repository.py", "path": "src/team_memory/storage/search_log_repository.py", "domain": "storage", "subgroup": "search_log_repo", "layer": "data", "level": "L3", "band": "data", "db_tables": ["search_logs"], "dependencies": { "in": ["memory-operations"], "out": ["postgres"] } }),
         "query-builders": M({ "id": "query-builders", "name": "query_builders.py", "path": "src/team_memory/storage/query_builders.py", "domain": "storage", "subgroup": "query_builders", "layer": "data", "level": "L3", "band": "data", "dependencies": { "in": [], "out": [] } }),
         "mon-alerting": M({ "id": "mon-alerting", "name": "alerting.py", "path": "src/team_memory/monitoring/alerting.py", "domain": "monitoring", "subgroup": "runtime", "layer": "services", "level": "L3", "band": "services", "description": "AlertManager: 多通道告警(send_daemon_alert)，飞书 webhook 支持，退避机制(10/20/40min)。", "dependencies": { "in": [], "out": [] } }),
         "mon-heartbeat": M({ "id": "mon-heartbeat", "name": "heartbeat.py", "path": "src/team_memory/monitoring/heartbeat.py", "domain": "monitoring", "subgroup": "runtime", "layer": "services", "level": "L3", "band": "services", "description": "HeartbeatState: monotonic 休眠检测(SLEEP_THRESHOLD=300s)、on_wake() 回调注册、structured JSON 休眠日志(system_sleep_detected/system_wake_recovery_complete)。30s 间隔。", "dependencies": { "in": [], "out": [] } }),
@@ -1258,7 +1327,7 @@
         "daemon-reloader": "轻量 Daemon 自动热重载。",
         "daemon-response-buffer": "PG 响应缓冲：fetch_pending(cursor_id) 支持断点续评，mark_evaluated() 逐条写入。",
         "daemon-search-eval": "搜索质量离线评测：对照已知查询集 Precision 等。",
-        "daemon-search-log-writer": "将检索日志与用量写入 TM 库（search_logs）。",
+        "daemon-search-log-writer": "SearchLogWriter: asyncpg 直写 search_logs；fuzzy 匹配、统计、趋势查询。已从 daemon 迁移到 services 层。",
         "daemon-solution-backfill": "从仅有问题描述的经验中补全 solution 字段。",
         "daemon-structured-logger": "包装标准 logger，输出 JSON 结构化日志。",
         "daemon-test-llm": "连通性自检：LLM/嵌入/Ollama 等依赖探测。",
@@ -1345,6 +1414,22 @@
         "tokenizer": "面向中文等的分词/粗切分，服务 FTS 与检索。",
         "topic-discovery": "轻量主题聚类，用于高层级检索/导航。",
         "web-mcp-auth": "MCP HTTP 端点的 ASGI 认证中间件。",
+        "memory-operations": "MCP 工具编排门面（facade）；实现分拆到 ops/ 子模块，此处仅 re-export。",
+        "ops-save": "保存编排：op_save（直接/LLM提取）、op_draft_save、op_draft_publish、op_experience_update。",
+        "ops-recall": "检索编排：op_recall 四模式（solve/search/adaptive/suggest）+ 搜索日志写入。",
+        "ops-archive": "档案编排：op_get_archive、op_archive_upsert。",
+        "ops-context": "上下文编排：op_context（用户画像 + 相关经验检索）。",
+        "ops-feedback": "反馈编排：op_feedback、op_submit_response（忠实度缓冲）。",
+        "search-scoring": "纯算法模块：RRF 融合(rrf_fuse/rrf_fuse3)、精确匹配/热度/自适应 boost、置信度标注。",
+        "search-query-expansion": "查询扩展：LLM 扩展 + 同义词映射（从 search_pipeline 提取）。",
+        "search-pipeline": "检索管线编排（RRF 由 scoring.py 提供，扩展由 query_expansion.py 提供）。",
+        "daemon-routes-hooks": "Daemon Hook 路由：6 个端点(after_response/session_start/before_prompt/session_end/mcp_callback/timeout_check)。",
+        "daemon-routes-drafts": "Daemon 草稿路由：draft/save、draft/publish 端点。",
+        "daemon-routes-wiki": "Daemon Wiki 路由：wiki/search、wiki/index、wiki/stats 端点。",
+        "daemon-routes-status": "Daemon 状态路由：status、faithfulness、stats、persona 端点。",
+        "daemon-routes-recall": "Daemon Recall 路由：/recall 代理端点。",
+        "daemon-routes-debug": "Daemon 调试路由：alert/test、debug/payloads、debug/contracts 端点。",
+        "daemon-models": "Daemon 请求模型：HookPayload, DraftSavePayload, DraftPublishPayload, MCPCallbackPayload, RecallQuery。",
       };
       for (const [_id, _desc] of Object.entries(MODULE_DESCRIPTION_ZH)) {
         if (MODULES[_id]) MODULES[_id].description = _desc;
@@ -1415,6 +1500,7 @@
         hooksView: localStorage.getItem("tm-arch-hooks-view") || "platform",
         configExpanded: false,
         hiddenEdgeTypes: new Set(),
+        hiddenNodeEdges: new Set(),
         collapsedSubgroups: new Set(),
         domainOffsets: {},
         /** 选中连线用 join key，与 path.data 一致 */
@@ -1801,6 +1887,9 @@
           html += `<div class="detail-section"><span class="ddl-toggle" id="ddl-tog">▸ 查看完整 DDL 摘要</span><div class="ddl-block detail-code" id="ddl-block">${m.ddlPreview}</div></div>`;
         }
 
+        const isHidden = state.hiddenNodeEdges.has(id);
+        html += `<div class="detail-section"><button class="btn-toggle-edges${isHidden ? " is-hidden" : ""}" id="btn-hide-node-edges">${isHidden ? "显示连线" : "隐藏连线"}</button></div>`;
+
         body.innerHTML = html;
         const tog = document.getElementById("ddl-tog");
         const blk = document.getElementById("ddl-block");
@@ -1808,6 +1897,20 @@
           tog.onclick = () => {
             blk.classList.toggle("show");
             tog.textContent = blk.classList.contains("show") ? "▾ 收起 DDL 摘要" : "▸ 查看完整 DDL 摘要";
+          };
+        }
+        const btnHide = document.getElementById("btn-hide-node-edges");
+        if (btnHide) {
+          btnHide.onclick = () => {
+            if (state.hiddenNodeEdges.has(id)) {
+              state.hiddenNodeEdges.delete(id);
+            } else {
+              state.hiddenNodeEdges.add(id);
+            }
+            drawGraph();
+            updateStatus();
+            renderHiddenNodesLegend();
+            renderDetail(id);
           };
         }
       }
@@ -1904,6 +2007,106 @@
           if (e.to === id) d++;
         }
         return d;
+      }
+
+      function topoSortWithinDomain(ids, domainKey) {
+        const idSet = new Set(ids);
+        const inDeg = new Map();
+        const outDeg = new Map();
+        for (const id of ids) { inDeg.set(id, 0); outDeg.set(id, 0); }
+        for (const e of EDGES) {
+          if (idSet.has(e.to) && idSet.has(e.from)) {
+            inDeg.set(e.to, (inDeg.get(e.to) || 0) + 1);
+            outDeg.set(e.from, (outDeg.get(e.from) || 0) + 1);
+          } else if (idSet.has(e.to)) {
+            inDeg.set(e.to, (inDeg.get(e.to) || 0) + 1);
+          }
+        }
+        return [...ids].sort((a, b) => {
+          const di = (inDeg.get(b) || 0) - (inDeg.get(a) || 0);
+          if (di !== 0) return di;
+          const do2 = (outDeg.get(b) || 0) - (outDeg.get(a) || 0);
+          if (do2 !== 0) return do2;
+          return MODULES[a].name.localeCompare(MODULES[b].name, "zh-CN");
+        });
+      }
+
+      function layoutDomainsLayered(domainBoxes, side) {
+        const GL = GRAPH_LAYOUT;
+        const gapX = 32;
+        const gapY = GL.domainGapY;
+
+        const bandRows = [
+          ["entry", "web"],
+          ["hooks", "services", "auth"],
+          ["daemon", "embedding", "reranker"],
+          ["config", "monitoring", "storage"],
+          ["external"],
+        ];
+
+        const boxByKey = new Map(domainBoxes.map(b => [b.domainKey, b]));
+
+        const crossEdgeCount = (d1, d2) => {
+          let count = 0;
+          for (const e of EDGES) {
+            const mF = MODULES[e.from], mT = MODULES[e.to];
+            if (!mF || !mT) continue;
+            if ((mF.domain === d1 && mT.domain === d2) || (mF.domain === d2 && mT.domain === d1)) count++;
+          }
+          return count;
+        };
+
+        const domainCenterX = new Map();
+        let yCursor = GL.topPad;
+        const rowMeta = [];
+
+        for (let ri = 0; ri < bandRows.length; ri++) {
+          const rowDomains = bandRows[ri].filter(dk => boxByKey.has(dk));
+          if (!rowDomains.length) continue;
+
+          if (ri > 0 && domainCenterX.size > 0) {
+            const scored = rowDomains.map(dk => {
+              let totalX = 0, totalWeight = 0;
+              for (const [prevDk, cx] of domainCenterX) {
+                const w = crossEdgeCount(dk, prevDk);
+                if (w > 0) { totalX += cx * w; totalWeight += w; }
+              }
+              return { dk, bary: totalWeight > 0 ? totalX / totalWeight : 0 };
+            });
+            scored.sort((a, b) => a.bary - b.bary);
+            rowDomains.length = 0;
+            for (const s of scored) rowDomains.push(s.dk);
+          }
+
+          let rowW = 0;
+          for (const dk of rowDomains) rowW += boxByKey.get(dk).boxW;
+          rowW += (rowDomains.length - 1) * gapX;
+
+          let xCursor = side;
+          const totalAvail = rowW;
+          const startX = side + Math.max(0, (Math.max(totalAvail, 800) - rowW) / 2);
+          xCursor = startX;
+
+          let rowH = 0;
+          for (const dk of rowDomains) {
+            const b = boxByKey.get(dk);
+            b.x0 = xCursor;
+            b.y0 = yCursor;
+            domainCenterX.set(dk, xCursor + b.boxW / 2);
+            xCursor += b.boxW + gapX;
+            rowH = Math.max(rowH, b.boxH);
+          }
+          rowMeta.push({ rowH, rowW: xCursor - startX - gapX });
+          yCursor += rowH + gapY;
+        }
+
+        let maxRight = 0;
+        for (const b of domainBoxes) {
+          maxRight = Math.max(maxRight, (b.x0 || 0) + b.boxW);
+        }
+        const contentWidth = maxRight + side;
+        const contentHeight = yCursor + GL.topPad;
+        return { contentWidth, contentHeight };
       }
 
       /** 子组展开时：高度数节点优先放网格中间列 */
@@ -2151,7 +2354,7 @@
           let totalBodyH = 0;
 
           for (const sk of sortedSk) {
-            const gidsAlpha = (subMap.get(sk) || []).sort((a, b) => MODULES[a].name.localeCompare(MODULES[b].name, "zh-CN"));
+            const gidsAlpha = topoSortWithinDomain(subMap.get(sk) || [], dKey);
             if (!gidsAlpha.length) continue;
             const ckey = subgroupCollapseKey(dKey, sk);
             if (state.collapsedSubgroups.has(ckey) && canCollapseSubgroup(dKey, sk)) {
@@ -2239,55 +2442,7 @@
           });
         }
 
-        const boxByKey = new Map(domainBoxes.map((b) => [b.domainKey, b]));
-        let col0W = 0;
-        let col1W = 0;
-        let col2W = 0;
-        for (const row of DAG_LAYOUT_ROWS) {
-          for (let ci = 0; ci < 3; ci++) {
-            const dk = row[ci];
-            if (!dk || !boxByKey.has(dk)) continue;
-            const bw = boxByKey.get(dk).boxW;
-            if (ci === 0) col0W = Math.max(col0W, bw);
-            else if (ci === 1) col1W = Math.max(col1W, bw);
-            else col2W = Math.max(col2W, bw);
-          }
-        }
-        const dmc = GL.dagMinColW ?? 280;
-        col0W = Math.max(col0W, dmc);
-        col1W = Math.max(col1W, dmc);
-        col2W = Math.max(col2W, dmc);
-        const colGapX = 28;
-        const innerGridW = col0W + col1W + col2W + 2 * colGapX;
-        const xCol0 = side;
-        const xCol1 = xCol0 + col0W + colGapX;
-        const xCol2 = xCol1 + col1W + colGapX;
-
-        function colCenterX(colIdx, boxW) {
-          if (colIdx === 0) return xCol0 + (col0W - boxW) / 2;
-          if (colIdx === 1) return xCol1 + (col1W - boxW) / 2;
-          return xCol2 + (col2W - boxW) / 2;
-        }
-
-        let yCursor = GL.topPad;
-        for (const row of DAG_LAYOUT_ROWS) {
-          let rowH = 0;
-          const placed = [];
-          for (let ci = 0; ci < 3; ci++) {
-            const dk = row[ci];
-            if (!dk || !boxByKey.has(dk)) continue;
-            const b = boxByKey.get(dk);
-            rowH = Math.max(rowH, b.boxH);
-            placed.push({ dk, b, col: ci });
-          }
-          if (!placed.length) continue;
-          for (const { dk, b, col } of placed) {
-            b.x0 = colCenterX(col, b.boxW);
-            /* 行内顶对齐：避免「居中」后与同行超高域纵向重叠显得像插队到上一行（如 Config 叠在 Daemon 视觉带内） */
-            b.y0 = yCursor;
-          }
-          yCursor += rowH + GL.domainGapY;
-        }
+        const { contentWidth, contentHeight } = layoutDomainsLayered(domainBoxes, side);
 
         for (const b of domainBoxes) {
           const o = state.domainOffsets[b.domainKey];
@@ -2297,8 +2452,6 @@
           }
         }
 
-        const contentHeight = yCursor + GL.topPad;
-        const contentWidth = side * 2 + innerGridW;
         svgEl.setAttribute("viewBox", `0 0 ${contentWidth} ${contentHeight}`);
         svgEl.setAttribute("preserveAspectRatio", "xMidYMin meet");
 
@@ -2409,6 +2562,7 @@
         })).filter((e) => {
           if (e.source === e.target) return false;
           if (state.hiddenEdgeTypes.has(e.type)) return false;
+          if (state.hiddenNodeEdges.has(e.source) || state.hiddenNodeEdges.has(e.target)) return false;
           return nodeById.has(e.source) && nodeById.has(e.target);
         });
         const seenLink = new Set();
@@ -2733,12 +2887,52 @@
         renderSubgroupOverlay(state.subgroupOverlayItems);
       }
 
+      function renderHiddenNodesLegend() {
+        const container = document.getElementById("hidden-nodes-legend");
+        if (!container) return;
+        const hidden = [...state.hiddenNodeEdges];
+        if (!hidden.length) {
+          container.style.display = "none";
+          container.innerHTML = "";
+          return;
+        }
+        container.style.display = "block";
+        let html = `<div style="font-size:10px;color:var(--fg-muted);margin-bottom:4px;">已隐藏连线的节点</div>`;
+        for (const nid of hidden) {
+          const m = MODULES[nid];
+          const label = m ? m.name : nid;
+          html += `<div class="hidden-node-item" data-restore-node="${nid}"><span>${label}</span><span style="color:var(--fg-muted);">✕</span></div>`;
+        }
+        html += `<button class="btn-restore-all" id="btn-restore-all-nodes">一键恢复全部</button>`;
+        container.innerHTML = html;
+        container.querySelectorAll("[data-restore-node]").forEach((el) => {
+          el.onclick = () => {
+            state.hiddenNodeEdges.delete(el.dataset.restoreNode);
+            drawGraph();
+            updateStatus();
+            renderHiddenNodesLegend();
+            if (state.selectedId) renderDetail(state.selectedId);
+          };
+        });
+        const btnAll = document.getElementById("btn-restore-all-nodes");
+        if (btnAll) {
+          btnAll.onclick = () => {
+            state.hiddenNodeEdges.clear();
+            drawGraph();
+            updateStatus();
+            renderHiddenNodesLegend();
+            if (state.selectedId) renderDetail(state.selectedId);
+          };
+        }
+      }
+
       function updateStatus() {
         const tier = [...state.expandedDAG].slice(0, 5).join("、") + (state.expandedDAG.size > 5 ? "…" : "");
         const visible = Object.keys(MODULES).filter((id) => graphIdPassesFilter(id)).length;
         const hiddenTypes = state.hiddenEdgeTypes.size ? ` · 已隐藏: ${[...state.hiddenEdgeTypes].join("/")}` : "";
+        const hiddenNodes = state.hiddenNodeEdges.size ? ` · 隐藏连线节点: ${state.hiddenNodeEdges.size}` : "";
         document.getElementById("status-text").textContent =
-          `模块字典 ${MODULE_COUNT} · 有向边 ${EDGE_COUNT} · 当前图中可见节点${visible} · Hooks:${state.hooksView === "platform" ? "平台" : "生命周期"} · Config:${effectiveConfigExpanded() ? "展开" : "聚合"}${hiddenTypes}`;
+          `模块字典 ${MODULE_COUNT} · 有向边 ${EDGE_COUNT} · 当前图中可见节点${visible} · Hooks:${state.hooksView === "platform" ? "平台" : "生命周期"} · Config:${effectiveConfigExpanded() ? "展开" : "聚合"}${hiddenTypes}${hiddenNodes}`;
       }
 
       function attachGraphInteractions() {
@@ -2773,8 +2967,10 @@
         state.expandedDAG.clear();
         state.configExpanded = false;
         state.hiddenEdgeTypes.clear();
+        state.hiddenNodeEdges.clear();
         state.selectedEdgeKey = null;
         document.querySelectorAll("#edge-legend .legend-row[data-edge-type]").forEach((r) => r.classList.remove("hidden-type"));
+        renderHiddenNodesLegend();
         for (const id of Object.keys(MODULES)) {
           if (MODULES[id].level === "L2") state.expandedDAG.add(id);
         }

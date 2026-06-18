@@ -241,6 +241,28 @@ class MemoryJanitor:
 
             purged_count = len(to_purge)
 
+            # Mark search_logs referencing purged IDs as orphaned
+            purged_ids = [str(exp.id) for exp in to_purge]
+            if purged_ids:
+                from sqlalchemy import text
+
+                id_list = ",".join(f"'{pid}'" for pid in purged_ids)
+                await session.execute(
+                    text(f"""
+                        UPDATE search_logs
+                        SET judgment_source = 'orphaned', updated_at = NOW()
+                        WHERE was_used IS NULL
+                          AND result_ids IS NOT NULL
+                          AND result_ids::text != '[]'
+                          AND result_ids::text != 'null'
+                          AND id IN (
+                            SELECT sl.id FROM search_logs sl,
+                                   json_array_elements(sl.result_ids) elem
+                            WHERE (elem->>'id') IN ({id_list})
+                          )
+                    """),
+                )
+
             # Hard delete the experiences
             for exp in to_purge:
                 await session.delete(exp)

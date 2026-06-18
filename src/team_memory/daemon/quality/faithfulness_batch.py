@@ -31,55 +31,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("faithfulness_batch")
 
 
-async def load_experience_contexts(
-    dsn: str,
-    result_ids: list[dict] | None,
-) -> list[str]:
-    """Load experience titles/solutions for the given result IDs."""
-    if not result_ids:
-        return []
-
-    import asyncpg
-
-    ids = []
-    for r in result_ids:
-        rid = r.get("id", "")
-        if rid:
-            try:
-                import uuid as _uuid
-
-                ids.append(_uuid.UUID(rid))
-            except (ValueError, AttributeError):
-                continue
-
-    if not ids:
-        return []
-
-    conn = await asyncpg.connect(dsn)
-    try:
-        rows = await conn.fetch(
-            """
-            SELECT id, title, description, solution
-            FROM experiences
-            WHERE id = ANY($1)
-            """,
-            ids,
-        )
-        contexts = []
-        for r in rows:
-            parts = []
-            if r["title"]:
-                parts.append(f"标题: {r['title']}")
-            if r["description"]:
-                parts.append(f"问题: {r['description'][:200]}")
-            if r["solution"]:
-                parts.append(f"方案: {r['solution'][:300]}")
-            contexts.append(" | ".join(parts))
-        return contexts
-    finally:
-        await conn.close()
-
-
 async def run_batch(
     *,
     dsn: str,
@@ -91,23 +42,16 @@ async def run_batch(
     force: bool = False,
     checkpoint_path: str = "/tmp/tm-faithfulness-checkpoint.txt",
 ) -> dict:
-    """Run a batch faithfulness evaluation with checkpoint resume."""
-    from pathlib import Path as _Path
+    """Run a batch faithfulness evaluation."""
 
     from team_memory.daemon.buffers.response_buffer import ResponseBuffer
     from team_memory.daemon.quality.faithfulness_judge import FaithfulnessJudge
+    from team_memory.services.maintenance.batch_ops import BatchOpsService
 
-    buffer = ResponseBuffer(dsn=dsn)
-
-    # Load checkpoint (last successfully evaluated entry ID)
-    _cursor: str | None = None
-    try:
-        _ckpt_raw = _Path(checkpoint_path).read_text().strip()
-        if _ckpt_raw:
-            _cursor = _ckpt_raw
-            logger.info("Resuming from checkpoint: %s", _cursor[:8])
-    except FileNotFoundError:
-        pass
+    raw_dsn = dsn.replace("postgresql+asyncpg://", "postgresql://", 1)
+    async_dsn = dsn.replace("postgresql://", "postgresql+asyncpg://", 1) if "+asyncpg" not in dsn else dsn
+    buffer = ResponseBuffer(dsn=raw_dsn)
+    batch_svc = BatchOpsService(db_url=async_dsn)
 
     try:
         # Check if we should run
@@ -122,8 +66,8 @@ async def run_batch(
             )
             return {"skipped": True, "pending": pending}
 
-        # Fetch entries to evaluate (with cursor for checkpoint resume)
-        entries = await buffer.fetch_pending(limit=batch_size, cursor_id=_cursor)
+        # Fetch unevaluated entries (ordered by created_at ASC)
+        entries = await buffer.fetch_pending(limit=batch_size)
         if not entries:
             logger.info("No entries to evaluate.")
             return {"skipped": False, "evaluated": 0}
@@ -144,8 +88,26 @@ async def run_batch(
             response = entry["agent_response"]
             result_ids = entry["result_ids"]
 
+            # Skip entries with no retrieval results — nothing to evaluate usage against
+            if not result_ids:
+                if not dry_run:
+                    await buffer.mark_evaluated(entry_id, faithfulness_score=0.0, judge_reasoning="skipped: no results")
+                logger.info("  [%s] skipped (no result_ids) query=%s", entry_id[:8], query[:50])
+                results.append({"id": entry_id, "query": query[:100], "score": 0.0, "supported": 0, "total": 0})
+                continue
+
             # Load experience context
-            contexts = await load_experience_contexts(dsn, result_ids)
+            contexts = await batch_svc.load_experience_contexts(result_ids)
+
+            # Skip if contexts resolved to empty (all result_ids invalid/deleted)
+            if not contexts:
+                if not dry_run:
+                    await buffer.mark_evaluated(
+                        entry_id, faithfulness_score=0.0, judge_reasoning="skipped: no valid contexts"
+                    )
+                logger.info("  [%s] skipped (empty contexts) query=%s", entry_id[:8], query[:50])
+                results.append({"id": entry_id, "query": query[:100], "score": 0.0, "supported": 0, "total": 0})
+                continue
 
             # Evaluate
             eval_result = await judge.evaluate(
@@ -172,9 +134,6 @@ async def run_batch(
                     faithfulness_score=score,
                     judge_reasoning=reasoning,
                 )
-                # Save checkpoint: write last evaluated entry ID
-                _Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
-                _Path(checkpoint_path).write_text(entry_id)
                 await buffer.sync_to_search_log(
                     entry_id,
                     faithfulness_score=score,
@@ -306,9 +265,10 @@ def main():
     parser.add_argument("--show", type=int, default=0, help="Show the N most recent buffer entries with scores")
     parser.add_argument("--db-url", default=None, help="Database URL")
     parser.add_argument(
-        "--checkpoint", type=str,
+        "--checkpoint",
+        type=str,
         default="/tmp/tm-faithfulness-checkpoint.txt",
-        help="Checkpoint file (stores last evaluated entry ID)"
+        help="Checkpoint file (stores last evaluated entry ID)",
     )
     args = parser.parse_args()
 

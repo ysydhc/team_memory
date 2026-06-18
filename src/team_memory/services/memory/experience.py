@@ -12,6 +12,8 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
+from sqlalchemy import select
+
 from team_memory import io_logger
 from team_memory.auth.provider import AuthProvider, User
 from team_memory.embedding.base import EmbeddingProvider
@@ -25,9 +27,7 @@ logger = logging.getLogger("team_memory.service")
 def _validate_source_status(source: str, exp_status: str) -> None:
     """Validate that draft status is only allowed for source='pipeline' or 'obsidian'."""
     if exp_status == "draft" and source not in ("pipeline", "obsidian"):
-        raise ValueError(
-            f"exp_status='draft' requires source='pipeline' or 'obsidian', got source='{source}'"
-        )
+        raise ValueError(f"exp_status='draft' requires source='pipeline' or 'obsidian', got source='{source}'")
 
 
 class ExperienceService:
@@ -98,9 +98,7 @@ class ExperienceService:
                 c_sol = (c.solution or "")[: self._CHILD_EMBED_TRUNCATE]
             else:
                 c_title = c.get("title", "")
-                c_desc = (c.get("description") or c.get("problem") or "")[
-                    : self._CHILD_EMBED_TRUNCATE
-                ]
+                c_desc = (c.get("description") or c.get("problem") or "")[: self._CHILD_EMBED_TRUNCATE]
                 c_sol = (c.get("solution") or "")[: self._CHILD_EMBED_TRUNCATE]
             text += f"\n{c_title}\n{c_desc}\n{c_sol}"
         return text
@@ -161,9 +159,7 @@ class ExperienceService:
                     embedding = await self._embedding.encode_single(embed_text)
                     break
                 except Exception as e:
-                    logger.warning(
-                        "Failed to generate embedding (attempt %d): %s", _attempt + 1, e
-                    )
+                    logger.warning("Failed to generate embedding (attempt %d): %s", _attempt + 1, e)
                     if _attempt == 0:
                         await _asyncio.sleep(1.0)
 
@@ -269,9 +265,7 @@ class ExperienceService:
                             tags=parent_exp.tags,
                             children=parent_exp.children,
                         )
-                        parent_embedding = await self._embedding.encode_single(
-                            parent_embed_text
-                        )
+                        parent_embedding = await self._embedding.encode_single(parent_embed_text)
                         await repo.update(parent_id, embedding=parent_embedding)
                 except Exception:
                     logger.warning("Failed to re-embed group parent %s", parent_id)
@@ -317,9 +311,7 @@ class ExperienceService:
                 updates["solution"] = kwargs["solution"]
                 need_reembed = True
             elif solution_addendum:
-                updates["solution"] = (
-                    f"{experience.solution or ''}\n\n---\n\n{solution_addendum}"
-                )
+                updates["solution"] = f"{experience.solution or ''}\n\n---\n\n{solution_addendum}"
                 need_reembed = True
 
             if "tags" in kwargs:
@@ -378,13 +370,9 @@ class ExperienceService:
                     )
 
                 # Update archive status if exp_status or visibility changed
-                if self._archive_service and (
-                    "exp_status" in updates or "visibility" in updates
-                ):
+                if self._archive_service and ("exp_status" in updates or "visibility" in updates):
                     try:
-                        await self._archive_service.update_archive_status_for_experience(
-                            exp_uuid
-                        )
+                        await self._archive_service.update_archive_status_for_experience(exp_uuid)
                     except Exception:
                         logger.warning("Failed to update archive status", exc_info=True)
 
@@ -403,9 +391,7 @@ class ExperienceService:
         proj_norm = ExperienceRepository._project_value(project)
         async with self._session() as session:
             repo = ExperienceRepository(session)
-            pairs = await repo.find_duplicates(
-                threshold=thr, limit=lim, project=project
-            )
+            pairs = await repo.find_duplicates(threshold=thr, limit=lim, project=project)
         return {
             "pairs": pairs,
             "threshold": thr,
@@ -599,8 +585,6 @@ class ExperienceService:
         Returns:
             List of experience dicts with exp_status in ('published', 'promoted').
         """
-        from sqlalchemy import select
-
         from team_memory.storage.models import Experience
 
         async with self._session() as session:
@@ -632,14 +616,18 @@ class ExperienceService:
         Returns:
             Integer count of matching published/promoted experiences.
         """
-        from sqlalchemy import func, select
+        from sqlalchemy import func
 
         from team_memory.storage.models import Experience
 
         async with self._session() as session:
-            stmt = select(func.count()).select_from(Experience).where(
-                Experience.exp_status.in_(["published", "promoted"]),
-                Experience.is_deleted == False,  # noqa: E712
+            stmt = (
+                select(func.count())
+                .select_from(Experience)
+                .where(
+                    Experience.exp_status.in_(["published", "promoted"]),
+                    Experience.is_deleted == False,  # noqa: E712
+                )
             )
             if project is not None:
                 stmt = stmt.where(Experience.project == project)
@@ -674,13 +662,7 @@ class ExperienceService:
         exp_uuid = uuid.UUID(experience_id)
         async with self._session() as session:
             await session.execute(
-                update(Experience)
-                .where(Experience.id == exp_uuid)
-                .values(
-                    used_count=(
-                        Experience.used_count + 1
-                    )
-                )
+                update(Experience).where(Experience.id == exp_uuid).values(used_count=(Experience.used_count + 1))
             )
             await session.commit()
 
@@ -690,32 +672,314 @@ class ExperienceService:
             repo = ExperienceRepository(session)
             return await repo.list_projects()
 
-    async def list_experiences(
-        self,
-        *,
-        page: int = 1,
-        page_size: int = 20,
-        status: str | None = None,
-        tag: str | None = None,
-        project: str | None = None,
-    ) -> dict:
-        """Paginated list with optional filters."""
+    async def get_experience_detail(self, experience_id: str) -> dict | None:
+        """Get experience with feedbacks and children."""
+        from sqlalchemy.orm import selectinload
+
+        from team_memory.storage.models import Experience
+
+        async with self._session() as session:
+            exp_uuid = uuid.UUID(experience_id)
+            result = await session.execute(
+                select(Experience)
+                .options(
+                    selectinload(Experience.feedbacks),
+                    selectinload(Experience.children),
+                )
+                .where(Experience.id == exp_uuid)
+                .where(Experience.is_deleted == False)  # noqa: E712
+            )
+            exp = result.scalar_one_or_none()
+            if exp is None:
+                return None
+
+            data = exp.to_dict()
+            data["feedbacks"] = [fb.to_dict() for fb in exp.feedbacks]
+            data["children"] = [c.to_dict() for c in (exp.children or [])]
+            return data
+
+    async def hard_delete(self, experience_id: str) -> bool:
+        """Permanently delete an experience."""
         async with self._session() as session:
             repo = ExperienceRepository(session)
-            offset = (page - 1) * page_size
-            exps = await repo.list_experiences(
-                limit=page_size,
-                offset=offset,
-                status=status,
-                tag=tag,
-                project=project,
-            )
-            total = await repo.count_experiences(
-                status=status, tag=tag, project=project
-            )
+            return await repo.delete(uuid.UUID(experience_id))
+
+    async def toggle_pin(self, experience_id: str) -> dict:
+        """Toggle pin status. Returns {"is_pinned": bool, "message": str}."""
+        async with self._session() as session:
+            repo = ExperienceRepository(session)
+            exp_uuid = uuid.UUID(experience_id)
+            exp = await repo.get_by_id(exp_uuid)
+            if exp is None:
+                raise ValueError("Experience not found")
+
+            new_pinned = not exp.is_pinned
+            await repo.update(exp_uuid, is_pinned=new_pinned)
+
+            label = "已置顶" if new_pinned else "已取消置顶"
             return {
-                "experiences": exps,
-                "total": total,
-                "page": page,
-                "page_size": page_size,
+                "message": label,
+                "is_pinned": new_pinned,
             }
+
+    async def revive(self, experience_id: str) -> dict:
+        """Revive an Outdated experience. Returns dict or raises ValueError."""
+        from datetime import datetime, timezone
+
+        async with self._session() as session:
+            repo = ExperienceRepository(session)
+            exp_uuid = uuid.UUID(experience_id)
+            exp = await repo.get_by_id(exp_uuid)
+            if exp is None:
+                raise ValueError("Experience not found")
+
+            if exp.quality_tier != "Outdated":
+                raise ValueError("Only Outdated experiences can be revived")
+
+            now = datetime.now(timezone.utc)
+            await repo.update(
+                exp_uuid,
+                quality_score=100.0,
+                quality_tier="Silver",
+                last_scored_at=now,
+            )
+
+            return {
+                "message": "经验已恢复，质量评分重置为 100",
+                "quality_score": 100.0,
+                "quality_tier": "Silver",
+            }
+
+    async def change_status(
+        self,
+        experience_id: str,
+        *,
+        new_status: str | None = None,
+        visibility: str | None = None,
+        changed_by: str,
+        is_admin: bool = False,
+    ) -> dict | None:
+        """Change status and/or visibility. Returns experience dict or None."""
+        async with self._session() as session:
+            repo = ExperienceRepository(session)
+            exp_uuid = uuid.UUID(experience_id)
+
+            if new_status:
+                try:
+                    result = await repo.change_status(
+                        experience_id=exp_uuid,
+                        new_status=new_status,
+                        visibility=visibility,
+                        changed_by=changed_by,
+                        is_admin=is_admin,
+                    )
+                except ValueError:
+                    raise
+            else:
+                result = await repo.update(exp_uuid, visibility=visibility)
+
+            if result is None:
+                return None
+
+            # Trigger archive status update if needed
+            if new_status and self._archive_service:
+                try:
+                    await self._archive_service.update_archive_status_for_experience(exp_uuid)
+                except Exception:
+                    logger.warning("Failed to update archive status", exc_info=True)
+
+            return result.to_dict()
+
+    async def list_experiences_filtered(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        tag: str | None = None,
+        project: str | None = None,
+        status: str | None = None,
+        visibility: str | None = None,
+        experience_type: str | None = None,
+        current_user: str,
+    ) -> dict:
+        """Full filtered paginated list matching routes/experiences.py logic."""
+        from sqlalchemy import func as sa_func
+        from sqlalchemy import or_
+        from sqlalchemy.orm import selectinload
+
+        from team_memory.storage.models import Experience
+
+        project_list = [p.strip() for p in project.split(",") if p.strip()] if project and "," in project else None
+        resolved_project = self._resolve_project(project.split(",")[0] if project else project)
+
+        def _project_filter(q):
+            if project_list:
+                return q.where(
+                    or_(
+                        Experience.project.in_(project_list),
+                        Experience.visibility == "global",
+                    )
+                )
+            return q.where(
+                or_(
+                    Experience.project == resolved_project,
+                    Experience.visibility == "global",
+                )
+            )
+
+        def _vis_where(q):
+            if visibility and visibility != "all":
+                vis_map = {"personal": "private", "team": "project", "global": "global"}
+                vis_val = vis_map.get(visibility, visibility)
+                q = q.where(Experience.visibility == vis_val)
+                if vis_val == "private" and current_user:
+                    q = q.where(Experience.created_by == current_user)
+                if vis_val != "global":
+                    q = _project_filter(q)
+            else:
+                q = _project_filter(q)
+                if current_user:
+                    q = q.where(
+                        or_(
+                            Experience.visibility != "private",
+                            Experience.created_by == current_user,
+                        )
+                    )
+                else:
+                    q = q.where(Experience.visibility != "private")
+            return q
+
+        include_all = status in ("all", "draft")
+
+        async with self._session() as session:
+            repo = ExperienceRepository(session)
+
+            if tag or experience_type or status:
+                base_q = (
+                    select(Experience)
+                    .where(Experience.parent_id.is_(None))
+                    .where(Experience.is_deleted == False)  # noqa: E712
+                    .options(selectinload(Experience.children))
+                )
+                base_q = _vis_where(base_q)
+                count_q = (
+                    select(sa_func.count())
+                    .select_from(Experience)
+                    .where(Experience.parent_id.is_(None))
+                    .where(Experience.is_deleted == False)  # noqa: E712
+                )
+                count_q = _vis_where(count_q)
+                if status and status not in ("all",):
+                    base_q = base_q.where(Experience.exp_status == status)
+                    count_q = count_q.where(Experience.exp_status == status)
+                elif not include_all:
+                    base_q = base_q.where(Experience.exp_status == "published")
+                    count_q = count_q.where(Experience.exp_status == "published")
+                if tag:
+                    base_q = base_q.where(Experience.tags.overlap([tag]))
+                    count_q = count_q.where(Experience.tags.overlap([tag]))
+                if experience_type:
+                    base_q = base_q.where(Experience.experience_type == experience_type)
+                    count_q = count_q.where(Experience.experience_type == experience_type)
+
+                base_q = base_q.order_by(Experience.created_at.desc()).limit(limit).offset(offset)
+                result = await session.execute(base_q)
+                experiences = list(result.scalars().all())
+                total_result = await session.execute(count_q)
+                total = total_result.scalar() or 0
+            else:
+                total = await repo.count(
+                    include_deleted=False if include_all else True,
+                    project=resolved_project,
+                    scope=visibility,
+                    current_user=current_user,
+                )
+                experiences = await repo.list_recent(
+                    limit=limit,
+                    offset=offset,
+                    include_all_statuses=include_all,
+                    project=resolved_project,
+                    scope=visibility,
+                    current_user=current_user,
+                )
+
+            exp_list = []
+            for exp in experiences:
+                d = exp.to_dict()
+                d["children_count"] = len(exp.children) if exp.children else 0
+                exp_list.append(d)
+
+            return {
+                "items": exp_list,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+
+    async def list_outdated(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        project: str | None = None,
+    ) -> dict:
+        """List Outdated-tier experiences for janitor route."""
+        from team_memory.storage.models import Experience
+
+        resolved_project = self._resolve_project(project) if project else None
+
+        async with self._session() as session:
+            query = (
+                select(Experience)
+                .where(Experience.quality_tier == "Outdated")
+                .where(Experience.is_deleted == False)  # noqa: E712
+                .order_by(Experience.last_scored_at.desc())
+            )
+
+            if resolved_project:
+                query = query.where(Experience.project == resolved_project)
+
+            count_query = (
+                select(Experience.id).where(Experience.quality_tier == "Outdated").where(Experience.is_deleted == False)  # noqa: E712
+            )
+            if resolved_project:
+                count_query = count_query.where(Experience.project == resolved_project)
+
+            total_result = await session.execute(count_query)
+            total = len(total_result.all())
+
+            paginated_query = query.limit(limit).offset(offset)
+            result = await session.execute(paginated_query)
+            experiences = result.scalars().all()
+
+            exp_list = []
+            for exp in experiences:
+                exp_dict = exp.to_dict()
+                exp_dict["cleanup_info"] = {
+                    "quality_score": exp.quality_score,
+                    "quality_tier": exp.quality_tier,
+                    "last_scored_at": exp.last_scored_at.isoformat() if exp.last_scored_at else None,
+                    "is_pinned": exp.is_pinned,
+                }
+                exp_list.append(exp_dict)
+
+            return {
+                "items": exp_list,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "project": resolved_project,
+                "message": f"Found {total} outdated experiences"
+                + (f" in project '{resolved_project}'" if resolved_project else ""),
+            }
+
+    def _resolve_project(self, project: str | None) -> str:
+        """Resolve project name using the same logic as the web layer."""
+        import os
+
+        if project and project.strip():
+            return project.strip()
+        env_project = (os.environ.get("TEAM_MEMORY_PROJECT") or "").strip()
+        if env_project:
+            return env_project
+        return "default"

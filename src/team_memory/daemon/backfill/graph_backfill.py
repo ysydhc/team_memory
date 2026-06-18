@@ -21,9 +21,7 @@ import time
 
 from team_memory.project_resolver import load_dotenv_if_exists
 
-load_dotenv_if_exists(
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-)
+load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 
 async def run_backfill(
@@ -60,9 +58,7 @@ async def run_backfill(
         if limit > 0:
             rows = rows[:limit]
 
-        print(
-            f"Found {total} published experiences{f' (processing {len(rows)})' if limit > 0 else ''}."
-        )
+        print(f"Found {total} published experiences{f' (processing {len(rows)})' if limit > 0 else ''}.")
 
         if dry_run:
             for row in rows[:10]:
@@ -103,9 +99,7 @@ async def run_backfill(
                 if (i + 1) % 10 == 0 or i + 1 == len(rows):
                     elapsed = time.monotonic() - start
                     rate = (i + 1) / elapsed if elapsed > 0 else 0
-                    print(
-                        f"  Progress: {i + 1}/{len(rows)} ({rate:.1f}/s) — failed: {failed}"
-                    )
+                    print(f"  Progress: {i + 1}/{len(rows)} ({rate:.1f}/s) — failed: {failed}")
 
             elapsed = time.monotonic() - start
             print(
@@ -123,9 +117,7 @@ async def run_backfill(
         if limit > 0:
             archive_rows = archive_rows[:limit]
 
-        print(
-            f"Found {total} archives{f' (processing {len(archive_rows)})' if limit > 0 else ''}."
-        )
+        print(f"Found {total} archives{f' (processing {len(archive_rows)})' if limit > 0 else ''}.")
 
         if dry_run:
             for row in archive_rows[:10]:
@@ -163,14 +155,10 @@ async def run_backfill(
                 if (i + 1) % 10 == 0 or i + 1 == len(archive_rows):
                     elapsed = time.monotonic() - start
                     rate = (i + 1) / elapsed if elapsed > 0 else 0
-                    print(
-                        f"  Progress: {i + 1}/{len(archive_rows)} ({rate:.1f}/s) — failed: {failed}"
-                    )
+                    print(f"  Progress: {i + 1}/{len(archive_rows)} ({rate:.1f}/s) — failed: {failed}")
 
             elapsed = time.monotonic() - start
-            print(
-                f"Archives graph backfill tasks submitted in {elapsed:.1f}s: Succeeded {succeeded}, Failed {failed}"
-            )
+            print(f"Archives graph backfill tasks submitted in {elapsed:.1f}s: Succeeded {succeeded}, Failed {failed}")
 
     # Backfill personal memories
     print("\n--- Backfilling Personal Memories to Graph ---")
@@ -183,9 +171,7 @@ async def run_backfill(
         if limit > 0:
             pm_rows = pm_rows[:limit]
 
-        print(
-            f"Found {total} personal memories{f' (processing {len(pm_rows)})' if limit > 0 else ''}."
-        )
+        print(f"Found {total} personal memories{f' (processing {len(pm_rows)})' if limit > 0 else ''}.")
 
         if not dry_run:
             succeeded = 0
@@ -214,9 +200,7 @@ async def run_backfill(
                 if (i + 1) % 10 == 0 or i + 1 == len(pm_rows):
                     elapsed = time.monotonic() - start
                     rate = (i + 1) / elapsed if elapsed > 0 else 0
-                    print(
-                        f"  Progress: {i + 1}/{len(pm_rows)} ({rate:.1f}/s) — failed: {failed}"
-                    )
+                    print(f"  Progress: {i + 1}/{len(pm_rows)} ({rate:.1f}/s) — failed: {failed}")
 
             elapsed = time.monotonic() - start
             print(
@@ -231,26 +215,25 @@ def main() -> None:
         description="Backfill missing embeddings for published experiences",
     )
     parser.add_argument("--dry-run", action="store_true", help="Show count only")
+    parser.add_argument("--limit", type=int, default=0, help="Max records (0=all)")
     parser.add_argument(
-        "--limit", type=int, default=0, help="Max records (0=all)"
+        "--chunk-size",
+        type=int,
+        default=50,
+        help="Submit N tasks per chunk. Smaller chunks survive sleep interruptions better.",
     )
-    parser.add_argument(
-        "--chunk-size", type=int, default=50,
-        help="Submit N tasks per chunk. Smaller chunks survive sleep interruptions better."
-    )
-    parser.add_argument(
-        "--resume-from", type=str, default=None,
-        help="Resume from record ID (skip already submitted)"
-    )
+    parser.add_argument("--resume-from", type=str, default=None, help="Resume from record ID (skip already submitted)")
     args = parser.parse_args()
 
     print("Running backfill...")
-    asyncio.run(run_backfill(
-        dry_run=args.dry_run,
-        limit=args.limit,
-        chunk_size=args.chunk_size,
-        resume_from=args.resume_from,
-    ))
+    asyncio.run(
+        run_backfill(
+            dry_run=args.dry_run,
+            limit=args.limit,
+            chunk_size=args.chunk_size,
+            resume_from=args.resume_from,
+        )
+    )
     print("Main finished.")
 
 

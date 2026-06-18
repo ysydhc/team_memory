@@ -1,16 +1,10 @@
 """Cursor afterAgentResponse hook — forwards to TM Daemon.
 
 Maps Cursor's field names to what the daemon expects.
-Cursor sends different field names than Hermes/Claude Code,
-so we normalize the payload here.
-
-Cursor afterAgentResponse stdin format:
-  {"conversation_id": "...", "agent_response": "...", ...}
+Supports both old format (agent_response field) and new format (transcript_path).
 
 Daemon expects:
   {"conversation_id": "...", "response_text": "...", "workspace_roots": [...]}
-
-Cursor 字段映射: agent_response → response_text
 """
 
 import os
@@ -18,6 +12,7 @@ import os
 from team_memory.hooks.core.daemon_http import post_hook
 from team_memory.hooks.core.output import print_cursor_action
 from team_memory.hooks.core.stdin import parse_stdin_json
+from team_memory.hooks.core.transcript import read_last_assistant_from_transcript
 
 
 def main() -> None:
@@ -26,14 +21,20 @@ def main() -> None:
         print_cursor_action({"action": "error", "message": "invalid input"})
         return
 
+    # Try direct fields first (old Cursor format)
     response_text = (
         input_data.get("response_text", "")
         or input_data.get("agent_response", "")
         or input_data.get("content", "")
         or input_data.get("response", "")
-        or input_data.get("prompt", "")
         or ""
     )
+
+    # Fallback: read from transcript_path (new Cursor format)
+    if not response_text:
+        transcript_path = input_data.get("transcript_path", "")
+        response_text = read_last_assistant_from_transcript(transcript_path)
+
     conversation_id = input_data.get("conversation_id", "") or input_data.get("session_id", "")
     workspace_roots = input_data.get("workspace_roots", [])
     if not workspace_roots:
@@ -42,6 +43,10 @@ def main() -> None:
             workspace_roots = [cwd]
         else:
             workspace_roots = [os.getcwd()]
+
+    if not response_text:
+        print_cursor_action({"action": "ok", "message": "no response to process"})
+        return
 
     payload = {
         "conversation_id": conversation_id,

@@ -106,39 +106,21 @@ class ResponseBuffer:
             logger.debug("response_buffer.has_search_log failed: %s", e)
             return False
 
-    async def fetch_pending(
-        self, limit: int = 50, cursor_id: str | None = None
-    ) -> list[dict[str, Any]]:
-        """Fetch unevaluated entries for batch processing.
-
-        If cursor_id is provided, only returns entries with id > cursor_id
-        (enables resume-after-crash checkpointing).
-        """
+    async def fetch_pending(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Fetch unevaluated entries for batch processing (oldest first)."""
         try:
             pool = await self._ensure_pool()
             async with pool.acquire() as conn:
-                if cursor_id:
-                    rows = await conn.fetch(
-                        """
-                        SELECT id, query, agent_response, result_ids, search_log_id, created_at
-                        FROM response_buffer
-                        WHERE evaluated = FALSE AND id > $1::uuid
-                        ORDER BY created_at ASC
-                        LIMIT $2
-                        """,
-                        cursor_id, limit,
-                    )
-                else:
-                    rows = await conn.fetch(
-                        """
-                        SELECT id, query, agent_response, result_ids, search_log_id, created_at
-                        FROM response_buffer
-                        WHERE evaluated = FALSE
-                        ORDER BY created_at ASC
-                        LIMIT $1
-                        """,
-                        limit,
-                    )
+                rows = await conn.fetch(
+                    """
+                    SELECT id, query, agent_response, result_ids, search_log_id, created_at
+                    FROM response_buffer
+                    WHERE evaluated = FALSE
+                    ORDER BY created_at ASC
+                    LIMIT $1
+                    """,
+                    limit,
+                )
             return [
                 {
                     "id": str(r["id"]),

@@ -37,9 +37,7 @@ async def _handle_graphiti_ingest(payload: dict[str, Any]) -> None:
 
     try:
         client = get_graph_client()
-        await client.ingest_to_graph(
-            record_id=record_id, content=content, source_type=source_type
-        )
+        await client.ingest_to_graph(record_id=record_id, content=content, source_type=source_type)
         logger.info("Successfully ingested %s to graphiti", record_id)
         # Force garbage collection to clean up Kuzu resources
         import gc

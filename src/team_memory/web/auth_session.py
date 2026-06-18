@@ -20,32 +20,32 @@ from team_memory.auth.provider import (
     DbApiKeyAuth,
     User,
 )
-from team_memory.bootstrap import get_context
 from team_memory.storage.database import get_session
 from team_memory.storage.models import ApiKey
 
 logger = logging.getLogger("team_memory.web")
 
 
-def _get_auth():
-    """Get the module-level _auth from web.app (lazy import to avoid circular)."""
-    from team_memory.web import app as app_module
+def _get_context():
+    """Late-bind get_context so that patches on team_memory.bootstrap are respected."""
+    from team_memory.bootstrap import get_context
 
-    return app_module._auth
+    return get_context()
+
+
+def _get_auth():
+    """Get the auth provider from AppContext."""
+    return _get_context().auth
 
 
 def _get_settings_lazy():
-    """Get the module-level _settings from web.app (lazy import to avoid circular)."""
-    from team_memory.web import app as app_module
-
-    return app_module._settings
+    """Get settings from AppContext."""
+    return _get_context().settings
 
 
 def _get_db_url_lazy() -> str:
-    """Get DB URL via the web app module."""
-    from team_memory.web.app import _get_db_url
-
-    return _get_db_url()
+    """Get DB URL from env or AppContext."""
+    return os.environ.get("TEAM_MEMORY_DB_URL") or _get_context().db_url
 
 
 def _encode_api_key_cookie(api_key: str) -> str:
@@ -83,7 +83,7 @@ def _get_session_secret() -> str:
     secret = os.environ.get("TEAM_MEMORY_SESSION_SECRET")
     if secret:
         return secret
-    settings = _get_settings_lazy() or get_context().settings
+    settings = _get_settings_lazy()
     if settings.auth.session_secret:
         return settings.auth.session_secret
     raise RuntimeError(

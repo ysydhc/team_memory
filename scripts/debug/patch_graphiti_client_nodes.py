@@ -1,5 +1,3 @@
-import os
-
 filepath = "src/team_memory/services/graph/graphiti_client.py"
 
 with open(filepath, "r") as f:
@@ -120,4 +118,3 @@ if old_str in content:
     print("Patched graphiti_client.py (nodes_found)")
 else:
     print("Already patched or string not found")
-

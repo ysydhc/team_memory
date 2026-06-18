@@ -2,7 +2,8 @@
 
 Runs as a long-lived process managed by taskctl.sh. Key design:
 - Atomic task claiming (pending → running via FOR UPDATE SKIP LOCKED)
-- SIGALRM watchdog for CPU-bound Kùzu hangs (asyncio.wait_for is ineffective)
+- Idle-timeout watchdog: kills only when no HTTP activity for IDLE_TIMEOUT_SECONDS
+  (not a hard wall-clock limit — tasks making progress are never killed)
 - State file (.task_worker.state) for rich monitoring
 - Retry with back-off (up to max_retries from DB)
 - Auto-restart via os.execv every N tasks to clear Kùzu/C-level state
@@ -29,7 +30,8 @@ from team_memory.storage.database import get_session
 ROOT_DIR = Path(__file__).resolve().parent.parent
 STATE_FILE = ROOT_DIR / ".task_worker.state"
 
-TASK_TIMEOUT_SECONDS = int(os.environ.get("TASK_TIMEOUT", "600"))
+IDLE_TIMEOUT_SECONDS = int(os.environ.get("IDLE_TIMEOUT", "180"))
+IDLE_CHECK_INTERVAL = int(os.environ.get("IDLE_CHECK_INTERVAL", "30"))
 RESTART_EVERY_N = int(os.environ.get("RESTART_EVERY", "20"))
 IDLE_POLL_INTERVAL = 30
 
@@ -41,6 +43,38 @@ logging.basicConfig(
 logger = logging.getLogger("graphiti_worker")
 
 _task_start_time: float = 0.0
+_last_activity: float = 0.0
+_current_task_id: str | None = None
+_current_retry_count: int = 0
+_current_max_retries: int = 3
+
+
+# ---------------------------------------------------------------------------
+# Activity tracking — monkey-patch httpx to update _last_activity on responses
+# ---------------------------------------------------------------------------
+
+
+def _install_activity_hook():
+    """Patch httpx.AsyncClient and httpx.Client to update _last_activity on every response."""
+    import httpx
+
+    _orig_async_send = httpx.AsyncClient.send
+    _orig_sync_send = httpx.Client.send
+
+    async def _patched_async_send(self, request, **kwargs):
+        global _last_activity
+        response = await _orig_async_send(self, request, **kwargs)
+        _last_activity = time.monotonic()
+        return response
+
+    def _patched_sync_send(self, request, **kwargs):
+        global _last_activity
+        response = _orig_sync_send(self, request, **kwargs)
+        _last_activity = time.monotonic()
+        return response
+
+    httpx.AsyncClient.send = _patched_async_send
+    httpx.Client.send = _patched_sync_send
 
 
 # ---------------------------------------------------------------------------
@@ -64,21 +98,54 @@ def _write_state(**kwargs):
 
 
 # ---------------------------------------------------------------------------
-# SIGALRM — the ONLY reliable way to kill a CPU-bound Kùzu hang
+# SIGALRM — periodic idle check (not a hard timeout)
 # ---------------------------------------------------------------------------
 
 
+def _mark_task_failed_sync(error_msg: str):
+    """Use sync psycopg2 to mark the current task — safe in signal handler context."""
+    if not _current_task_id:
+        return
+    new_retry = _current_retry_count + 1
+    new_status = "failed" if new_retry >= _current_max_retries else "pending"
+    try:
+        import psycopg2
+
+        settings = load_settings()
+        db_url = str(settings.database.url).replace("+asyncpg", "")
+        conn = psycopg2.connect(db_url)
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE background_tasks SET status = %s, retry_count = %s, error_message = %s WHERE id = %s",
+                (new_status, new_retry, error_msg, _current_task_id),
+            )
+        conn.close()
+    except Exception:
+        pass
+
+
 def _alarm_handler(signum, frame):
-    global _task_start_time
-    elapsed = time.monotonic() - _task_start_time if _task_start_time else 0
+    global _last_activity
+    now = time.monotonic()
+    idle_seconds = now - _last_activity if _last_activity else now - _task_start_time
+    total_elapsed = now - _task_start_time if _task_start_time else 0
+
+    if idle_seconds < IDLE_TIMEOUT_SECONDS:
+        signal.alarm(IDLE_CHECK_INTERVAL)
+        return
+
     logger.error(
-        "SIGALRM: task exceeded %ds (ran %.0fs), force-exiting",
-        TASK_TIMEOUT_SECONDS,
-        elapsed,
+        "IDLE TIMEOUT: no HTTP activity for %.0fs (total elapsed %.0fs), force-exiting",
+        idle_seconds,
+        total_elapsed,
     )
+
+    _mark_task_failed_sync(f"Idle timeout: no activity for {idle_seconds:.0f}s (total {total_elapsed:.0f}s)")
+
     _write_state(
-        status="timeout_exit",
-        exit_reason=f"SIGALRM after {elapsed:.0f}s",
+        status="idle_timeout_exit",
+        exit_reason=f"No activity for {idle_seconds:.0f}s",
     )
     os._exit(2)
 
@@ -94,7 +161,7 @@ async def _recover_orphaned_tasks(db_url: str) -> int:
         result = await session.execute(
             text(
                 "UPDATE background_tasks "
-                "SET status = 'pending', "
+                "SET status = 'pending', retry_count = retry_count + 1, "
                 "    error_message = 'Recovered: worker crashed while running' "
                 "WHERE task_type = 'graphiti_ingest' AND status = 'running' "
                 "RETURNING id"
@@ -113,6 +180,8 @@ async def _recover_orphaned_tasks(db_url: str) -> int:
 
 
 async def process_tasks():
+    _install_activity_hook()
+
     settings = load_settings()
     db_url = str(settings.database.url)
 
@@ -139,9 +208,10 @@ async def process_tasks():
     )
 
     logger.info(
-        "Worker started (pid=%d, timeout=%ds, restart_every=%d)",
+        "Worker started (pid=%d, idle_timeout=%ds, check_interval=%ds, restart_every=%d)",
         os.getpid(),
-        TASK_TIMEOUT_SECONDS,
+        IDLE_TIMEOUT_SECONDS,
+        IDLE_CHECK_INTERVAL,
         RESTART_EVERY_N,
     )
 
@@ -168,9 +238,7 @@ async def process_tasks():
 
         if not row:
             if idle_count == 0:
-                logger.info(
-                    "No pending tasks, polling every %ds...", IDLE_POLL_INTERVAL
-                )
+                logger.info("No pending tasks, polling every %ds...", IDLE_POLL_INTERVAL)
             idle_count += 1
             _write_state(status="idle", current_task=None)
             await asyncio.sleep(IDLE_POLL_INTERVAL)
@@ -184,6 +252,11 @@ async def process_tasks():
         record_id = payload.get("record_id", "?")
         source_type = payload.get("source_type", "experience")
         task_id_short = str(task_id)[:8]
+
+        global _current_task_id, _current_retry_count, _current_max_retries
+        _current_task_id = str(task_id)
+        _current_retry_count = retry_count
+        _current_max_retries = max_retries
 
         logger.info(
             "[START] %s record=%s type=%s retry=%d/%d",
@@ -204,23 +277,21 @@ async def process_tasks():
             },
         )
 
-        # ---- Execute with SIGALRM watchdog ----
-        global _task_start_time
+        # ---- Execute with idle-timeout watchdog ----
+        global _task_start_time, _last_activity
         _task_start_time = time.monotonic()
-        signal.alarm(TASK_TIMEOUT_SECONDS)
+        _last_activity = _task_start_time
+        signal.alarm(IDLE_CHECK_INTERVAL)
 
         try:
             await handler(payload)
             elapsed = time.monotonic() - _task_start_time
             signal.alarm(0)
+            _current_task_id = None
 
             async with get_session(db_url) as session:
                 await session.execute(
-                    text(
-                        "UPDATE background_tasks "
-                        "SET status = 'completed', completed_at = now() "
-                        "WHERE id = :id"
-                    ),
+                    text("UPDATE background_tasks SET status = 'completed', completed_at = now() WHERE id = :id"),
                     {"id": task_id},
                 )
                 await session.commit()
@@ -248,6 +319,7 @@ async def process_tasks():
         except Exception as e:
             elapsed = time.monotonic() - _task_start_time
             signal.alarm(0)
+            _current_task_id = None
             failed += 1
 
             new_retry = retry_count + 1

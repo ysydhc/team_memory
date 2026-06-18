@@ -29,9 +29,7 @@ class BatchOpsService:
     # Experiences – missing embedding
     # ------------------------------------------------------------------
 
-    async def list_experiences_missing_embedding(
-        self, limit: int = 50, cursor_id: str | None = None
-    ) -> list[dict]:
+    async def list_experiences_missing_embedding(self, limit: int = 50, cursor_id: str | None = None) -> list[dict]:
         """Return experiences with embedding IS NULL, ordered by created_at ASC.
 
         Supports cursor-based pagination: pass the last returned id as cursor_id
@@ -56,16 +54,10 @@ class BatchOpsService:
     # Archives – missing embedding
     # ------------------------------------------------------------------
 
-    async def list_archives_missing_embedding(
-        self, limit: int = 50, cursor_id: str | None = None
-    ) -> list[dict]:
+    async def list_archives_missing_embedding(self, limit: int = 50, cursor_id: str | None = None) -> list[dict]:
         """Return archives with embedding IS NULL."""
         async with get_session(self._db_url) as session:
-            sql = (
-                "SELECT id, title, overview, solution_doc, project, created_at "
-                "FROM archives "
-                "WHERE embedding IS NULL"
-            )
+            sql = "SELECT id, title, overview, solution_doc, project, created_at FROM archives WHERE embedding IS NULL"
             params: dict = {"limit": limit}
             if cursor_id is not None:
                 sql += " AND id > :cursor::uuid"
@@ -84,11 +76,7 @@ class BatchOpsService:
     ) -> list[dict]:
         """Return personal memories with embedding IS NULL."""
         async with get_session(self._db_url) as session:
-            sql = (
-                "SELECT id, user_id, content, profile_kind, created_at "
-                "FROM personal_memories "
-                "WHERE embedding IS NULL"
-            )
+            sql = "SELECT id, user_id, content, profile_kind, created_at FROM personal_memories WHERE embedding IS NULL"
             params: dict = {"limit": limit}
             if cursor_id is not None:
                 sql += " AND id > :cursor::uuid"
@@ -102,27 +90,19 @@ class BatchOpsService:
     # Update embeddings
     # ------------------------------------------------------------------
 
-    async def update_experience_embedding(
-        self, experience_id: str, embedding: list[float]
-    ) -> None:
+    async def update_experience_embedding(self, experience_id: str, embedding: list[float]) -> None:
         """UPDATE experiences SET embedding = :e WHERE id = :id."""
         async with get_session(self._db_url) as session:
             await session.execute(
-                text(
-                    "UPDATE experiences SET embedding = :e WHERE id = :id::uuid"
-                ),
+                text("UPDATE experiences SET embedding = :e WHERE id = :id::uuid"),
                 {"e": embedding, "id": experience_id},
             )
 
-    async def update_archive_embedding(
-        self, archive_id: str, embedding: list[float]
-    ) -> None:
+    async def update_archive_embedding(self, archive_id: str, embedding: list[float]) -> None:
         """UPDATE archives SET embedding = :e WHERE id = :id."""
         async with get_session(self._db_url) as session:
             await session.execute(
-                text(
-                    "UPDATE archives SET embedding = :e WHERE id = :id::uuid"
-                ),
+                text("UPDATE archives SET embedding = :e WHERE id = :id::uuid"),
                 {"e": embedding, "id": archive_id},
             )
 
@@ -130,9 +110,7 @@ class BatchOpsService:
     # Published / promoted records (for graph backfill)
     # ------------------------------------------------------------------
 
-    async def list_published_experiences(
-        self, limit: int = 50, cursor_id: str | None = None
-    ) -> list[dict]:
+    async def list_published_experiences(self, limit: int = 50, cursor_id: str | None = None) -> list[dict]:
         """Return published or promoted experiences for graph backfill."""
         async with get_session(self._db_url) as session:
             sql = (
@@ -150,9 +128,7 @@ class BatchOpsService:
             rows = result.mappings().all()
             return [dict(r) for r in rows]
 
-    async def list_published_archives(
-        self, limit: int = 50, cursor_id: str | None = None
-    ) -> list[dict]:
+    async def list_published_archives(self, limit: int = 50, cursor_id: str | None = None) -> list[dict]:
         """Return published archives for graph backfill."""
         async with get_session(self._db_url) as session:
             sql = (
@@ -196,9 +172,7 @@ class BatchOpsService:
     # Wiki generation
     # ------------------------------------------------------------------
 
-    async def list_experiences_for_wiki(
-        self, project: str | None = None
-    ) -> list[dict]:
+    async def list_experiences_for_wiki(self, project: str | None = None) -> list[dict]:
         """Return all published experiences for wiki generation."""
         async with get_session(self._db_url) as session:
             sql = (
@@ -220,9 +194,7 @@ class BatchOpsService:
     # Entities – missing embedding
     # ------------------------------------------------------------------
 
-    async def list_entities_missing_embedding(
-        self, limit: int = 50
-    ) -> list[dict]:
+    async def list_entities_missing_embedding(self, limit: int = 50) -> list[dict]:
         """Return entities with embedding IS NULL."""
         async with get_session(self._db_url) as session:
             sql = (
@@ -235,15 +207,11 @@ class BatchOpsService:
             rows = result.mappings().all()
             return [dict(r) for r in rows]
 
-    async def update_entity_embedding(
-        self, entity_id: str, embedding: list[float]
-    ) -> None:
+    async def update_entity_embedding(self, entity_id: str, embedding: list[float]) -> None:
         """UPDATE entities SET embedding = :e WHERE id = :id."""
         async with get_session(self._db_url) as session:
             await session.execute(
-                text(
-                    "UPDATE entities SET embedding = :e WHERE id = :id::uuid"
-                ),
+                text("UPDATE entities SET embedding = :e WHERE id = :id::uuid"),
                 {"e": embedding, "id": entity_id},
             )
 
@@ -251,9 +219,7 @@ class BatchOpsService:
     # Experiences – missing solution
     # ------------------------------------------------------------------
 
-    async def list_experiences_missing_solution(
-        self, limit: int = 50
-    ) -> list[dict]:
+    async def list_experiences_missing_solution(self, limit: int = 50) -> list[dict]:
         """Return experiences where solution IS NULL or empty."""
         async with get_session(self._db_url) as session:
             sql = (
@@ -266,15 +232,11 @@ class BatchOpsService:
             rows = result.mappings().all()
             return [dict(r) for r in rows]
 
-    async def update_experience_solution(
-        self, experience_id: str, solution: str
-    ) -> None:
+    async def update_experience_solution(self, experience_id: str, solution: str) -> None:
         """UPDATE experiences SET solution = :s WHERE id = :id."""
         async with get_session(self._db_url) as session:
             await session.execute(
-                text(
-                    "UPDATE experiences SET solution = :s WHERE id = :id::uuid"
-                ),
+                text("UPDATE experiences SET solution = :s WHERE id = :id::uuid"),
                 {"s": solution, "id": experience_id},
             )
 
@@ -282,15 +244,11 @@ class BatchOpsService:
     # Personal memories – update embedding
     # ------------------------------------------------------------------
 
-    async def update_personal_memory_embedding(
-        self, memory_id: str, embedding: list[float]
-    ) -> None:
+    async def update_personal_memory_embedding(self, memory_id: str, embedding: list[float]) -> None:
         """UPDATE personal_memories SET embedding = :e WHERE id = :id."""
         async with get_session(self._db_url) as session:
             await session.execute(
-                text(
-                    "UPDATE personal_memories SET embedding = :e WHERE id = :id::uuid"
-                ),
+                text("UPDATE personal_memories SET embedding = :e WHERE id = :id::uuid"),
                 {"e": embedding, "id": memory_id},
             )
 
@@ -298,9 +256,7 @@ class BatchOpsService:
     # Entity deduplication
     # ------------------------------------------------------------------
 
-    async def list_experiences_without_entity_links(
-        self, limit: int = 0
-    ) -> list[dict]:
+    async def list_experiences_without_entity_links(self, limit: int = 0) -> list[dict]:
         """Return published experiences that have no entity links."""
         async with get_session(self._db_url) as session:
             sql = (
@@ -348,9 +304,7 @@ class BatchOpsService:
                 for row in result.fetchall()
             ]
 
-    async def merge_entity_group(
-        self, primary_id: str, duplicate_ids: list[str]
-    ) -> int:
+    async def merge_entity_group(self, primary_id: str, duplicate_ids: list[str]) -> int:
         """Merge duplicate entities into primary. Returns affected row count."""
         affected = 0
         async with get_session(self._db_url) as session:
@@ -422,3 +376,51 @@ class BatchOpsService:
         async with get_session(self._db_url) as session:
             result = await session.execute(text("SELECT count(*) FROM entities"))
             return result.scalar() or 0
+
+    # ------------------------------------------------------------------
+    # Experiences – load contexts (for faithfulness evaluation)
+    # ------------------------------------------------------------------
+
+    async def load_experience_contexts(self, result_ids: list[dict] | None) -> list[str]:
+        """Load experience titles/solutions for given result IDs (for faithfulness evaluation)."""
+        if not result_ids:
+            return []
+
+        import uuid as _uuid
+
+        valid_ids: list[str] = []
+        for rid in result_ids:
+            r = rid.get("id", "") if isinstance(rid, dict) else str(rid)
+            if r:
+                try:
+                    _uuid.UUID(r)  # validate format
+                    valid_ids.append(r)
+                except (ValueError, AttributeError):
+                    continue
+
+        if not valid_ids:
+            return []
+
+        async with get_session(self._db_url) as session:
+            from sqlalchemy import select as sa_select
+
+            from team_memory.storage.models import Experience
+
+            uuids = [_uuid.UUID(v) for v in valid_ids]
+            result = await session.execute(
+                sa_select(Experience.id, Experience.title, Experience.description, Experience.solution).where(
+                    Experience.id.in_(uuids)
+                )
+            )
+            rows = result.mappings().all()
+            contexts: list[str] = []
+            for r in rows:
+                parts: list[str] = []
+                if r["title"]:
+                    parts.append(f"标题: {r['title']}")
+                if r["description"]:
+                    parts.append(f"问题: {r['description'][:200]}")
+                if r["solution"]:
+                    parts.append(f"方案: {r['solution'][:300]}")
+                contexts.append(" | ".join(parts))
+            return contexts

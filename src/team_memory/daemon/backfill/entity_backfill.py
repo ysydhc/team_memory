@@ -24,9 +24,7 @@ import time
 
 from team_memory.project_resolver import load_dotenv_if_exists
 
-load_dotenv_if_exists(
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-)
+load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 
 async def _build_llm_config(
@@ -119,9 +117,7 @@ async def run_backfill(
                 if succeeded % 10 == 0 or succeeded == len(experiences):
                     elapsed = time.time() - start_time
                     rate = succeeded / elapsed if elapsed > 0 else 0
-                    print(
-                        f"  Progress: {succeeded}/{len(experiences)} ({rate:.1f}/s) — failed: {failed}"
-                    )
+                    print(f"  Progress: {succeeded}/{len(experiences)} ({rate:.1f}/s) — failed: {failed}")
             except Exception as e:
                 failed += 1
                 failed_ids.append(exp_id)

@@ -86,9 +86,7 @@ def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
         logger.info("Embedding provider: %s (configured)", provider)
         return result
 
-    logger.warning(
-        "Configured embedding provider '%s' unavailable, trying fallbacks...", provider
-    )
+    logger.warning("Configured embedding provider '%s' unavailable, trying fallbacks...", provider)
     fallback_order = ["ollama", "openai", "generic", "local"]
     for fb in fallback_order:
         if fb == provider:

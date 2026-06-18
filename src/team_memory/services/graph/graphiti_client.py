@@ -42,11 +42,7 @@ class GraphitiClient:
         self._db_lock = asyncio.Lock()
         self.db_path = db_path or os.environ.get(
             "KUZU_DB",
-            os.path.abspath(
-                os.path.join(
-                    os.path.dirname(__file__), "..", "..", "..", "..", ".kuzu_db"
-                )
-            ),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".kuzu_db")),
         )
         self._initialized = False
         self._client: Graphiti | None = None
@@ -81,18 +77,14 @@ class GraphitiClient:
                 model=llm_config.model,
                 small_model=llm_config.model,
             )
-            graphiti_llm = OpenAIGenericClient(
-                config=graphiti_llm_config, client=openai_client
-            )
+            graphiti_llm = OpenAIGenericClient(config=graphiti_llm_config, client=openai_client)
 
             # Configure Embedder using TeamMemory's embedding config
             embedding_settings = get_settings().embedding
 
             # Determine base_url, api_key, and model based on provider
             if embedding_settings.provider == "openai":
-                emb_base_url = (
-                    embedding_settings.openai.base_url or "https://api.openai.com/v1"
-                )
+                emb_base_url = embedding_settings.openai.base_url or "https://api.openai.com/v1"
                 emb_api_key = embedding_settings.openai.resolved_api_key or "dummy-key"
                 emb_model = embedding_settings.openai.model
             elif embedding_settings.provider == "ollama":
@@ -124,9 +116,7 @@ class GraphitiClient:
                 base_url=emb_base_url,
                 embedding_model=emb_model,
             )
-            graphiti_embedder = OpenAIEmbedder(
-                config=embedder_config, client=emb_client
-            )
+            graphiti_embedder = OpenAIEmbedder(config=embedder_config, client=emb_client)
 
             # Initialize Kuzu driver and Graphiti
             driver = KuzuDriver(db=self.db_path)
@@ -162,9 +152,7 @@ class GraphitiClient:
 
             self._initialized = True
 
-    async def ingest_to_graph(
-        self, record_id: str, content: str, source_type: str = "experience"
-    ) -> None:
+    async def ingest_to_graph(self, record_id: str, content: str, source_type: str = "experience") -> None:
         """Ingest a high-value record into the graph.
 
         This method is designed to be called asynchronously via the task_runner.
@@ -199,14 +187,10 @@ class GraphitiClient:
                 )
             logger.info("Graphiti ingest completed for %s %s", source_type, record_id)
         except Exception as e:
-            logger.error(
-                "Graphiti ingest failed for %s %s: %s", source_type, record_id, e
-            )
+            logger.error("Graphiti ingest failed for %s %s: %s", source_type, record_id, e)
             raise
 
-    async def query_subgraph(
-        self, query: str, max_depth: int = 2, max_nodes: int = 20
-    ) -> dict[str, Any]:
+    async def query_subgraph(self, query: str, max_depth: int = 2, max_nodes: int = 20) -> dict[str, Any]:
         """Query the graph for a bounded subgraph based on the user's query.
 
         Args:
@@ -253,12 +237,8 @@ class GraphitiClient:
                         "fact": edge.fact,
                     }
                 )
-                summary_lines.append(
-                    f"- {edge.source_node.name} {edge.name} {edge.target_node.name} ({edge.fact})"
-                )
-            elif hasattr(edge, "source_node_uuid") and hasattr(
-                edge, "target_node_uuid"
-            ):
+                summary_lines.append(f"- {edge.source_node.name} {edge.name} {edge.target_node.name} ({edge.fact})")
+            elif hasattr(edge, "source_node_uuid") and hasattr(edge, "target_node_uuid"):
                 # We only have UUIDs, need to fetch nodes from Kuzu
                 try:
                     driver = self._client.driver
@@ -267,28 +247,16 @@ class GraphitiClient:
                     RETURN n.name as src
                     """
                     async with self._db_lock:
-                        src_records, _, _ = await driver.execute_query(
-                            query_str, src_uuid=edge.source_node_uuid
-                        )
+                        src_records, _, _ = await driver.execute_query(query_str, src_uuid=edge.source_node_uuid)
                     query_str = """
                     MATCH (m:Entity {uuid: $dst_uuid})
                     RETURN m.name as dst
                     """
                     async with self._db_lock:
-                        dst_records, _, _ = await driver.execute_query(
-                            query_str, dst_uuid=edge.target_node_uuid
-                        )
+                        dst_records, _, _ = await driver.execute_query(query_str, dst_uuid=edge.target_node_uuid)
 
-                    src_name = (
-                        src_records[0].get("src")
-                        if src_records
-                        else edge.source_node_uuid
-                    )
-                    dst_name = (
-                        dst_records[0].get("dst")
-                        if dst_records
-                        else edge.target_node_uuid
-                    )
+                    src_name = src_records[0].get("src") if src_records else edge.source_node_uuid
+                    dst_name = dst_records[0].get("dst") if dst_records else edge.target_node_uuid
 
                     edges_found.append(
                         {
@@ -298,9 +266,7 @@ class GraphitiClient:
                             "fact": edge.fact,
                         }
                     )
-                    summary_lines.append(
-                        f"- {src_name} {edge.name} {dst_name} ({edge.fact})"
-                    )
+                    summary_lines.append(f"- {src_name} {edge.name} {dst_name} ({edge.fact})")
                 except Exception as e:
                     logger.error(f"Failed to fetch nodes for edge {edge.uuid}: {e}")
 
@@ -320,9 +286,7 @@ class GraphitiClient:
                 LIMIT $limit
                 """
                 async with self._db_lock:
-                    records, _, _ = await driver.execute_query(
-                        query_str, names=node_names, limit=max_nodes
-                    )
+                    records, _, _ = await driver.execute_query(query_str, names=node_names, limit=max_nodes)
 
                 for record in records:
                     source = record.get("src")
@@ -341,9 +305,7 @@ class GraphitiClient:
                             if fact_records:
                                 fact = fact_records[0].get("fact", "")
                         except Exception as e:
-                            logger.debug(
-                                "Failed to fetch fact for rel %s: %s", rel_uuid, e
-                            )
+                            logger.debug("Failed to fetch fact for rel %s: %s", rel_uuid, e)
 
                     edges_found.append(
                         {
@@ -368,9 +330,7 @@ class GraphitiClient:
                 LIMIT $limit
                 """
                 async with self._db_lock:
-                    records, _, _ = await driver.execute_query(
-                        query_str, search_query=query, limit=max_nodes
-                    )
+                    records, _, _ = await driver.execute_query(query_str, search_query=query, limit=max_nodes)
 
                 for record in records:
                     source = record.get("src")
@@ -389,9 +349,7 @@ class GraphitiClient:
                             if fact_records:
                                 fact = fact_records[0].get("fact", "")
                         except Exception as e:
-                            logger.debug(
-                                "Failed to fetch fact for rel %s: %s", rel_uuid, e
-                            )
+                            logger.debug("Failed to fetch fact for rel %s: %s", rel_uuid, e)
 
                     edges_found.append(
                         {
@@ -423,9 +381,7 @@ class GraphitiClient:
                     if hasattr(edge, "target_node"):
                         nodes_set.add(edge.target_node.name)
 
-        nodes_found_list = list(
-            set([e["source"] for e in edges_found] + [e["target"] for e in edges_found])
-        )
+        nodes_found_list = list(set([e["source"] for e in edges_found] + [e["target"] for e in edges_found]))
         return {
             "query": query,
             "nodes_found": nodes_found_list,

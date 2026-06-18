@@ -3,6 +3,7 @@
 Uses LLM to evaluate query complexity, then iteratively retrieves
 and critiques results until sufficient context is collected.
 """
+
 from __future__ import annotations
 
 import logging
@@ -90,21 +91,16 @@ class AdaptiveRetriever:
             logger.warning("Intent evaluation failed, defaulting to simple: %s", e)
             return IntentEvaluation(is_complex=False)
 
-    async def evaluate_critic(
-        self, query: str, collected_context: list[dict]
-    ) -> CriticEvaluation:
+    async def evaluate_critic(self, query: str, collected_context: list[dict]) -> CriticEvaluation:
         """Evaluate whether collected context is sufficient."""
         context_summary = "\n\n".join(
-            f"[{i+1}] {r.get('title', '')}: {r.get('solution', r.get('description', ''))}"
+            f"[{i + 1}] {r.get('title', '')}: {r.get('solution', r.get('description', ''))}"
             for i, r in enumerate(collected_context)
         )
         try:
             data = await self._llm.chat_json(
                 system=CRITIC_SYSTEM_PROMPT,
-                user=(
-                    f"Original Query: {query}\n\n"
-                    f"Retrieved Context:\n{context_summary[:3000]}"
-                ),
+                user=(f"Original Query: {query}\n\nRetrieved Context:\n{context_summary[:3000]}"),
                 temperature=0.1,
             )
             return CriticEvaluation(
@@ -204,14 +200,18 @@ class AdaptiveRetriever:
                 new_items = self._merge_dedup(collected, sub_result.results, seen_ids)
                 hop_new_total += len(new_items)
 
-            hop_log.append({
-                "hop": loop_count,
-                "queries": new_queries[:2],
-                "new_results": hop_new_total,
-            })
+            hop_log.append(
+                {
+                    "hop": loop_count,
+                    "queries": new_queries[:2],
+                    "new_results": hop_new_total,
+                }
+            )
             logger.info(
                 "[Hop %d] Queries=%s -> %d new results",
-                loop_count, new_queries[:2], hop_new_total,
+                loop_count,
+                new_queries[:2],
+                hop_new_total,
             )
 
             if hop_new_total == 0:
@@ -221,7 +221,9 @@ class AdaptiveRetriever:
         duration_ms = int((time.monotonic() - start) * 1000)
         logger.info(
             "[Adaptive] Completed: %d hops, %d total results, %dms",
-            loop_count, len(collected), duration_ms,
+            loop_count,
+            len(collected),
+            duration_ms,
         )
 
         return AdaptiveResult(

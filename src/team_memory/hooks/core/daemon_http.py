@@ -24,9 +24,7 @@ def post_hook(hook_name: str, payload: dict, timeout: float = 10.0) -> httpx.Res
     return httpx.post(f"{DAEMON_URL}/hooks/{hook_name}", json=payload, timeout=timeout)
 
 
-async def async_post_hook(
-    hook_name: str, payload: dict, timeout: float = 10.0
-) -> dict:
+async def async_post_hook(hook_name: str, payload: dict, timeout: float = 10.0) -> dict:
     """Async POST to a daemon endpoint. 异步向 daemon 端点发送 POST 请求。
 
     Uses a path of /hooks/<hook_name> for hook endpoints, and supports

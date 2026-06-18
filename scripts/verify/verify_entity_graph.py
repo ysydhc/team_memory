@@ -65,7 +65,7 @@ async def step1_check_tables(db_url: str) -> bool:
 async def step2_rule_extraction() -> bool:
     """Test rule-based entity extraction from query strings."""
     _section(2, "Rule-based entity extraction")
-    from team_memory.services.entity_search import extract_entities_from_query
+    from team_memory.services.entity.entity_search import extract_entities_from_query
 
     tests = [
         ("LiteLLM 和 Clash 有什么关系？", ["LiteLLM", "Clash"]),
@@ -155,7 +155,7 @@ async def step3_seed_data(db_url: str) -> bool:
 async def step4_search_and_graph(db_url: str) -> bool:
     """Test entity search and graph traversal APIs."""
     _section(4, "Search entities + graph traversal")
-    from team_memory.services.entity_search import get_entity_graph, search_entities
+    from team_memory.services.entity.entity_search import get_entity_graph, search_entities
 
     ok = True
 

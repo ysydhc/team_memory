@@ -20,10 +20,10 @@ logger = logging.getLogger("team_memory.web.mcp_auth")
 
 
 def _default_get_auth() -> Any:
-    """Lazy import: get the auth provider from the web app module."""
-    from team_memory.web import app as app_module
+    """Get the auth provider from AppContext."""
+    from team_memory.bootstrap import get_context
 
-    return app_module._auth
+    return get_context().auth
 
 
 class MCPAuthMiddleware:

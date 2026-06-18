@@ -1,5 +1,3 @@
-import os
-
 filepath = ".venv/lib/python3.13/site-packages/graphiti_core/graph_queries.py"
 
 with open(filepath, "r") as f:
@@ -19,4 +17,3 @@ if old_str2 in content:
 with open(filepath, "w") as f:
     f.write(content)
 print("Patched graph_queries.py")
-

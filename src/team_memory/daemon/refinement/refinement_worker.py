@@ -212,6 +212,7 @@ async def _llm_api_reachable(base_url: str, timeout: float = 3.0) -> bool:
     """Quick health check — ping LLM API /models endpoint."""
     try:
         import httpx
+
         url = base_url.rstrip("/") + "/models"
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.get(url)
@@ -250,8 +251,8 @@ class RefinementWorker:
         self._running = False
         self._task: asyncio.Task | None = None
 
-    # ------------------------------------------------------------------
-    # Lifecycle
+        # ------------------------------------------------------------------
+        # Lifecycle
         self._running = False
         self._paused = False
 
@@ -826,9 +827,7 @@ class RefinementWorker:
                 "[LLM]  Skipping refinement — LLM API unreachable (%s)",
                 self._cfg.base_url,
             )
-            raise LLMUnavailableError(
-                f"LLM API {self._cfg.base_url} is unreachable"
-            )
+            raise LLMUnavailableError(f"LLM API {self._cfg.base_url} is unreachable")
 
         for attempt in range(max_retries + 1):
             try:
