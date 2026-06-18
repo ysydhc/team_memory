@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from team_memory.daemon.runtime.config import DaemonConfig, RefinementSettings
 from team_memory.daemon.refinement.refinement_worker import _MAX_REFINE_ATTEMPTS, RefinementWorker
+from team_memory.daemon.runtime.config import DaemonConfig, RefinementSettings
 from team_memory.services.llm.llm_parser import LLMParseError
 
 # ---------------------------------------------------------------------------
@@ -555,6 +555,16 @@ class TestRefineOne:
 @pytest.mark.unit
 class TestCallLLM:
     """Tests for _call_llm retry logic and provider dispatch."""
+
+    @pytest.fixture(autouse=True)
+    def _stub_llm_reachable(self):
+        """_call_llm now does a pre-call health check; force it to pass for unit tests."""
+        with patch(
+            "team_memory.daemon.refinement.refinement_worker._llm_api_reachable",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            yield
 
     @pytest.mark.asyncio
     async def test_litellm_success(self):
@@ -1147,7 +1157,9 @@ class TestQualityScore:
         cfg = _make_config(quality_gate_enabled=True)
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
-        with patch("team_memory.daemon.refinement.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
+        with patch(
+            "team_memory.daemon.refinement.refinement_worker.call_llm_openai", new_callable=AsyncMock
+        ) as mock_call:
             mock_call.return_value = '{"score": 75}'
             score = await worker._quality_score(_valid_llm_result())
 
@@ -1158,7 +1170,9 @@ class TestQualityScore:
         cfg = _make_config(quality_gate_enabled=True)
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
-        with patch("team_memory.daemon.refinement.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
+        with patch(
+            "team_memory.daemon.refinement.refinement_worker.call_llm_openai", new_callable=AsyncMock
+        ) as mock_call:
             mock_call.return_value = '{"score": 150}'
             score = await worker._quality_score(_valid_llm_result())
 
@@ -1169,7 +1183,9 @@ class TestQualityScore:
         cfg = _make_config(quality_gate_enabled=True)
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
-        with patch("team_memory.daemon.refinement.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
+        with patch(
+            "team_memory.daemon.refinement.refinement_worker.call_llm_openai", new_callable=AsyncMock
+        ) as mock_call:
             mock_call.return_value = '{"score": -10}'
             score = await worker._quality_score(_valid_llm_result())
 
@@ -1181,7 +1197,9 @@ class TestQualityScore:
         cfg = _make_config(quality_gate_enabled=True)
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
-        with patch("team_memory.daemon.refinement.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
+        with patch(
+            "team_memory.daemon.refinement.refinement_worker.call_llm_openai", new_callable=AsyncMock
+        ) as mock_call:
             mock_call.side_effect = RuntimeError("LLM down")
             score = await worker._quality_score(_valid_llm_result())
 
@@ -1193,7 +1211,9 @@ class TestQualityScore:
         cfg = _make_config(quality_gate_enabled=True)
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
-        with patch("team_memory.daemon.refinement.refinement_worker.call_llm_openai", new_callable=AsyncMock) as mock_call:
+        with patch(
+            "team_memory.daemon.refinement.refinement_worker.call_llm_openai", new_callable=AsyncMock
+        ) as mock_call:
             mock_call.return_value = "not json at all"
             score = await worker._quality_score(_valid_llm_result())
 

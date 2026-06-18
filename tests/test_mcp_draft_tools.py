@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from team_memory.server import mcp
-from tests.conftest import _O, _P, _patch_app_context, _patch_user, make_mock_app_context
+from tests.conftest import _P, _SAVE, _patch_app_context, _patch_user, make_mock_app_context
 
 # ============================================================
 # memory_draft_save
@@ -38,13 +38,13 @@ class TestMemoryDraftSave:
             _patch_app_context(mock_app),
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_O}.get_session") as mock_get_session,
+            patch(f"{_SAVE}.get_session") as mock_get_session,
         ):
             mock_session = AsyncMock()
             mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_draft_save"].fn
             result = await fn(
                 title="Draft fix",
@@ -82,13 +82,13 @@ class TestMemoryDraftSave:
             _patch_app_context(mock_app),
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="myproj"),
-            patch(f"{_O}.get_session") as mock_get_session,
+            patch(f"{_SAVE}.get_session") as mock_get_session,
         ):
             mock_session = AsyncMock()
             mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_draft_save"].fn
             result = await fn(
                 title="Draft",
@@ -140,7 +140,7 @@ class TestMemoryDraftPublish:
             _patch_app_context(mock_app),
             _patch_user(),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_draft_publish"].fn
             result = await fn(draft_id=draft_id)
 
@@ -177,7 +177,7 @@ class TestMemoryDraftPublish:
             _patch_app_context(mock_app),
             _patch_user(),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_draft_publish"].fn
             result = await fn(draft_id=draft_id, refined_content="Improved solution")
 
@@ -205,7 +205,7 @@ class TestMemoryDraftPublish:
             _patch_app_context(mock_app),
             _patch_user(),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_draft_publish"].fn
             result = await fn(draft_id=draft_id)
 
@@ -231,7 +231,7 @@ class TestMemoryDraftPublish:
             _patch_app_context(mock_app),
             _patch_user(),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_draft_publish"].fn
             result = await fn(draft_id=draft_id)
 
@@ -252,7 +252,7 @@ class TestMemoryDraftPublish:
             _patch_app_context(mock_app),
             _patch_user(),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_draft_publish"].fn
             result = await fn(draft_id=draft_id)
 
@@ -286,13 +286,13 @@ class TestMemorySaveRegression:
             _patch_app_context(mock_app),
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_O}.get_session") as mock_get_session,
+            patch(f"{_SAVE}.get_session") as mock_get_session,
         ):
             mock_session = AsyncMock()
             mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_save"].fn
             result = await fn(
                 title="Fix DB timeout",

@@ -44,10 +44,10 @@ class TestDBVectorDimConstant:
     """Verify DB_VECTOR_DIM constant in models.py."""
 
     def test_db_vector_dim_value(self) -> None:
-        """DB_VECTOR_DIM should be 1024 (matching qwen3-embedding:0.6b schema)."""
+        """DB_VECTOR_DIM should be 4096 (matching qwen3-embedding-8b schema)."""
         from team_memory.storage.models import DB_VECTOR_DIM
 
-        assert DB_VECTOR_DIM == 1024
+        assert DB_VECTOR_DIM == 4096
 
     def test_db_vector_dim_is_int(self) -> None:
         """DB_VECTOR_DIM should be an integer."""
@@ -62,10 +62,12 @@ class TestValidateEmbeddingDimension:
     def test_no_warning_when_dimensions_match(self, caplog: pytest.LogCaptureFixture, _ensure_propagate: None) -> None:
         """No warning should be emitted when config dimension == DB_VECTOR_DIM."""
         from team_memory.bootstrap import _validate_embedding_dimension
+        from team_memory.storage.models import DB_VECTOR_DIM
 
         settings = load_settings()
-        # Default Ollama config uses 1024 (qwen3-embedding:0.6b), which matches DB_VECTOR_DIM
-        assert settings.embedding.dimension == 1024
+        # Configure provider to exactly match the DB schema dimension.
+        settings.embedding.provider = "openai"
+        settings.embedding.openai.dimension = DB_VECTOR_DIM
 
         with caplog.at_level(logging.WARNING, logger="team_memory.bootstrap"):
             _validate_embedding_dimension(settings)
@@ -75,9 +77,10 @@ class TestValidateEmbeddingDimension:
     def test_warns_on_dimension_mismatch(self, caplog: pytest.LogCaptureFixture, _ensure_propagate: None) -> None:
         """A warning should be emitted when config dimension != DB_VECTOR_DIM."""
         from team_memory.bootstrap import _validate_embedding_dimension
+        from team_memory.storage.models import DB_VECTOR_DIM
 
         settings = load_settings()
-        # Simulate switching to OpenAI with 1536 dims
+        # Simulate switching to OpenAI with 1536 dims (differs from DB schema)
         settings.embedding.provider = "openai"
         settings.embedding.openai.dimension = 1536
 
@@ -86,7 +89,7 @@ class TestValidateEmbeddingDimension:
 
         assert "dimension mismatch" in caplog.text.lower()
         assert "1536" in caplog.text
-        assert "1024" in caplog.text
+        assert str(DB_VECTOR_DIM) in caplog.text
 
     def test_warns_on_local_dimension_mismatch(self, caplog: pytest.LogCaptureFixture, _ensure_propagate: None) -> None:
         """Warning should fire for local provider with non-1024 dimension."""
@@ -105,12 +108,13 @@ class TestValidateEmbeddingDimension:
     def test_no_warning_when_custom_provider_matches(
         self, caplog: pytest.LogCaptureFixture, _ensure_propagate: None
     ) -> None:
-        """No warning when a non-default provider is configured to use 1024 dims."""
+        """No warning when a non-default provider is configured to match the DB schema dims."""
         from team_memory.bootstrap import _validate_embedding_dimension
+        from team_memory.storage.models import DB_VECTOR_DIM
 
         settings = load_settings()
         settings.embedding.provider = "openai"
-        settings.embedding.openai.dimension = 1024
+        settings.embedding.openai.dimension = DB_VECTOR_DIM
 
         with caplog.at_level(logging.WARNING, logger="team_memory.bootstrap"):
             _validate_embedding_dimension(settings)

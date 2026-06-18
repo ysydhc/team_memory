@@ -201,7 +201,9 @@ class TestCmdCompile:
             return_value=fake_experiences,
         ):
             with patch("team_memory.config.load_settings", return_value=mock_settings):
-                with patch("team_memory.daemon.wiki.wiki_compiler.WikiCompiler", return_value=mock_compiler) as mock_cls:
+                with patch(
+                    "team_memory.daemon.wiki.wiki_compiler.WikiCompiler", return_value=mock_compiler
+                ) as mock_cls:
                     await cmd_compile(full=False, wiki_root=None)
                     # WikiCompiler should have been called with default wiki_root
                     call_kwargs = mock_cls.call_args
@@ -384,27 +386,16 @@ class TestFetchPublishedExperiences:
 
     @pytest.mark.asyncio
     async def test_returns_list_on_success(self):
-        """On success, should return list of dicts."""
-        mock_exp = MagicMock()
-        mock_exp.to_dict.return_value = {"id": "1", "title": "Test"}
-
-        mock_session = AsyncMock()
-        mock_result = MagicMock()
-        mock_scalars = MagicMock()
-        mock_scalars.all.return_value = [mock_exp]
-        mock_result.scalars.return_value = mock_scalars
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        mock_cm = AsyncMock()
-        mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_cm.__aexit__ = AsyncMock(return_value=False)
-
+        """On success, returns the list from BatchOpsService.list_experiences_for_wiki."""
         mock_settings = MagicMock()
         mock_settings.database.url = "postgresql://test"
 
         with patch("team_memory.config.load_settings", return_value=mock_settings):
-            with patch("team_memory.storage.database.get_session", return_value=mock_cm):
-                with patch("team_memory.storage.database.close_db", new_callable=AsyncMock):
-                    result = await _fetch_published_experiences()
-                    assert len(result) == 1
-                    assert result[0]["id"] == "1"
+            with patch(
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.list_experiences_for_wiki",
+                new_callable=AsyncMock,
+                return_value=[{"id": "1", "title": "Test"}],
+            ):
+                result = await _fetch_published_experiences()
+                assert len(result) == 1
+                assert result[0]["id"] == "1"

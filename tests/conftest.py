@@ -18,6 +18,7 @@ LITE_PATCH_BASE = "team_memory.server"
 _OPS_PATCH_BASE = "team_memory.services.memory.memory_operations"
 _P = LITE_PATCH_BASE  # short alias
 _O = _OPS_PATCH_BASE  # MCP orchestration (memory_operations)
+_SAVE = "team_memory.services.memory.ops.save"  # save op module (get_session lives here)
 
 
 def make_mock_app_context(
@@ -28,6 +29,7 @@ def make_mock_app_context(
     archive_service=None,
     db_url: str = "sqlite://",
     embedding=None,
+    adaptive_retriever=None,
 ) -> MagicMock:
     """Build a MagicMock mimicking bootstrap AppContext fields used by MCP tools."""
 
@@ -38,6 +40,7 @@ def make_mock_app_context(
     ctx.archive_service = MagicMock() if archive_service is None else archive_service
     ctx.db_url = db_url
     ctx.embedding = MagicMock() if embedding is None else embedding
+    ctx.adaptive_retriever = MagicMock() if adaptive_retriever is None else adaptive_retriever
     return ctx
 
 

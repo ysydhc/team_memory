@@ -21,10 +21,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from team_memory.services.analysis.evaluation import EvaluationService
-from team_memory.services.search.search_orchestrator import (
-    SearchOrchestrator,
-)
 from team_memory.storage.models import Base, SearchLog
 from team_memory.storage.search_log_repository import SearchLogRepository
 

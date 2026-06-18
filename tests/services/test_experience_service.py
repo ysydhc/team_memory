@@ -41,6 +41,7 @@ def _make_service():
 
 def _mock_session_cm(session: AsyncMock):
     """Return an asynccontextmanager that yields *session*."""
+
     @asynccontextmanager
     async def _cm(_db_url):
         yield session

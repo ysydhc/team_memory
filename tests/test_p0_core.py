@@ -50,6 +50,7 @@ def setup_app():
         }
     )
     mock_service.feedback = AsyncMock(return_value=True)
+    mock_service.list_experiences_filtered = AsyncMock(return_value={"items": [], "total": 0, "limit": 20, "offset": 0})
     mock_service._event_bus = MagicMock()
     web_module._service = mock_service
 
@@ -141,25 +142,12 @@ class TestDraftMode:
         assert call_kwargs.kwargs.get("exp_status") == "published"
 
     def test_list_experiences_with_status_filter(self, client, auth_headers):
-        """GET /api/v1/experiences?status=all should include all statuses."""
-        with patch("team_memory.web.app.get_session") as mock_session:
-            mock_ctx = MagicMock()
-            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
-            mock_session.return_value.__aexit__ = AsyncMock()
-
-            mock_repo = MagicMock()
-            mock_repo.list_recent = AsyncMock(return_value=[])
-            mock_repo.count = AsyncMock(return_value=0)
-
-            with patch(
-                "team_memory.storage.repository.ExperienceRepository",
-                return_value=mock_repo,
-            ):
-                resp = client.get(
-                    "/api/v1/experiences?status=draft",
-                    headers=auth_headers,
-                )
-                assert resp.status_code == 200
+        """GET /api/v1/experiences?status=draft should delegate to service."""
+        resp = client.get(
+            "/api/v1/experiences?status=draft",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
 
 
 # ============================================================

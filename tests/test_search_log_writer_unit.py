@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from team_memory.daemon.observe.search_log_writer import SearchLogWriter
+from team_memory.services.search.search_log_writer import SearchLogWriter
 
 pytestmark = pytest.mark.unit
 
@@ -781,6 +781,8 @@ class TestGetTrends:
             "used": 5,
             "used_fuzzy": 2,
             "used_faithfulness": 3,
+            "avg_relevance": None,
+            "avg_helpfulness": None,
         }
         conn = AsyncMock()
         conn.fetch = AsyncMock(return_value=[row])
@@ -811,6 +813,8 @@ class TestGetTrends:
             "used": 1,
             "used_fuzzy": 0,
             "used_faithfulness": 0,
+            "avg_relevance": None,
+            "avg_helpfulness": None,
         }
         conn = AsyncMock()
         conn.fetch = AsyncMock(return_value=[row])

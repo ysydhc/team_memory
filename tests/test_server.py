@@ -18,6 +18,7 @@ from team_memory.services.search.search_orchestrator import OrchestratedSearchRe
 from tests.conftest import (
     _O,
     _P,
+    _SAVE,
     _patch_app_context,
     _patch_expansion,
     _patch_personal,
@@ -37,14 +38,12 @@ class TestLiteToolRegistration:
 
     @pytest.mark.asyncio
     async def test_exactly_six_tools(self):
-        tools = {t.name: t for t in await mcp.list_tools()}
-        assert (
-            len(tools) == 9
-        ), f"Expected 9 tools, got {len(tools)}: {list(tools.keys())}"
+        tools = {t.name: t for t in (await mcp.get_tools()).values()}
+        assert len(tools) == 9, f"Expected 9 tools, got {len(tools)}: {list(tools.keys())}"
 
     @pytest.mark.asyncio
     async def test_tool_names(self):
-        tools = {t.name: t for t in await mcp.list_tools()}
+        tools = {t.name: t for t in (await mcp.get_tools()).values()}
         expected = {
             "memory_save",
             "memory_recall",
@@ -60,14 +59,14 @@ class TestLiteToolRegistration:
 
     @pytest.mark.asyncio
     async def test_all_tools_have_descriptions(self):
-        tools = {t.name: t for t in await mcp.list_tools()}
+        tools = {t.name: t for t in (await mcp.get_tools()).values()}
         for name, tool in tools.items():
             assert tool.description, f"Tool '{name}' has no description"
 
     @pytest.mark.asyncio
     async def test_no_tm_prefix_tools(self):
         """Lite server should NOT register any tm_* tools."""
-        tools = {t.name: t for t in await mcp.list_tools()}
+        tools = {t.name: t for t in (await mcp.get_tools()).values()}
         for name in tools:
             assert not name.startswith("tm_"), f"Unexpected tm_ tool: {name}"
 
@@ -93,12 +92,10 @@ class TestMemoryGetArchive:
         mock_app = make_mock_app_context(archive_service=mock_svc)
         with (
             _patch_app_context(mock_app),
-            patch(
-                f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"
-            ),
+            patch(f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"),
             patch(f"{_P}._resolve_project", return_value="default"),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_get_archive"].fn
             out = await fn(archive_id=aid)
         data = json.loads(out)
@@ -108,7 +105,7 @@ class TestMemoryGetArchive:
 
     @pytest.mark.asyncio
     async def test_invalid_uuid(self):
-        tools = {t.name: t for t in await mcp.list_tools()}
+        tools = {t.name: t for t in (await mcp.get_tools()).values()}
         fn = tools["memory_get_archive"].fn
         mock_app = make_mock_app_context()
         with _patch_app_context(mock_app), _patch_user("alice"):
@@ -139,12 +136,10 @@ class TestMemoryArchiveUpsert:
         mock_app = make_mock_app_context(settings=st, archive_service=mock_svc)
         with (
             _patch_app_context(mock_app),
-            patch(
-                f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"
-            ),
+            patch(f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"),
             patch(f"{_P}._resolve_project", return_value="myproj"),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_archive_upsert"].fn
             out = await fn(title="Doc", solution_doc="# Body\n", project="p")
 
@@ -161,7 +156,7 @@ class TestMemoryArchiveUpsert:
     async def test_validation_error_from_schema(self):
         mock_app = make_mock_app_context(settings=make_mcp_tool_settings_stub())
         with _patch_app_context(mock_app), _patch_user("alice"):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_archive_upsert"].fn
             out = await fn(
                 title="T",
@@ -179,7 +174,7 @@ class TestMemoryArchiveUpsert:
         st.mcp.max_archive_solution_doc_chars = 10
         mock_app = make_mock_app_context(settings=st)
         with _patch_app_context(mock_app), _patch_user("alice"):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_archive_upsert"].fn
             out = await fn(title="T", solution_doc="x" * 11)
 
@@ -204,12 +199,10 @@ class TestMemoryArchiveUpsert:
         mock_app = make_mock_app_context(settings=st, archive_service=mock_svc)
         with (
             _patch_app_context(mock_app),
-            patch(
-                f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"
-            ),
+            patch(f"{_P}._get_current_user", new_callable=AsyncMock, return_value="alice"),
             patch(f"{_P}._resolve_project", return_value=None),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_archive_upsert"].fn
             out = await fn(title="T", solution_doc="body")
 
@@ -242,15 +235,13 @@ class TestMemorySave:
             _patch_app_context(mock_app),
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_O}.get_session") as mock_get_session,
+            patch(f"{_SAVE}.get_session") as mock_get_session,
         ):
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_save"].fn
             result = await fn(
                 title="Fix DB timeout",
@@ -298,7 +289,7 @@ class TestMemorySave:
             _patch_app_context(mock_app),
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_O}.get_session") as mock_get_session,
+            patch(f"{_SAVE}.get_session") as mock_get_session,
             patch(
                 "team_memory.services.llm.llm_parser.parse_content",
                 new_callable=AsyncMock,
@@ -307,12 +298,10 @@ class TestMemorySave:
             _patch_personal(),
         ):
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_save"].fn
             result = await fn(content="Long conversation about fixing a bug...")
 
@@ -329,7 +318,7 @@ class TestMemorySave:
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_save"].fn
             result = await fn(
                 title="Sprint 42 Summary",
@@ -355,7 +344,7 @@ class TestMemorySave:
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_save"].fn
             result = await fn(tags=["python"])
 
@@ -387,9 +376,7 @@ class TestMemoryRecall:
         ]
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(
-            return_value=OrchestratedSearchResult(results=mock_results)
-        )
+        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=mock_orchestrator,
@@ -407,7 +394,7 @@ class TestMemoryRecall:
             ),
             _patch_expansion(),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_recall"].fn
             result = await fn(problem="Database connection timeout", language="python")
 
@@ -431,9 +418,7 @@ class TestMemoryRecall:
         ]
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(
-            return_value=OrchestratedSearchResult(results=mock_results)
-        )
+        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=mock_orchestrator,
@@ -451,9 +436,9 @@ class TestMemoryRecall:
             ),
             _patch_expansion(),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_recall"].fn
-            result = await fn(query="redis caching best practices")
+            result = await fn(query="redis caching best practices", adaptive=False)
 
         data = json.loads(result)
         assert "results" in data
@@ -478,9 +463,7 @@ class TestMemoryRecall:
         mock_settings.mcp.truncate_solution_at = 2000
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(
-            return_value=OrchestratedSearchResult(results=mock_results)
-        )
+        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
         mock_embed = MagicMock()
         mock_app = make_mock_app_context(
             db_url="sqlite://",
@@ -503,14 +486,12 @@ class TestMemoryRecall:
             _patch_expansion(),
         ):
             mock_pm = MagicMock()
-            mock_pm.build_profile_for_user = AsyncMock(
-                return_value={"static": ["prefers tests"], "dynamic": []}
-            )
+            mock_pm.build_profile_for_user = AsyncMock(return_value={"static": ["prefers tests"], "dynamic": []})
             mock_pm_cls.return_value = mock_pm
 
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_recall"].fn
-            result = await fn(query="redis", include_user_profile=True)
+            result = await fn(query="redis", include_user_profile=True, adaptive=False)
 
         data = json.loads(result)
         assert data["profile"]["static"] == ["prefers tests"]
@@ -535,9 +516,7 @@ class TestMemoryRecall:
         ]
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(
-            return_value=OrchestratedSearchResult(results=mock_results)
-        )
+        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=mock_orchestrator,
@@ -554,7 +533,7 @@ class TestMemoryRecall:
                 return_value="00000000-0000-0000-0000-000000000001",
             ),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_recall"].fn
             result = await fn(file_path="src/auth/middleware.py")
 
@@ -584,7 +563,7 @@ class TestMemoryRecall:
                 return_value="00000000-0000-0000-0000-000000000001",
             ),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_recall"].fn
             result = await fn()
 
@@ -595,9 +574,7 @@ class TestMemoryRecall:
     async def test_no_results_suggests_save(self):
         """No results in solve mode → suggest memory_save."""
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(
-            return_value=OrchestratedSearchResult(results=[])
-        )
+        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=[]))
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=mock_orchestrator,
@@ -614,7 +591,7 @@ class TestMemoryRecall:
                 return_value="00000000-0000-0000-0000-000000000001",
             ),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_recall"].fn
             result = await fn(problem="Some unique problem")
 
@@ -635,9 +612,7 @@ class TestMemoryRecall:
         ]
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(
-            return_value=OrchestratedSearchResult(results=mock_results)
-        )
+        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=mock_orchestrator,
@@ -655,9 +630,9 @@ class TestMemoryRecall:
             ),
             _patch_expansion(),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_recall"].fn
-            result = await fn(query="redis patterns", include_archives=True)
+            result = await fn(query="redis patterns", include_archives=True, adaptive=False)
 
         data = json.loads(result)
         assert "results" in data
@@ -680,9 +655,7 @@ class TestMemoryRecall:
         ]
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(
-            return_value=OrchestratedSearchResult(results=mock_results)
-        )
+        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=mock_orchestrator,
@@ -700,7 +673,7 @@ class TestMemoryRecall:
             ),
             _patch_expansion(),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_recall"].fn
             result = await fn(
                 problem="Connection pool exhaustion",
@@ -718,9 +691,7 @@ class TestMemoryRecall:
         monkeypatch.setenv("TEAM_MEMORY_ENV", "development")
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(
-            return_value=OrchestratedSearchResult(results=[])
-        )
+        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=[]))
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=mock_orchestrator,
@@ -738,9 +709,9 @@ class TestMemoryRecall:
             ),
             _patch_expansion(),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_recall"].fn
-            await fn(query="test query")
+            await fn(query="test query", adaptive=False)
 
         call_kwargs = mock_orchestrator.search.call_args.kwargs
         assert call_kwargs["include_archives"] is True
@@ -751,9 +722,7 @@ class TestMemoryRecall:
         monkeypatch.setenv("TEAM_MEMORY_ENV", "production")
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(
-            return_value=OrchestratedSearchResult(results=[])
-        )
+        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=[]))
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=mock_orchestrator,
@@ -771,9 +740,9 @@ class TestMemoryRecall:
             ),
             _patch_expansion(),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_recall"].fn
-            await fn(query="test query")
+            await fn(query="test query", adaptive=False)
 
         call_kwargs = mock_orchestrator.search.call_args.kwargs
         assert call_kwargs["include_archives"] is False
@@ -805,9 +774,7 @@ class TestMemoryContext:
         mock_settings.mcp.profile_max_strings_per_side = 20
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(
-            return_value=OrchestratedSearchResult(results=mock_results, reranked=True)
-        )
+        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results, reranked=True))
         mock_embed = MagicMock()
         mock_app = make_mock_app_context(
             db_url="sqlite://",
@@ -833,7 +800,7 @@ class TestMemoryContext:
             )
             mock_pm_cls.return_value = mock_pm
 
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_context"].fn
             result = await fn(
                 file_paths=["src/auth/middleware.py"],
@@ -865,7 +832,7 @@ class TestMemoryFeedback:
             _patch_app_context(mock_app),
             _patch_user(),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_feedback"].fn
             result = await fn(experience_id=str(uuid.uuid4()), rating=5)
 
@@ -880,7 +847,7 @@ class TestMemoryFeedback:
             _patch_app_context(mock_app),
             _patch_user(),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_feedback"].fn
             result = await fn(experience_id=str(uuid.uuid4()), rating=10)
 
@@ -908,9 +875,7 @@ class TestGuardOutput:
     def test_large_output_truncates_results(self):
         from team_memory.server import _guard_output
 
-        results = [
-            {"title": f"Experience {i}", "solution": "x" * 3000} for i in range(10)
-        ]
+        results = [{"title": f"Experience {i}", "solution": "x" * 3000} for i in range(10)]
         data = {"message": "Found 10", "results": results}
         raw = json.dumps(data, ensure_ascii=False)
 
@@ -967,7 +932,7 @@ class TestMemorySaveContentLimit:
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_save"].fn
             result = await fn(content="x" * 101)
 
@@ -1010,7 +975,7 @@ class TestMemorySaveContentLimit:
             _patch_app_context(mock_app),
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_O}.get_session") as mock_get_session,
+            patch(f"{_SAVE}.get_session") as mock_get_session,
             patch(
                 "team_memory.services.llm.llm_parser.parse_content",
                 new_callable=AsyncMock,
@@ -1024,7 +989,7 @@ class TestMemorySaveContentLimit:
             )
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_save"].fn
             result = await fn(content="Valid content under limit")
 
@@ -1055,7 +1020,7 @@ class TestMemorySaveTagsValidation:
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_save"].fn
             result = await fn(
                 title="T",
@@ -1081,7 +1046,7 @@ class TestMemorySaveTagsValidation:
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_save"].fn
             result = await fn(
                 title="T",
@@ -1118,7 +1083,7 @@ class TestMemorySaveTagsValidation:
             _patch_app_context(mock_app),
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_O}.get_session") as mock_get_session,
+            patch(f"{_SAVE}.get_session") as mock_get_session,
         ):
             mock_session = AsyncMock()
             mock_get_session.return_value.__aenter__ = AsyncMock(
@@ -1126,7 +1091,7 @@ class TestMemorySaveTagsValidation:
             )
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_save"].fn
             result = await fn(
                 title="T",
@@ -1166,11 +1131,9 @@ class TestMemorySubmitResponse:
             patch(f"{_P}._resolve_project", return_value="proj-a"),
             patch(f"{_O}.op_submit_response", mock_op),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_submit_response"].fn
-            out = await fn(
-                query="why tests fail", response="because mocks", result_ids=[exp_id]
-            )
+            out = await fn(query="why tests fail", response="because mocks", result_ids=[exp_id])
 
         mock_op.assert_awaited_once_with(
             "admin",
@@ -1189,16 +1152,14 @@ class TestMemorySubmitResponse:
     async def test_remote_delegates_to_client(self):
         buffer_id = str(uuid.uuid4())
         mock_client = MagicMock()
-        mock_client.op_submit_response = AsyncMock(
-            return_value={"status": "buffered", "buffer_id": buffer_id}
-        )
+        mock_client.op_submit_response = AsyncMock(return_value={"status": "buffered", "buffer_id": buffer_id})
         rid = str(uuid.uuid4())
         with (
             patch(f"{_P}._remote_client", mock_client),
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="remote-proj"),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_submit_response"].fn
             out = await fn(query="q1", response="r1", result_ids=[rid])
 

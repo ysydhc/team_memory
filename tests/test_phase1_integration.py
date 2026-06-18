@@ -22,6 +22,7 @@ from team_memory.services.search.search_orchestrator import OrchestratedSearchRe
 from tests.conftest import (
     _O,
     _P,
+    _SAVE,
     _patch_app_context,
     _patch_expansion,
     _patch_user,
@@ -162,15 +163,13 @@ class TestDraftPublishRecallFlow:
             _patch_app_context(mock_app),
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_O}.get_session") as mock_get_session,
+            patch(f"{_SAVE}.get_session") as mock_get_session,
         ):
             mock_session = AsyncMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_draft_save"].fn
             result = await fn(
                 title="Draft fix",
@@ -202,7 +201,7 @@ class TestDraftPublishRecallFlow:
             _patch_app_context(mock_app),
             _patch_user(),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_draft_publish"].fn
             result = await fn(draft_id=exp_id)
 
@@ -222,9 +221,7 @@ class TestDraftPublishRecallFlow:
         mock_results = _make_recall_result(exp_id)
 
         mock_orchestrator = MagicMock()
-        mock_orchestrator.search = AsyncMock(
-            return_value=OrchestratedSearchResult(results=mock_results)
-        )
+        mock_orchestrator.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=mock_orchestrator,
@@ -243,7 +240,7 @@ class TestDraftPublishRecallFlow:
             ),
             _patch_expansion(),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_recall"].fn
             result = await fn(problem="Connection pool exhausted")
 
@@ -275,13 +272,13 @@ class TestDraftPublishRecallFlow:
             _patch_app_context(mock_app),
             _patch_user("pipeline_user"),
             patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_O}.get_session") as mock_gs,
+            patch(f"{_SAVE}.get_session") as mock_gs,
         ):
             s = AsyncMock()
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=s)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             save_result = await tools["memory_draft_save"].fn(
                 title="Fix DB pool exhaustion",
                 content="Connection pool exhausted under high concurrency",
@@ -330,9 +327,7 @@ class TestDraftPublishRecallFlow:
             }
         ]
         orch = MagicMock()
-        orch.search = AsyncMock(
-            return_value=OrchestratedSearchResult(results=recall_results)
-        )
+        orch.search = AsyncMock(return_value=OrchestratedSearchResult(results=recall_results))
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=orch,
@@ -455,13 +450,13 @@ class TestPublishedUseCountPromotionFlow:
             _patch_app_context(mock_app),
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_O}.get_session") as mock_gs,
+            patch(f"{_SAVE}.get_session") as mock_gs,
         ):
             s = AsyncMock()
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=s)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             save_result = await tools["memory_save"].fn(
                 title="Redis caching pattern",
                 problem="Slow DB queries on repeated reads",
@@ -490,9 +485,7 @@ class TestPublishedUseCountPromotionFlow:
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(
             side_effect=[
-                MagicMock(
-                    scalars=MagicMock(return_value=_FakeScalarResult([promoted_exp]))
-                ),
+                MagicMock(scalars=MagicMock(return_value=_FakeScalarResult([promoted_exp]))),
                 MagicMock(all=MagicMock(return_value=[])),
             ]
         )
@@ -510,12 +503,7 @@ class TestPublishedUseCountPromotionFlow:
     async def test_group_key_promotion_flow(self):
         """Multiple published experiences with same group_key get promoted together."""
         group_key = "auth-patterns"
-        exps = [
-            _make_experience(
-                exp_status="published", recall_count=0, group_key=group_key
-            )
-            for _ in range(5)
-        ]
+        exps = [_make_experience(exp_status="published", recall_count=0, group_key=group_key) for _ in range(5)]
         janitor = MemoryJanitor(
             db_url="sqlite+aiosqlite://",
             config=JanitorConfig(promotion_group_key_threshold=5),
@@ -570,13 +558,13 @@ class TestMemorySaveRecallRegression:
             _patch_app_context(mock_app),
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_O}.get_session") as mock_gs,
+            patch(f"{_SAVE}.get_session") as mock_gs,
         ):
             s = AsyncMock()
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=s)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_save"].fn
             result = await fn(
                 title="Fix DB timeout",
@@ -605,9 +593,7 @@ class TestMemorySaveRecallRegression:
         ]
 
         orch = MagicMock()
-        orch.search = AsyncMock(
-            return_value=OrchestratedSearchResult(results=mock_results)
-        )
+        orch.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=orch,
@@ -626,7 +612,7 @@ class TestMemorySaveRecallRegression:
             ),
             _patch_expansion(),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_recall"].fn
             result = await fn(problem="Database connection timeout", language="python")
 
@@ -650,9 +636,7 @@ class TestMemorySaveRecallRegression:
         ]
 
         orch = MagicMock()
-        orch.search = AsyncMock(
-            return_value=OrchestratedSearchResult(results=mock_results)
-        )
+        orch.search = AsyncMock(return_value=OrchestratedSearchResult(results=mock_results))
         mock_app = make_mock_app_context(
             db_url="sqlite://",
             search_orchestrator=orch,
@@ -671,9 +655,9 @@ class TestMemorySaveRecallRegression:
             ),
             _patch_expansion(),
         ):
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_recall"].fn
-            result = await fn(query="redis caching best practices")
+            result = await fn(query="redis caching best practices", adaptive=False)
 
         data = json.loads(result)
         assert "results" in data
@@ -716,21 +700,19 @@ class TestMemorySaveRecallRegression:
             _patch_app_context(mock_app),
             _patch_user(),
             patch(f"{_P}._resolve_project", return_value="default"),
-            patch(f"{_O}.get_session") as mock_gs,
+            patch(f"{_SAVE}.get_session") as mock_gs,
             patch(
                 "team_memory.services.llm.llm_parser.parse_content",
                 new_callable=AsyncMock,
                 return_value=mock_parsed,
             ),
-            patch(
-                f"{_O}._try_extract_and_save_personal_memory", new_callable=AsyncMock
-            ),
+            patch(f"{_O}._try_extract_and_save_personal_memory", new_callable=AsyncMock),
         ):
             s = AsyncMock()
             mock_gs.return_value.__aenter__ = AsyncMock(return_value=s)
             mock_gs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            tools = {t.name: t for t in await mcp.list_tools()}
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
             fn = tools["memory_save"].fn
             result = await fn(content="Long conversation about fixing a bug...")
 

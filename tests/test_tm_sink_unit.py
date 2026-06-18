@@ -34,9 +34,7 @@ def mock_daemon_context():
     from tests.conftest import make_mock_app_context
 
     ctx = make_mock_app_context()
-    with patch(
-        "team_memory.daemon.integration.tm_sink._daemon_context", return_value=ctx
-    ) as mock:
+    with patch("team_memory.daemon.integration.tm_sink._daemon_context", return_value=ctx) as mock:
         yield mock
 
 
@@ -108,9 +106,7 @@ class TestLocalTMSinkRecall:
     async def test_recall_returns_empty_list_when_raw_is_list(self):
         """When _op_recall returns a list (not dict, not str), recall returns []."""
         sink = LocalTMSink(user="test_user")
-        with patch(
-            "team_memory.daemon.integration.tm_sink._op_recall", new_callable=AsyncMock
-        ) as mock_recall:
+        with patch("team_memory.daemon.integration.tm_sink._op_recall", new_callable=AsyncMock) as mock_recall:
             mock_recall.return_value = [{"id": "1"}, {"id": "2"}]
             result = await sink.recall(query="test")
             assert result == []
@@ -119,9 +115,7 @@ class TestLocalTMSinkRecall:
     async def test_recall_returns_empty_list_when_raw_is_none(self):
         """When _op_recall returns None, recall returns []."""
         sink = LocalTMSink(user="test_user")
-        with patch(
-            "team_memory.daemon.integration.tm_sink._op_recall", new_callable=AsyncMock
-        ) as mock_recall:
+        with patch("team_memory.daemon.integration.tm_sink._op_recall", new_callable=AsyncMock) as mock_recall:
             mock_recall.return_value = None
             result = await sink.recall(query="test")
             assert result == []
@@ -177,14 +171,10 @@ class TestLocalTMSinkIncrementUsedCount:
         ctx = make_mock_app_context(service=mock_service)
 
         sink = LocalTMSink(user="test_user")
-        with patch(
-            "team_memory.daemon.integration.tm_sink._daemon_context", return_value=ctx
-        ):
+        with patch("team_memory.daemon.integration.tm_sink._daemon_context", return_value=ctx):
             await sink.increment_used_count("00000000-0000-0000-0000-000000000001")
 
-        mock_service.increment_used_count.assert_awaited_once_with(
-            "00000000-0000-0000-0000-000000000001"
-        )
+        mock_service.increment_used_count.assert_awaited_once_with("00000000-0000-0000-0000-000000000001")
 
 
 # ---------------------------------------------------------------------------
@@ -260,9 +250,7 @@ class TestRemoteTMSinkDraftSave:
                 skip_dedup=True,
             )
         call_kwargs = mock_req.call_args
-        body = (
-            call_kwargs[0][2] if len(call_kwargs[0]) > 2 else call_kwargs[1].get("body")
-        )
+        body = call_kwargs[0][2] if len(call_kwargs[0]) > 2 else call_kwargs[1].get("body")
         # Verify body was built correctly
         # The _request is called as: _request("POST", "/api/v1/mcp/draft-save", body)
         args, kwargs = mock_req.call_args
@@ -517,7 +505,6 @@ class TestLocalTMSinkMethods:
                 project="proj",
                 group_key="gk",
             )
-        from unittest.mock import ANY
         from unittest.mock import ANY
 
         mock_op.assert_awaited_once_with(

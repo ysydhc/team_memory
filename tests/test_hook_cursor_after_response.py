@@ -45,7 +45,7 @@ class TestCursorAfterResponseThin:
     def test_daemon_not_running_returns_ok(self) -> None:
         from team_memory.hooks.platforms.cursor.after_response import main
 
-        input_data = {"conversation_id": "sess-1", "prompt": "hello"}
+        input_data = {"conversation_id": "sess-1", "agent_response": "hello"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
             with patch("team_memory.hooks.core.daemon_http.httpx.post", side_effect=httpx.ConnectError("refused")):
                 with patch("builtins.print") as mock_print:
@@ -65,7 +65,7 @@ class TestCursorAfterResponseThin:
     def test_timeout_returns_error(self) -> None:
         from team_memory.hooks.platforms.cursor.after_response import main
 
-        input_data = {"conversation_id": "sess-1", "prompt": "hello"}
+        input_data = {"conversation_id": "sess-1", "agent_response": "hello"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
             with patch(
                 "team_memory.hooks.core.daemon_http.httpx.post", side_effect=httpx.TimeoutException("timed out")
@@ -78,7 +78,7 @@ class TestCursorAfterResponseThin:
     def test_generic_exception_returns_error(self) -> None:
         from team_memory.hooks.platforms.cursor.after_response import main
 
-        input_data = {"conversation_id": "sess-1", "prompt": "hello"}
+        input_data = {"conversation_id": "sess-1", "agent_response": "hello"}
         with patch("sys.stdin", io.StringIO(json.dumps(input_data))):
             with patch("team_memory.hooks.core.daemon_http.httpx.post", side_effect=RuntimeError("fail")):
                 with patch("builtins.print") as mock_print:

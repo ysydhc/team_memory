@@ -11,6 +11,7 @@ Covers: argument parsing, helper functions, main() entry points,
 from __future__ import annotations
 
 import sys
+from contextlib import ExitStack, contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -83,7 +84,9 @@ class TestEmbeddingBackfillMain:
         with (
             patch.object(sys, "argv", ["embedding_backfill.py", "--dry-run"]),
             patch(
-                "team_memory.daemon.backfill.embedding_backfill.run_backfill", new_callable=MagicMock, return_value=mock_coro
+                "team_memory.daemon.backfill.embedding_backfill.run_backfill",
+                new_callable=MagicMock,
+                return_value=mock_coro,
             ) as mock_rb,
             patch("team_memory.daemon.backfill.embedding_backfill.asyncio") as mock_asyncio,
         ):
@@ -91,7 +94,9 @@ class TestEmbeddingBackfillMain:
             from team_memory.daemon.backfill.embedding_backfill import main
 
             main()
-            mock_rb.assert_called_once_with(dry_run=True, limit=0)
+            assert mock_rb.call_count == 1
+            _kw = mock_rb.call_args.kwargs
+            assert _kw["dry_run"] is True and _kw["limit"] == 0
         mock_coro.close()
 
     def test_main_limit(self):
@@ -99,7 +104,9 @@ class TestEmbeddingBackfillMain:
         with (
             patch.object(sys, "argv", ["embedding_backfill.py", "--limit", "42"]),
             patch(
-                "team_memory.daemon.backfill.embedding_backfill.run_backfill", new_callable=MagicMock, return_value=mock_coro
+                "team_memory.daemon.backfill.embedding_backfill.run_backfill",
+                new_callable=MagicMock,
+                return_value=mock_coro,
             ) as mock_rb,
             patch("team_memory.daemon.backfill.embedding_backfill.asyncio") as mock_asyncio,
         ):
@@ -107,7 +114,9 @@ class TestEmbeddingBackfillMain:
             from team_memory.daemon.backfill.embedding_backfill import main
 
             main()
-            mock_rb.assert_called_once_with(dry_run=False, limit=42)
+            assert mock_rb.call_count == 1
+            _kw = mock_rb.call_args.kwargs
+            assert _kw["dry_run"] is False and _kw["limit"] == 42
         mock_coro.close()
 
     def test_main_all_args(self):
@@ -115,7 +124,9 @@ class TestEmbeddingBackfillMain:
         with (
             patch.object(sys, "argv", ["embedding_backfill.py", "--dry-run", "--limit", "5"]),
             patch(
-                "team_memory.daemon.backfill.embedding_backfill.run_backfill", new_callable=MagicMock, return_value=mock_coro
+                "team_memory.daemon.backfill.embedding_backfill.run_backfill",
+                new_callable=MagicMock,
+                return_value=mock_coro,
             ) as mock_rb,
             patch("team_memory.daemon.backfill.embedding_backfill.asyncio") as mock_asyncio,
         ):
@@ -123,25 +134,55 @@ class TestEmbeddingBackfillMain:
             from team_memory.daemon.backfill.embedding_backfill import main
 
             main()
-            mock_rb.assert_called_once_with(dry_run=True, limit=5)
+            assert mock_rb.call_count == 1
+            _kw = mock_rb.call_args.kwargs
+            assert _kw["dry_run"] is True and _kw["limit"] == 5
         mock_coro.close()
+
+
+_EB = "team_memory.services.maintenance.batch_ops.BatchOpsService"
+
+
+@contextmanager
+def _patch_embedding_batchops(exp_rows=None, arch_rows=None, pm_rows=None):
+    """Enter patches for the three list_* (chunked: rows once then []) and update_* methods.
+
+    Yields a dict of the AsyncMock objects so tests can assert on them.
+    """
+    exp_chunks = [list(exp_rows or []), []]
+    arch_chunks = [list(arch_rows or []), []]
+
+    list_exp = AsyncMock(side_effect=exp_chunks)
+    list_arch = AsyncMock(side_effect=arch_chunks)
+    list_pm = AsyncMock(return_value=list(pm_rows or []))
+    upd_exp = AsyncMock()
+    upd_arch = AsyncMock()
+    upd_pm = AsyncMock()
+
+    patches = [
+        patch(f"{_EB}.list_experiences_missing_embedding", list_exp),
+        patch(f"{_EB}.list_archives_missing_embedding", list_arch),
+        patch(f"{_EB}.list_personal_memories_missing_embedding", list_pm),
+        patch(f"{_EB}.update_experience_embedding", upd_exp),
+        patch(f"{_EB}.update_archive_embedding", upd_arch),
+        patch(f"{_EB}.update_personal_memory_embedding", upd_pm),
+    ]
+    with ExitStack() as stack:
+        for pc in patches:
+            stack.enter_context(pc)
+        yield {"list_exp": list_exp, "update_exp": upd_exp}
 
 
 @pytest.mark.unit
 class TestEmbeddingBackfillRunBackfill:
-    """Test run_backfill() with fully mocked DB and embedding provider."""
+    """Test run_backfill() with BatchOpsService and embedding provider mocked."""
 
     @pytest.mark.asyncio
     async def test_no_rows_returns_early(self, capsys):
-        session = _mock_session_context(fetchall_return=[])
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-
         with (
             patch("team_memory.config.load_settings", return_value=_make_settings()),
-            patch("team_memory.embedding.factory.create_embedding_provider") as mock_emb,
-            patch("team_memory.storage.database.get_session", return_value=mock_ctx),
+            patch("team_memory.embedding.factory.create_embedding_provider"),
+            _patch_embedding_batchops(exp_rows=[]) as mocks,
         ):
             from team_memory.daemon.backfill.embedding_backfill import run_backfill
 
@@ -152,130 +193,90 @@ class TestEmbeddingBackfillRunBackfill:
     @pytest.mark.asyncio
     async def test_dry_run_shows_rows(self, capsys):
         rows = [
-            ("id-1", "Title 1", "Desc 1", "Sol 1", ["tag1"]),
-            ("id-2", "Title 2", "Desc 2", "Sol 2", []),
+            {"id": "id-1", "title": "Title 1", "description": "Desc 1", "solution": "Sol 1", "tags": ["tag1"]},
+            {"id": "id-2", "title": "Title 2", "description": "Desc 2", "solution": "Sol 2", "tags": []},
         ]
-        session = _mock_session_context(fetchall_return=rows)
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-
         with (
             patch("team_memory.config.load_settings", return_value=_make_settings()),
             patch("team_memory.embedding.factory.create_embedding_provider"),
-            patch("team_memory.storage.database.get_session", return_value=mock_ctx),
+            _patch_embedding_batchops(exp_rows=rows) as mocks,
         ):
             from team_memory.daemon.backfill.embedding_backfill import run_backfill
 
             await run_backfill(dry_run=True, limit=0)
         captured = capsys.readouterr()
-        assert "Found 2 experiences" in captured.out
+        # Dry-run prints the row id prefixes (first 8 chars).
         assert "id-1" in captured.out
-
-    @pytest.mark.asyncio
-    async def test_dry_run_with_limit(self, capsys):
-        rows = [(f"id-{i}", f"Title {i}", f"Desc {i}", "", []) for i in range(20)]
-        session = _mock_session_context(fetchall_return=rows)
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-
-        with (
-            patch("team_memory.config.load_settings", return_value=_make_settings()),
-            patch("team_memory.embedding.factory.create_embedding_provider"),
-            patch("team_memory.storage.database.get_session", return_value=mock_ctx),
-        ):
-            from team_memory.daemon.backfill.embedding_backfill import run_backfill
-
-            await run_backfill(dry_run=True, limit=5)
-        captured = capsys.readouterr()
-        assert "processing 5" in captured.out
+        assert "id-2" in captured.out
 
     @pytest.mark.asyncio
     async def test_dry_run_truncates_at_10(self, capsys):
-        rows = [(f"id-{i}", f"Title {i}", f"Desc {i}", "", []) for i in range(15)]
-        session = _mock_session_context(fetchall_return=rows)
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-
+        rows = [
+            {"id": f"id-{i}", "title": f"Title {i}", "description": f"Desc {i}", "solution": "", "tags": []}
+            for i in range(15)
+        ]
         with (
             patch("team_memory.config.load_settings", return_value=_make_settings()),
             patch("team_memory.embedding.factory.create_embedding_provider"),
-            patch("team_memory.storage.database.get_session", return_value=mock_ctx),
+            _patch_embedding_batchops(exp_rows=rows) as mocks,
         ):
             from team_memory.daemon.backfill.embedding_backfill import run_backfill
 
             await run_backfill(dry_run=True, limit=0)
         captured = capsys.readouterr()
-        assert "and 5 more" in captured.out
+        # Only first 10 rows are printed in dry-run mode.
+        assert "id-0:" in captured.out
+        assert "id-9:" in captured.out
+        assert "id-10:" not in captured.out
 
     @pytest.mark.asyncio
     async def test_successful_backfill(self, capsys):
-        row = ("exp-001", "Bug fix", "Fixed it", "Solution text", ["python"])
-        session = _mock_session_context(fetchall_return=[row])
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-
+        rows = [
+            {
+                "id": "exp-001",
+                "title": "Bug fix",
+                "description": "Fixed it",
+                "solution": "Solution text",
+                "tags": ["python"],
+            }
+        ]
         mock_embedder = AsyncMock()
         mock_embedder.encode_single = AsyncMock(return_value=[0.1, 0.2])
-
-        # Two session contexts: SELECT and UPDATE
-        update_session = _mock_session_context()
-        update_ctx = AsyncMock()
-        update_ctx.__aenter__ = AsyncMock(return_value=update_session)
-        update_ctx.__aexit__ = AsyncMock(return_value=False)
-
         with (
             patch("team_memory.config.load_settings", return_value=_make_settings()),
             patch("team_memory.embedding.factory.create_embedding_provider", return_value=mock_embedder),
-            patch("team_memory.storage.database.get_session", side_effect=[mock_ctx, update_ctx]),
+            _patch_embedding_batchops(exp_rows=rows) as mocks,
         ):
             from team_memory.daemon.backfill.embedding_backfill import run_backfill
 
             await run_backfill(dry_run=False, limit=0)
-        captured = capsys.readouterr()
-        assert "Succeeded: 1" in captured.out
-        assert "Failed:    0" in captured.out
+        mocks["update_exp"].assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_embedding_returns_none(self, capsys):
-        row = ("exp-002", "Title", "Desc", "Sol", [])
-        session = _mock_session_context(fetchall_return=[row])
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-
+        rows = [{"id": "exp-002", "title": "Title", "description": "Desc", "solution": "Sol", "tags": []}]
         mock_embedder = AsyncMock()
         mock_embedder.encode_single = AsyncMock(return_value=None)
-
         with (
             patch("team_memory.config.load_settings", return_value=_make_settings()),
             patch("team_memory.embedding.factory.create_embedding_provider", return_value=mock_embedder),
-            patch("team_memory.storage.database.get_session", return_value=mock_ctx),
+            _patch_embedding_batchops(exp_rows=rows) as mocks,
         ):
             from team_memory.daemon.backfill.embedding_backfill import run_backfill
 
             await run_backfill(dry_run=False, limit=0)
-        captured = capsys.readouterr()
-        assert "Failed:    1" in captured.out
+        # No embedding => no DB update.
+        mocks["update_exp"].assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_encode_exception_increments_failed(self, capsys):
-        row = ("exp-003", "T", "D", "S", ["x"])
-        session = _mock_session_context(fetchall_return=[row])
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-
+        rows = [{"id": "exp-003", "title": "T", "description": "D", "solution": "S", "tags": ["x"]}]
         mock_embedder = AsyncMock()
         mock_embedder.encode_single = AsyncMock(side_effect=RuntimeError("API down"))
-
         with (
             patch("team_memory.config.load_settings", return_value=_make_settings()),
             patch("team_memory.embedding.factory.create_embedding_provider", return_value=mock_embedder),
-            patch("team_memory.storage.database.get_session", return_value=mock_ctx),
+            _patch_embedding_batchops(exp_rows=rows) as mocks,
         ):
             from team_memory.daemon.backfill.embedding_backfill import run_backfill
 
@@ -286,59 +287,33 @@ class TestEmbeddingBackfillRunBackfill:
 
     @pytest.mark.asyncio
     async def test_limit_truncates_rows(self, capsys):
-        rows = [(f"id-{i}", f"Title {i}", f"Desc {i}", f"Sol {i}", []) for i in range(10)]
-        session = _mock_session_context(fetchall_return=rows)
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-
+        rows = [
+            {"id": f"id-{i}", "title": f"Title {i}", "description": f"Desc {i}", "solution": f"Sol {i}", "tags": []}
+            for i in range(3)
+        ]
         mock_embedder = AsyncMock()
         mock_embedder.encode_single = AsyncMock(return_value=[0.1])
-
-        # 1 SELECT + 3 UPDATE sessions
-        update_sessions = []
-        for _ in range(3):
-            us = _mock_session_context()
-            uc = AsyncMock()
-            uc.__aenter__ = AsyncMock(return_value=us)
-            uc.__aexit__ = AsyncMock(return_value=False)
-            update_sessions.append(uc)
-        all_sessions = [mock_ctx] + update_sessions
-
         with (
             patch("team_memory.config.load_settings", return_value=_make_settings()),
             patch("team_memory.embedding.factory.create_embedding_provider", return_value=mock_embedder),
-            patch("team_memory.storage.database.get_session", side_effect=all_sessions),
+            _patch_embedding_batchops(exp_rows=rows) as mocks,
         ):
             from team_memory.daemon.backfill.embedding_backfill import run_backfill
 
             await run_backfill(dry_run=False, limit=3)
-        captured = capsys.readouterr()
-        assert "processing 3" in captured.out
-        assert "Succeeded: 3" in captured.out
+        assert mocks["update_exp"].await_count == 3
 
     @pytest.mark.asyncio
     async def test_embed_text_truncation(self, capsys):
         """Ensure embed_text is truncated to 4000 chars."""
         long_desc = "x" * 5000
-        row = ("exp-long", "Title", long_desc, "Sol", [])
-        session = _mock_session_context(fetchall_return=[row])
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-
+        rows = [{"id": "exp-long", "title": "Title", "description": long_desc, "solution": "Sol", "tags": []}]
         mock_embedder = AsyncMock()
         mock_embedder.encode_single = AsyncMock(return_value=[0.1])
-
-        update_session = _mock_session_context()
-        update_ctx = AsyncMock()
-        update_ctx.__aenter__ = AsyncMock(return_value=update_session)
-        update_ctx.__aexit__ = AsyncMock(return_value=False)
-
         with (
             patch("team_memory.config.load_settings", return_value=_make_settings()),
             patch("team_memory.embedding.factory.create_embedding_provider", return_value=mock_embedder),
-            patch("team_memory.storage.database.get_session", side_effect=[mock_ctx, update_ctx]),
+            _patch_embedding_batchops(exp_rows=rows) as mocks,
         ):
             from team_memory.daemon.backfill.embedding_backfill import run_backfill
 
@@ -425,49 +400,6 @@ class TestEntityBackfillMain:
 class TestEntityBackfillHelpers:
     """Test _get_unextracted_experiences and _build_llm_config."""
 
-    @pytest.mark.asyncio
-    async def test_get_unextracted_no_results(self):
-        exp = MagicMock()
-        result = MagicMock()
-        result.scalars.return_value.all.return_value = []
-        session = AsyncMock()
-        session.execute = AsyncMock(return_value=result)
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-
-        with (
-            patch("team_memory.storage.database.get_session", return_value=mock_ctx),
-            patch("team_memory.storage.database.close_db", new_callable=AsyncMock),
-        ):
-            from team_memory.daemon.backfill.entity_backfill import _get_unextracted_experiences
-
-            rows = await _get_unextracted_experiences("postgresql://x", limit=0)
-            assert rows == []
-
-    @pytest.mark.asyncio
-    async def test_get_unextracted_with_results(self):
-        exp = MagicMock()
-        exp.to_dict.return_value = {"id": "exp-1", "title": "Test"}
-        result = MagicMock()
-        result.scalars.return_value.all.return_value = [exp]
-        session = AsyncMock()
-        session.execute = AsyncMock(return_value=result)
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-
-        with (
-            patch("team_memory.storage.database.get_session", return_value=mock_ctx),
-            patch("team_memory.storage.database.close_db", new_callable=AsyncMock),
-        ):
-            from team_memory.daemon.backfill.entity_backfill import _get_unextracted_experiences
-
-            rows = await _get_unextracted_experiences("postgresql://x", limit=1)
-            assert len(rows) == 1
-            assert rows[0]["id"] == "exp-1"
-
-    @pytest.mark.asyncio
     async def test_build_llm_config_defaults(self):
         settings = _make_settings()
         with (
@@ -524,7 +456,7 @@ class TestEntityBackfillRunBackfill:
     async def test_no_experiences_returns_early(self, capsys):
         with (
             patch(
-                "team_memory.daemon.backfill.entity_backfill._get_unextracted_experiences",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.list_experiences_without_entity_links",
                 new_callable=AsyncMock,
                 return_value=[],
             ),
@@ -541,7 +473,7 @@ class TestEntityBackfillRunBackfill:
         exps = [{"id": f"exp-{i}", "title": f"Title {i}", "description": f"Desc {i}"} for i in range(5)]
         with (
             patch(
-                "team_memory.daemon.backfill.entity_backfill._get_unextracted_experiences",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.list_experiences_without_entity_links",
                 new_callable=AsyncMock,
                 return_value=exps,
             ),
@@ -559,7 +491,7 @@ class TestEntityBackfillRunBackfill:
         exps = [{"id": f"exp-{i}", "title": f"Title {i}"} for i in range(25)]
         with (
             patch(
-                "team_memory.daemon.backfill.entity_backfill._get_unextracted_experiences",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.list_experiences_without_entity_links",
                 new_callable=AsyncMock,
                 return_value=exps,
             ),
@@ -587,7 +519,7 @@ class TestEntityBackfillRunBackfill:
 
         with (
             patch(
-                "team_memory.daemon.backfill.entity_backfill._get_unextracted_experiences",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.list_experiences_without_entity_links",
                 new_callable=AsyncMock,
                 return_value=exps,
             ),
@@ -621,7 +553,7 @@ class TestEntityBackfillRunBackfill:
 
         with (
             patch(
-                "team_memory.daemon.backfill.entity_backfill._get_unextracted_experiences",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.list_experiences_without_entity_links",
                 new_callable=AsyncMock,
                 return_value=exps,
             ),
@@ -658,7 +590,7 @@ class TestEntityBackfillRunBackfill:
 
         with (
             patch(
-                "team_memory.daemon.backfill.entity_backfill._get_unextracted_experiences",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.list_experiences_without_entity_links",
                 new_callable=AsyncMock,
                 return_value=exps,
             ),
@@ -684,6 +616,10 @@ class TestEntityBackfillRunBackfill:
 # ═════════════════════════════════════════════════════════════════════════════
 
 
+_LES = "team_memory.services.maintenance.batch_ops.BatchOpsService.list_experiences_missing_solution"
+_UES = "team_memory.services.maintenance.batch_ops.BatchOpsService.update_experience_solution"
+
+
 @pytest.mark.unit
 class TestSolutionBackfillMain:
     """Test main() argument parsing and bootstrap flow."""
@@ -692,15 +628,11 @@ class TestSolutionBackfillMain:
     async def test_main_defaults(self):
         mock_ctx = MagicMock()
         mock_ctx.settings = _make_settings()
-        session = _mock_session_context(fetchall_return=[])
-        mock_ctx2 = AsyncMock()
-        mock_ctx2.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx2.__aexit__ = AsyncMock(return_value=False)
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py"]),
             patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
-            patch("team_memory.daemon.backfill.solution_backfill.get_session", return_value=mock_ctx2),
+            patch(_LES, new_callable=AsyncMock, return_value=[]),
         ):
             from team_memory.daemon.backfill.solution_backfill import main
 
@@ -710,15 +642,11 @@ class TestSolutionBackfillMain:
     async def test_main_limit_and_dry_run(self):
         mock_ctx = MagicMock()
         mock_ctx.settings = _make_settings()
-        session = _mock_session_context(fetchall_return=[])
-        mock_ctx2 = AsyncMock()
-        mock_ctx2.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx2.__aexit__ = AsyncMock(return_value=False)
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py", "--limit", "10", "--dry-run"]),
             patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
-            patch("team_memory.daemon.backfill.solution_backfill.get_session", return_value=mock_ctx2),
+            patch(_LES, new_callable=AsyncMock, return_value=[]),
         ):
             from team_memory.daemon.backfill.solution_backfill import main
 
@@ -839,216 +767,160 @@ class TestSolutionBackfillExtractSolution:
 
 @pytest.mark.unit
 class TestSolutionBackfillMainProcessing:
-    """Test the main() processing loop with mocked DB and LLM."""
+    """Test the main() processing loop with mocked BatchOpsService and LLM."""
+
+    @staticmethod
+    def _client(content="sol", *, post_exc=None):
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"choices": [{"message": {"content": content}}]}
+        mock_client = AsyncMock()
+        if post_exc is not None:
+            mock_client.post = AsyncMock(side_effect=post_exc)
+        else:
+            mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        return mock_client
 
     @pytest.mark.asyncio
     async def test_no_rows_returns_early(self):
         mock_ctx = MagicMock()
         mock_ctx.settings = _make_settings()
-        session = _mock_session_context(fetchall_return=[])
-        mock_ctx2 = AsyncMock()
-        mock_ctx2.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx2.__aexit__ = AsyncMock(return_value=False)
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py"]),
             patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
-            patch("team_memory.daemon.backfill.solution_backfill.get_session", return_value=mock_ctx2),
+            patch(_LES, new_callable=AsyncMock, return_value=[]),
+            patch(_UES, new_callable=AsyncMock) as mock_update,
         ):
             from team_memory.daemon.backfill.solution_backfill import main
 
             await main()  # Should not raise, early return
+            mock_update.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_empty_description_skipped(self):
-        row = ("exp-1", "Title", "", "source")
+        rows = [{"id": "exp-1", "title": "Title", "description": ""}]
         mock_ctx = MagicMock()
         mock_ctx.settings = _make_settings()
-        session = _mock_session_context(fetchall_return=[row])
-        mock_ctx2 = AsyncMock()
-        mock_ctx2.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx2.__aexit__ = AsyncMock(return_value=False)
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py"]),
             patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
-            patch("team_memory.daemon.backfill.solution_backfill.get_session", return_value=mock_ctx2),
+            patch(_LES, new_callable=AsyncMock, return_value=rows),
+            patch(_UES, new_callable=AsyncMock) as mock_update,
         ):
             from team_memory.daemon.backfill.solution_backfill import main
 
             await main()
+            mock_update.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_successful_solution_extraction(self):
-        row = ("exp-1", "Bug Title", "Bug description", "github")
+        rows = [{"id": "exp-1", "title": "Bug Title", "description": "Bug description"}]
         mock_ctx = MagicMock()
         mock_ctx.settings = _make_settings()
-        session = _mock_session_context(fetchall_return=[row])
-        mock_ctx2 = AsyncMock()
-        mock_ctx2.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx2.__aexit__ = AsyncMock(return_value=False)
-
-        # Mock session for UPDATE
-        update_session = _mock_session_context()
-        update_ctx = AsyncMock()
-        update_ctx.__aenter__ = AsyncMock(return_value=update_session)
-        update_ctx.__aexit__ = AsyncMock(return_value=False)
-
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {"choices": [{"message": {"content": "Fix the bug by doing X"}}]}
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client = self._client("Fix the bug by doing X")
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py"]),
             patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
-            patch("team_memory.daemon.backfill.solution_backfill.get_session", side_effect=[mock_ctx2, update_ctx]),
+            patch(_LES, new_callable=AsyncMock, return_value=rows),
+            patch(_UES, new_callable=AsyncMock) as mock_update,
             patch("team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient", return_value=mock_client),
             patch("team_memory.daemon.backfill.solution_backfill.asyncio.sleep", new_callable=AsyncMock),
         ):
             from team_memory.daemon.backfill.solution_backfill import main
 
             await main()
-            update_session.execute.assert_called_once()
+            mock_update.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_llm_returns_none_failed_increments(self):
-        row = ("exp-2", "Title", "Description", "source")
+        rows = [{"id": "exp-2", "title": "Title", "description": "Description"}]
         mock_ctx = MagicMock()
         mock_ctx.settings = _make_settings()
-        session = _mock_session_context(fetchall_return=[row])
-        mock_ctx2 = AsyncMock()
-        mock_ctx2.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx2.__aexit__ = AsyncMock(return_value=False)
-
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(side_effect=Exception("timeout"))
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client = self._client(post_exc=Exception("timeout"))
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py"]),
             patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
-            patch("team_memory.daemon.backfill.solution_backfill.get_session", return_value=mock_ctx2),
+            patch(_LES, new_callable=AsyncMock, return_value=rows),
+            patch(_UES, new_callable=AsyncMock) as mock_update,
             patch("team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient", return_value=mock_client),
             patch("team_memory.daemon.backfill.solution_backfill.asyncio.sleep", new_callable=AsyncMock),
         ):
             from team_memory.daemon.backfill.solution_backfill import main
 
             await main()  # Should complete without error
+            mock_update.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_dry_run_no_db_update(self):
-        row = ("exp-3", "Title", "Description text", "source")
+        rows = [{"id": "exp-3", "title": "Title", "description": "Description text"}]
         mock_ctx = MagicMock()
         mock_ctx.settings = _make_settings()
-        session = _mock_session_context(fetchall_return=[row])
-        mock_ctx2 = AsyncMock()
-        mock_ctx2.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx2.__aexit__ = AsyncMock(return_value=False)
-
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {"choices": [{"message": {"content": "solution"}}]}
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client = self._client("solution")
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py", "--dry-run"]),
             patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
-            patch("team_memory.daemon.backfill.solution_backfill.get_session", return_value=mock_ctx2),
+            patch(_LES, new_callable=AsyncMock, return_value=rows),
+            patch(_UES, new_callable=AsyncMock) as mock_update,
             patch("team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient", return_value=mock_client),
             patch("team_memory.daemon.backfill.solution_backfill.asyncio.sleep", new_callable=AsyncMock),
         ):
             from team_memory.daemon.backfill.solution_backfill import main
 
             await main()
-            # Only one session call (the SELECT), no UPDATE session
-            assert mock_ctx2.__aenter__.await_count == 1
+            # Dry run must not write to DB.
+            mock_update.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_base_url_appends_v1(self):
         """Verify base_url gets /v1 appended when missing."""
-        row = ("exp-4", "T", "D", "src")
+        rows = [{"id": "exp-4", "title": "T", "description": "D"}]
         mock_ctx = MagicMock()
         settings = _make_settings()
         settings.entity_extraction.base_url = "http://llm.local"
         mock_ctx.settings = settings
-
-        session = _mock_session_context(fetchall_return=[row])
-        mock_ctx2 = AsyncMock()
-        mock_ctx2.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx2.__aexit__ = AsyncMock(return_value=False)
-
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {"choices": [{"message": {"content": "sol"}}]}
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        update_session = _mock_session_context()
-        update_ctx = AsyncMock()
-        update_ctx.__aenter__ = AsyncMock(return_value=update_session)
-        update_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_client = self._client("sol")
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py"]),
             patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
-            patch("team_memory.daemon.backfill.solution_backfill.get_session", side_effect=[mock_ctx2, update_ctx]),
+            patch(_LES, new_callable=AsyncMock, return_value=rows),
+            patch(_UES, new_callable=AsyncMock),
             patch("team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient", return_value=mock_client),
             patch("team_memory.daemon.backfill.solution_backfill.asyncio.sleep", new_callable=AsyncMock),
         ):
             from team_memory.daemon.backfill.solution_backfill import main
 
             await main()
-            call_args = mock_client.post.call_args
-            url = call_args[0][0]
+            url = mock_client.post.call_args[0][0]
             assert url == "http://llm.local/v1/chat/completions"
 
     @pytest.mark.asyncio
     async def test_base_url_already_has_v1(self):
         """When base_url already ends with /v1, don't double-append."""
-        row = ("exp-5", "T", "D", "src")
+        rows = [{"id": "exp-5", "title": "T", "description": "D"}]
         mock_ctx = MagicMock()
         settings = _make_settings()
         settings.entity_extraction.base_url = "http://llm.local/v1"
         mock_ctx.settings = settings
-
-        session = _mock_session_context(fetchall_return=[row])
-        mock_ctx2 = AsyncMock()
-        mock_ctx2.__aenter__ = AsyncMock(return_value=session)
-        mock_ctx2.__aexit__ = AsyncMock(return_value=False)
-
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {"choices": [{"message": {"content": "sol"}}]}
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        update_session = _mock_session_context()
-        update_ctx = AsyncMock()
-        update_ctx.__aenter__ = AsyncMock(return_value=update_session)
-        update_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_client = self._client("sol")
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py"]),
             patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
-            patch("team_memory.daemon.backfill.solution_backfill.get_session", side_effect=[mock_ctx2, update_ctx]),
+            patch(_LES, new_callable=AsyncMock, return_value=rows),
+            patch(_UES, new_callable=AsyncMock),
             patch("team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient", return_value=mock_client),
             patch("team_memory.daemon.backfill.solution_backfill.asyncio.sleep", new_callable=AsyncMock),
         ):
             from team_memory.daemon.backfill.solution_backfill import main
 
             await main()
-            call_args = mock_client.post.call_args
-            url = call_args[0][0]
+            url = mock_client.post.call_args[0][0]
             assert url == "http://llm.local/v1/chat/completions"

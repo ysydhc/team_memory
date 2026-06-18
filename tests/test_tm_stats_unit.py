@@ -3,7 +3,6 @@
 Covers:
   - _bar()          bar chart generation (pure logic)
   - _resolve_dsn()  DSN resolution fallback chain (mocked imports)
-  - _render_plain() plain-text fallback renderer (captured stdout)
   - main()          argparse entry point
   - _faithfulness_breakdown()   async DB query (mocked asyncpg)
   - _get_low_faithfulness_entries() async DB query (mocked asyncpg)
@@ -28,7 +27,6 @@ from team_memory.daemon.observe.tm_stats import (
     _bar,
     _faithfulness_breakdown,
     _get_low_faithfulness_entries,
-    _render_plain,
     _resolve_dsn,
     main,
     run_stats,
@@ -173,165 +171,6 @@ class TestResolveDsn:
                 with patch("builtins.open", side_effect=OSError("no file")):
                     dsn = _resolve_dsn()
         assert "fallback" in dsn and "5544" in dsn
-
-
-# ---------------------------------------------------------------------------
-# _render_plain — test the plain-text renderer
-# ---------------------------------------------------------------------------
-
-
-class TestRenderPlain:
-    """_render_plain() stdout output — with ResponseBuffer fully mocked."""
-
-    @pytest.fixture
-    def sample_stats(self):
-        return {
-            "total_searches": 100,
-            "hit": 80,
-            "used": 40,
-            "used_marker": 25,
-            "used_fuzzy": 15,
-            "unjudged": 20,
-            "use_rate": 0.5,
-            "by_project": {"proj_a": {"total": 60, "used": 30}},
-        }
-
-    @pytest.fixture
-    def sample_trends(self):
-        return [
-            {"period": "2026-04-20", "total": 10, "hit": 8, "used": 4, "use_rate": 0.4},
-            {"period": "2026-04-21", "total": 15, "hit": 12, "used": 6, "use_rate": 0.4},
-        ]
-
-    @pytest.fixture
-    def sample_miss(self):
-        return [
-            {"query": "foo bar", "count": 5, "last_seen": "2026-04-21T10:00:00"},
-        ]
-
-    @pytest.fixture
-    def sample_low_use(self):
-        return [
-            {"query": "baz qux", "count": 3, "used": 0},
-        ]
-
-    @pytest.fixture
-    def _mock_response_buffer(self):
-        """Mock ResponseBuffer so _render_plain doesn't touch real DB."""
-        mock_buf = MagicMock()
-        mock_buf.get_stats = AsyncMock(
-            return_value={
-                "total": 10,
-                "evaluated": 5,
-                "pending": 5,
-                "avg_faithfulness": 0.8,
-            }
-        )
-        mock_buf.close = AsyncMock()
-        with patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=mock_buf):
-            with patch("team_memory.daemon.observe.tm_stats._resolve_dsn", return_value="postgresql://test"):
-                yield
-
-    def test_prints_header(
-        self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use
-    ):
-        """Should print the report header."""
-        _render_plain(sample_stats, sample_trends, sample_miss, sample_low_use, 7, "day")
-        out = capsys.readouterr().out
-        assert "TM Search Quality Report" in out
-        assert "7d" in out
-
-    def test_prints_funnel_numbers(
-        self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use
-    ):
-        """Should include total/hit/used numbers."""
-        _render_plain(sample_stats, sample_trends, sample_miss, sample_low_use, 30, "day")
-        out = capsys.readouterr().out
-        assert "100" in out
-        assert "80" in out
-        assert "40" in out
-
-    def test_prints_trend_section(
-        self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use
-    ):
-        """Should include trend data when trends provided."""
-        _render_plain(sample_stats, sample_trends, sample_miss, sample_low_use, 7, "day")
-        out = capsys.readouterr().out
-        assert "Trend" in out
-
-    def test_prints_miss_queries(
-        self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use
-    ):
-        """Should include miss queries."""
-        _render_plain(sample_stats, sample_trends, sample_miss, sample_low_use, 7, "day")
-        out = capsys.readouterr().out
-        assert "Miss Queries" in out
-        assert "foo bar" in out
-
-    def test_prints_low_use_queries(
-        self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use
-    ):
-        """Should include low-use queries."""
-        _render_plain(sample_stats, sample_trends, sample_miss, sample_low_use, 7, "day")
-        out = capsys.readouterr().out
-        assert "Low Use Queries" in out
-        assert "baz qux" in out
-
-    def test_empty_trends_no_crash(self, capsys, _mock_response_buffer, sample_stats, sample_miss, sample_low_use):
-        """Empty trends list should not crash."""
-        _render_plain(sample_stats, [], sample_miss, sample_low_use, 7, "day")
-        out = capsys.readouterr().out
-        assert "TM Search Quality Report" in out
-
-    def test_empty_miss_queries_no_crash(
-        self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_low_use
-    ):
-        """Empty miss queries should not crash."""
-        _render_plain(sample_stats, sample_trends, [], sample_low_use, 7, "day")
-        out = capsys.readouterr().out
-        assert "TM Search Quality Report" in out
-
-    def test_empty_low_use_no_crash(self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss):
-        """Empty low-use queries should not crash."""
-        _render_plain(sample_stats, sample_trends, sample_miss, [], 7, "day")
-        out = capsys.readouterr().out
-        assert "TM Search Quality Report" in out
-
-    def test_error_in_trends_skipped(self, capsys, _mock_response_buffer, sample_stats, sample_miss, sample_low_use):
-        """Trends with error key should be skipped."""
-        bad_trends = [{"error": "db down"}]
-        _render_plain(sample_stats, bad_trends, sample_miss, sample_low_use, 7, "day")
-        out = capsys.readouterr().out
-        assert "TM Search Quality Report" in out
-
-    def test_error_in_miss_skipped(self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_low_use):
-        """Miss queries with error key should be skipped."""
-        _render_plain(sample_stats, sample_trends, [{"error": "fail"}], sample_low_use, 7, "day")
-        out = capsys.readouterr().out
-        assert "Miss Queries" not in out
-
-    def test_error_in_low_use_skipped(self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss):
-        """Low-use queries with error key should be skipped."""
-        _render_plain(sample_stats, sample_trends, sample_miss, [{"error": "fail"}], 7, "day")
-        out = capsys.readouterr().out
-        assert "Low Use Queries" not in out
-
-    def test_use_rate_displayed(
-        self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use
-    ):
-        """Use rate percentage should appear."""
-        _render_plain(sample_stats, sample_trends, sample_miss, sample_low_use, 7, "day")
-        out = capsys.readouterr().out
-        assert "50.0%" in out
-
-    def test_marker_and_fuzzy_counts(
-        self, capsys, _mock_response_buffer, sample_stats, sample_trends, sample_miss, sample_low_use
-    ):
-        """Marker and fuzzy counts should appear."""
-        _render_plain(sample_stats, sample_trends, sample_miss, sample_low_use, 7, "day")
-        out = capsys.readouterr().out
-        assert "marker:25" in out
-        assert "fuzzy:15" in out
 
 
 # ---------------------------------------------------------------------------
@@ -504,17 +343,18 @@ class TestRunStats:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_error_in_stats_returns_early(self):
+    async def test_error_in_stats_returns_early(self, capsys):
         """If stats contains 'error', the function should print and return."""
         mock_writer = AsyncMock()
         mock_writer.get_stats = AsyncMock(return_value={"error": "connection refused"})
         mock_writer.close = AsyncMock()
 
         with patch("team_memory.daemon.observe.tm_stats._resolve_dsn", return_value="postgresql://test"):
-            with patch("team_memory.daemon.observe.search_log_writer.SearchLogWriter", return_value=mock_writer):
-                with patch("builtins.print") as mock_print:
-                    await run_stats(7, "day")
-        mock_print.assert_any_call("[ERROR] Failed to fetch stats: connection refused")
+            with patch("team_memory.services.search.search_log_writer.SearchLogWriter", return_value=mock_writer):
+                await run_stats(7, "day")
+        out = capsys.readouterr().out
+        assert "Failed to fetch stats" in out
+        assert "connection refused" in out
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -559,7 +399,7 @@ class TestRunStats:
         mock_conn.fetch = AsyncMock(return_value=[])
 
         with patch("team_memory.daemon.observe.tm_stats._resolve_dsn", return_value="postgresql://test"):
-            with patch("team_memory.daemon.observe.search_log_writer.SearchLogWriter", return_value=mock_writer):
+            with patch("team_memory.services.search.search_log_writer.SearchLogWriter", return_value=mock_writer):
                 with patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=mock_buffer):
                     with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
                         await run_stats(7, "day")
@@ -569,33 +409,6 @@ class TestRunStats:
         mock_writer.get_miss_queries.assert_awaited_once()
         mock_writer.get_low_use_queries.assert_awaited_once()
         mock_writer.close.assert_awaited_once()
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_rich_not_installed_falls_back_to_plain(self):
-        """When Rich is not importable, _render_plain should be called."""
-        stats = {
-            "total_searches": 10,
-            "hit": 8,
-            "used": 4,
-            "used_marker": 2,
-            "used_fuzzy": 2,
-            "unjudged": 2,
-            "use_rate": 0.4,
-        }
-        mock_writer = AsyncMock()
-        mock_writer.get_stats = AsyncMock(return_value=stats)
-        mock_writer.get_trends = AsyncMock(return_value=[])
-        mock_writer.get_miss_queries = AsyncMock(return_value=[])
-        mock_writer.get_low_use_queries = AsyncMock(return_value=[])
-        mock_writer.close = AsyncMock()
-
-        with patch("team_memory.daemon.observe.tm_stats._resolve_dsn", return_value="postgresql://test"):
-            with patch("team_memory.daemon.observe.search_log_writer.SearchLogWriter", return_value=mock_writer):
-                with patch.dict("sys.modules", {"rich": None, "rich.console": None}):
-                    with patch("team_memory.daemon.observe.tm_stats._render_plain") as mock_plain:
-                        await run_stats(7, "day")
-        mock_plain.assert_called_once()
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -616,7 +429,7 @@ class TestRunStats:
         mock_writer.close = AsyncMock()
 
         with patch("team_memory.daemon.observe.tm_stats._resolve_dsn", return_value="postgresql://test"):
-            with patch("team_memory.daemon.observe.search_log_writer.SearchLogWriter", return_value=mock_writer):
+            with patch("team_memory.services.search.search_log_writer.SearchLogWriter", return_value=mock_writer):
                 with pytest.raises(RuntimeError):
                     await run_stats(7, "day")
         mock_writer.close.assert_awaited_once()

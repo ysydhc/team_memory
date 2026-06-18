@@ -7,6 +7,7 @@ FaithfulnessJudge scores to quantify the improvement.
 Usage:
     PYTHONPATH=src python -m tests.eval_adaptive_ab
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -116,18 +117,14 @@ async def main():
         adaptive_response = "\n".join(adaptive_contexts) if adaptive_contexts else "(no results)"
 
         try:
-            single_score = await judge.evaluate(
-                query=query, contexts=single_contexts, response=single_response
-            )
+            single_score = await judge.evaluate(query=query, contexts=single_contexts, response=single_response)
             s_score = single_score.score
         except Exception as e:
             print(f"    [Judge ERROR single] {e}")
             s_score = -1.0
 
         try:
-            adaptive_score = await judge.evaluate(
-                query=query, contexts=adaptive_contexts, response=adaptive_response
-            )
+            adaptive_score = await judge.evaluate(query=query, contexts=adaptive_contexts, response=adaptive_response)
             a_score = adaptive_score.score
         except Exception as e:
             print(f"    [Judge ERROR adaptive] {e}")

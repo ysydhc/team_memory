@@ -33,12 +33,13 @@ class TestSettings:
         assert "postgresql+asyncpg" in settings.database.url
 
     def test_default_embedding_provider(self):
+        """Provider must be explicitly configured (empty by default)."""
         settings = Settings()
-        assert settings.embedding.provider == "ollama"
+        assert settings.embedding.provider == ""
 
     def test_embedding_dimension_ollama(self):
-        """Default provider is Ollama with 1024 dimensions (qwen3-embedding:0.6b)."""
-        settings = load_settings()
+        """Ollama provider reports its configured dimension (qwen3-embedding:0.6b → 1024)."""
+        settings = Settings(embedding={"provider": "ollama", "ollama": {"dimension": 1024}})
         assert settings.embedding.dimension == 1024
 
     def test_embedding_dimension_openai(self):
@@ -50,8 +51,8 @@ class TestSettings:
         assert settings.embedding.dimension == 1024
 
     def test_ollama_config_defaults(self):
-        """Ollama config has sensible defaults."""
-        settings = Settings()
+        """Ollama config has sensible defaults when explicitly enabled."""
+        settings = Settings(embedding={"provider": "ollama", "ollama": {}})
         assert settings.embedding.ollama.model == "qwen3-embedding:0.6b"
         assert settings.embedding.ollama.base_url == "http://localhost:11434"
         assert settings.embedding.ollama.dimension == 1024
@@ -87,7 +88,7 @@ class TestLoadSettings:
     def test_load_nonexistent_file_uses_defaults(self):
         settings = load_settings("/nonexistent/config.yaml")
         assert settings.database.url is not None
-        assert settings.embedding.provider == "ollama"
+        assert settings.embedding.provider == ""
 
     def test_env_var_resolution_in_yaml(self, tmp_path: Path, monkeypatch):
         monkeypatch.setenv("TEST_API_KEY", "sk-test-123")

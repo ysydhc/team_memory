@@ -123,9 +123,7 @@ class TestExperienceServiceUnit:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch(
-                "team_memory.services.memory.experience.ExperienceRepository"
-            ) as mock_repo,
+            patch("team_memory.services.memory.experience.ExperienceRepository") as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             await service.save(
@@ -164,9 +162,7 @@ class TestExperienceServiceUnit:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch(
-                "team_memory.services.memory.experience.ExperienceRepository"
-            ) as mock_repo,
+            patch("team_memory.services.memory.experience.ExperienceRepository") as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             result = await service.feedback(
@@ -194,9 +190,7 @@ class TestExperienceServiceUnit:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch(
-                "team_memory.services.memory.experience.ExperienceRepository"
-            ) as mock_repo,
+            patch("team_memory.services.memory.experience.ExperienceRepository") as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             result = await service.feedback(
@@ -230,9 +224,7 @@ class TestExperienceServiceUnit:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch(
-                "team_memory.services.memory.experience.ExperienceRepository"
-            ) as mock_repo,
+            patch("team_memory.services.memory.experience.ExperienceRepository") as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             result = await service.update(
@@ -270,9 +262,7 @@ class TestExperienceServiceUnit:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch(
-                "team_memory.services.memory.experience.ExperienceRepository"
-            ) as mock_repo,
+            patch("team_memory.services.memory.experience.ExperienceRepository") as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             result = await service.update(
@@ -327,9 +317,7 @@ class TestPhase2Fixes:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch(
-                "team_memory.services.memory.experience.ExperienceRepository"
-            ) as mock_repo,
+            patch("team_memory.services.memory.experience.ExperienceRepository") as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             await service_simple.save(
@@ -366,9 +354,7 @@ class TestPhase2Fixes:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch(
-                "team_memory.services.memory.experience.ExperienceRepository"
-            ) as mock_repo,
+            patch("team_memory.services.memory.experience.ExperienceRepository") as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             await service_simple.save(
@@ -401,9 +387,7 @@ class TestPhase2Fixes:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch(
-                "team_memory.services.memory.experience.ExperienceRepository"
-            ) as mock_repo,
+            patch("team_memory.services.memory.experience.ExperienceRepository") as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             result = await service_simple.feedback(
@@ -427,9 +411,7 @@ class TestPhase2Fixes:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch(
-                "team_memory.services.memory.experience.ExperienceRepository"
-            ) as mock_repo,
+            patch("team_memory.services.memory.experience.ExperienceRepository") as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             result = await service_simple.feedback(
@@ -466,9 +448,7 @@ class TestPhase2Fixes:
 
         with (
             patch("team_memory.storage.database.get_session", mock_get_session),
-            patch(
-                "team_memory.services.memory.experience.ExperienceRepository"
-            ) as mock_repo,
+            patch("team_memory.services.memory.experience.ExperienceRepository") as mock_repo,
         ):
             mock_repo.return_value = mock_repo_instance
             result = await service_simple.update(

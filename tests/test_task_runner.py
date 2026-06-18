@@ -93,7 +93,11 @@ class TestHandlerRegistration:
         task_runner.register_handler("a", AsyncMock())
         task_runner.register_handler("b", AsyncMock())
         task_runner.clear_handlers()
-        assert task_runner.get_handlers() == {}
+        # clear_handlers re-registers the default graphiti_ingest handler.
+        handlers = task_runner.get_handlers()
+        assert "a" not in handlers
+        assert "b" not in handlers
+        assert set(handlers) == {"graphiti_ingest"}
 
 
 # ============================================================
@@ -109,12 +113,8 @@ class TestEnqueue:
         added_objects: list[BackgroundTask] = []
         mock_session.add = MagicMock(side_effect=lambda obj: added_objects.append(obj))
 
-        with patch(
-            "team_memory.services.infra.task_runner.get_session"
-        ) as mock_get_session:
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+        with patch("team_memory.services.infra.task_runner.get_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
             await task_runner.enqueue(
@@ -144,12 +144,8 @@ class TestPollAndExecute:
         task = _make_task(payload={"key": "value"})
         mock_session = _mock_session_with_tasks([task, None])
 
-        with patch(
-            "team_memory.services.infra.task_runner.get_session"
-        ) as mock_get_session:
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+        with patch("team_memory.services.infra.task_runner.get_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
             processed = await task_runner.poll_and_execute("sqlite+aiosqlite://")
@@ -169,12 +165,8 @@ class TestPollAndExecute:
         task2 = _make_task(payload={"n": 2})
         mock_session = _mock_session_with_tasks([task1, task2, None])
 
-        with patch(
-            "team_memory.services.infra.task_runner.get_session"
-        ) as mock_get_session:
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+        with patch("team_memory.services.infra.task_runner.get_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
             processed = await task_runner.poll_and_execute("sqlite+aiosqlite://")
@@ -192,12 +184,8 @@ class TestPollAndExecute:
         task = _make_task(retry_count=0, max_retries=3)
         mock_session = _mock_session_with_tasks([task, None])
 
-        with patch(
-            "team_memory.services.infra.task_runner.get_session"
-        ) as mock_get_session:
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+        with patch("team_memory.services.infra.task_runner.get_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
             processed = await task_runner.poll_and_execute("sqlite+aiosqlite://")
@@ -216,12 +204,8 @@ class TestPollAndExecute:
         task = _make_task(retry_count=2, max_retries=3)  # one more failure => failed
         mock_session = _mock_session_with_tasks([task, None])
 
-        with patch(
-            "team_memory.services.infra.task_runner.get_session"
-        ) as mock_get_session:
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+        with patch("team_memory.services.infra.task_runner.get_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
             processed = await task_runner.poll_and_execute("sqlite+aiosqlite://")
@@ -237,12 +221,8 @@ class TestPollAndExecute:
         task = _make_task(task_type="unknown_type")
         mock_session = _mock_session_with_tasks([task, None])
 
-        with patch(
-            "team_memory.services.infra.task_runner.get_session"
-        ) as mock_get_session:
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+        with patch("team_memory.services.infra.task_runner.get_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
             processed = await task_runner.poll_and_execute("sqlite+aiosqlite://")
@@ -254,12 +234,8 @@ class TestPollAndExecute:
         """When no pending tasks exist, poll_and_execute returns 0."""
         mock_session = _mock_session_with_tasks([None])
 
-        with patch(
-            "team_memory.services.infra.task_runner.get_session"
-        ) as mock_get_session:
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+        with patch("team_memory.services.infra.task_runner.get_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
             processed = await task_runner.poll_and_execute("sqlite+aiosqlite://")
@@ -277,17 +253,11 @@ class TestPollAndExecute:
         # After batch_size iterations the loop stops regardless
         mock_session = _mock_session_with_tasks(tasks)
 
-        with patch(
-            "team_memory.services.infra.task_runner.get_session"
-        ) as mock_get_session:
-            mock_get_session.return_value.__aenter__ = AsyncMock(
-                return_value=mock_session
-            )
+        with patch("team_memory.services.infra.task_runner.get_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            processed = await task_runner.poll_and_execute(
-                "sqlite+aiosqlite://", batch_size=2
-            )
+            processed = await task_runner.poll_and_execute("sqlite+aiosqlite://", batch_size=2)
 
         assert processed == 2
         assert handler.await_count == 2

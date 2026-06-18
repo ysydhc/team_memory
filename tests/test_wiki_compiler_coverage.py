@@ -20,7 +20,6 @@ Covers previously uncovered lines:
 from __future__ import annotations
 
 import os
-import struct
 import sys
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -770,564 +769,57 @@ class TestAppendLogWithTitle:
 
 
 # ---------------------------------------------------------------------------
-# _load_pg_data embedding paths (lines 246, 253-266)
+# _load_pg_data — loads entity map via BatchOpsService
 # ---------------------------------------------------------------------------
 
 
-class TestLoadPgDataEmbeddings:
-    async def test_load_pg_data_emb_none_skips(self, compiler):
-        """Line 246: continue when emb is None."""
+_BATCHOPS_ENTITY_MAP = "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_entity_map"
+
+
+class TestLoadPgData:
+    """Tests for WikiCompiler._load_pg_data (entity map via BatchOpsService)."""
+
+    @pytest.mark.asyncio
+    async def test_load_pg_data_entity_success(self, compiler):
+        """Entity map is loaded from BatchOpsService.load_experience_entity_map."""
         async with compiler:
-            compiler._pg_url = "postgresql://test"
-
-            mock_entity_result = MagicMock()
-            mock_entity_result.fetchall.return_value = []
-
-            mock_emb_result = MagicMock()
-            mock_row = MagicMock()
-            mock_row.__getitem__ = lambda self, idx: "exp-1" if idx == 0 else None
-            mock_emb_result.fetchall.return_value = [mock_row]
-
-            call_count = 0
-
-            async def mock_execute(sql_str):
-                nonlocal call_count
-                call_count += 1
-                if call_count == 1:
-                    return mock_entity_result
-                return mock_emb_result
-
-            mock_session = AsyncMock()
-            mock_session.execute = mock_execute
-            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session.__aexit__ = AsyncMock(return_value=False)
-
-            mock_get_session = MagicMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            saved_db = sys.modules.pop("team_memory.storage.database", None)
-            mock_db_module = MagicMock()
-            mock_db_module.get_session = mock_get_session
-            sys.modules["team_memory.storage.database"] = mock_db_module
-
-            try:
+            with patch(
+                _BATCHOPS_ENTITY_MAP,
+                new_callable=AsyncMock,
+                return_value={"exp-1": ["entity-a", "entity-b"]},
+            ):
                 await compiler._load_pg_data("postgresql://test")
-            finally:
-                if saved_db is not None:
-                    sys.modules["team_memory.storage.database"] = saved_db
-                else:
-                    sys.modules.pop("team_memory.storage.database", None)
 
-            assert "exp-1" not in compiler._exp_embeddings
+            assert "exp-1" in compiler._exp_entity_map
+            assert compiler._exp_entity_map["exp-1"] == ["entity-a", "entity-b"]
 
-    async def test_load_pg_data_emb_tolist(self, compiler):
-        """Lines 253-254: emb.tolist() path."""
+    @pytest.mark.asyncio
+    async def test_load_pg_data_empty_map(self, compiler):
+        """An empty entity map yields an empty cache."""
         async with compiler:
-            compiler._pg_url = "postgresql://test"
-
-            mock_entity_result = MagicMock()
-            mock_entity_result.fetchall.return_value = []
-
-            mock_emb = MagicMock()
-            mock_emb.tolist.return_value = [0.1, 0.2, 0.3]
-
-            mock_emb_result = MagicMock()
-            mock_row = MagicMock()
-            mock_row.__getitem__ = lambda self, idx: "exp-1" if idx == 0 else mock_emb
-            mock_emb_result.fetchall.return_value = [mock_row]
-
-            call_count = 0
-
-            async def mock_execute(sql_str):
-                nonlocal call_count
-                call_count += 1
-                if call_count == 1:
-                    return mock_entity_result
-                return mock_emb_result
-
-            mock_session = AsyncMock()
-            mock_session.execute = mock_execute
-            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session.__aexit__ = AsyncMock(return_value=False)
-
-            mock_get_session = MagicMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            saved_db = sys.modules.pop("team_memory.storage.database", None)
-            mock_db_module = MagicMock()
-            mock_db_module.get_session = mock_get_session
-            sys.modules["team_memory.storage.database"] = mock_db_module
-
-            try:
+            with patch(_BATCHOPS_ENTITY_MAP, new_callable=AsyncMock, return_value={}):
                 await compiler._load_pg_data("postgresql://test")
-            finally:
-                if saved_db is not None:
-                    sys.modules["team_memory.storage.database"] = saved_db
-                else:
-                    sys.modules.pop("team_memory.storage.database", None)
-
-            assert "exp-1" in compiler._exp_embeddings
-
-    async def test_load_pg_data_emb_list(self, compiler):
-        """Lines 255-256: emb is list path."""
-        async with compiler:
-            compiler._pg_url = "postgresql://test"
-
-            mock_entity_result = MagicMock()
-            mock_entity_result.fetchall.return_value = []
-
-            mock_emb_result = MagicMock()
-            mock_row = MagicMock()
-            mock_row.__getitem__ = lambda self, idx: "exp-1" if idx == 0 else [0.1, 0.2, 0.3]
-            mock_emb_result.fetchall.return_value = [mock_row]
-
-            call_count = 0
-
-            async def mock_execute(sql_str):
-                nonlocal call_count
-                call_count += 1
-                if call_count == 1:
-                    return mock_entity_result
-                return mock_emb_result
-
-            mock_session = AsyncMock()
-            mock_session.execute = mock_execute
-            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session.__aexit__ = AsyncMock(return_value=False)
-
-            mock_get_session = MagicMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            saved_db = sys.modules.pop("team_memory.storage.database", None)
-            mock_db_module = MagicMock()
-            mock_db_module.get_session = mock_get_session
-            sys.modules["team_memory.storage.database"] = mock_db_module
-
-            try:
-                await compiler._load_pg_data("postgresql://test")
-            finally:
-                if saved_db is not None:
-                    sys.modules["team_memory.storage.database"] = saved_db
-                else:
-                    sys.modules.pop("team_memory.storage.database", None)
-
-            assert "exp-1" in compiler._exp_embeddings
-
-    async def test_load_pg_data_emb_bytes(self, compiler):
-        """Lines 257-258: emb is bytes path."""
-        async with compiler:
-            compiler._pg_url = "postgresql://test"
-
-            mock_entity_result = MagicMock()
-            mock_entity_result.fetchall.return_value = []
-
-            emb_bytes = struct.pack("3f", 0.1, 0.2, 0.3)
-
-            mock_emb_result = MagicMock()
-            mock_row = MagicMock()
-            mock_row.__getitem__ = lambda self, idx: "exp-1" if idx == 0 else emb_bytes
-            mock_emb_result.fetchall.return_value = [mock_row]
-
-            call_count = 0
-
-            async def mock_execute(sql_str):
-                nonlocal call_count
-                call_count += 1
-                if call_count == 1:
-                    return mock_entity_result
-                return mock_emb_result
-
-            mock_session = AsyncMock()
-            mock_session.execute = mock_execute
-            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session.__aexit__ = AsyncMock(return_value=False)
-
-            mock_get_session = MagicMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            saved_db = sys.modules.pop("team_memory.storage.database", None)
-            mock_db_module = MagicMock()
-            mock_db_module.get_session = mock_get_session
-            sys.modules["team_memory.storage.database"] = mock_db_module
-
-            try:
-                await compiler._load_pg_data("postgresql://test")
-            finally:
-                if saved_db is not None:
-                    sys.modules["team_memory.storage.database"] = saved_db
-                else:
-                    sys.modules.pop("team_memory.storage.database", None)
-
-            assert "exp-1" in compiler._exp_embeddings
-
-    async def test_load_pg_data_emb_exception_continues(self, compiler):
-        """Lines 259-260: exception during embedding parsing continues."""
-        async with compiler:
-            compiler._pg_url = "postgresql://test"
-
-            mock_entity_result = MagicMock()
-            mock_entity_result.fetchall.return_value = []
-
-            mock_emb_result = MagicMock()
-            mock_row = MagicMock()
-            mock_row.__getitem__ = lambda self, idx: "exp-1" if idx == 0 else {"invalid": "type"}
-            mock_emb_result.fetchall.return_value = [mock_row]
-
-            call_count = 0
-
-            async def mock_execute(sql_str):
-                nonlocal call_count
-                call_count += 1
-                if call_count == 1:
-                    return mock_entity_result
-                return mock_emb_result
-
-            mock_session = AsyncMock()
-            mock_session.execute = mock_execute
-            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session.__aexit__ = AsyncMock(return_value=False)
-
-            mock_get_session = MagicMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            saved_db = sys.modules.pop("team_memory.storage.database", None)
-            mock_db_module = MagicMock()
-            mock_db_module.get_session = mock_get_session
-            sys.modules["team_memory.storage.database"] = mock_db_module
-
-            try:
-                await compiler._load_pg_data("postgresql://test")
-            finally:
-                if saved_db is not None:
-                    sys.modules["team_memory.storage.database"] = saved_db
-                else:
-                    sys.modules.pop("team_memory.storage.database", None)
-
-            assert "exp-1" not in compiler._exp_embeddings
-
-    async def test_load_pg_data_numpy_not_available(self, compiler):
-        """Lines 261-263: ImportError when numpy not available."""
-        async with compiler:
-            compiler._pg_url = "postgresql://test"
-
-            mock_entity_result = MagicMock()
-            mock_entity_result.fetchall.return_value = []
-
-            mock_emb_result = MagicMock()
-            mock_emb_result.fetchall.return_value = []
-
-            call_count = 0
-
-            async def mock_execute(sql_str):
-                nonlocal call_count
-                call_count += 1
-                if call_count == 1:
-                    return mock_entity_result
-                return mock_emb_result
-
-            mock_session = AsyncMock()
-            mock_session.execute = mock_execute
-            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session.__aexit__ = AsyncMock(return_value=False)
-
-            mock_get_session = MagicMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            saved_db = sys.modules.pop("team_memory.storage.database", None)
-            mock_db_module = MagicMock()
-            mock_db_module.get_session = mock_get_session
-            sys.modules["team_memory.storage.database"] = mock_db_module
-
-            try:
-                # Force ImportError for numpy
-                saved_numpy = sys.modules.pop("numpy", None)
-                sys.modules["numpy"] = None
-                try:
-                    await compiler._load_pg_data("postgresql://test")
-                finally:
-                    if saved_numpy is not None:
-                        sys.modules["numpy"] = saved_numpy
-                    else:
-                        sys.modules.pop("numpy", None)
-            finally:
-                if saved_db is not None:
-                    sys.modules["team_memory.storage.database"] = saved_db
-                else:
-                    sys.modules.pop("team_memory.storage.database", None)
-
-            assert compiler._exp_embeddings == {}
-
-    async def test_load_pg_data_embedding_exception(self, compiler):
-        """Lines 264-266: general exception during embedding loading."""
-        async with compiler:
-            compiler._pg_url = "postgresql://test"
-
-            mock_entity_result = MagicMock()
-            mock_entity_result.fetchall.return_value = []
-
-            call_count = 0
-
-            async def mock_execute(sql_str):
-                nonlocal call_count
-                call_count += 1
-                if call_count == 1:
-                    return mock_entity_result
-                raise RuntimeError("DB connection lost")
-
-            mock_session = AsyncMock()
-            mock_session.execute = mock_execute
-            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session.__aexit__ = AsyncMock(return_value=False)
-
-            mock_get_session = MagicMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            saved_db = sys.modules.pop("team_memory.storage.database", None)
-            mock_db_module = MagicMock()
-            mock_db_module.get_session = mock_get_session
-            sys.modules["team_memory.storage.database"] = mock_db_module
-
-            try:
-                await compiler._load_pg_data("postgresql://test")
-            finally:
-                if saved_db is not None:
-                    sys.modules["team_memory.storage.database"] = saved_db
-                else:
-                    sys.modules.pop("team_memory.storage.database", None)
-
-            assert compiler._exp_embeddings == {}
-
-    async def test_load_pg_data_entity_exception(self, compiler):
-        """Lines 228-230: entity loading exception sets empty map."""
-        async with compiler:
-            compiler._pg_url = "postgresql://test"
-
-            async def mock_execute(sql_str):
-                raise RuntimeError("DB entity query failed")
-
-            mock_session = AsyncMock()
-            mock_session.execute = mock_execute
-            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session.__aexit__ = AsyncMock(return_value=False)
-
-            mock_get_session = MagicMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            saved_db = sys.modules.pop("team_memory.storage.database", None)
-            mock_db_module = MagicMock()
-            mock_db_module.get_session = mock_get_session
-            sys.modules["team_memory.storage.database"] = mock_db_module
-
-            try:
-                await compiler._load_pg_data("postgresql://test")
-            finally:
-                if saved_db is not None:
-                    sys.modules["team_memory.storage.database"] = saved_db
-                else:
-                    sys.modules.pop("team_memory.storage.database", None)
 
             assert compiler._exp_entity_map == {}
 
-    async def test_load_pg_data_string_embedding(self, compiler):
-        """Lines 248-252: emb is string (JSON-encoded)."""
+    @pytest.mark.asyncio
+    async def test_load_pg_data_exception_falls_back_to_empty(self, compiler):
+        """If BatchOpsService raises, _exp_entity_map falls back to empty dict."""
         async with compiler:
-            compiler._pg_url = "postgresql://test"
-
-            import json
-
-            mock_entity_result = MagicMock()
-            mock_entity_result.fetchall.return_value = []
-
-            mock_emb_result = MagicMock()
-            mock_row = MagicMock()
-            mock_row.__getitem__ = lambda self, idx: "exp-1" if idx == 0 else json.dumps([0.1, 0.2, 0.3])
-            mock_emb_result.fetchall.return_value = [mock_row]
-
-            call_count = 0
-
-            async def mock_execute(sql_str):
-                nonlocal call_count
-                call_count += 1
-                if call_count == 1:
-                    return mock_entity_result
-                return mock_emb_result
-
-            mock_session = AsyncMock()
-            mock_session.execute = mock_execute
-            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session.__aexit__ = AsyncMock(return_value=False)
-
-            mock_get_session = MagicMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            saved_db = sys.modules.pop("team_memory.storage.database", None)
-            mock_db_module = MagicMock()
-            mock_db_module.get_session = mock_get_session
-            sys.modules["team_memory.storage.database"] = mock_db_module
-
-            try:
+            with patch(
+                _BATCHOPS_ENTITY_MAP,
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("db down"),
+            ):
                 await compiler._load_pg_data("postgresql://test")
-            finally:
-                if saved_db is not None:
-                    sys.modules["team_memory.storage.database"] = saved_db
-                else:
-                    sys.modules.pop("team_memory.storage.database", None)
 
-            assert "exp-1" in compiler._exp_embeddings
+            assert compiler._exp_entity_map == {}
 
-    async def test_load_pg_data_emb_inner_exception(self, compiler):
-        """Lines 259-260: inner exception during embedding type dispatch."""
+    @pytest.mark.asyncio
+    async def test_load_pg_data_sets_pg_url(self, compiler):
+        """_load_pg_data records the pg_url for later incremental checks."""
         async with compiler:
-            compiler._pg_url = "postgresql://test"
-
-            mock_entity_result = MagicMock()
-            mock_entity_result.fetchall.return_value = []
-
-            # Create an object with tolist that raises on call
-            mock_emb = MagicMock(spec=[])  # no tolist, not str, list, bytes
-            mock_emb_result = MagicMock()
-            mock_row = MagicMock()
-            mock_row.__getitem__ = lambda self, idx: "exp-1" if idx == 0 else mock_emb
-            mock_emb_result.fetchall.return_value = [mock_row]
-
-            call_count = 0
-
-            async def mock_execute(sql_str):
-                nonlocal call_count
-                call_count += 1
-                if call_count == 1:
-                    return mock_entity_result
-                return mock_emb_result
-
-            mock_session = AsyncMock()
-            mock_session.execute = mock_execute
-            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session.__aexit__ = AsyncMock(return_value=False)
-
-            mock_get_session = MagicMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            saved_db = sys.modules.pop("team_memory.storage.database", None)
-            mock_db_module = MagicMock()
-            mock_db_module.get_session = mock_get_session
-            sys.modules["team_memory.storage.database"] = mock_db_module
-
-            try:
+            with patch(_BATCHOPS_ENTITY_MAP, new_callable=AsyncMock, return_value={}):
                 await compiler._load_pg_data("postgresql://test")
-            finally:
-                if saved_db is not None:
-                    sys.modules["team_memory.storage.database"] = saved_db
-                else:
-                    sys.modules.pop("team_memory.storage.database", None)
 
-            # The object falls through all isinstance checks and doesn't enter any branch
-            assert "exp-1" not in compiler._exp_embeddings
-
-    async def test_load_pg_data_emb_tolist_exception(self, compiler):
-        """Lines 259-260: tolist() raises exception during embedding processing."""
-        async with compiler:
-            compiler._pg_url = "postgresql://test"
-
-            mock_entity_result = MagicMock()
-            mock_entity_result.fetchall.return_value = []
-
-            # Create an object with tolist that raises
-            mock_emb = MagicMock()
-            mock_emb.tolist.side_effect = ValueError("tolist failed")
-
-            mock_emb_result = MagicMock()
-            mock_row = MagicMock()
-            mock_row.__getitem__ = lambda self, idx: "exp-1" if idx == 0 else mock_emb
-            mock_emb_result.fetchall.return_value = [mock_row]
-
-            call_count = 0
-
-            async def mock_execute(sql_str):
-                nonlocal call_count
-                call_count += 1
-                if call_count == 1:
-                    return mock_entity_result
-                return mock_emb_result
-
-            mock_session = AsyncMock()
-            mock_session.execute = mock_execute
-            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session.__aexit__ = AsyncMock(return_value=False)
-
-            mock_get_session = MagicMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            saved_db = sys.modules.pop("team_memory.storage.database", None)
-            mock_db_module = MagicMock()
-            mock_db_module.get_session = mock_get_session
-            sys.modules["team_memory.storage.database"] = mock_db_module
-
-            try:
-                await compiler._load_pg_data("postgresql://test")
-            finally:
-                if saved_db is not None:
-                    sys.modules["team_memory.storage.database"] = saved_db
-                else:
-                    sys.modules.pop("team_memory.storage.database", None)
-
-            assert "exp-1" not in compiler._exp_embeddings
-
-    async def test_load_pg_data_entity_success(self, compiler):
-        """Lines 216-227: successful entity loading."""
-        async with compiler:
-            compiler._pg_url = "postgresql://test"
-
-            mock_entity_result = MagicMock()
-            mock_entity_row1 = MagicMock()
-            mock_entity_row1.__getitem__ = lambda self, idx: "exp-1" if idx == 0 else "entity-a"
-            mock_entity_row2 = MagicMock()
-            mock_entity_row2.__getitem__ = lambda self, idx: "exp-1" if idx == 0 else "entity-b"
-            mock_entity_result.fetchall.return_value = [mock_entity_row1, mock_entity_row2]
-
-            mock_emb_result = MagicMock()
-            mock_emb_result.fetchall.return_value = []
-
-            call_count = 0
-
-            async def mock_execute(sql_str):
-                nonlocal call_count
-                call_count += 1
-                if call_count == 1:
-                    return mock_entity_result
-                return mock_emb_result
-
-            mock_session = AsyncMock()
-            mock_session.execute = mock_execute
-            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session.__aexit__ = AsyncMock(return_value=False)
-
-            mock_get_session = MagicMock()
-            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            saved_db = sys.modules.pop("team_memory.storage.database", None)
-            mock_db_module = MagicMock()
-            mock_db_module.get_session = mock_get_session
-            sys.modules["team_memory.storage.database"] = mock_db_module
-
-            try:
-                await compiler._load_pg_data("postgresql://test")
-            finally:
-                if saved_db is not None:
-                    sys.modules["team_memory.storage.database"] = saved_db
-                else:
-                    sys.modules.pop("team_memory.storage.database", None)
-
-            assert "exp-1" in compiler._exp_entity_map
-            assert compiler._exp_entity_map["exp-1"] == {"entity-a", "entity-b"}
+            assert compiler._pg_url == "postgresql://test"

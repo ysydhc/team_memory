@@ -14,8 +14,8 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from team_memory.daemon.buffers.draft_buffer import DraftBuffer
-from team_memory.daemon.refinement.draft_refiner import DraftRefiner
 from team_memory.daemon.integration.tm_sink import TMSink
+from team_memory.daemon.refinement.draft_refiner import DraftRefiner
 
 # ---------------------------------------------------------------------------
 # DraftBuffer: tm_id column

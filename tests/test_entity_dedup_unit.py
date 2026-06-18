@@ -30,7 +30,7 @@ import pytest
 # ---------------------------------------------------------------------------
 pytest.skip("entity_dedup private helpers moved to BatchOpsService", allow_module_level=True)
 from team_memory.daemon.backfill.entity_dedup import (
-        _find_duplicates,
+    _find_duplicates,
     _merge_group,
     main,
     run_dedup,
@@ -75,9 +75,7 @@ class TestMainArgparse:
     def test_no_args_default_dry_run_false(self):
         """No --dry-run => dry_run=False."""
         with patch.object(sys, "argv", ["entity_dedup.py"]):
-            with patch(
-                "team_memory.daemon.backfill.entity_dedup.asyncio.run"
-            ) as mock_run:
+            with patch("team_memory.daemon.backfill.entity_dedup.asyncio.run") as mock_run:
                 main()
                 mock_run.assert_called_once()
                 coroutine = mock_run.call_args[0][0]
@@ -86,9 +84,7 @@ class TestMainArgparse:
     def test_dry_run_flag(self):
         """--dry-run => dry_run=True."""
         with patch.object(sys, "argv", ["entity_dedup.py", "--dry-run"]):
-            with patch(
-                "team_memory.daemon.backfill.entity_dedup.asyncio.run"
-            ) as mock_run:
+            with patch("team_memory.daemon.backfill.entity_dedup.asyncio.run") as mock_run:
                 main()
                 mock_run.assert_called_once()
 
@@ -195,9 +191,7 @@ class TestFindDuplicates:
         mock_cm.__aexit__ = AsyncMock(return_value=False)
 
         with patch("team_memory.storage.database.get_session", return_value=mock_cm):
-            with patch(
-                "team_memory.storage.database.close_db", new_callable=AsyncMock
-            ) as mock_close:
+            with patch("team_memory.storage.database.close_db", new_callable=AsyncMock) as mock_close:
                 await _find_duplicates("postgresql://test")
                 mock_close.assert_awaited_once()
 
@@ -222,9 +216,7 @@ class TestMergeGroup:
         mock_cm.__aexit__ = AsyncMock(return_value=False)
 
         with patch("team_memory.storage.database.get_session", return_value=mock_cm):
-            result = await _merge_group(
-                "postgresql://test", "primary_id", ["dup1"], dry_run=True
-            )
+            result = await _merge_group("postgresql://test", "primary_id", ["dup1"], dry_run=True)
             assert result == 0
             mock_session.execute.assert_not_awaited()
 
@@ -241,9 +233,7 @@ class TestMergeGroup:
         mock_cm.__aexit__ = AsyncMock(return_value=False)
 
         with patch("team_memory.storage.database.get_session", return_value=mock_cm):
-            result = await _merge_group(
-                "postgresql://test", "p1", ["d1"], dry_run=False
-            )
+            result = await _merge_group("postgresql://test", "p1", ["d1"], dry_run=False)
             # rowcount=3 from UPDATE + 1 from source_count update = 4
             assert result == 4
 
@@ -260,9 +250,7 @@ class TestMergeGroup:
         mock_cm.__aexit__ = AsyncMock(return_value=False)
 
         with patch("team_memory.storage.database.get_session", return_value=mock_cm):
-            result = await _merge_group(
-                "postgresql://test", "p1", ["d1", "d2"], dry_run=False
-            )
+            result = await _merge_group("postgresql://test", "p1", ["d1", "d2"], dry_run=False)
             # 2 dup_ids * 4 queries each = 8 execute calls + 1 commit = 9 total
             assert mock_session.execute.await_count >= 8
 
@@ -335,9 +323,7 @@ class TestRunDedup:
             return_value=groups,
         ):
             with patch("team_memory.config.load_settings", return_value=mock_settings):
-                with patch(
-                    "team_memory.storage.database.get_session", return_value=mock_cm
-                ):
+                with patch("team_memory.storage.database.get_session", return_value=mock_cm):
                     await run_dedup(dry_run=True)
             output = capsys.readouterr().out
             assert "Found 1 duplicate" in output
@@ -378,12 +364,8 @@ class TestRunDedup:
                 new_callable=AsyncMock,
                 return_value=2,
             ):
-                with patch(
-                    "team_memory.config.load_settings", return_value=mock_settings
-                ):
-                    with patch(
-                        "team_memory.storage.database.get_session", return_value=mock_cm
-                    ):
+                with patch("team_memory.config.load_settings", return_value=mock_settings):
+                    with patch("team_memory.storage.database.get_session", return_value=mock_cm):
                         await run_dedup(dry_run=False)
             output = capsys.readouterr().out
             assert "Merged" in output
@@ -422,12 +404,8 @@ class TestRunDedup:
                 new_callable=AsyncMock,
                 return_value=0,
             ):
-                with patch(
-                    "team_memory.config.load_settings", return_value=mock_settings
-                ):
-                    with patch(
-                        "team_memory.storage.database.get_session", return_value=mock_cm
-                    ):
+                with patch("team_memory.config.load_settings", return_value=mock_settings):
+                    with patch("team_memory.storage.database.get_session", return_value=mock_cm):
                         await run_dedup(dry_run=False)
             output = capsys.readouterr().out
             assert "Final entity count: 42" in output
@@ -469,9 +447,7 @@ class TestRunDedup:
             return_value=groups,
         ):
             with patch("team_memory.config.load_settings", return_value=mock_settings):
-                with patch(
-                    "team_memory.storage.database.get_session", return_value=mock_cm
-                ):
+                with patch("team_memory.storage.database.get_session", return_value=mock_cm):
                     await run_dedup(dry_run=True)
             output = capsys.readouterr().out
             # Group 1: 1 dup, Group 2: 2 dups => total 3

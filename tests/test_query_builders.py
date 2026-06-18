@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import Select
 from sqlalchemy.sql.elements import TextClause
 
-from team_memory.storage.models import Experience
+from team_memory.storage.models import DB_VECTOR_DIM, Experience
 from team_memory.storage.query_builders import (
     active_filter,
     apply_scope_filter,
@@ -88,36 +88,36 @@ class TestBuildVectorSearch:
     """Tests for build_vector_search."""
 
     def test_returns_select(self) -> None:
-        fake_embedding = [0.1] * 1024
+        fake_embedding = [0.1] * DB_VECTOR_DIM
         stmt = build_vector_search(fake_embedding)
         assert isinstance(stmt, Select)
 
     def test_applies_project_filter(self) -> None:
-        fake_embedding = [0.1] * 1024
+        fake_embedding = [0.1] * DB_VECTOR_DIM
         stmt = build_vector_search(fake_embedding, project="test_proj")
         compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
         assert "test_proj" in compiled
 
     def test_applies_tag_filter(self) -> None:
-        fake_embedding = [0.1] * 1024
+        fake_embedding = [0.1] * DB_VECTOR_DIM
         stmt = build_vector_search(fake_embedding, tags=["python", "testing"])
         compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
         assert "python" in compiled
 
     def test_limit_applied(self) -> None:
-        fake_embedding = [0.1] * 1024
+        fake_embedding = [0.1] * DB_VECTOR_DIM
         stmt = build_vector_search(fake_embedding, limit=10)
         compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
         assert "10" in compiled
 
     def test_offset_not_applied_when_zero(self) -> None:
-        fake_embedding = [0.1] * 1024
+        fake_embedding = [0.1] * DB_VECTOR_DIM
         stmt = build_vector_search(fake_embedding, limit=10, offset=0)
         compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
         assert "OFFSET" not in compiled.upper()
 
     def test_offset_applied_when_positive(self) -> None:
-        fake_embedding = [0.1] * 1024
+        fake_embedding = [0.1] * DB_VECTOR_DIM
         stmt = build_vector_search(fake_embedding, limit=10, offset=5)
         compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
         assert "OFFSET" in compiled.upper()

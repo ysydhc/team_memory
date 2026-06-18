@@ -12,9 +12,9 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from team_memory.daemon.integration.tm_sink import TMSink
 from team_memory.daemon.runtime.app import create_app
 from team_memory.daemon.runtime.config import DaemonConfig, DaemonSettings, DraftSettings, TMSettings
-from team_memory.daemon.integration.tm_sink import TMSink
 
 
 # ---------------------------------------------------------------------------

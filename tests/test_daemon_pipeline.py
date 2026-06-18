@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from team_memory.daemon.runtime.config import DaemonConfig, ProjectMapping, RetrievalSettings
 from team_memory.daemon.refinement.pipeline import (
     _resolve_project,
     process_after_response,
@@ -14,6 +13,7 @@ from team_memory.daemon.refinement.pipeline import (
     process_session_end,
     process_session_start,
 )
+from team_memory.daemon.runtime.config import DaemonConfig, ProjectMapping, RetrievalSettings
 
 # ---------------------------------------------------------------------------
 # Fixtures

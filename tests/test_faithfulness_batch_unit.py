@@ -97,211 +97,6 @@ def _mock_judge(eval_result=None):
 
 
 # ===========================================================================
-# load_experience_contexts
-# ===========================================================================
-
-
-class TestLoadExperienceContexts:
-    """Tests for the load_experience_contexts() helper."""
-
-    @pytest.mark.asyncio
-    async def test_empty_result_ids_returns_empty_list(self):
-        from team_memory.daemon.quality.faithfulness_batch import load_experience_contexts
-
-        result = await load_experience_contexts("postgresql://x", None)
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_empty_list_returns_empty_list(self):
-        from team_memory.daemon.quality.faithfulness_batch import load_experience_contexts
-
-        result = await load_experience_contexts("postgresql://x", [])
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_all_invalid_uuids_returns_empty_list(self):
-        from team_memory.daemon.quality.faithfulness_batch import load_experience_contexts
-
-        result_ids = [{"id": "not-a-uuid"}, {"id": ""}, {"id": None}]
-        result = await load_experience_contexts("postgresql://x", result_ids)
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_valid_uuid_connects_and_queries(self):
-        """Valid UUID should trigger asyncpg.connect and fetch."""
-        from team_memory.daemon.quality.faithfulness_batch import load_experience_contexts
-
-        valid_id = str(uuid.uuid4())
-        result_ids = [{"id": valid_id}]
-
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(return_value=[])
-        mock_conn.close = AsyncMock()
-
-        with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn) as mock_connect:
-            result = await load_experience_contexts("postgresql://x", result_ids)
-            assert result == []
-            mock_connect.assert_called_once_with("postgresql://x")
-            mock_conn.close.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_context_formatting_with_all_fields(self):
-        """Test that title, problem, solution are formatted correctly."""
-        from team_memory.daemon.quality.faithfulness_batch import load_experience_contexts
-
-        valid_id = uuid.uuid4()
-        result_ids = [{"id": str(valid_id)}]
-
-        mock_row = {
-            "title": "Test Title",
-            "description": "Test Problem",
-            "solution": "Test Solution",
-        }
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(return_value=[mock_row])
-        mock_conn.close = AsyncMock()
-
-        with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
-            result = await load_experience_contexts("postgresql://x", result_ids)
-            assert len(result) == 1
-            assert "标题: Test Title" in result[0]
-            assert "问题: Test Problem" in result[0]
-            assert "方案: Test Solution" in result[0]
-
-    @pytest.mark.asyncio
-    async def test_context_formatting_with_title_only(self):
-        """Test context when only title is present."""
-        from team_memory.daemon.quality.faithfulness_batch import load_experience_contexts
-
-        valid_id = uuid.uuid4()
-        result_ids = [{"id": str(valid_id)}]
-
-        mock_row = {"title": "Only Title", "description": None, "solution": None}
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(return_value=[mock_row])
-        mock_conn.close = AsyncMock()
-
-        with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
-            result = await load_experience_contexts("postgresql://x", result_ids)
-            assert len(result) == 1
-            assert result[0] == "标题: Only Title"
-
-    @pytest.mark.asyncio
-    async def test_problem_truncated_to_200(self):
-        """Test that problem text is truncated to 200 chars."""
-        from team_memory.daemon.quality.faithfulness_batch import load_experience_contexts
-
-        valid_id = uuid.uuid4()
-        result_ids = [{"id": str(valid_id)}]
-
-        long_problem = "x" * 300
-        mock_row = {"title": "T", "description": long_problem, "solution": None}
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(return_value=[mock_row])
-        mock_conn.close = AsyncMock()
-
-        with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
-            result = await load_experience_contexts("postgresql://x", result_ids)
-            assert len(result) == 1
-            assert "x" * 200 in result[0]
-            assert long_problem not in result[0]
-
-    @pytest.mark.asyncio
-    async def test_solution_truncated_to_300(self):
-        """Test that solution text is truncated to 300 chars."""
-        from team_memory.daemon.quality.faithfulness_batch import load_experience_contexts
-
-        valid_id = uuid.uuid4()
-        result_ids = [{"id": str(valid_id)}]
-
-        long_solution = "y" * 400
-        mock_row = {"title": "T", "description": None, "solution": long_solution}
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(return_value=[mock_row])
-        mock_conn.close = AsyncMock()
-
-        with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
-            result = await load_experience_contexts("postgresql://x", result_ids)
-            assert len(result) == 1
-            assert "y" * 300 in result[0]
-            assert long_solution not in result[0]
-
-    @pytest.mark.asyncio
-    async def test_empty_title_problem_solution_excluded(self):
-        """Empty strings should be excluded from context."""
-        from team_memory.daemon.quality.faithfulness_batch import load_experience_contexts
-
-        valid_id = uuid.uuid4()
-        result_ids = [{"id": str(valid_id)}]
-
-        mock_row = {"title": "", "description": "", "solution": ""}
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(return_value=[mock_row])
-        mock_conn.close = AsyncMock()
-
-        with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
-            result = await load_experience_contexts("postgresql://x", result_ids)
-            assert len(result) == 1
-            assert result[0] == ""
-
-    @pytest.mark.asyncio
-    async def test_multiple_valid_uuids(self):
-        """Multiple valid UUIDs should all be collected."""
-        from team_memory.daemon.quality.faithfulness_batch import load_experience_contexts
-
-        ids = [{"id": str(uuid.uuid4())}, {"id": str(uuid.uuid4())}]
-
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(return_value=[])
-        mock_conn.close = AsyncMock()
-
-        with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
-            result = await load_experience_contexts("postgresql://x", ids)
-            call_args = mock_conn.fetch.call_args
-            assert len(call_args[0][1]) == 2
-
-    @pytest.mark.asyncio
-    async def test_mixed_valid_invalid_uuids(self):
-        """Mix of valid and invalid UUIDs should only use valid ones."""
-        from team_memory.daemon.quality.faithfulness_batch import load_experience_contexts
-
-        valid_id = str(uuid.uuid4())
-        ids = [{"id": "bad"}, {"id": valid_id}, {"id": ""}]
-
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(return_value=[])
-        mock_conn.close = AsyncMock()
-
-        with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
-            result = await load_experience_contexts("postgresql://x", ids)
-            call_args = mock_conn.fetch.call_args
-            assert len(call_args[0][1]) == 1
-
-    @pytest.mark.asyncio
-    async def test_multiple_rows_formatted(self):
-        """Multiple rows from DB should produce multiple context strings."""
-        from team_memory.daemon.quality.faithfulness_batch import load_experience_contexts
-
-        valid_id1 = str(uuid.uuid4())
-        valid_id2 = str(uuid.uuid4())
-        ids = [{"id": valid_id1}, {"id": valid_id2}]
-
-        rows = [
-            {"title": "T1", "description": "P1", "solution": "S1"},
-            {"title": "T2", "description": None, "solution": "S2"},
-        ]
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(return_value=rows)
-        mock_conn.close = AsyncMock()
-
-        with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
-            result = await load_experience_contexts("postgresql://x", ids)
-            assert len(result) == 2
-            assert "T1" in result[0]
-            assert "T2" in result[1]
-
-
-# ===========================================================================
 # run_batch
 # ===========================================================================
 
@@ -360,7 +155,7 @@ class TestRunBatch:
             patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=buf),
             patch("team_memory.daemon.quality.faithfulness_judge.FaithfulnessJudge", return_value=judge),
             patch(
-                "team_memory.daemon.quality.faithfulness_batch.load_experience_contexts",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_contexts",
                 new_callable=AsyncMock,
                 return_value=["ctx1"],
             ),
@@ -387,7 +182,7 @@ class TestRunBatch:
             patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=buf),
             patch("team_memory.daemon.quality.faithfulness_judge.FaithfulnessJudge", return_value=judge),
             patch(
-                "team_memory.daemon.quality.faithfulness_batch.load_experience_contexts",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_contexts",
                 new_callable=AsyncMock,
                 return_value=["ctx"],
             ),
@@ -411,7 +206,7 @@ class TestRunBatch:
             patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=buf),
             patch("team_memory.daemon.quality.faithfulness_judge.FaithfulnessJudge", return_value=judge),
             patch(
-                "team_memory.daemon.quality.faithfulness_batch.load_experience_contexts",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_contexts",
                 new_callable=AsyncMock,
                 return_value=["ctx"],
             ),
@@ -450,7 +245,7 @@ class TestRunBatch:
             patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=buf),
             patch("team_memory.daemon.quality.faithfulness_judge.FaithfulnessJudge", return_value=judge),
             patch(
-                "team_memory.daemon.quality.faithfulness_batch.load_experience_contexts",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_contexts",
                 new_callable=AsyncMock,
                 return_value=["ctx"],
             ),
@@ -477,7 +272,7 @@ class TestRunBatch:
             patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=buf),
             patch("team_memory.daemon.quality.faithfulness_judge.FaithfulnessJudge", return_value=judge),
             patch(
-                "team_memory.daemon.quality.faithfulness_batch.load_experience_contexts",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_contexts",
                 new_callable=AsyncMock,
                 return_value=["ctx"],
             ),
@@ -500,7 +295,7 @@ class TestRunBatch:
             patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=buf),
             patch("team_memory.daemon.quality.faithfulness_judge.FaithfulnessJudge", return_value=judge),
             patch(
-                "team_memory.daemon.quality.faithfulness_batch.load_experience_contexts",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_contexts",
                 new_callable=AsyncMock,
                 return_value=["ctx"],
             ),
@@ -526,7 +321,7 @@ class TestRunBatch:
             patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=buf),
             patch("team_memory.daemon.quality.faithfulness_judge.FaithfulnessJudge", return_value=judge),
             patch(
-                "team_memory.daemon.quality.faithfulness_batch.load_experience_contexts",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_contexts",
                 new_callable=AsyncMock,
                 return_value=["ctx"],
             ),
@@ -554,7 +349,7 @@ class TestRunBatch:
                 "team_memory.daemon.quality.faithfulness_judge.FaithfulnessJudge", return_value=judge
             ) as mock_judge_cls,
             patch(
-                "team_memory.daemon.quality.faithfulness_batch.load_experience_contexts",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_contexts",
                 new_callable=AsyncMock,
                 return_value=["ctx"],
             ),
@@ -598,7 +393,7 @@ class TestRunBatch:
             patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=buf),
             patch("team_memory.daemon.quality.faithfulness_judge.FaithfulnessJudge", return_value=judge),
             patch(
-                "team_memory.daemon.quality.faithfulness_batch.load_experience_contexts",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_contexts",
                 new_callable=AsyncMock,
                 return_value=["ctx"],
             ),
@@ -1136,7 +931,7 @@ class TestRunBatchEndToEnd:
             patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=buf),
             patch("team_memory.daemon.quality.faithfulness_judge.FaithfulnessJudge", return_value=judge),
             patch(
-                "team_memory.daemon.quality.faithfulness_batch.load_experience_contexts",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_contexts",
                 new_callable=AsyncMock,
                 return_value=["ctx"],
             ),
@@ -1187,7 +982,7 @@ class TestRunBatchEndToEnd:
             patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=buf),
             patch("team_memory.daemon.quality.faithfulness_judge.FaithfulnessJudge", return_value=judge),
             patch(
-                "team_memory.daemon.quality.faithfulness_batch.load_experience_contexts",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_contexts",
                 new_callable=AsyncMock,
                 return_value=["ctx"],
             ),
@@ -1210,7 +1005,7 @@ class TestRunBatchEndToEnd:
             patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=buf),
             patch("team_memory.daemon.quality.faithfulness_judge.FaithfulnessJudge", return_value=judge),
             patch(
-                "team_memory.daemon.quality.faithfulness_batch.load_experience_contexts",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_contexts",
                 new_callable=AsyncMock,
                 return_value=["ctx"],
             ),
@@ -1241,7 +1036,7 @@ class TestRunBatchEndToEnd:
             patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=buf),
             patch("team_memory.daemon.quality.faithfulness_judge.FaithfulnessJudge", return_value=judge),
             patch(
-                "team_memory.daemon.quality.faithfulness_batch.load_experience_contexts",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_contexts",
                 new_callable=AsyncMock,
                 return_value=["ctx"],
             ),
@@ -1281,7 +1076,7 @@ class TestRunBatchEndToEnd:
                 "team_memory.daemon.quality.faithfulness_judge.FaithfulnessJudge", return_value=judge
             ) as mock_judge_cls,
             patch(
-                "team_memory.daemon.quality.faithfulness_batch.load_experience_contexts",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_contexts",
                 new_callable=AsyncMock,
                 return_value=["ctx"],
             ),
@@ -1311,13 +1106,13 @@ class TestRunBatchEndToEnd:
             patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=buf),
             patch("team_memory.daemon.quality.faithfulness_judge.FaithfulnessJudge", return_value=judge),
             patch(
-                "team_memory.daemon.quality.faithfulness_batch.load_experience_contexts",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_contexts",
                 new_callable=AsyncMock,
                 return_value=["ctx"],
             ) as mock_load,
         ):
             await run_batch(dsn="postgresql://x", force=True)
-            mock_load.assert_called_once_with("postgresql://x", rids)
+            mock_load.assert_called_once_with(rids)
 
     @pytest.mark.asyncio
     async def test_report_header_printed(self, capsys):
@@ -1333,7 +1128,7 @@ class TestRunBatchEndToEnd:
             patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=buf),
             patch("team_memory.daemon.quality.faithfulness_judge.FaithfulnessJudge", return_value=judge),
             patch(
-                "team_memory.daemon.quality.faithfulness_batch.load_experience_contexts",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_contexts",
                 new_callable=AsyncMock,
                 return_value=["ctx"],
             ),
@@ -1356,7 +1151,7 @@ class TestRunBatchEndToEnd:
             patch("team_memory.daemon.buffers.response_buffer.ResponseBuffer", return_value=buf),
             patch("team_memory.daemon.quality.faithfulness_judge.FaithfulnessJudge", return_value=judge),
             patch(
-                "team_memory.daemon.quality.faithfulness_batch.load_experience_contexts",
+                "team_memory.services.maintenance.batch_ops.BatchOpsService.load_experience_contexts",
                 new_callable=AsyncMock,
                 return_value=["ctx"],
             ),

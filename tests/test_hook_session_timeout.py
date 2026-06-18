@@ -29,15 +29,13 @@ class TestSessionTimeoutManagerInit:
         import ast
         import pathlib
 
-        src = pathlib.Path(
-            "src/team_memory/hooks/session_timeout.py"
-        ).read_text()
+        src = pathlib.Path("src/team_memory/hooks/session_timeout.py").read_text()
         tree = ast.parse(src)
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module:
-                assert not node.module.startswith(
-                    "team_memory.daemon"
-                ), f"session_timeout imports daemon: {node.module}"
+                assert not node.module.startswith("team_memory.daemon"), (
+                    f"session_timeout imports daemon: {node.module}"
+                )
 
 
 class TestSessionTimeoutManagerHTTP:
