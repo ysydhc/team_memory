@@ -118,7 +118,7 @@ class EvaluationSettings:
     """评估配置：模糊匹配开关与阈值。"""
 
     fuzzy_match_enabled: bool = True
-    fuzzy_match_threshold: float = 0.3
+    fuzzy_match_threshold: float = 0.18
     faithfulness_batch_threshold: int = 5
 
 
@@ -129,6 +129,18 @@ class WikiSettings:
     enabled: bool = True
     wiki_root: str = ""  # 默认：项目根目录下的 wiki/
     db_path: str = ""  # 默认：<项目根>/.wiki/cache.db
+
+
+@dataclass
+class ArenaSettings:
+    """Arena 评估系统配置。"""
+
+    enabled: bool = True
+    interval_minutes: int = 30
+    converged_interval_minutes: int = 120
+    rounds_per_epoch: int = 10
+    sample_size: int = 3
+    data_dir: str = ""  # empty = default (project_root/data/arena/)
 
 
 @dataclass
@@ -152,6 +164,7 @@ class DaemonConfig:
     evaluation: EvaluationSettings = field(default_factory=EvaluationSettings)
     auto_dream: AutoDreamSettings = field(default_factory=AutoDreamSettings)
     wiki: WikiSettings = field(default_factory=WikiSettings)
+    arena: ArenaSettings = field(default_factory=ArenaSettings)
     projects: list[ProjectMapping] = field(default_factory=list)
 
 
@@ -171,6 +184,7 @@ _SUBCONFIG_KEYS = {
     "evaluation": (EvaluationSettings, None),
     "auto_dream": (AutoDreamSettings, None),
     "wiki": (WikiSettings, None),
+    "arena": (ArenaSettings, None),
 }
 
 
@@ -269,9 +283,9 @@ def load_config(config_path: str | None = None) -> DaemonConfig:
             config.daemon.host = client_cfg.daemon.host
         if config.daemon.port == 3901 and client_cfg.daemon.port != 3901:
             config.daemon.port = client_cfg.daemon.port
-        if not config.draft.db_path and hasattr(client_cfg, 'conversation') and client_cfg.conversation.db_path:
+        if not config.draft.db_path and hasattr(client_cfg, "conversation") and client_cfg.conversation.db_path:
             config.draft.db_path = os.path.expanduser(client_cfg.conversation.db_path)
-        if not config.wiki.db_path and hasattr(client_cfg, 'wiki') and client_cfg.wiki.db_path:
+        if not config.wiki.db_path and hasattr(client_cfg, "wiki") and client_cfg.wiki.db_path:
             config.wiki.db_path = os.path.expanduser(client_cfg.wiki.db_path)
 
     return config

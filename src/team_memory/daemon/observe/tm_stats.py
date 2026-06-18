@@ -5,11 +5,14 @@ Usage:
     python -m team_memory.daemon.observe.tm_stats [--days 30] [--granularity day|hour|week]
 
 Outputs a Rich-formatted terminal report with:
-- Search funnel (total → hit → used)
-- Use rate trend (sparkline bars)
-- Miss queries (no results)
-- Low-use queries (results but never used)
-- Project breakdown
+- Search funnel (total → hit → used) with WoW comparison
+- Quality evaluation (faithfulness + arena)
+- Weekly trend chart with sparkline bars
+- Daily trend table with relevance
+- Top used queries
+- Miss queries (filtered)
+- Low-use queries
+- Project breakdown with use rate
 """
 
 from __future__ import annotations
@@ -23,6 +26,15 @@ from team_memory.project_resolver import find_project_root, load_dotenv_if_exist
 load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 
+# Noise filter: short confirmation-style queries with no technical identifier
+# (e.g. "可以,请测试", "先按照这个继续") have no real retrieval target, so their
+# faithfulness scores are meaningless and drag the average down. We treat a query
+# as noise when it is short (<12 chars) AND contains no 4+ letter run that would
+# indicate a class/method/identifier (e.g. "BannerAdLoader", "phase1").
+NOISE_QUERY_PREDICATE = "(char_length(query) < 12 AND query !~ '[A-Za-z]{4,}')"
+QUALITY_QUERY_FILTER = f"NOT {NOISE_QUERY_PREDICATE}"
+
+
 def _bar(value: float, max_value: float, width: int = 20) -> str:
     """Generate a simple bar chart string."""
     if max_value <= 0:
@@ -33,7 +45,6 @@ def _bar(value: float, max_value: float, width: int = 20) -> str:
 
 def _resolve_dsn() -> str:
     """Resolve DB DSN: TM Settings > DATABASE_URL > TEAM_MEMORY_DB_URL > alembic.ini."""
-    # 1. Try TM Settings (most reliable — same source as the main app)
     try:
         from team_memory.config import load_settings
 
@@ -43,17 +54,14 @@ def _resolve_dsn() -> str:
     except Exception:
         pass
 
-    # 2. Fall back to DATABASE_URL env var
     env_url = (os.environ.get("DATABASE_URL") or "").strip()
     if env_url:
         return env_url
 
-    # 3. Same legacy override as bootstrap / MCP — sync URL for asyncpg
     tm_legacy = (os.environ.get("TEAM_MEMORY_DB_URL") or "").strip()
     if tm_legacy:
         return tm_legacy.replace("postgresql+asyncpg://", "postgresql://")
 
-    # 4. Parse alembic.ini
     try:
         import configparser
 
@@ -83,6 +91,7 @@ async def _faithfulness_breakdown(dsn: str, days: int, threshold: float = 0.7, a
         count = await conn.fetchval(
             f"SELECT count(*) FROM response_buffer "
             f"WHERE evaluated = TRUE AND faithfulness_score {op} $1 "
+            f"AND {QUALITY_QUERY_FILTER} "
             f"AND created_at > NOW() - make_interval(days => $2)",
             threshold,
             days,
@@ -99,9 +108,10 @@ async def _faithfulness_avg(dsn: str, days: int) -> float:
     conn = await asyncpg.connect(dsn)
     try:
         avg = await conn.fetchval(
-            """
+            f"""
             SELECT avg(faithfulness_score) FROM response_buffer
             WHERE evaluated = TRUE
+              AND {QUALITY_QUERY_FILTER}
               AND created_at > NOW() - make_interval(days => $1)
             """,
             days,
@@ -118,11 +128,12 @@ async def _get_low_faithfulness_entries(dsn: str, days: int, limit: int = 5) -> 
     conn = await asyncpg.connect(dsn)
     try:
         rows = await conn.fetch(
-            "SELECT query, faithfulness_score, created_at::text "
-            "FROM response_buffer "
-            "WHERE evaluated = TRUE AND faithfulness_score < 0.7 AND faithfulness_score >= 0 "
-            "AND created_at > NOW() - make_interval(days => $1) "
-            "ORDER BY faithfulness_score ASC LIMIT $2",
+            f"SELECT query, faithfulness_score, created_at::text "
+            f"FROM response_buffer "
+            f"WHERE evaluated = TRUE AND faithfulness_score < 0.7 AND faithfulness_score >= 0 "
+            f"AND {QUALITY_QUERY_FILTER} "
+            f"AND created_at > NOW() - make_interval(days => $1) "
+            f"ORDER BY faithfulness_score ASC LIMIT $2",
             days,
             limit,
         )
@@ -131,37 +142,38 @@ async def _get_low_faithfulness_entries(dsn: str, days: int, limit: int = 5) -> 
         await conn.close()
 
 
+def _delta_style(delta: float) -> tuple[str, str]:
+    """Return (formatted delta string, rich style) for WoW comparison."""
+    if delta > 0:
+        return f"↑{delta:.1f}%", "green"
+    elif delta < 0:
+        return f"↓{abs(delta):.1f}%", "red"
+    return "→0%", "dim"
+
+
 async def run_stats(days: int, granularity: str) -> None:
-    from team_memory.daemon.observe.search_log_writer import SearchLogWriter
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+
+    from team_memory.services.search.search_log_writer import SearchLogWriter
 
     dsn = _resolve_dsn()
     writer = SearchLogWriter(dsn=dsn)
+    console = Console()
 
     try:
-        # Fetch all data
         stats = await writer.get_stats(days=days)
         trends = await writer.get_trends(days=days, granularity=granularity)
         miss_queries = await writer.get_miss_queries(days=days, limit=10)
         low_use_queries = await writer.get_low_use_queries(days=days, limit=10)
 
         if "error" in stats:
-            print(f"[ERROR] Failed to fetch stats: {stats['error']}")
+            console.print(f"[red][ERROR] Failed to fetch stats: {stats['error']}[/red]")
             return
 
-        # Render with Rich
-        try:
-            from rich.console import Console
-            from rich.panel import Panel
-            from rich.table import Table
-            from rich.text import Text
-
-            console = Console()
-        except ImportError:
-            # Fallback: plain text output
-            _render_plain(stats, trends, miss_queries, low_use_queries, days, granularity)
-            return
-
-        # --- Funnel ---
+        # --- 1. Search Funnel with WoW ---
         total = stats["total_searches"]
         hit = stats["hit"]
         used = stats["used"]
@@ -184,35 +196,151 @@ async def run_stats(days: int, granularity: str) -> None:
         if legacy_unjudged:
             funnel_text.append(f"  Legacy (pre-hook):  {legacy_unjudged}\n", style="dim yellow")
 
-        console.print(Panel(funnel_text, title=f"TM Search Funnel ({days}d)", border_style="blue"))
+        # WoW comparison from stats (prev_use_rate delta)
+        use_rate_delta = stats.get("use_rate_delta")
+        prev_hit = stats.get("prev_hit", 0)
+        if use_rate_delta is not None:
+            funnel_text.append(f"\n  Use rate: {use_rate * 100:.1f}%  ", style="bold")
+            if prev_hit > 0:
+                delta_str, delta_style = _delta_style(use_rate_delta * 100)
+                funnel_text.append(f"({delta_str} vs prev {days}d)", style=delta_style)
+            else:
+                funnel_text.append("(no prev period data)", style="dim")
+            funnel_text.append("\n")
 
-        # --- Faithfulness ---
+        console.print(Panel(funnel_text, title=f"Search Funnel ({days}d)", border_style="blue"))
+
+        # --- 2. Quality Evaluation (merged) ---
+        quality_text = Text()
+
+        # Legacy faithfulness section
         try:
-            fb_total = await _faithfulness_breakdown(dsn, days, threshold=0.0, above=True)
             fb_high = await _faithfulness_breakdown(dsn, days, threshold=0.7, above=True)
             fb_low = await _faithfulness_breakdown(dsn, days, threshold=0.7, above=False)
-            fb_pending = fb_total - fb_high - fb_low if fb_total else 0
+            fb_evaluated = fb_high + fb_low
+            avg_score = await _faithfulness_avg(dsn, days) if fb_evaluated > 0 else 0.0
 
-            fb_text = Text()
-            fb_text.append(f"  Evaluated: {fb_high + fb_low}", style="bold")
-            fb_text.append(f"  | Pending: {fb_pending}\n", style="yellow")
-            fb_text.append(f"  High (≥0.7): {fb_high}", style="green")
-            fb_text.append(f"  | Low (<0.7): {fb_low}\n", style="red" if fb_low > 0 else "dim")
-            if fb_high + fb_low > 0:
-                avg_score = await _faithfulness_avg(dsn, days)
-                fb_text.append(f"  Avg score: {avg_score:.2f}\n", style="cyan")
+            quality_text.append("  [Legacy] Faithfulness", style="bold")
+            quality_text.append("  (noise-filtered)\n", style="dim")
+            quality_text.append(f"    Evaluated: {fb_evaluated}  Avg: {avg_score:.2f}\n")
+            quality_text.append(f"    High (≥0.7): {fb_high}", style="green")
+            quality_text.append(f"  Low: {fb_low}\n", style="red" if fb_low > 0 else "dim")
 
             low_entries = await _get_low_faithfulness_entries(dsn, days, limit=3)
             if low_entries:
-                fb_text.append("  Low faithfulness:\n", style="dim")
+                quality_text.append("    Lowest:\n", style="dim")
                 for e in low_entries:
-                    fb_text.append(f"    • {e['score']:.2f} | {e['query'][:50]}\n", style="dim")
-
-            console.print(Panel(fb_text, title="Faithfulness (LLM Eval)", border_style="magenta"))
+                    quality_text.append(f"      • {e['score']:.2f} | {e['query'][:50]}\n", style="dim")
         except Exception:
-            pass  # faithfulness not available
+            quality_text.append("  [Legacy] Faithfulness: unavailable\n", style="dim")
 
-        # --- Trend ---
+        quality_text.append("\n")
+
+        # Arena section
+        try:
+            arena_stats = await writer.get_arena_stats(days=days)
+
+            if "error" not in arena_stats:
+                avg_rel = arena_stats.get("avg_relevance")
+                avg_help = arena_stats.get("avg_helpfulness")
+                dist = arena_stats.get("score_distribution", {})
+
+                quality_text.append("  [Arena] Relevance & Helpfulness\n", style="bold")
+                if avg_rel is not None or avg_help is not None:
+                    quality_text.append(
+                        f"    Avg relevance:   {avg_rel:.2f}\n"
+                        if avg_rel is not None
+                        else "    Avg relevance:   N/A\n",
+                        style="cyan",
+                    )
+                    quality_text.append(
+                        f"    Avg helpfulness: {avg_help:.2f}\n"
+                        if avg_help is not None
+                        else "    Avg helpfulness: N/A\n",
+                        style="cyan",
+                    )
+                    quality_text.append(
+                        f"    Distribution: H={dist.get('high', 0)} M={dist.get('medium', 0)} L={dist.get('low', 0)}\n"
+                    )
+                else:
+                    quality_text.append("    No scored entries yet.\n", style="dim")
+
+                quality_text.append("\n")
+
+                # Arena champion
+                try:
+                    from team_memory.daemon.quality.arena.storage import ArenaStorage
+
+                    arena_storage = ArenaStorage()
+                    champion = arena_storage.get_champion()
+                    if champion is not None:
+                        epoch = arena_storage.get_current_epoch()
+                        total_rounds = len(arena_storage.load_rounds())
+                        converged = arena_storage.is_converged()
+                        short_id = champion.id[:12] if len(champion.id) > 12 else champion.id
+                        converged_str = "Yes" if converged else "No"
+
+                        quality_text.append(f"  Champion: {short_id} ({champion.elo:.0f})\n", style="bold")
+                        quality_text.append(f"  Epoch: {epoch} | Rounds: {total_rounds} | Conv: {converged_str}\n")
+                    else:
+                        quality_text.append("  Arena: not initialized\n", style="dim")
+                except Exception:
+                    quality_text.append("  Arena: not initialized\n", style="dim")
+            else:
+                quality_text.append("  [Arena] Error: unavailable\n", style="dim")
+        except Exception:
+            quality_text.append("  [Arena] Relevance & Helpfulness: unavailable\n", style="dim")
+
+        console.print(Panel(quality_text, title=f"Quality Evaluation ({days}d)", border_style="magenta"))
+
+        # --- 3. Weekly Trend Chart ---
+        try:
+            weekly_data = await writer.get_weekly_comparison(weeks=4)
+            if weekly_data:
+                weekly_table = Table(title="Weekly Trend (4w)", show_lines=False)
+                weekly_table.add_column("Week", style="dim")
+                weekly_table.add_column("HitRate", min_width=10)
+                weekly_table.add_column("UseRate", min_width=10)
+                weekly_table.add_column("HR%", justify="right", style="green")
+                weekly_table.add_column("UR%", justify="right", style="cyan")
+                weekly_table.add_column("Relevance", justify="right")
+
+                max_hr = max((w.get("hit_rate", 0) for w in weekly_data), default=1)
+                max_ur = max((w.get("use_rate", 0) for w in weekly_data), default=1)
+
+                for w in weekly_data:
+                    week_label = str(w.get("week_start", ""))[:5]
+                    hr = w.get("hit_rate", 0)
+                    ur = w.get("use_rate", 0)
+                    hr_bar = _bar(hr, max_hr if max_hr > 0 else 1, width=8)
+                    ur_bar = _bar(ur, max_ur if max_ur > 0 else 1, width=8)
+                    hr_pct = f"{hr * 100:.0f}%"
+                    ur_pct = f"{ur * 100:.0f}%"
+                    rel = w.get("avg_relevance")
+                    rel_str = f"{rel:.2f}" if rel is not None else "—"
+                    weekly_table.add_row(week_label, hr_bar, ur_bar, hr_pct, ur_pct, rel_str)
+
+                # Determine trend direction
+                if len(weekly_data) >= 2:
+                    first_ur = weekly_data[0].get("use_rate", 0)
+                    last_ur = weekly_data[-1].get("use_rate", 0)
+                    if last_ur > first_ur:
+                        trend_label = "↑ improving"
+                        trend_style = "green"
+                    elif last_ur < first_ur:
+                        trend_label = "↓ declining"
+                        trend_style = "red"
+                    else:
+                        trend_label = "→ stable"
+                        trend_style = "dim"
+                    console.print(weekly_table)
+                    console.print(f"  Use rate trend: [{trend_style}]{trend_label}[/{trend_style}]\n")
+                else:
+                    console.print(weekly_table)
+        except Exception:
+            pass
+
+        # --- 4. Daily Trend Table (with avg_relevance) ---
         if trends and "error" not in trends[0]:
             max_total = max((t["total"] for t in trends), default=1)
             table = Table(title=f"Use Rate Trend (by {granularity})", show_lines=False)
@@ -221,150 +349,103 @@ async def run_stats(days: int, granularity: str) -> None:
             table.add_column("Hit", justify="right", style="green")
             table.add_column("Used", justify="right", style="cyan")
             table.add_column("Use Rate", justify="right", style="bold")
+            table.add_column("Relevance", justify="right")
             table.add_column("Volume", min_width=20)
 
-            for t in trends[-14:]:  # Show last 14 periods
+            for t in trends[-14:]:
                 period = t["period"] or ""
-                # Shorten period display
                 if granularity == "hour":
-                    period = period[5:16]  # "04-25 14:00"
+                    period = period[5:16]
                 elif granularity == "week":
                     period = period[0:10]
                 else:
-                    period = period[0:10]  # "2026-04-25"
+                    period = period[0:10]
 
                 rate_str = f"{t['use_rate'] * 100:.0f}%"
+                rel = t.get("avg_relevance")
+                rel_str = f"{rel:.2f}" if rel is not None else "—"
                 bar = _bar(t["total"], max_total)
-                table.add_row(period, str(t["total"]), str(t["hit"]), str(t["used"]), rate_str, bar)
+                table.add_row(period, str(t["total"]), str(t["hit"]), str(t["used"]), rate_str, rel_str, bar)
 
             console.print(table)
 
-        # --- Miss Queries ---
+        # --- 5. Top Used Queries ---
+        try:
+            top_used = await writer.get_top_used_queries(days=days, limit=10)
+            if top_used and "error" not in top_used[0]:
+                top_table = Table(title="Top Used Queries", show_lines=False)
+                top_table.add_column("Query")
+                top_table.add_column("Used/Total", justify="right", style="cyan")
+                top_table.add_column("Rate", justify="right", style="bold")
+                top_table.add_column("Relevance", justify="right")
+
+                for q in top_used:
+                    query_str = q["query"][:60]
+                    ratio = f"{q['used']}/{q['total']}"
+                    rate = f"{q['use_rate'] * 100:.0f}%"
+                    rel = q.get("avg_relevance")
+                    rel_str = f"{rel:.2f}" if rel is not None else "—"
+                    top_table.add_row(query_str, ratio, rate, rel_str)
+
+                console.print(top_table)
+        except Exception:
+            pass
+
+        # --- 6. Miss Queries (filtered) ---
         if miss_queries and "error" not in miss_queries[0]:
-            miss_table = Table(title="Miss Queries (no results)", show_lines=False)
-            miss_table.add_column("Query", style="red")
-            miss_table.add_column("Count", justify="right")
-            miss_table.add_column("Last Seen", style="dim")
+            filtered_misses = [
+                q
+                for q in miss_queries
+                if not q["query"].startswith("@") and not q["query"].startswith("<") and len(q["query"]) >= 4
+            ]
+            if filtered_misses:
+                miss_table = Table(title="Miss Queries (no results)", show_lines=False)
+                miss_table.add_column("Query", style="red")
+                miss_table.add_column("Count", justify="right")
+                miss_table.add_column("Last Seen", style="dim")
 
-            for q in miss_queries[:10]:
-                last = q.get("last_seen", "")[0:10] if q.get("last_seen") else "-"
-                miss_table.add_row(q["query"][:60], str(q["count"]), last)
+                for q in filtered_misses[:10]:
+                    last = q.get("last_seen", "")[0:10] if q.get("last_seen") else "-"
+                    miss_table.add_row(q["query"][:60], str(q["count"]), last)
 
-            console.print(miss_table)
+                console.print(miss_table)
 
-        # --- Low Use Queries ---
+        # --- 7. Low Use Queries (filtered) ---
         if low_use_queries and "error" not in low_use_queries[0]:
+            filtered_low = [
+                q
+                for q in low_use_queries
+                if not q["query"].startswith("@") and not q["query"].startswith("<") and len(q["query"]) >= 4
+            ]
             low_table = Table(title="Low Use Queries (hit but never used)", show_lines=False)
             low_table.add_column("Query", style="yellow")
             low_table.add_column("Searches", justify="right")
             low_table.add_column("Used", justify="right")
 
-            for q in low_use_queries[:10]:
+            for q in filtered_low[:10]:
                 low_table.add_row(q["query"][:60], str(q["count"]), str(q["used"]))
 
             console.print(low_table)
 
-        # --- By Project ---
+        # --- 8. By Project (with use rate) ---
         by_project = stats.get("by_project", {})
         if by_project:
             proj_table = Table(title="By Project", show_lines=False)
             proj_table.add_column("Project")
             proj_table.add_column("Hit", justify="right")
             proj_table.add_column("Used", justify="right", style="cyan")
+            proj_table.add_column("Use Rate", justify="right", style="bold")
 
             for proj, data in sorted(by_project.items(), key=lambda x: x[1]["total"], reverse=True):
-                proj_table.add_row(proj, str(data["total"]), str(data["used"]))
+                proj_total = data["total"]
+                proj_used = data["used"]
+                proj_rate = f"{proj_used / proj_total * 100:.0f}%" if proj_total > 0 else "0%"
+                proj_table.add_row(proj, str(proj_total), str(proj_used), proj_rate)
 
             console.print(proj_table)
 
-        # --- Faithfulness ---
-        from team_memory.daemon.buffers.response_buffer import ResponseBuffer
-
-        buffer = ResponseBuffer(dsn=dsn)
-        try:
-            f_stats = await buffer.get_stats(days=days)
-            if f_stats["total"] > 0:
-                f_text = Text()
-                f_text.append(f"  Evaluated:    {f_stats['evaluated']}\n", style="bold")
-                f_text.append(f"  Pending:      {f_stats['pending']}\n", style="yellow")
-                avg = f_stats["avg_faithfulness"]
-                if avg is not None:
-                    style = "green" if avg >= 0.7 else "red"
-                    f_text.append(f"  Avg score:    {avg:.3f}\n", style=style)
-                    high = await _faithfulness_breakdown(dsn, days, threshold=0.7, above=True)
-                    low = await _faithfulness_breakdown(dsn, days, threshold=0.7, above=False)
-                    f_text.append(f"  High (≥0.7):  {high}\n", style="green")
-                    f_text.append(f"  Low  (<0.7):  {low}\n", style="red")
-                else:
-                    f_text.append("  No evaluated entries yet.\n", style="dim")
-                console.print(Panel(f_text, title=f"Faithfulness ({days}d)", border_style="magenta"))
-
-                # Low faithfulness entries
-                low_entries = await _get_low_faithfulness_entries(dsn, days, limit=5)
-                if low_entries:
-                    low_table = Table(title="Low Faithfulness Entries", show_lines=False)
-                    low_table.add_column("Score", justify="right", style="red")
-                    low_table.add_column("Query", style="yellow")
-                    low_table.add_column("Evaluated", style="dim")
-                    for entry in low_entries:
-                        score_str = f"{entry['score']:.2f}" if entry["score"] >= 0 else "error"
-                        low_table.add_row(score_str, entry["query"][:50], entry["created_at"][:10])
-                    console.print(low_table)
-        finally:
-            await buffer.close()
-
     finally:
         await writer.close()
-
-
-def _render_plain(stats, trends, miss_queries, low_use_queries, days, granularity) -> None:
-    """Plain text fallback when Rich is not installed."""
-    total = stats["total_searches"]
-    hit = stats["hit"]
-    used = stats["used"]
-    used_marker = stats.get("used_marker", 0)
-    used_fuzzy = stats.get("used_fuzzy", 0)
-    unjudged = stats["unjudged"]
-    legacy_unjudged = stats.get("legacy_unjudged", 0)
-    use_rate = stats["use_rate"]
-
-    print(f"\n=== TM Search Quality Report ({days}d) ===\n")
-    print(f"  Total: {total}  Hit: {hit}  Used: {used} (marker:{used_marker} fuzzy:{used_fuzzy})  Rate: {use_rate:.1%}")
-    print(f"  Unjudged: {unjudged}  Legacy (pre-hook): {legacy_unjudged}\n")
-
-    if trends and "error" not in trends[0]:
-        print(f"  Trend ({granularity}):")
-        for t in trends[-7:]:
-            period = (t["period"] or "")[0:10]
-            bar = _bar(t["total"], max(x["total"] for x in trends), width=15)
-            print(f"    {period}  {bar}  {t['total']:3d} hits  {t['use_rate']:.0%}")
-
-    if miss_queries and "error" not in miss_queries[0]:
-        print("\n  Miss Queries:")
-        for q in miss_queries[:5]:
-            print(f"    {q['query'][:50]:50s}  x{q['count']}")
-
-    if low_use_queries and "error" not in low_use_queries[0]:
-        print("\n  Low Use Queries:")
-        for q in low_use_queries[:5]:
-            print(f"    {q['query'][:50]:50s}  x{q['count']} searches, 0 used")
-
-    # Faithfulness
-    from team_memory.daemon.buffers.response_buffer import ResponseBuffer
-
-    dsn = _resolve_dsn()
-    buffer = ResponseBuffer(dsn=dsn)
-    try:
-        f_stats = asyncio.run(buffer.get_stats(days=days))
-        if f_stats["total"] > 0:
-            print("\n  Faithfulness:")
-            print(f"    Evaluated: {f_stats['evaluated']}  Pending: {f_stats['pending']}")
-            if f_stats["avg_faithfulness"] is not None:
-                print(f"    Avg score: {f_stats['avg_faithfulness']:.3f}")
-    except Exception:
-        pass
-    finally:
-        asyncio.run(buffer.close())
 
 
 def main() -> None:

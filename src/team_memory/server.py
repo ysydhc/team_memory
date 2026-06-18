@@ -176,9 +176,7 @@ def _guard_output(
 
     # Step 1: Remove low-confidence results
     if len(results) > 1:
-        high_medium = [
-            r for r in results if r.get("confidence", "high") in ("high", "medium")
-        ]
+        high_medium = [r for r in results if r.get("confidence", "high") in ("high", "medium")]
         if high_medium and len(high_medium) < len(results):
             results = high_medium
             truncated = True
@@ -372,9 +370,7 @@ async def memory_save(
             project=resolved_project,
             group_key=group_key,
         )
-    return _guard_output(
-        json.dumps(result, ensure_ascii=False), settings=truncate_settings
-    )
+    return _guard_output(json.dumps(result, ensure_ascii=False), settings=truncate_settings)
 
 
 # ============================================================
@@ -408,7 +404,7 @@ async def memory_recall(
     max_results: int = 10,
     project: str | None = None,
     include_archives: bool | None = None,
-    include_user_profile: bool = False,
+    include_user_profile: bool = True,
     adaptive: bool = True,
 ) -> str:
     """Unified read: route to solve/search/suggest mode based on input."""
@@ -451,9 +447,7 @@ async def memory_recall(
             adaptive=adaptive,
             adaptive_retriever=ctx.adaptive_retriever,
         )
-    return _guard_output(
-        json.dumps(result, ensure_ascii=False), settings=truncate_settings
-    )
+    return _guard_output(json.dumps(result, ensure_ascii=False), settings=truncate_settings)
 
 
 # ============================================================
@@ -501,9 +495,7 @@ async def memory_context(
             task_description=task_description,
             project=resolved_project,
         )
-    return _guard_output(
-        json.dumps(result, ensure_ascii=False), settings=truncate_settings
-    )
+    return _guard_output(json.dumps(result, ensure_ascii=False), settings=truncate_settings)
 
 
 # ============================================================
@@ -623,9 +615,7 @@ async def memory_feedback(
 
 @mcp.tool(
     name="memory_draft_save",
-    description=(
-        "Pipeline-only: save a draft memory. source is always 'pipeline', exp_status is always 'draft'."
-    ),
+    description=("Pipeline-only: save a draft memory. source is always 'pipeline', exp_status is always 'draft'."),
 )
 @track_usage
 async def memory_draft_save(
@@ -741,9 +731,7 @@ async def memory_submit_response(
             **result,
             "message": "Response submitted for faithfulness evaluation.",
         }
-    return _guard_output(
-        json.dumps(result, ensure_ascii=False), settings=truncate_settings
-    )
+    return _guard_output(json.dumps(result, ensure_ascii=False), settings=truncate_settings)
 
 
 # ============================================================
