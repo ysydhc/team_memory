@@ -305,10 +305,13 @@ def bootstrap(
 
     event_bus = EventBus()
 
+    from team_memory.services.archive.completeness_judge import ArchiveCompletenessJudge
+
     archive_service = ArchiveService(
         embedding_provider=embedding,
         db_url=db_url,
         event_bus=event_bus,
+        completeness_judge=ArchiveCompletenessJudge(),
     )
 
     intent_router = DefaultIntentRouter()

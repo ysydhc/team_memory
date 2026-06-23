@@ -148,12 +148,18 @@ class ArchiveRepository:
         visibility: str = "project",
         embedding: list[float] | None = None,
         linked_experience_ids: list[uuid.UUID] | None = None,
+        initial_status: str = "draft",
     ) -> dict[str, Any]:
         """Atomic upsert using INSERT ... ON CONFLICT (title, project) DO UPDATE.
 
         On conflict, updates content fields but does NOT delete old attachments
         (attachments are incremental). Experience links are re-associated: old
         links for this archive are deleted and new ones inserted.
+
+        ``initial_status`` sets the status on insert and on content update
+        (e.g. "published" when a completeness judge deems the archive ready).
+        The linked-experience rule below can still upgrade draft→published but
+        never downgrades.
 
         Returns ``{"action": "created"|"updated", "archive_id": UUID,
         "previous_updated_at": str|None}``.
@@ -176,7 +182,7 @@ class ArchiveRepository:
             "value_summary": value_summary,
             "tags": tags or [],
             "visibility": visibility,
-            "status": "draft",
+            "status": initial_status,
             "embedding": embedding,
             "created_at": now,
             "updated_at": now,
@@ -194,6 +200,9 @@ class ArchiveRepository:
             "scope_ref": scope_ref,
             "updated_at": now,
         }
+        # Promote to published on update when the judge says so; never downgrade.
+        if initial_status == "published":
+            update_on_conflict["status"] = "published"
 
         stmt = (
             insert(Archive)

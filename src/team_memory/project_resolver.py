@@ -118,9 +118,40 @@ def _git_repo_name(cwd: str) -> str | None:
     return None
 
 
+def canonicalize_project_name(name: str) -> str:
+    """Canonical project slug: path-aware, case/separator normalized.
+
+    Rules (single source of truth for every write path):
+      1. Path-like input → take the last segment (git/dir basename),
+         so "gensoft-ipcs-mobile/adx-sdk-android" → "adx-sdk-android".
+      2. Lowercase.
+      3. Collapse any run of separators ( - . space / \\ ) into "_".
+      4. Strip leading/trailing underscores.
+
+    Examples:
+      "adx-sdk-android"                     → "adx_sdk_android"
+      "gensoft-ipcs-mobile/adx-sdk-android" → "adx_sdk_android"
+      "MyGuguGaga"                          → "mygugugaga"
+    """
+    import re
+
+    value = (name or "").strip()
+    if not value:
+        return ""
+    # 1. basename for path-like names
+    for sep in ("/", "\\"):
+        if sep in value:
+            value = value.rsplit(sep, 1)[-1]
+    # 2-4. lowercase, collapse separators, strip
+    value = value.lower()
+    value = re.sub(r"[-.\s]+", "_", value)
+    value = re.sub(r"_+", "_", value).strip("_")
+    return value
+
+
 def _normalize(name: str) -> str:
-    """Normalize project name: kebab-case → snake_case, strip whitespace."""
-    return name.strip().replace("-", "_")
+    """Backward-compatible alias for :func:`canonicalize_project_name`."""
+    return canonicalize_project_name(name)
 
 
 # ---------------------------------------------------------------------------

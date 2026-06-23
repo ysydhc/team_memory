@@ -12,12 +12,19 @@ from team_memory.storage.models import Experience
 # ====================== Filter helpers ======================
 
 
+# Placeholder titles auto-assigned to unrefined drafts (e.g. "Draft 6f25becf").
+# These slipped into published status but carry no real content signal, so they
+# pollute recall — exclude them from search results.
+_PLACEHOLDER_TITLE_RE = r"^Draft [0-9a-f]+$"
+
+
 def active_filter(current_user: str | None = None) -> list:
     """Build visibility WHERE clauses.
 
     Returns a list of SQLAlchemy filter expressions:
     - is_deleted == False (always)
     - published/promoted for all; OR published/promoted/draft(own) when current_user is set
+    - exclude placeholder-titled ("Draft <hex>") and empty-titled experiences
     """
     base = [Experience.is_deleted == False]  # noqa: E712
     if current_user:
@@ -29,6 +36,9 @@ def active_filter(current_user: str | None = None) -> list:
         )
     else:
         base.append(Experience.exp_status.in_(["published", "promoted"]))
+    # Drop unrefined placeholders from recall (not from storage).
+    base.append(func.coalesce(func.trim(Experience.title), "") != "")
+    base.append(~Experience.title.op("~")(_PLACEHOLDER_TITLE_RE))
     return base
 
 

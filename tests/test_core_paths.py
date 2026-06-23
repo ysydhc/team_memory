@@ -9,18 +9,18 @@ class TestActiveFilter:
     """Tests for _active_filter visibility logic."""
 
     def test_active_filter_no_user_only_published(self):
-        """Without current_user, only published should pass."""
+        """Without current_user: is_deleted + published + 2 placeholder-title guards."""
         from team_memory.storage.repository import ExperienceRepository
 
         filters = ExperienceRepository._active_filter(current_user=None)
-        assert len(filters) == 2
+        assert len(filters) == 4
 
     def test_active_filter_with_user_includes_personal(self):
-        """With current_user, filter should allow published + creator's own."""
+        """With current_user: is_deleted + OR(published,owned) + 2 placeholder guards."""
         from team_memory.storage.repository import ExperienceRepository
 
         filters = ExperienceRepository._active_filter(current_user="alice")
-        assert len(filters) == 2
+        assert len(filters) == 4
 
     def test_active_filter_with_user_or_clause(self):
         """The second filter with current_user should be an OR clause."""

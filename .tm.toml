@@ -1,4 +1,7 @@
 # Team Memory project configuration / TM 项目配置
 [project]
 name = "team_memory"                       # Canonical name / 规范名
-aliases = ["team_doc", "team-memory"]      # Historical names / 历史别名
+# Aliases are matched AFTER canonicalization (lowercase, path-basename,
+# separators→"_"), so list them in canonical form. e.g. "agent/team_doc"
+# canonicalizes to "team_doc" (already covered); "team-memory" → "team_memory".
+aliases = ["team_doc", "team_memory_project"]  # Historical names / 历史别名

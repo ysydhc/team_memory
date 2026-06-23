@@ -10,22 +10,25 @@ import os
 
 
 def normalize_project_name(project: str | None) -> str:
-    """Normalize project name: resolve aliases from .tm.toml registry."""
+    """Normalize a project name to its canonical slug, then resolve aliases.
+
+    Canonicalization (lowercase, path-basename, separators → "_") is applied
+    first so that every write path produces a single stable form regardless of
+    whether the caller sent "adx-sdk-android", a full path, or "MyGuguGaga".
+    Alias resolution runs on the canonical slug.
+    """
     if not project:
         return ""
-    value = project.strip()
-    # Check global alias registry (populated by .tm.toml at server startup)
     try:
-        from team_memory.project_resolver import resolve_alias
+        from team_memory.project_resolver import canonicalize_project_name, resolve_alias
 
-        return resolve_alias(value)
+        canonical = canonicalize_project_name(project)
+        return resolve_alias(canonical)
     except ImportError:
-        pass
-    # Fallback: hardcoded legacy aliases (for environments without .tm.toml)
-    alias_map = {
-        "team-memory": "team_memory",
-    }
-    return alias_map.get(value, value)
+        # Fallback when project_resolver is unavailable: minimal canonicalization.
+        value = project.strip().lower().replace("-", "_")
+        alias_map = {"team_memory_project": "team_memory"}
+        return alias_map.get(value, value)
 
 
 def resolve_project(project: str | None = None) -> str:

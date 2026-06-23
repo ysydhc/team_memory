@@ -90,10 +90,12 @@ class ArchiveService:
         embedding_provider: EmbeddingProvider,
         db_url: str,
         event_bus: EventBus | None = None,
+        completeness_judge: object | None = None,
     ):
         self._embedding = embedding_provider
         self._db_url = db_url
         self._event_bus = event_bus
+        self._completeness_judge = completeness_judge
 
     async def archive_save(
         self,
@@ -271,6 +273,28 @@ class ArchiveService:
                 title,
             )
 
+        # Completeness gate: auto-publish when the judge deems the archive a
+        # finished record (clear problem + complete solution + decisions landed),
+        # skipping human review. Fails closed to "draft" on any judge error.
+        initial_status = "draft"
+        if self._completeness_judge is not None:
+            try:
+                verdict = await self._completeness_judge.judge(
+                    title=title,
+                    overview=ov or "",
+                    solution_doc=solution_doc,
+                )
+                if verdict.complete:
+                    initial_status = "published"
+                logger.info(
+                    "[ARCHIVE] completeness: complete=%s reason=%s title=%s",
+                    verdict.complete,
+                    verdict.reason,
+                    title[:50],
+                )
+            except Exception:
+                logger.debug("Completeness judge call failed; archive stays draft", exc_info=True)
+
         persist_start = time.monotonic()
         async with get_session(self._db_url) as session:
             repo = ArchiveRepository(session)
@@ -288,6 +312,7 @@ class ArchiveService:
                 tags=tags,
                 embedding=embedding,
                 linked_experience_ids=linked_experience_ids,
+                initial_status=initial_status,
             )
             await session.commit()
             persist_ms = int((time.monotonic() - persist_start) * 1000)
