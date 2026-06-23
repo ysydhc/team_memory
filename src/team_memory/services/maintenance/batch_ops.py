@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from sqlalchemy import text
+from sqlalchemy import text, update
 
 from team_memory.storage.database import get_session
+from team_memory.storage.models import Archive, Entity, Experience, PersonalMemory
 
 
 class BatchOpsService:
@@ -43,9 +44,12 @@ class BatchOpsService:
             )
             params: dict = {"limit": limit}
             if cursor_id is not None:
-                sql += " AND id > :cursor::uuid"
+                sql += " AND id > CAST(:cursor AS uuid)"
                 params["cursor"] = cursor_id
-            sql += " ORDER BY created_at ASC LIMIT :limit"
+            # Order by id (not created_at) so it matches the keyset cursor
+            # `id > :cursor`; ordering by a different column would skip or
+            # repeat rows across pages.
+            sql += " ORDER BY id ASC LIMIT :limit"
             result = await session.execute(text(sql), params)
             rows = result.mappings().all()
             return [dict(r) for r in rows]
@@ -60,9 +64,12 @@ class BatchOpsService:
             sql = "SELECT id, title, overview, solution_doc, project, created_at FROM archives WHERE embedding IS NULL"
             params: dict = {"limit": limit}
             if cursor_id is not None:
-                sql += " AND id > :cursor::uuid"
+                sql += " AND id > CAST(:cursor AS uuid)"
                 params["cursor"] = cursor_id
-            sql += " ORDER BY created_at ASC LIMIT :limit"
+            # Order by id (not created_at) so it matches the keyset cursor
+            # `id > :cursor`; ordering by a different column would skip or
+            # repeat rows across pages.
+            sql += " ORDER BY id ASC LIMIT :limit"
             result = await session.execute(text(sql), params)
             rows = result.mappings().all()
             return [dict(r) for r in rows]
@@ -79,9 +86,12 @@ class BatchOpsService:
             sql = "SELECT id, user_id, content, profile_kind, created_at FROM personal_memories WHERE embedding IS NULL"
             params: dict = {"limit": limit}
             if cursor_id is not None:
-                sql += " AND id > :cursor::uuid"
+                sql += " AND id > CAST(:cursor AS uuid)"
                 params["cursor"] = cursor_id
-            sql += " ORDER BY created_at ASC LIMIT :limit"
+            # Order by id (not created_at) so it matches the keyset cursor
+            # `id > :cursor`; ordering by a different column would skip or
+            # repeat rows across pages.
+            sql += " ORDER BY id ASC LIMIT :limit"
             result = await session.execute(text(sql), params)
             rows = result.mappings().all()
             return [dict(r) for r in rows]
@@ -91,20 +101,14 @@ class BatchOpsService:
     # ------------------------------------------------------------------
 
     async def update_experience_embedding(self, experience_id: str, embedding: list[float]) -> None:
-        """UPDATE experiences SET embedding = :e WHERE id = :id."""
+        """UPDATE experiences SET embedding WHERE id = experience_id."""
         async with get_session(self._db_url) as session:
-            await session.execute(
-                text("UPDATE experiences SET embedding = :e WHERE id = :id::uuid"),
-                {"e": embedding, "id": experience_id},
-            )
+            await session.execute(update(Experience).where(Experience.id == experience_id).values(embedding=embedding))
 
     async def update_archive_embedding(self, archive_id: str, embedding: list[float]) -> None:
-        """UPDATE archives SET embedding = :e WHERE id = :id."""
+        """UPDATE archives SET embedding WHERE id = archive_id."""
         async with get_session(self._db_url) as session:
-            await session.execute(
-                text("UPDATE archives SET embedding = :e WHERE id = :id::uuid"),
-                {"e": embedding, "id": archive_id},
-            )
+            await session.execute(update(Archive).where(Archive.id == archive_id).values(embedding=embedding))
 
     # ------------------------------------------------------------------
     # Published / promoted records (for graph backfill)
@@ -121,9 +125,12 @@ class BatchOpsService:
             )
             params: dict = {"limit": limit}
             if cursor_id is not None:
-                sql += " AND id > :cursor::uuid"
+                sql += " AND id > CAST(:cursor AS uuid)"
                 params["cursor"] = cursor_id
-            sql += " ORDER BY created_at ASC LIMIT :limit"
+            # Order by id (not created_at) so it matches the keyset cursor
+            # `id > :cursor`; ordering by a different column would skip or
+            # repeat rows across pages.
+            sql += " ORDER BY id ASC LIMIT :limit"
             result = await session.execute(text(sql), params)
             rows = result.mappings().all()
             return [dict(r) for r in rows]
@@ -138,9 +145,12 @@ class BatchOpsService:
             )
             params: dict = {"limit": limit}
             if cursor_id is not None:
-                sql += " AND id > :cursor::uuid"
+                sql += " AND id > CAST(:cursor AS uuid)"
                 params["cursor"] = cursor_id
-            sql += " ORDER BY created_at ASC LIMIT :limit"
+            # Order by id (not created_at) so it matches the keyset cursor
+            # `id > :cursor`; ordering by a different column would skip or
+            # repeat rows across pages.
+            sql += " ORDER BY id ASC LIMIT :limit"
             result = await session.execute(text(sql), params)
             rows = result.mappings().all()
             return [dict(r) for r in rows]
@@ -208,12 +218,9 @@ class BatchOpsService:
             return [dict(r) for r in rows]
 
     async def update_entity_embedding(self, entity_id: str, embedding: list[float]) -> None:
-        """UPDATE entities SET embedding = :e WHERE id = :id."""
+        """UPDATE entities SET embedding WHERE id = entity_id."""
         async with get_session(self._db_url) as session:
-            await session.execute(
-                text("UPDATE entities SET embedding = :e WHERE id = :id::uuid"),
-                {"e": embedding, "id": entity_id},
-            )
+            await session.execute(update(Entity).where(Entity.id == entity_id).values(embedding=embedding))
 
     # ------------------------------------------------------------------
     # Experiences – missing solution
@@ -233,23 +240,19 @@ class BatchOpsService:
             return [dict(r) for r in rows]
 
     async def update_experience_solution(self, experience_id: str, solution: str) -> None:
-        """UPDATE experiences SET solution = :s WHERE id = :id."""
+        """UPDATE experiences SET solution WHERE id = experience_id."""
         async with get_session(self._db_url) as session:
-            await session.execute(
-                text("UPDATE experiences SET solution = :s WHERE id = :id::uuid"),
-                {"s": solution, "id": experience_id},
-            )
+            await session.execute(update(Experience).where(Experience.id == experience_id).values(solution=solution))
 
     # ------------------------------------------------------------------
     # Personal memories – update embedding
     # ------------------------------------------------------------------
 
     async def update_personal_memory_embedding(self, memory_id: str, embedding: list[float]) -> None:
-        """UPDATE personal_memories SET embedding = :e WHERE id = :id."""
+        """UPDATE personal_memories SET embedding WHERE id = memory_id."""
         async with get_session(self._db_url) as session:
             await session.execute(
-                text("UPDATE personal_memories SET embedding = :e WHERE id = :id::uuid"),
-                {"e": embedding, "id": memory_id},
+                update(PersonalMemory).where(PersonalMemory.id == memory_id).values(embedding=embedding)
             )
 
     # ------------------------------------------------------------------

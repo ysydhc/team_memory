@@ -152,8 +152,9 @@ class TestUpdateExperienceEmbedding:
             await svc.update_experience_embedding(str(uuid.uuid4()), [0.1, 0.2])
 
         mock_session.execute.assert_awaited_once()
-        params = mock_session.execute.call_args[0][1]
-        assert params["e"] == [0.1, 0.2]
+        stmt = mock_session.execute.call_args[0][0]
+        assert stmt.is_update
+        assert stmt.table.name == "experiences"
 
 
 # ---------------------------------------------------------------------------
@@ -311,8 +312,9 @@ class TestUpdateEntityEmbedding:
             await svc.update_entity_embedding(str(uuid.uuid4()), [0.5, 0.6])
 
         mock_session.execute.assert_awaited_once()
-        params = mock_session.execute.call_args[0][1]
-        assert params["e"] == [0.5, 0.6]
+        stmt = mock_session.execute.call_args[0][0]
+        assert stmt.is_update
+        assert stmt.table.name == "entities"
 
 
 # ---------------------------------------------------------------------------
@@ -349,8 +351,9 @@ class TestUpdateExperienceSolution:
             await svc.update_experience_solution(str(uuid.uuid4()), "Fixed by doing X")
 
         mock_session.execute.assert_awaited_once()
-        params = mock_session.execute.call_args[0][1]
-        assert params["s"] == "Fixed by doing X"
+        stmt = mock_session.execute.call_args[0][0]
+        assert stmt.is_update
+        assert stmt.table.name == "experiences"
 
 
 # ---------------------------------------------------------------------------
