@@ -57,6 +57,23 @@ _PROMPT_TEMPLATE = """你是一个意图分类器。根据用户输入判断是�
 
 只返回一个词: none / experience / wiki / both"""
 
+_MULTI_TURN_TEMPLATE = """你是一个意图分类器。下面是一段多轮对话的最近几轮（按时间排序）。
+请先在心里总结当前这轮用户发言的"真实意图"（结合上下文，而不只看字面），
+再判断是否需要从团队记忆库检索。
+
+分类:
+- "none": 闲聊/确认/纯操作指令（如"继续"、"重试"、"按这个改"、测试命令、多步骤指令），不需要检索
+- "experience": 需要项目历史经验（之前怎么做的、类似问题、实现某需求、排查某错误）
+- "wiki": 需要项目文档/规范（规范、API定义、文档模板）
+- "both": 同时需要经验和文档
+
+对话上下文:
+{history}
+
+当前这轮用户发言: {prompt}
+
+只返回一个词: none / experience / wiki / both"""
+
 
 async def send_daemon_alert(title: str, body: str, severity: str = "critical") -> None:
     """Proxy to daemon's alert helper — imported lazily to avoid circular deps."""
@@ -163,6 +180,52 @@ class IntentGate:
 
             return FALLBACK_RESULT
 
+    async def classify_with_history(
+        self,
+        prompt: str,
+        history: list[dict[str, str]] | None = None,
+    ) -> IntentResult:
+        """Classify intent using recent conversation turns for context.
+
+        Unlike :meth:`classify`, this asks the LLM to first summarize the
+        *true* intent of the current turn given the surrounding dialogue, then
+        decide whether retrieval is needed. Used by the noise gate so that a
+        literally-ambiguous utterance (e.g. "再看看那个问题") is judged in
+        context rather than on its surface form.
+
+        Args:
+            prompt: Current user turn.
+            history: Recent turns as ``[{"role": ..., "content": ...}, ...]``
+                ordered oldest→newest. The current turn may or may not be
+                included; it is passed separately as ``prompt`` regardless.
+
+        Returns:
+            IntentResult. Falls back to BOTH on any LLM failure.
+        """
+        if self.is_fused:
+            return FALLBACK_RESULT
+
+        was_fused = self._consecutive_failures >= self._fuse_threshold
+
+        try:
+            llm_prompt = self._build_multi_turn_prompt(prompt, history or [])
+            raw = await self._call_llm(llm_prompt)
+            result = self._parse_result(raw)
+            self._consecutive_failures = 0
+            if was_fused:
+                logger.info("[INTENT_GATE] Circuit breaker recovered")
+            return result
+        except Exception as e:
+            self._consecutive_failures += 1
+            logger.warning(
+                "[INTENT_GATE] multi-turn LLM call failed (%d consecutive): %s",
+                self._consecutive_failures,
+                e,
+            )
+            if self._consecutive_failures == self._fuse_threshold:
+                self._fuse_triggered_at = time.monotonic()
+            return FALLBACK_RESULT
+
     def _build_prompt(self, prompt: str, prev_message: str) -> str:
         prev_context = ""
         if prev_message:
@@ -171,6 +234,27 @@ class IntentGate:
 
         return _PROMPT_TEMPLATE.format(
             prev_context=prev_context,
+            prompt=prompt[:500],
+        )
+
+    @staticmethod
+    def _format_history(history: list[dict[str, str]], max_turns: int = 6) -> str:
+        """Render the last ``max_turns`` messages as a compact transcript."""
+        recent = history[-max_turns:] if max_turns > 0 else history
+        lines = []
+        for msg in recent:
+            role = msg.get("role", "user")
+            speaker = "用户" if role == "user" else "助手"
+            content = (msg.get("content") or "").strip().replace("\n", " ")
+            if len(content) > 200:
+                content = content[:200] + "…"
+            if content:
+                lines.append(f"{speaker}: {content}")
+        return "\n".join(lines) if lines else "（无历史）"
+
+    def _build_multi_turn_prompt(self, prompt: str, history: list[dict[str, str]]) -> str:
+        return _MULTI_TURN_TEMPLATE.format(
+            history=self._format_history(history),
             prompt=prompt[:500],
         )
 

@@ -115,10 +115,8 @@ class AutoDreamSettings:
 
 @dataclass
 class EvaluationSettings:
-    """评估配置：模糊匹配开关与阈值。"""
+    """评估配置：忠实度批量评估阈值。"""
 
-    fuzzy_match_enabled: bool = True
-    fuzzy_match_threshold: float = 0.18
     faithfulness_batch_threshold: int = 5
 
 

@@ -77,11 +77,25 @@ class ResponseBuffer:
             return None
 
     async def pending_count(self) -> int:
-        """Return number of unevaluated entries."""
+        """Return number of unevaluated, non-noise entries.
+
+        Must use the same noise filter as fetch_pending — otherwise noise rows
+        that are never evaluated would keep pending_count above the threshold
+        and retrigger batches forever.
+        """
         try:
             pool = await self._ensure_pool()
             async with pool.acquire() as conn:
-                count = await conn.fetchval("SELECT count(*) FROM response_buffer WHERE evaluated = FALSE")
+                count = await conn.fetchval(
+                    """
+                    SELECT count(*)
+                    FROM response_buffer rb
+                    LEFT JOIN search_logs sl ON rb.search_log_id = sl.id
+                    WHERE rb.evaluated = FALSE
+                      AND sl.is_noise IS NOT TRUE
+                      AND NOT (char_length(rb.query) < 12 AND rb.query !~ '[A-Za-z]{4,}')
+                    """
+                )
             return count or 0
         except Exception as e:
             logger.debug("response_buffer.pending_count failed: %s", e)
@@ -107,16 +121,28 @@ class ResponseBuffer:
             return False
 
     async def fetch_pending(self, limit: int = 50) -> list[dict[str, Any]]:
-        """Fetch unevaluated entries for batch processing (oldest first)."""
+        """Fetch unevaluated entries for batch processing (oldest first).
+
+        Skips entries whose query is noise (no real retrieval intent), so the
+        LLM judge isn't spent scoring "Kill test 1" / confirmations / multi-step
+        instructions. Two filters, mirroring the stats layer:
+          1. linked search_log flagged is_noise (rule/llm gate), and
+          2. legacy fallback for unflagged rows: short query (<12 chars) with no
+             4+ letter identifier.
+        """
         try:
             pool = await self._ensure_pool()
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
                     """
-                    SELECT id, query, agent_response, result_ids, search_log_id, created_at
-                    FROM response_buffer
-                    WHERE evaluated = FALSE
-                    ORDER BY created_at ASC
+                    SELECT rb.id, rb.query, rb.agent_response, rb.result_ids,
+                           rb.search_log_id, rb.created_at
+                    FROM response_buffer rb
+                    LEFT JOIN search_logs sl ON rb.search_log_id = sl.id
+                    WHERE rb.evaluated = FALSE
+                      AND sl.is_noise IS NOT TRUE
+                      AND NOT (char_length(rb.query) < 12 AND rb.query !~ '[A-Za-z]{4,}')
+                    ORDER BY rb.created_at ASC
                     LIMIT $1
                     """,
                     limit,
@@ -168,7 +194,15 @@ class ResponseBuffer:
         *,
         faithfulness_score: float,
     ) -> None:
-        """Copy faithfulness_score to the linked search_log (if any)."""
+        """Copy faithfulness_score to the linked search_log (if any).
+
+        Once an entry is judged it is no longer "unjudged": we record the
+        verdict in BOTH directions — was_used=TRUE when the response actually
+        used the recalled context (score >= 0.5), was_used=FALSE otherwise.
+        Previously only positive verdicts were written, leaving negative ones
+        as NULL and indistinguishable from genuinely unjudged rows, which
+        inflated the "unjudged" count and made use-rate uninterpretable.
+        """
         try:
             pool = await self._ensure_pool()
             async with pool.acquire() as conn:
@@ -182,8 +216,8 @@ class ResponseBuffer:
                         """
                         UPDATE search_logs
                         SET faithfulness_score = $2,
-                            was_used = CASE WHEN $3 THEN TRUE ELSE was_used END,
-                            judgment_source = CASE WHEN $3 THEN 'faithfulness' ELSE judgment_source END,
+                            was_used = $3,
+                            judgment_source = 'faithfulness',
                             updated_at = $4
                         WHERE id = $1
                         """,

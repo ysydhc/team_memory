@@ -7,7 +7,6 @@ conversation buffer, convergence detection, refinement, and TMSink calls.
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 from team_memory.daemon.integration.tm_sink import TMSink
@@ -99,36 +98,6 @@ def _detect_source_pipeline(data: dict) -> str:
     return "unknown"
 
 
-_COMMAND_PREFIXES = (
-    "/memory_archive",
-    "/memory_save",
-    "/memory_feedback",
-    "/brainstorming",
-    "/review",
-    "/init",
-    "/help",
-    "/clear",
-    "/loop",
-    "/simplify",
-    "/security-review",
-)
-
-_TRIVIAL_PATTERNS = re.compile(
-    r"^(ok|好|好的|可以|确定|确认|是的|对|continue|yes|no|不|不是|行|嗯|got it|done|next|下一步)$",
-    re.IGNORECASE,
-)
-
-
-def _is_command_only(prompt: str) -> bool:
-    """Return True if the prompt is a command/confirmation that doesn't need recall."""
-    stripped = prompt.strip()
-    if any(stripped.startswith(prefix) for prefix in _COMMAND_PREFIXES):
-        return True
-    if len(stripped) <= 10 and _TRIVIAL_PATTERNS.match(stripped):
-        return True
-    return False
-
-
 async def process_before_prompt(
     input_data: dict,
     config: DaemonConfig,
@@ -166,25 +135,40 @@ async def process_before_prompt(
     if buf and prompt.strip():
         await buf.add_message(session_id, "user", prompt, project=project or "default")
 
-    # Retrieve memories (skip queries that don't benefit from recall)
-    if not prompt.strip() or _is_command_only(prompt):
-        return {"results": [], "project": project}
-
-    # Intent gate: LLM-based classification to decide retrieval scope
+    # --- Noise gate (two layers) ---
+    # Layer 1 (rules, zero-cost): flag high-confidence noise (test commands,
+    # confirmations, multi-step instructions, short fillers). Conservative —
+    # only obvious noise is caught here; ambiguous prompts defer to the LLM.
     from team_memory.daemon.integration.intent_gate import IntentResult
+    from team_memory.daemon.refinement.query_noise import NoiseReason, classify_noise_rule
 
+    rule_verdict = classify_noise_rule(prompt)
+    if rule_verdict is not None:
+        return {
+            "results": [],
+            "project": project or "",
+            "is_noise": True,
+            "noise_reason": rule_verdict.value,
+        }
+
+    # Layer 2 (LLM, context-aware): summarize the true intent of this turn
+    # using recent dialogue, then decide whether retrieval is needed.
     intent = IntentResult.BOTH  # default: search everything
     if intent_gate is not None:
-        prev_message = ""
+        history: list[dict] = []
         if buf and session_id != "unknown":
-            user_messages = await buf.get_user_messages(session_id)
-            if len(user_messages) >= 2:
-                prev_message = user_messages[-2].get("content", "")
-        intent = await intent_gate.classify(prompt, prev_message=prev_message)
+            history = await buf.get_messages(session_id)
+        intent = await intent_gate.classify_with_history(prompt, history=history)
         logger.debug("[INTENT_GATE] prompt=%s → %s", prompt[:60], intent.value)
 
     if intent == IntentResult.NONE:
-        return {"results": [], "project": project or "", "intent": "none"}
+        return {
+            "results": [],
+            "project": project or "",
+            "intent": "none",
+            "is_noise": True,
+            "noise_reason": NoiseReason.LLM.value,
+        }
 
     # Retrieve experiences (skip if intent is wiki-only)
     results: list[dict] = []

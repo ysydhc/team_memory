@@ -11,7 +11,6 @@ Uses @pytest.mark.integration for tests that hit a real PostgreSQL.
 from __future__ import annotations
 
 import json
-import re
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -104,12 +103,6 @@ class TestSearchLogWriterConstructor:
 
         sig = inspect.signature(SearchLogWriter.log_search)
         assert sig.parameters["source"].default == "daemon"
-
-    def test_default_threshold_fuzzy(self):
-        import inspect
-
-        sig = inspect.signature(SearchLogWriter.mark_used_fuzzy)
-        assert sig.parameters["threshold"].default == 0.3
 
 
 # ===================================================================
@@ -242,228 +235,6 @@ class TestLogSearch:
         assert call_args[0][4] == "test_src"
 
 
-# ===================================================================
-# ===================================================================
-
-
-class TestMarkUsedFuzzy:
-    """Tests for fuzzy matching logic with mocked DB."""
-
-    @pytest.mark.asyncio
-    async def test_returns_0_when_no_rows(self):
-        w = _make_writer()
-        mock_pool = _mock_pool(rows_fetch=[])
-        w._pool = mock_pool
-
-        result = await w.mark_used_fuzzy("some response")
-        assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_returns_0_on_exception(self):
-        w = _make_writer()
-        pool = AsyncMock()
-        pool._closed = False
-        pool.acquire = MagicMock(side_effect=Exception("fail"))
-        w._pool = pool
-
-        result = await w.mark_used_fuzzy("response")
-        assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_marks_when_keyword_overlap_exceeds_threshold(self):
-        """When most keywords from experience appear in response."""
-        exp_id = str(uuid.uuid4())
-        # Experience text: all these words should appear in response
-        exp_text = "docker postgresql connection setup guide"
-
-        row = {"id": uuid.uuid4(), "result_ids": [{"id": exp_id}]}
-        exp_row = {"description": exp_text, "solution": None}
-
-        mock_pool = _mock_pool(rows_fetch=[row], row_fetchrow=exp_row)
-        w = _make_writer()
-        w._pool = mock_pool
-
-        # Response contains all keywords → overlap ratio = 1.0 > 0.8
-        result = await w.mark_used_fuzzy("Docker PostgreSQL connection setup is important for the guide")
-        assert result == 1
-
-    @pytest.mark.asyncio
-    async def test_does_not_mark_when_overlap_below_threshold(self):
-        """When few keywords match, overlap < threshold → no mark."""
-        exp_id = str(uuid.uuid4())
-        exp_text = "docker postgresql connection setup guide configuration"
-
-        row = {"id": uuid.uuid4(), "result_ids": [{"id": exp_id}]}
-        exp_row = {"description": exp_text, "solution": None}
-
-        mock_pool = _mock_pool(rows_fetch=[row], row_fetchrow=exp_row)
-        w = _make_writer()
-        w._pool = mock_pool
-
-        # Response only matches 1 out of 6 keywords → ~0.17 < 0.8
-        result = await w.mark_used_fuzzy("I like docker very much today")
-        assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_uses_solution_over_description(self):
-        """When solution is non-null, it should be used instead of description."""
-        exp_id = str(uuid.uuid4())
-        row = {"id": uuid.uuid4(), "result_ids": [{"id": exp_id}]}
-        # solution takes priority
-        exp_row = {"description": "unrelated", "solution": "docker postgresql setup"}
-
-        mock_pool = _mock_pool(rows_fetch=[row], row_fetchrow=exp_row)
-        w = _make_writer()
-        w._pool = mock_pool
-
-        result = await w.mark_used_fuzzy("Here is the docker postgresql setup for you")
-        assert result == 1
-
-    @pytest.mark.asyncio
-    async def test_skips_row_when_result_ids_empty(self):
-        row = {"id": uuid.uuid4(), "result_ids": []}
-        mock_pool = _mock_pool(rows_fetch=[row])
-        w = _make_writer()
-        w._pool = mock_pool
-
-        result = await w.mark_used_fuzzy("response text")
-        assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_skips_invalid_uuid(self):
-        row = {"id": uuid.uuid4(), "result_ids": [{"id": "not-a-uuid"}]}
-        mock_pool = _mock_pool(rows_fetch=[row])
-        w = _make_writer()
-        w._pool = mock_pool
-
-        result = await w.mark_used_fuzzy("response text")
-        assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_skips_empty_id_in_result(self):
-        row = {"id": uuid.uuid4(), "result_ids": [{"id": ""}]}
-        mock_pool = _mock_pool(rows_fetch=[row])
-        w = _make_writer()
-        w._pool = mock_pool
-
-        result = await w.mark_used_fuzzy("response text")
-        assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_skips_missing_id_key(self):
-        row = {"id": uuid.uuid4(), "result_ids": [{"score": 0.9}]}
-        mock_pool = _mock_pool(rows_fetch=[row])
-        w = _make_writer()
-        w._pool = mock_pool
-
-        result = await w.mark_used_fuzzy("response text")
-        assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_skips_when_experience_not_found(self):
-        exp_id = str(uuid.uuid4())
-        row = {"id": uuid.uuid4(), "result_ids": [{"id": exp_id}]}
-        # exp_row is None → experience not in DB
-        mock_pool = _mock_pool(rows_fetch=[row], row_fetchrow=None)
-        w = _make_writer()
-        w._pool = mock_pool
-
-        result = await w.mark_used_fuzzy("response text")
-        assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_skips_when_text_empty(self):
-        exp_id = str(uuid.uuid4())
-        row = {"id": uuid.uuid4(), "result_ids": [{"id": exp_id}]}
-        exp_row = {"description": "", "solution": ""}
-        mock_pool = _mock_pool(rows_fetch=[row], row_fetchrow=exp_row)
-        w = _make_writer()
-        w._pool = mock_pool
-
-        result = await w.mark_used_fuzzy("response text")
-        assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_skips_when_keywords_all_short(self):
-        """If all tokens in experience text are <= 2 chars, no keywords."""
-        exp_id = str(uuid.uuid4())
-        row = {"id": uuid.uuid4(), "result_ids": [{"id": exp_id}]}
-        exp_row = {"description": "a b c d", "solution": None}
-        mock_pool = _mock_pool(rows_fetch=[row], row_fetchrow=exp_row)
-        w = _make_writer()
-        w._pool = mock_pool
-
-        result = await w.mark_used_fuzzy("response with a b c d words")
-        assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_parsing_string_result_ids(self):
-        exp_id = str(uuid.uuid4())
-        row = {"id": uuid.uuid4(), "result_ids": json.dumps([{"id": exp_id}])}
-        exp_row = {"description": "docker postgresql setup", "solution": None}
-        mock_pool = _mock_pool(rows_fetch=[row], row_fetchrow=exp_row)
-        w = _make_writer()
-        w._pool = mock_pool
-
-        result = await w.mark_used_fuzzy("docker postgresql setup here")
-        assert result == 1
-
-    @pytest.mark.asyncio
-    async def test_only_one_fuzzy_hit_per_search_log(self):
-        """Even if multiple experiences match, only 1 mark per search_log (break)."""
-        exp1 = str(uuid.uuid4())
-        exp2 = str(uuid.uuid4())
-        row = {
-            "id": uuid.uuid4(),
-            "result_ids": [{"id": exp1}, {"id": exp2}],
-        }
-
-        def fetchrow_side_effect(query, *args):
-            # Both experiences return high-overlap text
-            return {"description": "docker postgresql setup", "solution": None}
-
-        conn = AsyncMock()
-        conn.fetch = AsyncMock(return_value=[row])
-        conn.fetchrow = AsyncMock(side_effect=fetchrow_side_effect)
-        conn.execute = AsyncMock()
-
-        pool = AsyncMock()
-        pool._closed = False
-        pool.acquire = MagicMock()
-        pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
-        pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
-
-        w = _make_writer()
-        w._pool = pool
-
-        result = await w.mark_used_fuzzy("docker postgresql setup is great")
-        # Only 1 mark even though both experiences match
-        assert result == 1
-
-    @pytest.mark.asyncio
-    async def test_passes_custom_threshold(self):
-        """Verify threshold parameter is used."""
-        exp_id = str(uuid.uuid4())
-        row = {"id": uuid.uuid4(), "result_ids": [{"id": exp_id}]}
-        # 6 keywords: docker postgresql connection setup guide config
-        exp_row = {"description": "docker postgresql connection setup guide config", "solution": None}
-        mock_pool = _mock_pool(rows_fetch=[row], row_fetchrow=exp_row)
-        w = _make_writer()
-        w._pool = mock_pool
-
-        # Response matches 4/6 = 0.667, threshold=0.5 → should match
-        result = await w.mark_used_fuzzy(
-            "docker postgresql connection setup works",
-            threshold=0.5,
-        )
-        assert result == 1
-
-
-# ===================================================================
-# get_recent_with_results
-# ===================================================================
-
-
 class TestGetRecentWithResults:
     @pytest.mark.asyncio
     async def test_returns_none_when_no_rows(self):
@@ -557,7 +328,6 @@ class TestGetStats:
             "used": 50,
             "unjudged": 20,
             "legacy_unjudged": 5,
-            "used_fuzzy": 20,
             "used_faithfulness": 30,
         }
         project_rows = [
@@ -598,7 +368,7 @@ class TestGetStats:
         assert result["used"] == 50
         assert result["unjudged"] == 20
         assert result["legacy_unjudged"] == 5
-        assert result["used_fuzzy"] == 20
+        assert result["used_faithfulness"] == 30
         assert result["use_rate"] == 0.625  # 50/80
         assert "default" in result["by_project"]
         assert len(result["top_queries"]) == 1
@@ -611,7 +381,6 @@ class TestGetStats:
             "used": 0,
             "unjudged": 0,
             "legacy_unjudged": 0,
-            "used_fuzzy": 0,
             "used_faithfulness": 0,
         }
         conn = AsyncMock()
@@ -639,7 +408,6 @@ class TestGetStats:
             "used": None,
             "unjudged": None,
             "legacy_unjudged": None,
-            "used_fuzzy": None,
             "used_faithfulness": None,
         }
         conn = AsyncMock()
@@ -779,7 +547,6 @@ class TestGetTrends:
             "total": 10,
             "hit": 8,
             "used": 5,
-            "used_fuzzy": 2,
             "used_faithfulness": 3,
             "avg_relevance": None,
             "avg_helpfulness": None,
@@ -811,7 +578,6 @@ class TestGetTrends:
             "total": 5,
             "hit": 3,
             "used": 1,
-            "used_fuzzy": 0,
             "used_faithfulness": 0,
             "avg_relevance": None,
             "avg_helpfulness": None,
@@ -945,119 +711,6 @@ class TestGetLowUseQueries:
 
         result = await w.get_low_use_queries()
         assert len(result[0]["query"]) == 80
-
-
-# ===================================================================
-# Keyword extraction logic (testing the actual regex used in mark_used_fuzzy)
-# ===================================================================
-
-
-class TestKeywordExtraction:
-    """Test the tokenization logic used in mark_used_fuzzy.
-
-    In the source code:
-        keywords = [
-            tok.lower()
-            for tok in re.split(r"[^\\w]+", text)
-            if len(tok) > 2
-        ]
-    """
-
-    def test_basic_extraction(self):
-        text = "Docker PostgreSQL connection"
-        keywords = [tok.lower() for tok in re.split(r"[^\w]+", text) if len(tok) > 2]
-        assert keywords == ["docker", "postgresql", "connection"]
-
-    def test_filters_short_tokens(self):
-        text = "a bb ccc dd eee"
-        keywords = [tok.lower() for tok in re.split(r"[^\w]+", text) if len(tok) > 2]
-        assert "a" not in keywords
-        assert "bb" not in keywords
-        assert "ccc" in keywords
-        assert "eee" in keywords
-
-    def test_handles_punctuation(self):
-        text = "hello, world! how-are you?"
-        keywords = [tok.lower() for tok in re.split(r"[^\w]+", text) if len(tok) > 2]
-        assert "hello" in keywords
-        assert "world" in keywords
-        assert "how" in keywords  # len("how") = 3 > 2
-        assert "are" in keywords
-
-    def test_empty_text(self):
-        text = ""
-        keywords = [tok.lower() for tok in re.split(r"[^\w]+", text) if len(tok) > 2]
-        assert keywords == []
-
-    def test_only_short_tokens(self):
-        text = "a b c --"
-        keywords = [tok.lower() for tok in re.split(r"[^\w]+", text) if len(tok) > 2]
-        assert keywords == []
-
-    def test_numbers_included(self):
-        text = "port 8080 or 443"
-        keywords = [tok.lower() for tok in re.split(r"[^\w]+", text) if len(tok) > 2]
-        assert "8080" in keywords
-
-    def test_unicode_split(self):
-        text = "python 代码 测试 工具"
-        keywords = [tok.lower() for tok in re.split(r"[^\w]+", text) if len(tok) > 2]
-        # Chinese characters may or may not be word chars depending on regex engine
-        assert isinstance(keywords, list)
-
-
-# ===================================================================
-# Overlap ratio calculation
-# ===================================================================
-
-
-class TestOverlapRatioCalculation:
-    def test_full_overlap(self):
-        keywords = ["docker", "postgresql", "setup"]
-        response = "docker postgresql setup guide".lower()
-        matched = sum(1 for kw in keywords if kw in response)
-        ratio = matched / len(keywords)
-        assert ratio == 1.0
-
-    def test_no_overlap(self):
-        keywords = ["docker", "postgresql"]
-        response = "kubernetes helm chart deployment".lower()
-        matched = sum(1 for kw in keywords if kw in response)
-        ratio = matched / len(keywords)
-        assert ratio == 0.0
-
-    def test_partial_overlap(self):
-        keywords = ["docker", "postgresql", "redis", "nginx"]
-        response = "docker and postgresql are great".lower()
-        matched = sum(1 for kw in keywords if kw in response)
-        ratio = matched / len(keywords)
-        assert ratio == 0.5
-
-    def test_threshold_boundary_above(self):
-        keywords = ["a", "b", "c", "d", "e"]  # all > 2 chars? No, need len > 2
-        keywords = ["aaa", "bbb", "ccc", "ddd", "eee"]
-        response = "aaa bbb ccc ddd eee".lower()
-        matched = sum(1 for kw in keywords if kw in response)
-        ratio = matched / len(keywords)
-        assert ratio == 1.0
-        assert ratio > 0.8
-
-    def test_threshold_boundary_below(self):
-        keywords = ["aaa", "bbb", "ccc", "ddd", "eee"]
-        response = "aaa bbb ccc".lower()
-        matched = sum(1 for kw in keywords if kw in response)
-        ratio = matched / len(keywords)
-        assert ratio == 0.6
-        assert ratio < 0.8
-
-    def test_exact_threshold_not_above(self):
-        """Threshold comparison uses > not >=. At exactly 0.8 should not match."""
-        keywords = ["aaa", "bbb", "ccc", "ddd", "eee"]
-        response = "aaa bbb ccc ddd".lower()  # 4/5 = 0.8
-        matched = sum(1 for kw in keywords if kw in response)
-        ratio = matched / len(keywords)
-        assert ratio == 0.8
-        assert not (ratio > 0.8)  # > not >=
 
 
 # ===================================================================

@@ -25,6 +25,7 @@ import pytest
 # ---------------------------------------------------------------------------
 from team_memory.daemon.observe.tm_stats import (
     _bar,
+    _embedding_coverage,
     _faithfulness_breakdown,
     _get_low_faithfulness_entries,
     _resolve_dsn,
@@ -333,6 +334,56 @@ class TestGetLowFaithfulnessEntries:
         assert args[2] == 3
 
 
+class TestEmbeddingCoverage:
+    """_embedding_coverage() — vector coverage health check."""
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_full_coverage(self):
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value={"total": 185, "missing": 0})
+        mock_conn.close = AsyncMock()
+        with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
+            result = await _embedding_coverage("postgresql://test")
+        assert result["total"] == 185
+        assert result["missing"] == 0
+        assert result["covered"] == 185
+        assert result["ratio"] == 1.0
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_partial_coverage(self):
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value={"total": 100, "missing": 40})
+        mock_conn.close = AsyncMock()
+        with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
+            result = await _embedding_coverage("postgresql://test")
+        assert result["covered"] == 60
+        assert result["ratio"] == 0.6
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_empty_library_is_full_coverage(self):
+        """No experiences => ratio 1.0 (nothing missing), no false alarm."""
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value={"total": 0, "missing": 0})
+        mock_conn.close = AsyncMock()
+        with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
+            result = await _embedding_coverage("postgresql://test")
+        assert result["ratio"] == 1.0
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_connection_closed(self):
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(side_effect=RuntimeError("db down"))
+        mock_conn.close = AsyncMock()
+        with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
+            with pytest.raises(RuntimeError):
+                await _embedding_coverage("postgresql://test")
+        mock_conn.close.assert_awaited_once()
+
+
 # ===========================================================================
 # run_stats — full pipeline with mocked writer + buffer
 # ===========================================================================
@@ -364,8 +415,7 @@ class TestRunStats:
             "total_searches": 100,
             "hit": 80,
             "used": 40,
-            "used_marker": 25,
-            "used_fuzzy": 15,
+            "used_faithfulness": 25,
             "unjudged": 10,
             "use_rate": 0.5,
             "by_project": {"proj": {"total": 50, "used": 20}},
@@ -418,8 +468,7 @@ class TestRunStats:
             "total_searches": 10,
             "hit": 8,
             "used": 4,
-            "used_marker": 2,
-            "used_fuzzy": 2,
+            "used_faithfulness": 2,
             "unjudged": 2,
             "use_rate": 0.4,
         }

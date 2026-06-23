@@ -42,8 +42,7 @@ refinement:
   fallback_on_failure: true
 
 evaluation:
-  fuzzy_match_enabled: true
-  fuzzy_match_threshold: 0.8
+  faithfulness_batch_threshold: 5
 
 auto_dream:
   enabled: true

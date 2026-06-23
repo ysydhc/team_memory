@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -21,6 +20,13 @@ from typing import Any
 import asyncpg
 
 logger = logging.getLogger(__name__)
+
+# Exclude noise from quality/usage stats. Two layers:
+#   1. is_noise flag set by the entry gate (rule/llm) on new rows.
+#   2. Legacy fallback for rows logged before the flag existed: short query
+#      (<12 chars) with no 4+ letter identifier run.
+# A row counts as a real search only when it passes BOTH.
+_NOISE_EXCLUSION = "is_noise IS NOT TRUE AND NOT (char_length(query) < 12 AND query !~ '[A-Za-z]{4,}')"
 
 
 class SearchLogWriter:
@@ -49,22 +55,31 @@ class SearchLogWriter:
         project: str = "default",
         source: str = "daemon",
         result_ids: list[dict[str, Any]] | None = None,
+        is_noise: bool | None = None,
+        noise_reason: str | None = None,
     ) -> str | None:
-        """Write a search log entry. Returns the log ID or None on failure."""
+        """Write a search log entry. Returns the log ID or None on failure.
+
+        ``is_noise`` marks utterances with no real retrieval intent so that
+        quality/usage stats can exclude them; ``noise_reason`` is 'rule' or 'llm'.
+        """
         try:
             pool = await self._ensure_pool()
             log_id = uuid.uuid4()
             async with pool.acquire() as conn:
                 await conn.execute(
                     """
-                    INSERT INTO search_logs (id, query, project, source, result_ids, created_at, updated_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $6)
+                    INSERT INTO search_logs
+                        (id, query, project, source, result_ids, is_noise, noise_reason, created_at, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
                     """,
                     log_id,
                     query[:500],
                     project,
                     source,
                     json.dumps(result_ids) if result_ids else None,
+                    is_noise,
+                    noise_reason,
                     datetime.now(timezone.utc),
                 )
             return str(log_id)
@@ -205,143 +220,13 @@ class SearchLogWriter:
             logger.debug("find_unjudged_in_window failed: %s", e)
             return []
 
-    async def mark_used_fuzzy(
-        self,
-        agent_response: str,
-        *,
-        project: str | None = None,
-        hours_window: int = 24,
-        threshold: float = 0.3,
-    ) -> int:
-        """Fuzzy match: check if agent response overlaps with search result keywords.
-
-        For each unjudged search log, extracts keywords from the result experience's
-        description/solution, then computes overlap ratio with agent_response.
-        If overlap > threshold → was_used = True, judgment_source = 'fuzzy'.
-
-        Also increments used_count on the corresponding experience.
-
-        Returns the number of logs marked as used.
-        """
-        try:
-            pool = await self._ensure_pool()
-            response_lower = agent_response.lower()
-            marked = 0
-
-            async with pool.acquire() as conn:
-                # Get unjudged search logs with results
-                rows = await conn.fetch(
-                    """
-                    SELECT id, result_ids FROM search_logs
-                    WHERE was_used IS NULL
-                      AND result_ids IS NOT NULL
-                      AND result_ids::text NOT IN ('[]', 'null')
-                      AND created_at > NOW() - make_interval(hours => $1)
-                      AND ($2::text IS NULL OR project = $2)
-                    """,
-                    hours_window,
-                    project,
-                )
-
-                for row in rows:
-                    result_ids = row["result_ids"]
-                    if isinstance(result_ids, str):
-                        result_ids = json.loads(result_ids)
-                    if not result_ids:
-                        continue
-
-                    # For each result in this search log, fetch the experience text
-                    # and check keyword overlap
-                    for r in result_ids:
-                        rid = str(r.get("id", ""))
-                        if not rid:
-                            continue
-
-                        try:
-                            exp_uuid = uuid.UUID(rid)
-                        except ValueError:
-                            continue
-
-                        exp_row = await conn.fetchrow(
-                            """
-                            SELECT description, solution FROM experiences WHERE id = $1
-                            """,
-                            exp_uuid,
-                        )
-                        if not exp_row:
-                            continue
-
-                        text = exp_row["solution"] or exp_row["description"] or ""
-                        if not text:
-                            continue
-
-                        # Tokenize: for Chinese/Japanese text, use character bigrams;
-                        # for alphabetic text, split by non-word chars.
-                        if re.search(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]", text):
-                            # CJK text: extract individual CJK chars and bigrams,
-                            # plus any alphabetic tokens
-                            cjk_chars = re.findall(r"[\u4e00-\u9fff]+", text)
-                            keywords = []
-                            for segment in cjk_chars:
-                                if len(segment) >= 2:
-                                    keywords.extend(segment[i : i + 2] for i in range(len(segment) - 1))
-                                else:
-                                    keywords.append(segment)
-                            # Also include alphabetic tokens
-                            alpha_tokens = [
-                                tok.lower()
-                                for tok in re.split(r"[^\w]+", text)
-                                if len(tok) > 2 and not re.match(r"^[\u4e00-\u9fff]+$", tok)
-                            ]
-                            keywords.extend(alpha_tokens)
-                        else:
-                            keywords = [tok.lower() for tok in re.split(r"[^\w]+", text) if len(tok) > 2]
-                        if not keywords:
-                            continue
-
-                        matched = sum(1 for kw in keywords if kw in response_lower)
-                        overlap_ratio = matched / len(keywords)
-
-                        if overlap_ratio > threshold:
-                            # Mark search log as used with fuzzy source
-                            now = datetime.now(timezone.utc)
-                            await conn.execute(
-                                """
-                                UPDATE search_logs
-                                SET was_used = TRUE, judgment_source = 'fuzzy', updated_at = $2
-                                WHERE id = $1
-                                """,
-                                row["id"],
-                                now,
-                            )
-                            # Increment used_count on the experience
-                            try:
-                                await conn.execute(
-                                    """
-                                    UPDATE experiences
-                                    SET used_count = used_count + 1, updated_at = $2
-                                    WHERE id = $1
-                                    """,
-                                    exp_uuid,
-                                    now,
-                                )
-                            except Exception:
-                                pass
-                            marked += 1
-                            break  # One fuzzy hit is enough for this search log
-
-            return marked
-        except Exception as e:
-            logger.debug("mark_used_fuzzy failed: %s", e)
-            return 0
-
     async def get_stats(self, days: int = 7) -> dict[str, Any]:
         """Get evaluation statistics for the last N days."""
         try:
             pool = await self._ensure_pool()
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    """
+                    f"""
                     SELECT
                         COUNT(*) AS total,
                         COUNT(*) FILTER (
@@ -357,10 +242,10 @@ class SearchLogWriter:
                                  OR judgment_source != 'legacy_unjudged')
                         ) AS unjudged,
                         COUNT(*) FILTER (WHERE judgment_source = 'legacy_unjudged') AS legacy_unjudged,
-                        COUNT(*) FILTER (WHERE judgment_source = 'fuzzy') AS used_fuzzy,
                         COUNT(*) FILTER (WHERE judgment_source = 'faithfulness') AS used_faithfulness
                     FROM search_logs
                     WHERE created_at > NOW() - make_interval(days => $1)
+                      AND {_NOISE_EXCLUSION}
                     """,
                     days,
                 )
@@ -369,13 +254,12 @@ class SearchLogWriter:
                 used = row["used"] or 0
                 unjudged = row["unjudged"] or 0
                 legacy_unjudged = row["legacy_unjudged"] or 0
-                used_fuzzy = row["used_fuzzy"] or 0
                 used_faithfulness = row["used_faithfulness"] or 0
                 use_rate = used / hit if hit > 0 else 0.0
 
                 # Per-project breakdown
                 project_rows = await conn.fetch(
-                    """
+                    f"""
                     SELECT
                         project,
                         COUNT(*) AS total,
@@ -383,6 +267,7 @@ class SearchLogWriter:
                     FROM search_logs
                     WHERE created_at > NOW() - make_interval(days => $1)
                       AND result_ids IS NOT NULL AND result_ids::text NOT IN ('[]', 'null')
+                      AND {_NOISE_EXCLUSION}
                     GROUP BY project
                     ORDER BY total DESC
                     """,
@@ -392,10 +277,11 @@ class SearchLogWriter:
 
                 # Top queries (most frequent)
                 top_queries = await conn.fetch(
-                    """
+                    f"""
                     SELECT query, COUNT(*) as cnt
                     FROM search_logs
                     WHERE created_at > NOW() - make_interval(days => $1)
+                      AND {_NOISE_EXCLUSION}
                     GROUP BY query
                     ORDER BY cnt DESC
                     LIMIT 10
@@ -405,7 +291,7 @@ class SearchLogWriter:
 
                 # WoW comparison
                 prev_row = await conn.fetchrow(
-                    """
+                    f"""
                     SELECT
                         COUNT(*) FILTER (
                             WHERE result_ids IS NOT NULL
@@ -415,6 +301,7 @@ class SearchLogWriter:
                     FROM search_logs
                     WHERE created_at > NOW() - make_interval(days => $1 * 2)
                       AND created_at <= NOW() - make_interval(days => $1)
+                      AND {_NOISE_EXCLUSION}
                     """,
                     days,
                 )
@@ -427,7 +314,6 @@ class SearchLogWriter:
                     "total_searches": total,
                     "hit": hit,
                     "used": used,
-                    "used_fuzzy": used_fuzzy,
                     "used_faithfulness": used_faithfulness,
                     "unjudged": unjudged,
                     "legacy_unjudged": legacy_unjudged,
@@ -459,7 +345,7 @@ class SearchLogWriter:
                     trunc = "day"
 
                 rows = await conn.fetch(
-                    """
+                    f"""
                     SELECT
                         date_trunc($1, created_at) AS period,
                         COUNT(*) AS total,
@@ -468,12 +354,12 @@ class SearchLogWriter:
                             AND result_ids::text NOT IN ('[]', 'null')
                         ) AS hit,
                         COUNT(*) FILTER (WHERE was_used = TRUE) AS used,
-                        COUNT(*) FILTER (WHERE judgment_source = 'fuzzy') AS used_fuzzy,
                         COUNT(*) FILTER (WHERE judgment_source = 'faithfulness') AS used_faithfulness,
                         AVG(relevance_score) FILTER (WHERE relevance_score IS NOT NULL) AS avg_relevance,
                         AVG(helpfulness_score) FILTER (WHERE helpfulness_score IS NOT NULL) AS avg_helpfulness
                     FROM search_logs
                     WHERE created_at > NOW() - make_interval(days => $2)
+                      AND {_NOISE_EXCLUSION}
                     GROUP BY period
                     ORDER BY period
                     """,
@@ -493,7 +379,6 @@ class SearchLogWriter:
                             "total": total,
                             "hit": hit,
                             "used": used,
-                            "used_fuzzy": r["used_fuzzy"] or 0,
                             "used_faithfulness": r["used_faithfulness"] or 0,
                             "use_rate": round(use_rate, 3),
                             "avg_relevance": round(float(r["avg_relevance"]), 3) if r["avg_relevance"] else None,
@@ -514,11 +399,12 @@ class SearchLogWriter:
             pool = await self._ensure_pool()
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
-                    """
+                    f"""
                     SELECT query, COUNT(*) as cnt, MAX(created_at) as last_seen
                     FROM search_logs
                     WHERE created_at > NOW() - make_interval(days => $1)
                       AND (result_ids IS NULL OR result_ids::text IN ('[]', 'null'))
+                      AND {_NOISE_EXCLUSION}
                     GROUP BY query
                     ORDER BY cnt DESC
                     LIMIT $2
@@ -547,7 +433,7 @@ class SearchLogWriter:
             pool = await self._ensure_pool()
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
-                    """
+                    f"""
                     SELECT
                         query,
                         COUNT(*) AS total,
@@ -555,6 +441,7 @@ class SearchLogWriter:
                     FROM search_logs
                     WHERE created_at > NOW() - make_interval(days => $1)
                       AND result_ids IS NOT NULL AND result_ids::text NOT IN ('[]', 'null')
+                      AND {_NOISE_EXCLUSION}
                     GROUP BY query
                     HAVING COUNT(*) FILTER (WHERE was_used = TRUE) = 0
                     ORDER BY total DESC
@@ -585,7 +472,7 @@ class SearchLogWriter:
             pool = await self._ensure_pool()
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
-                    """
+                    f"""
                     SELECT
                         date_trunc('week', created_at) AS week_start,
                         COUNT(*) AS total,
@@ -597,6 +484,7 @@ class SearchLogWriter:
                         AVG(helpfulness_score) FILTER (WHERE helpfulness_score IS NOT NULL) AS avg_helpfulness
                     FROM search_logs
                     WHERE created_at > NOW() - make_interval(weeks => $1)
+                      AND {_NOISE_EXCLUSION}
                     GROUP BY week_start
                     ORDER BY week_start
                     """,
@@ -629,7 +517,7 @@ class SearchLogWriter:
             pool = await self._ensure_pool()
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
-                    """
+                    f"""
                     SELECT
                         query,
                         COUNT(*) AS total,
@@ -638,6 +526,7 @@ class SearchLogWriter:
                     FROM search_logs
                     WHERE created_at > NOW() - make_interval(days => $1)
                       AND result_ids IS NOT NULL AND result_ids::text NOT IN ('[]', 'null')
+                      AND {_NOISE_EXCLUSION}
                     GROUP BY query
                     HAVING COUNT(*) >= 2 AND COUNT(*) FILTER (WHERE was_used = TRUE) > 0
                     ORDER BY COUNT(*) FILTER (WHERE was_used = TRUE) DESC, total DESC
@@ -669,7 +558,7 @@ class SearchLogWriter:
             pool = await self._ensure_pool()
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    """
+                    f"""
                     SELECT
                         avg(relevance_score) AS avg_relevance,
                         avg(helpfulness_score) AS avg_helpfulness,
@@ -679,7 +568,7 @@ class SearchLogWriter:
                     FROM search_logs
                     WHERE created_at > NOW() - make_interval(days => $1)
                       AND (relevance_score IS NOT NULL OR helpfulness_score IS NOT NULL)
-                      AND NOT (char_length(query) < 12 AND query !~ '[A-Za-z]{4,}')
+                      AND {_NOISE_EXCLUSION}
                     """,
                     days,
                 )

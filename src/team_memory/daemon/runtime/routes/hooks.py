@@ -99,7 +99,7 @@ async def hook_after_response(request: Request) -> dict[str, Any]:
         action,
         convergence,
     )
-    # Evaluate usage: fuzzy match + faithfulness buffer
+    # Evaluate usage: buffer response for faithfulness judgment.
     response_text = payload.response_text or payload.prompt
     if response_text:
         search_log: SearchLogWriter = app.state.search_log
@@ -109,22 +109,11 @@ async def hook_after_response(request: Request) -> dict[str, Any]:
         key = payload.conversation_id or resolved_project or "default"
         cached_search = recent_searches.pop(key, None)
 
-        # Fuzzy match: check unjudged logs for keyword overlap
-        eval_config = app.state.config.evaluation
-        if eval_config.fuzzy_match_enabled:
-            fuzzy_marked = await search_log.mark_used_fuzzy(
-                response_text,
-                project=resolved_project or None,
-                threshold=eval_config.fuzzy_match_threshold,
-            )
-            if fuzzy_marked > 0:
-                logger.info("[EVAL]  marked %d search_log(s) as was_used (fuzzy)", fuzzy_marked)
-
         # Auto-buffer response for faithfulness evaluation
         try:
             response_buffer = getattr(app.state, "response_buffer", None)
             if response_buffer is not None:
-                # Use cached search_log_id from before_prompt (precise correlation)
+                # --- Capture the daemon before_prompt recall (precise correlation) ---
                 if cached_search:
                     recent_log = {
                         "id": cached_search["log_id"],
@@ -132,59 +121,11 @@ async def hook_after_response(request: Request) -> dict[str, Any]:
                         "result_ids": cached_search["result_ids"],
                     }
                 else:
-                    # Fallback: time-window query for MCP search_logs
-                    # when recent_searches is lost (daemon restart, etc.)
-                    t_end = datetime.now(timezone.utc)
-                    t_start = None
-
-                    # Try ConversationBuffer for T1 (C-2)
-                    conv_buf = getattr(app.state, "conversation_buffer", None)
-                    if conv_buf and payload.conversation_id:
-                        try:
-                            t_start = await conv_buf.get_last_user_message_time(payload.conversation_id)
-                        except Exception:
-                            pass
-
-                    # If no T1 from ConversationBuffer, use 5 min window
-                    if not t_start:
-                        from datetime import timedelta
-
-                        t_start = t_end - timedelta(minutes=5)
-
-                    # Query unjudged MCP search_logs in window
-                    mcp_fallback = await search_log.find_unjudged_in_window(
-                        t_start=t_start,
-                        t_end=t_end,
+                    # No cached daemon recall — last resort: most recent log with results.
+                    recent_log = await search_log.get_recent_with_results(
                         project=resolved_project or None,
-                        source="mcp",
+                        hours_window=1,
                     )
-                    if mcp_fallback:
-                        # Buffer each MCP search_log found in window
-                        for mcp_log in mcp_fallback:
-                            if not await response_buffer.has_search_log(mcp_log["id"]):
-                                await response_buffer.add(
-                                    query=mcp_log["query"] or "(mcp recall)",
-                                    agent_response=response_text[:10000],
-                                    result_ids=mcp_log["result_ids"],
-                                    search_log_id=mcp_log["id"],
-                                )
-                                logger.info(
-                                    "[EVAL]  fallback: buffered MCP search_log %s (window %s~%s)",
-                                    mcp_log["id"][:8],
-                                    t_start.strftime("%H:%M:%S"),
-                                    t_end.strftime("%H:%M:%S"),
-                                )
-                        # Also try daemon search_log fallback
-                        recent_log = await search_log.get_recent_with_results(
-                            project=resolved_project or None,
-                            hours_window=1,
-                        )
-                    else:
-                        # Last resort: find any recent search_log with results
-                        recent_log = await search_log.get_recent_with_results(
-                            project=resolved_project or None,
-                            hours_window=1,
-                        )
                 if recent_log:
                     await response_buffer.add(
                         query=recent_log["query"],
@@ -192,6 +133,46 @@ async def hook_after_response(request: Request) -> dict[str, Any]:
                         result_ids=recent_log["result_ids"],
                         search_log_id=recent_log["id"],
                     )
+
+                # --- Always scan for unjudged MCP recall logs in this turn's window ---
+                # MCP recalls (agent-invoked memory_recall) are logged by the server
+                # with source='mcp'. They used to be captured only via the fragile
+                # mcp_callback PostToolUse hook, so ~85% were missed. Scanning the
+                # [last_user_message, now] window here captures them independent of
+                # that hook; has_search_log() dedups against the paths above/below.
+                t_end = datetime.now(timezone.utc)
+                t_start = None
+                conv_buf = getattr(app.state, "conversation_buffer", None)
+                if conv_buf and payload.conversation_id:
+                    try:
+                        t_start = await conv_buf.get_last_user_message_time(payload.conversation_id)
+                    except Exception:
+                        pass
+                if not t_start:
+                    from datetime import timedelta
+
+                    t_start = t_end - timedelta(minutes=5)
+
+                mcp_fallback = await search_log.find_unjudged_in_window(
+                    t_start=t_start,
+                    t_end=t_end,
+                    project=resolved_project or None,
+                    source="mcp",
+                )
+                for mcp_log in mcp_fallback:
+                    if not await response_buffer.has_search_log(mcp_log["id"]):
+                        await response_buffer.add(
+                            query=mcp_log["query"] or "(mcp recall)",
+                            agent_response=response_text[:10000],
+                            result_ids=mcp_log["result_ids"],
+                            search_log_id=mcp_log["id"],
+                        )
+                        logger.info(
+                            "[EVAL]  buffered MCP search_log %s (window %s~%s)",
+                            mcp_log["id"][:8],
+                            t_start.strftime("%H:%M:%S"),
+                            t_end.strftime("%H:%M:%S"),
+                        )
 
                 # Process MCP recall calls registered by PostToolUse hooks
                 mcp_calls = (cached_search or {}).get("mcp_calls", [])
@@ -318,11 +299,16 @@ async def hook_before_prompt(request: Request) -> dict[str, Any]:
     if query_preview and len(query_preview.strip()) >= min_query_len:
         search_log: SearchLogWriter = app.state.search_log
         log_result_ids = [{"id": r.get("id", ""), "score": r.get("score", 0)} for r in all_results[:5]]
+        # Noise flags from the entry gate — written but excluded from stats.
+        is_noise = result.get("is_noise")
+        noise_reason = result.get("noise_reason")
         log_id = await search_log.log_search(
             query=query_preview,
             project=project or "default",
             source="daemon",
             result_ids=log_result_ids if log_result_ids else None,
+            is_noise=True if is_noise else None,
+            noise_reason=noise_reason,
         )
         # Cache for after_response correlation
         if log_id:

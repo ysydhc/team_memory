@@ -26,13 +26,12 @@ from team_memory.project_resolver import find_project_root, load_dotenv_if_exist
 load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 
-# Noise filter: short confirmation-style queries with no technical identifier
-# (e.g. "可以,请测试", "先按照这个继续") have no real retrieval target, so their
-# faithfulness scores are meaningless and drag the average down. We treat a query
-# as noise when it is short (<12 chars) AND contains no 4+ letter run that would
-# indicate a class/method/identifier (e.g. "BannerAdLoader", "phase1").
-NOISE_QUERY_PREDICATE = "(char_length(query) < 12 AND query !~ '[A-Za-z]{4,}')"
-QUALITY_QUERY_FILTER = f"NOT {NOISE_QUERY_PREDICATE}"
+# Faithfulness lives in response_buffer (alias rb), which has no is_noise column
+# but always links to a search_log (alias sl). Exclude noise via two filters:
+#   1. the linked search_log's is_noise flag (rule/llm gate), and
+#   2. legacy char_length fallback for rows logged before the flag existed.
+# Used in queries that JOIN response_buffer rb LEFT JOIN search_logs sl.
+BUFFER_QUALITY_FILTER = "sl.is_noise IS NOT TRUE AND NOT (char_length(rb.query) < 12 AND rb.query !~ '[A-Za-z]{4,}')"
 
 
 def _bar(value: float, max_value: float, width: int = 20) -> str:
@@ -89,10 +88,11 @@ async def _faithfulness_breakdown(dsn: str, days: int, threshold: float = 0.7, a
     try:
         op = ">=" if above else "<"
         count = await conn.fetchval(
-            f"SELECT count(*) FROM response_buffer "
-            f"WHERE evaluated = TRUE AND faithfulness_score {op} $1 "
-            f"AND {QUALITY_QUERY_FILTER} "
-            f"AND created_at > NOW() - make_interval(days => $2)",
+            f"SELECT count(*) FROM response_buffer rb "
+            f"LEFT JOIN search_logs sl ON rb.search_log_id = sl.id "
+            f"WHERE rb.evaluated = TRUE AND rb.faithfulness_score {op} $1 "
+            f"AND {BUFFER_QUALITY_FILTER} "
+            f"AND rb.created_at > NOW() - make_interval(days => $2)",
             threshold,
             days,
         )
@@ -109,14 +109,44 @@ async def _faithfulness_avg(dsn: str, days: int) -> float:
     try:
         avg = await conn.fetchval(
             f"""
-            SELECT avg(faithfulness_score) FROM response_buffer
-            WHERE evaluated = TRUE
-              AND {QUALITY_QUERY_FILTER}
-              AND created_at > NOW() - make_interval(days => $1)
+            SELECT avg(rb.faithfulness_score) FROM response_buffer rb
+            LEFT JOIN search_logs sl ON rb.search_log_id = sl.id
+            WHERE rb.evaluated = TRUE
+              AND {BUFFER_QUALITY_FILTER}
+              AND rb.created_at > NOW() - make_interval(days => $1)
             """,
             days,
         )
         return float(avg) if avg else 0.0
+    finally:
+        await conn.close()
+
+
+async def _embedding_coverage(dsn: str) -> dict:
+    """Vector-embedding coverage for searchable experiences.
+
+    A published/promoted experience with a NULL embedding is invisible to
+    vector/topic search (only FTS can reach it), so low coverage silently
+    degrades recall. This surfaces the gap — e.g. after a vector-dimension
+    migration that drops the embedding column and requires a re-backfill.
+    """
+    import asyncpg
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        row = await conn.fetchrow(
+            """
+            SELECT count(*) AS total,
+                   count(*) FILTER (WHERE embedding IS NULL) AS missing
+            FROM experiences
+            WHERE exp_status IN ('published', 'promoted') AND is_deleted = FALSE
+            """
+        )
+        total = row["total"] or 0
+        missing = row["missing"] or 0
+        covered = total - missing
+        ratio = covered / total if total > 0 else 1.0
+        return {"total": total, "missing": missing, "covered": covered, "ratio": ratio}
     finally:
         await conn.close()
 
@@ -128,12 +158,13 @@ async def _get_low_faithfulness_entries(dsn: str, days: int, limit: int = 5) -> 
     conn = await asyncpg.connect(dsn)
     try:
         rows = await conn.fetch(
-            f"SELECT query, faithfulness_score, created_at::text "
-            f"FROM response_buffer "
-            f"WHERE evaluated = TRUE AND faithfulness_score < 0.7 AND faithfulness_score >= 0 "
-            f"AND {QUALITY_QUERY_FILTER} "
-            f"AND created_at > NOW() - make_interval(days => $1) "
-            f"ORDER BY faithfulness_score ASC LIMIT $2",
+            f"SELECT rb.query, rb.faithfulness_score, rb.created_at::text "
+            f"FROM response_buffer rb "
+            f"LEFT JOIN search_logs sl ON rb.search_log_id = sl.id "
+            f"WHERE rb.evaluated = TRUE AND rb.faithfulness_score < 0.7 AND rb.faithfulness_score >= 0 "
+            f"AND {BUFFER_QUALITY_FILTER} "
+            f"AND rb.created_at > NOW() - make_interval(days => $1) "
+            f"ORDER BY rb.faithfulness_score ASC LIMIT $2",
             days,
             limit,
         )
@@ -177,7 +208,6 @@ async def run_stats(days: int, granularity: str) -> None:
         total = stats["total_searches"]
         hit = stats["hit"]
         used = stats["used"]
-        used_fuzzy = stats.get("used_fuzzy", 0)
         used_faithfulness = stats.get("used_faithfulness", 0)
         unjudged = stats["unjudged"]
         legacy_unjudged = stats.get("legacy_unjudged", 0)
@@ -189,7 +219,6 @@ async def run_stats(days: int, granularity: str) -> None:
         funnel_text.append(f"  ({hit / total * 100:.0f}%)\n" if total else " (0%)\n")
         funnel_text.append(f"  Used by agent:  {used}", style="cyan")
         funnel_text.append(f"  ({use_rate * 100:.1f}% use rate)\n")
-        funnel_text.append(f"    └─ fuzzy:  {used_fuzzy}\n", style="dim")
         funnel_text.append(f"    └─ faithfulness:  {used_faithfulness}\n", style="dim")
         funnel_text.append(f"  Unjudged:  {unjudged}", style="yellow")
         funnel_text.append(f"  ({unjudged / hit * 100:.0f}% of hits)\n" if hit else " (0%)\n")
@@ -209,6 +238,30 @@ async def run_stats(days: int, granularity: str) -> None:
             funnel_text.append("\n")
 
         console.print(Panel(funnel_text, title=f"Search Funnel ({days}d)", border_style="blue"))
+
+        # --- 1b. Embedding coverage health check ---
+        try:
+            cov = await _embedding_coverage(dsn)
+            if cov["total"] > 0:
+                ratio_pct = cov["ratio"] * 100
+                # < 95% coverage means a meaningful slice of the library is
+                # invisible to vector search — flag it loudly.
+                healthy = cov["ratio"] >= 0.95
+                health_text = Text()
+                health_text.append("  Vector coverage (published): ", style="bold")
+                health_text.append(
+                    f"{cov['covered']}/{cov['total']} ({ratio_pct:.0f}%)\n",
+                    style="green" if healthy else "red",
+                )
+                if not healthy:
+                    health_text.append(
+                        f"  ⚠ {cov['missing']} experiences missing embeddings — "
+                        "run: python -m team_memory.daemon.backfill.embedding_backfill\n",
+                        style="red",
+                    )
+                console.print(Panel(health_text, title="Embedding Health", border_style="yellow"))
+        except Exception:
+            pass
 
         # --- 2. Quality Evaluation (merged) ---
         quality_text = Text()
