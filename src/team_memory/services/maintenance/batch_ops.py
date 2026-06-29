@@ -385,7 +385,11 @@ class BatchOpsService:
     # ------------------------------------------------------------------
 
     async def load_experience_contexts(self, result_ids: list[dict] | None) -> list[str]:
-        """Load experience titles/solutions for given result IDs (for faithfulness evaluation)."""
+        """Load contexts for given result IDs (for faithfulness evaluation).
+
+        Searches BOTH experiences and archives tables — search pipeline may return
+        either type, identified only by UUID. Returns contexts in any order.
+        """
         if not result_ids:
             return []
 
@@ -407,17 +411,18 @@ class BatchOpsService:
         async with get_session(self._db_url) as session:
             from sqlalchemy import select as sa_select
 
-            from team_memory.storage.models import Experience
+            from team_memory.storage.models import Archive, Experience
 
             uuids = [_uuid.UUID(v) for v in valid_ids]
-            result = await session.execute(
+            contexts: list[str] = []
+
+            # Query experiences
+            exp_result = await session.execute(
                 sa_select(Experience.id, Experience.title, Experience.description, Experience.solution).where(
                     Experience.id.in_(uuids)
                 )
             )
-            rows = result.mappings().all()
-            contexts: list[str] = []
-            for r in rows:
+            for r in exp_result.mappings().all():
                 parts: list[str] = []
                 if r["title"]:
                     parts.append(f"标题: {r['title']}")
@@ -426,4 +431,21 @@ class BatchOpsService:
                 if r["solution"]:
                     parts.append(f"方案: {r['solution'][:300]}")
                 contexts.append(" | ".join(parts))
+
+            # Query archives (search pipeline may return archive IDs)
+            arc_result = await session.execute(
+                sa_select(Archive.id, Archive.title, Archive.overview, Archive.solution_doc).where(
+                    Archive.id.in_(uuids)
+                )
+            )
+            for r in arc_result.mappings().all():
+                parts = []
+                if r["title"]:
+                    parts.append(f"标题: {r['title']}")
+                if r["overview"]:
+                    parts.append(f"概述: {r['overview'][:200]}")
+                if r["solution_doc"]:
+                    parts.append(f"内容: {r['solution_doc'][:300]}")
+                contexts.append(" | ".join(parts))
+
             return contexts
