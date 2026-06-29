@@ -161,7 +161,23 @@ else
     fi
 fi
 
-# 4. Web Service
+# Worker Health (via Daemon /status)
+printf "  %-22s" "Worker (daemon):"
+WORKER_CHECK=$(curl -sf --max-time 3 "http://localhost:${DAEMON_PORT:-3901}/status" 2>/dev/null)
+if [ $? -eq 0 ]; then
+    WOK=$(echo "$WORKER_CHECK" | "${_TM_PYTHON}" -c \
+        "import sys,json; d=json.load(sys.stdin); rw=d.get('refinement_worker',{}); print('OK' if rw.get('healthy') else 'UNHEALTHY')" \
+        2>/dev/null || echo "OK")
+    WFAILS=$(echo "$WORKER_CHECK" | "${_TM_PYTHON}" -c \
+        "import sys,json; d=json.load(sys.stdin); rw=d.get('refinement_worker',{}); print(rw.get('fail_count','?'))" \
+        2>/dev/null || echo "?")
+    echo "${WOK}  (fail_count=${WFAILS})"
+else
+    echo "FAIL  (daemon not responding on port ${DAEMON_PORT:-3901})"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# 5. Web Service
 printf "  %-22s" "Web (port ${PORT}):"
 HEALTH_RESP=$(curl -sf --max-time 3 "${WEB_URL}/health" 2>/dev/null)
 if [ $? -eq 0 ]; then

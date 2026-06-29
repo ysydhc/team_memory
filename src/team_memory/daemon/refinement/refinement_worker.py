@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 import os
 from typing import Any
 
@@ -250,6 +251,10 @@ class RefinementWorker:
         self._health_check = health_check
         self._running = False
         self._task: asyncio.Task | None = None
+        # Tick health tracking
+        self._tick_count = 0
+        self._tick_fail_count = 0
+        self._last_tick_ok: str | None = None
 
         # ------------------------------------------------------------------
         # Lifecycle
@@ -302,11 +307,14 @@ class RefinementWorker:
                 await asyncio.sleep(self._cfg.scan_interval_seconds)
                 continue
             try:
+                self._tick_count += 1
                 await self._tick()
+                self._last_tick_ok = datetime.now(timezone.utc).isoformat()
             except asyncio.CancelledError:
                 logger.debug("RefinementWorker loop cancelled")
                 raise
             except Exception:
+                self._tick_fail_count += 1
                 logger.exception("RefinementWorker tick failed")
 
             try:
@@ -456,7 +464,14 @@ class RefinementWorker:
                     payload = draft["refined_payload"]
                     logger.info("skip_llm: replaying publish for %s", draft_id)
                     await self._sink.draft_publish(draft_id=payload["experience_id"])
-                    await self._sink.update_experience(payload["experience_id"], payload["structured"])
+                    await self._sink.update_experience(
+                        experience_id=payload["experience_id"],
+                        title=payload["structured"].get("title"),
+                        problem=payload["structured"].get("problem") or payload["structured"].get("description"),
+                        solution=payload["structured"].get("solution"),
+                        tags=payload["structured"].get("tags"),
+                        experience_type=payload["structured"].get("experience_type", "general"),
+                    )
                     await self._buf.mark_published(draft_id)
                     continue
 

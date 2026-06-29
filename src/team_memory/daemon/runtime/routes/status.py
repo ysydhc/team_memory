@@ -32,6 +32,21 @@ async def get_status(request: Request) -> dict[str, Any]:
     }
     if heartbeat:
         result["heartbeat"] = heartbeat.to_dict()
+    # Worker health — exposes RefinementWorker tick status
+    rw = getattr(app.state, "refinement_worker", None)
+    if rw:
+        result["refinement_worker"] = {
+            "tick_count": getattr(rw, "_tick_count", 0),
+            "fail_count": getattr(rw, "_tick_fail_count", 0),
+            "last_tick_ok": getattr(rw, "_last_tick_ok", None),
+            "healthy": (
+                getattr(rw, "_tick_fail_count", 0) == 0
+                or (
+                    getattr(rw, "_tick_fail_count", 0) < 5
+                    and getattr(rw, "_tick_count", 0) > getattr(rw, "_tick_fail_count", 0) * 2
+                )
+            ),
+        }
     return result
 
 
