@@ -250,6 +250,34 @@ class SearchPipeline:
         except Exception:
             pass  # entity enrichment must never break search
 
+        # Stage 1.6: Entity-graph traversal — find related experiences via the
+        # entity relationship graph (PostgreSQL recursive CTE, 2 hops).
+        # 使用实体关系图查找相关经验（PostgreSQL 递归 CTE，2 跳）
+        graph_experience_ids: list[str] = []
+        if entity_names and self._db_url and request.project:
+            try:
+                from team_memory.services.entity.entity_search import (
+                    find_experience_ids_by_entities,
+                )
+
+                projects = [request.project]
+                if request.fallback_projects:
+                    projects.extend(request.fallback_projects)
+                graph_experience_ids = await find_experience_ids_by_entities(
+                    db_url=self._db_url,
+                    entity_names=entity_names,
+                    projects=projects,
+                    max_depth=2,
+                )
+                if graph_experience_ids:
+                    logger.info(
+                        "[GRAPH]  entity-graph found %d related experience(s) for query=%s",
+                        len(graph_experience_ids),
+                        retrieval_query[:50],
+                    )
+            except Exception:
+                logger.debug("Entity graph traversal failed (non-critical)", exc_info=True)
+
         # Stage 2: Embedding
         stage_begin = time.monotonic()
         query_embedding = None
@@ -286,6 +314,20 @@ class SearchPipeline:
 
         # Stage 5: Exact match boost
         candidates = self._apply_exact_match_boost(candidates, request.query)
+
+        # Stage 5.5: Entity-graph boost — promote experiences found via graph
+        # traversal. Graph-related results get +0.15 score bonus.
+        if graph_experience_ids:
+            graph_id_set = set(graph_experience_ids)
+            for c in candidates:
+                if c.get("id") in graph_id_set:
+                    old_score = c.get("score", 0) or 0
+                    c["score"] = old_score + 0.15
+                    logger.debug("[GRAPH]  boosted candidate %s from %.2f to %.2f", c.get("id","?")[:8], old_score, c["score"])
+            logger.info(
+                "[GRAPH]  boosted %d candidate(s) from graph traversal",
+                sum(1 for c in candidates if c.get("id") in graph_id_set),
+            )
 
         # Stage 5b: Popularity boost (反哺排序)
         stage_begin = time.monotonic()
