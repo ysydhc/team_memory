@@ -347,6 +347,18 @@ async def process_after_response(
                 msg_threshold,
             )
 
+    # Signal 3: Immediate converge if there's been at least one assistant
+    # response (single-turn Q&A). Previously required 30min idle timeout,
+    # but that delays memory creation for hours for normal usage.
+    # 信号 3: 有任何 assistant 回复就立即收敛，不再等 30min 空闲超时
+    if not converged and msg_count >= 1:
+        converged = True
+        logger.info(
+            "[CONVERGE] session=%s msg_count=%d (immediate converge on any response)",
+            session_id[:8],
+            msg_count,
+        )
+
     if converged:
         # Check session status — handle already-processed sessions
         session = await buf.get_session(session_id)

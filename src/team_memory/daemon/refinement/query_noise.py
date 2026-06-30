@@ -49,6 +49,18 @@ _TRIVIAL_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+# System-level retrieval queries (agent framework, not user intent).
+_SYSTEM_PROMPT_PREFIXES = (
+    "review the conversation above and consider",
+    "review the conversation above and update",
+    "review the conversation and consider",
+    "review the conversation and update",
+    "the current conversation does not require",
+    "you can only call memory and skill management",
+    "protected skills (do not edit these):",
+    "nothing to save",
+)
+
 # Synthetic test-harness commands seen polluting the logs:
 #   "Kill test 1", "Pub kill 2", "Kill test", "pub kill 3"
 _TEST_COMMAND_PATTERN = re.compile(
@@ -80,6 +92,10 @@ def classify_noise_rule(prompt: str) -> NoiseReason | None:
 
     # 1. Slash commands.
     if any(lowered.startswith(prefix) for prefix in _COMMAND_PREFIXES):
+        return NoiseReason.RULE
+
+    # 1b. System-level prompts (agent framework, not user retrieval).
+    if any(stripped.lower().startswith(p) for p in _SYSTEM_PROMPT_PREFIXES):
         return NoiseReason.RULE
 
     # 2. Synthetic test commands (Kill test N / Pub kill N).
