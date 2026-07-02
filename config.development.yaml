@@ -51,9 +51,9 @@ database:
 embedding:
   provider: openai
   openai:
-    api_key: "${LITELLM_MASTER_KEY}"
-    model: qwen3-embedding-8b
-    base_url: http://localhost:4000/v1
+    api_key: "${SILICONFLOW_API_KEY}"
+    model: Qwen/Qwen3-Embedding-8B
+    base_url: https://api.siliconflow.cn/v1
     dimension: 4096
 
 # -----------------------------------------------------------------------------
