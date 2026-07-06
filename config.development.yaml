@@ -51,7 +51,8 @@ database:
 embedding:
   provider: openai
   openai:
-    api_key: "${SILICONFLOW_API_KEY}"
+    api_key_env: "SILICONFLOW_API_KEY"
+    api_key: ""
     model: Qwen/Qwen3-Embedding-8B
     base_url: https://api.siliconflow.cn/v1
     dimension: 4096

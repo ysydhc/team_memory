@@ -216,22 +216,24 @@ async def _check_database() -> dict:
 
 
 async def _check_embedding_health() -> dict:
-    """Check embedding provider health by pinging its base URL."""
+    """Check embedding provider health by sending a tiny embedding request."""
     try:
         if _settings and _settings.embedding.provider:
             provider = _settings.embedding.provider
             if provider == "openai":
                 cfg = _settings.embedding.openai
-                base_url = cfg.base_url or "http://localhost:4000/v1"
+                base_url = cfg.base_url or "https://api.siliconflow.cn/v1"
+                model = cfg.model or "Qwen/Qwen3-Embedding-8B"
             else:
                 return {"status": "up", "provider": provider, "note": "health check not implemented"}
             start = time.monotonic()
-            headers: dict[str, str] = {}
+            headers: dict[str, str] = {"Content-Type": "application/json"}
             api_key = cfg.resolved_api_key
             if api_key:
                 headers["Authorization"] = f"Bearer {api_key}"
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(f"{base_url}/models", headers=headers)
+            payload = {"model": model, "input": "ping", "encoding_format": "float"}
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(f"{base_url}/embeddings", headers=headers, json=payload)
                 resp.raise_for_status()
             latency_ms = round((time.monotonic() - start) * 1000, 1)
             return {"status": "up", "provider": provider, "latency_ms": latency_ms}

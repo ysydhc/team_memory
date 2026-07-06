@@ -65,8 +65,11 @@ services:
     ports:
       - "9111:9111"
     # 使用宿主机 ./src（置前于 site-packages），改代码后无需 rebuild 即可加载新路由
+    # 同时挂载 ./migrations，使新增 alembic 迁移无需 rebuild 即可被启动迁移识别
+    # （否则容器内是 build 时 COPY 的旧迁移，DB 版本领先时会启动失败）
     volumes:
       - ./src:/app/live-src:ro
+      - ./migrations:/app/migrations:ro
     environment:
       TEAM_MEMORY_DB_URL: "postgresql+asyncpg://developer:devpass@postgres:5432/team_memory"
       TEAM_MEMORY_DATABASE__URL: "postgresql+asyncpg://developer:devpass@postgres:5432/team_memory"
@@ -77,10 +80,16 @@ services:
       TEAM_MEMORY_API_KEY: "${TEAM_MEMORY_API_KEY:-changeme}"
       TEAM_MEMORY_USER: "${TEAM_MEMORY_USER:-admin}"
       RUN_MIGRATIONS: "true"
-      # Ollama on the host: container localhost:11434 is NOT the host. Use host.docker.internal (see extra_hosts on Linux).
-      TEAM_MEMORY_EMBEDDING__OLLAMA__BASE_URL: "http://host.docker.internal:11434"
-      TEAM_MEMORY_EMBEDDING__OLLAMA__MODEL: "nomic-embed-text:latest"
-      TEAM_MEMORY_LLM__BASE_URL: "http://host.docker.internal:11434"
+      # Embedding via SiliconFlow directly (bypasses LiteLLM auth issues).
+      # The DB schema is vector(4096) from Qwen3-Embedding-8B.
+      TEAM_MEMORY_EMBEDDING__PROVIDER: "openai"
+      TEAM_MEMORY_EMBEDDING__OPENAI__BASE_URL: "https://api.siliconflow.cn/v1"
+      TEAM_MEMORY_EMBEDDING__OPENAI__MODEL: "Qwen/Qwen3-Embedding-8B"
+      TEAM_MEMORY_EMBEDDING__OPENAI__DIMENSION: "4096"
+      TEAM_MEMORY_EMBEDDING__OPENAI__API_KEY_ENV: "SILICONFLOW_API_KEY"
+      OPENAI_API_KEY: "${SILICONFLOW_API_KEY:-}"
+      SILICONFLOW_API_KEY: "${SILICONFLOW_API_KEY:-}"
+      TEAM_MEMORY_LLM__BASE_URL: "http://host.docker.internal:4000/v1"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

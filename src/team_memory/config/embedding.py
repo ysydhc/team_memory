@@ -11,7 +11,7 @@ class OpenAIEmbeddingConfig(BaseModel):
     """OpenAI embedding API configuration."""
 
     api_key: str = ""
-    api_key_env: str = "LITELLM_MASTER_KEY"
+    api_key_env: str = "SILICONFLOW_API_KEY"
     base_url: str | None = None
     model: str = "text-embedding-3-small"
     dimension: int = 1536
