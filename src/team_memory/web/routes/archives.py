@@ -169,6 +169,12 @@ async def upload_archive_attachment(
         )
     except ArchiveUploadError as e:
         raise HTTPException(status_code=e.http_status, detail=e.message) from e
+    except Exception as e:
+        import logging
+        logging.getLogger("team_memory.web.archives").exception(
+            "Unexpected error uploading attachment for archive %s: %s", archive_id, e
+        )
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}") from e
 
 
 @router.get("/archives/{archive_id}/attachments/{attachment_id}/file")
