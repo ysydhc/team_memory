@@ -206,7 +206,7 @@ class TestAdd:
         mock_pool = _mock_pool()
         buf._pool = mock_pool
 
-        result = await buf.add(query="test query", agent_response="test response")
+        result = await buf.add(query="test query", agent_response="test response", result_ids=[{"id": "x"}])
         assert result is not None
         # result should be a uuid string
         uuid.UUID(result)  # raises if invalid
@@ -223,13 +223,14 @@ class TestAdd:
         uuid.UUID(result)
 
     @pytest.mark.asyncio
-    async def test_success_with_none_result_ids(self):
+    async def test_none_result_ids_not_buffered(self):
+        """No retrieval results → not a judgeable recall → not buffered."""
         buf = _make_buffer()
         mock_pool = _mock_pool()
         buf._pool = mock_pool
 
         result = await buf.add(query="q", agent_response="r", result_ids=None)
-        assert result is not None
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_success_with_search_log_id(self):
@@ -240,7 +241,7 @@ class TestAdd:
         buf.has_search_log = AsyncMock(return_value=False)
 
         log_id = str(uuid.uuid4())
-        result = await buf.add(query="q", agent_response="r", search_log_id=log_id)
+        result = await buf.add(query="q", agent_response="r", result_ids=[{"id": "x"}], search_log_id=log_id)
         assert result is not None
         uuid.UUID(result)
 
@@ -256,7 +257,7 @@ class TestAdd:
         pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
         buf._pool = pool
 
-        result = await buf.add(query="q", agent_response="r")
+        result = await buf.add(query="q", agent_response="r", result_ids=[{"id": "x"}])
         assert result is None
 
     @pytest.mark.asyncio
@@ -267,7 +268,7 @@ class TestAdd:
         buf._pool = mock_pool
 
         long_query = "a" * 3000
-        await buf.add(query=long_query, agent_response="r")
+        await buf.add(query=long_query, agent_response="r", result_ids=[{"id": "x"}])
 
         conn = mock_pool.acquire.return_value.__aenter__.return_value
         call_args = conn.execute.call_args
@@ -282,7 +283,7 @@ class TestAdd:
         buf._pool = mock_pool
 
         long_response = "b" * 15000
-        await buf.add(query="q", agent_response=long_response)
+        await buf.add(query="q", agent_response=long_response, result_ids=[{"id": "x"}])
 
         conn = mock_pool.acquire.return_value.__aenter__.return_value
         call_args = conn.execute.call_args
@@ -306,18 +307,17 @@ class TestAdd:
         assert json.loads(result_ids_json) == rids
 
     @pytest.mark.asyncio
-    async def test_none_result_ids_passed_as_none(self):
-        """None result_ids should be passed as None, not serialized."""
+    async def test_empty_result_ids_not_buffered(self):
+        """Empty result_ids → no judgeable recall → add() returns None, no INSERT."""
         buf = _make_buffer()
         mock_pool = _mock_pool()
         buf._pool = mock_pool
 
-        await buf.add(query="q", agent_response="r", result_ids=None)
+        result = await buf.add(query="q", agent_response="r", result_ids=[])
 
+        assert result is None
         conn = mock_pool.acquire.return_value.__aenter__.return_value
-        call_args = conn.execute.call_args
-        # $4 is the result_ids arg
-        assert call_args[0][4] is None
+        conn.execute.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_search_log_id_converted_to_uuid(self):
@@ -328,7 +328,7 @@ class TestAdd:
         buf.has_search_log = AsyncMock(return_value=False)
 
         log_id = str(uuid.uuid4())
-        await buf.add(query="q", agent_response="r", search_log_id=log_id)
+        await buf.add(query="q", agent_response="r", result_ids=[{"id": "x"}], search_log_id=log_id)
 
         conn = mock_pool.acquire.return_value.__aenter__.return_value
         call_args = conn.execute.call_args
@@ -343,7 +343,7 @@ class TestAdd:
         mock_pool = _mock_pool()
         buf._pool = mock_pool
 
-        await buf.add(query="q", agent_response="r", search_log_id=None)
+        await buf.add(query="q", agent_response="r", result_ids=[{"id": "x"}], search_log_id=None)
 
         conn = mock_pool.acquire.return_value.__aenter__.return_value
         call_args = conn.execute.call_args
@@ -357,7 +357,7 @@ class TestAdd:
         mock_pool = _mock_pool()
         buf._pool = mock_pool
 
-        await buf.add(query="q", agent_response="r")
+        await buf.add(query="q", agent_response="r", result_ids=[{"id": "x"}])
 
         conn = mock_pool.acquire.return_value.__aenter__.return_value
         call_args = conn.execute.call_args
@@ -740,6 +740,22 @@ class TestSyncToSearchLog:
         call_args = conn.execute.call_args
         assert call_args[0][3] is True
 
+    @pytest.mark.asyncio
+    async def test_skips_negative_error_sentinel(self):
+        """Negative score (-1.0 error sentinel) must not overwrite search_logs."""
+        buf = _make_buffer()
+        entry_id = uuid.uuid4()
+        log_id = uuid.uuid4()
+        row = {"search_log_id": log_id}
+        mock_pool = _mock_pool(row_fetchrow=row)
+        buf._pool = mock_pool
+
+        await buf.sync_to_search_log(str(entry_id), faithfulness_score=-1.0)
+
+        conn = mock_pool.acquire.return_value.__aenter__.return_value
+        conn.fetchrow.assert_not_awaited()
+        conn.execute.assert_not_awaited()
+
 
 # ===================================================================
 # get_stats()
@@ -849,8 +865,9 @@ class TestErrorHandling:
         pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
         pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
         buf._pool = pool
+        buf.has_search_log = AsyncMock(return_value=False)
 
-        result = await buf.add(query="q", agent_response="r", search_log_id="not-a-uuid")
+        result = await buf.add(query="q", agent_response="r", result_ids=[{"id": "x"}], search_log_id="not-a-uuid")
         assert result is None
 
     @pytest.mark.asyncio

@@ -10,3 +10,4 @@ class LifecycleConfig(BaseModel):
 
     dedup_on_save: bool = True
     dedup_on_save_threshold: float = 0.90
+    auto_resolve_mutations: bool = False

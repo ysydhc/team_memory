@@ -84,11 +84,39 @@ async def op_submit_response(
 
     try:
         async with get_session(db_url) as session:
+            search_log_id = None
+            try:
+                match_res = await session.execute(
+                    text(
+                        """
+                        SELECT sl.id FROM search_logs sl
+                        WHERE sl.created_at > NOW() - INTERVAL '30 minutes'
+                          AND sl.result_ids IS NOT NULL
+                          AND sl.result_ids::text NOT IN ('[]', 'null')
+                          AND NOT EXISTS (
+                              SELECT 1 FROM response_buffer rb WHERE rb.search_log_id = sl.id
+                          )
+                          AND (sl.query = :query OR sl.project = :project)
+                        ORDER BY (CASE WHEN sl.query = :query THEN 0 ELSE 1 END), sl.created_at DESC
+                        LIMIT 1
+                        """
+                    ),
+                    {
+                        "query": truncated_query[:500],
+                        "project": resolved_project,
+                    },
+                )
+                row = match_res.first() if hasattr(match_res, "first") else None
+                if row and row[0]:
+                    search_log_id = str(row[0])
+            except Exception as lookup_err:
+                logger.debug("op_submit_response search_log lookup skipped: %s", lookup_err)
+
             await session.execute(
                 text(
                     """
-                    INSERT INTO response_buffer (id, query, agent_response, result_ids, created_at)
-                    VALUES (:id, :query, :agent_response, CAST(:result_ids AS json), NOW())
+                    INSERT INTO response_buffer (id, query, agent_response, result_ids, search_log_id, created_at)
+                    VALUES (:id, :query, :agent_response, CAST(:result_ids AS json), :search_log_id, NOW())
                     """
                 ),
                 {
@@ -96,6 +124,7 @@ async def op_submit_response(
                     "query": truncated_query,
                     "agent_response": truncated_response,
                     "result_ids": ids_json,
+                    "search_log_id": search_log_id,
                 },
             )
     except Exception as e:

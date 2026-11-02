@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import delete, desc, func, select
+from sqlalchemy import case, delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from team_memory.storage.models import PersonalMemory
 
 PERSONAL_MEMORY_OVERWRITE_THRESHOLD = 0.88
+VALID_PERSONAS = ("coding", "debugging", "writing", "research", "general")
+
+__all__ = [
+    "PERSONAL_MEMORY_OVERWRITE_THRESHOLD",
+    "VALID_PERSONAS",
+    "PersonalMemoryRepository",
+]
 
 
 class PersonalMemoryRepository:
@@ -210,13 +217,21 @@ class PersonalMemoryRepository:
         return result.scalar_one()
 
     async def delete_oldest_by_persona(self, user_id: str, persona: str) -> bool:
-        """Delete the oldest memory for a (user_id, persona) pair. Returns True if deleted."""
-        # Find the oldest
+        """Delete the lowest-priority/oldest memory for a (user_id, persona) pair.
+
+        Evicts dynamic memories before static core preferences, then lowest
+        priority first, then oldest created_at first. Returns True if deleted.
+        """
+        # Evict dynamic before static, lower priority before higher, oldest first
         q = (
             select(PersonalMemory.id)
             .where(PersonalMemory.user_id == user_id)
             .where(PersonalMemory.persona == persona)
-            .order_by(PersonalMemory.created_at)
+            .order_by(
+                case((PersonalMemory.profile_kind == "dynamic", 0), else_=1).asc(),
+                PersonalMemory.priority.asc(),
+                PersonalMemory.created_at.asc(),
+            )
             .limit(1)
         )
         result = await self._session.execute(q)

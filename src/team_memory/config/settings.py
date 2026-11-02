@@ -166,6 +166,10 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
         else:
             env_name = _normalize_env_name(os.environ.get("TEAM_MEMORY_ENV", "development"))
             cfg_path = Path(f"config.{env_name}.yaml")
+            if not cfg_path.exists():
+                repo_cfg = Path(__file__).resolve().parent.parent.parent.parent / f"config.{env_name}.yaml"
+                if repo_cfg.exists():
+                    cfg_path = repo_cfg
             if cfg_path.exists():
                 with open(cfg_path) as f:
                     raw = yaml.safe_load(f) or {}

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 from team_memory.daemon.buffers.conversation_buffer import ConversationBuffer
@@ -401,6 +401,12 @@ class RefinementWorker:
                         "title": payload.get("title", f"Draft {op['session_id'][:8]}"),
                         "conversation_id": payload.get("conversation_id", ""),
                     }
+                    if hasattr(self._buf, "get_session"):
+                        existing_sess = await self._buf.get_session(draft["id"])
+                        if isinstance(existing_sess, dict) and existing_sess.get("status") == "published":
+                            self._queue.dequeue(op_id)
+                            logger.info("Queue op %s skipped — session %s already published", op_id, draft["id"])
+                            continue
                     await self._refine_one(draft)
                     self._queue.dequeue(op_id)
                     logger.info("Queue retry succeeded for %s", op_id)
@@ -457,6 +463,8 @@ class RefinementWorker:
                 if self._is_learning_card(title, description):
                     logger.info("Skipping learning card: %s", title[:50])
                     await self._buf.mark_published(draft_id)
+                    if self._queue and hasattr(self._queue, "dequeue_by_session"):
+                        self._queue.dequeue_by_session(draft_id)
                     continue
 
                 # Check for crash-recovery: skip_llm bypasses refine
@@ -473,6 +481,8 @@ class RefinementWorker:
                         experience_type=payload["structured"].get("experience_type", "general"),
                     )
                     await self._buf.mark_published(draft_id)
+                    if self._queue and hasattr(self._queue, "dequeue_by_session"):
+                        self._queue.dequeue_by_session(draft_id)
                     continue
 
                 # Mark as refining before processing / 处理前标记 refining
@@ -481,6 +491,7 @@ class RefinementWorker:
                 try:
                     await self._refine_one(draft)
                 except LLMUnavailableError:
+                    await self._buf.mark_needs_refinement(draft_id)
                     logger.info(
                         "Draft %s skipped — LLM API unreachable",
                         draft_id,
@@ -545,6 +556,8 @@ class RefinementWorker:
             except Exception:
                 logger.warning("Failed to increment used_count for experience %s", hit_id, exc_info=True)
             await self._buf.mark_published(draft_id)
+            if self._queue and hasattr(self._queue, "dequeue_by_session"):
+                self._queue.dequeue_by_session(draft_id)
             logger.info(
                 "Merged draft %s into existing experience %s (dedup, similarity=%.4f)",
                 draft_id,
@@ -598,8 +611,36 @@ class RefinementWorker:
             logger.error("draft_save returned no id for local draft %s: %s", draft_id, save_result)
             raise RuntimeError("draft_save returned no experience_id")
 
-        # Step 2: LLM refinement
-        structured = await self._call_llm(content, project=project, similar_context=similar_context)
+        # Step 2: LLM refinement (enrich with tool execution trajectory if available)
+        llm_input_content = content
+        if hasattr(self._buf, "get_tool_observations"):
+            try:
+                tool_obs = await self._buf.get_tool_observations(draft_id)
+                if isinstance(tool_obs, list) and tool_obs:
+                    traj_lines = ["\n\n[工具执行轨迹 / Tool Execution Trajectory]:"]
+                    for obs in tool_obs[:20]:
+                        if not isinstance(obs, dict):
+                            continue
+                        tname = obs.get("tool_name", "tool")
+                        cmd = obs.get("command_summary") or obs.get("command") or obs.get("cmd") or ""
+                        raw_files = obs.get("target_files")
+                        if isinstance(raw_files, list):
+                            tfile = ", ".join(str(f) for f in raw_files if f)
+                        else:
+                            tfile = str(obs.get("target_file") or "")
+                        status = "OK" if obs.get("succeeded", True) else f"FAIL(exit={obs.get('exit_code')})"
+                        detail = cmd or tfile
+                        line = f"- {tname} [{status}]: {detail}"
+                        err = obs.get("error_excerpt", "")
+                        if err:
+                            line += f" | error: {str(err)[:160]}"
+                        traj_lines.append(line)
+                    if len(traj_lines) > 1:
+                        llm_input_content = content + "\n".join(traj_lines)
+            except Exception:
+                logger.debug("Failed to load tool trajectory for draft=%s", draft_id, exc_info=True)
+
+        structured = await self._call_llm(llm_input_content, project=project, similar_context=similar_context)
 
         # Persist LLM output for crash recovery (before quality gate)
         await self._buf.mark_publishing_in_progress(
@@ -627,8 +668,9 @@ class RefinementWorker:
                         1,
                         {"project": project, "reason": "structure_failed"},
                     )
-                await self._sink.draft_publish(draft_id=experience_id)
                 await self._buf.mark_published(draft_id)
+                if self._queue and hasattr(self._queue, "dequeue_by_session"):
+                    self._queue.dequeue_by_session(draft_id)
                 return
 
             score = await self._quality_score(structured)
@@ -651,8 +693,9 @@ class RefinementWorker:
                         1,
                         {"project": project, "reason": "below_threshold"},
                     )
-                await self._sink.draft_publish(draft_id=experience_id)
                 await self._buf.mark_published(draft_id)
+                if self._queue and hasattr(self._queue, "dequeue_by_session"):
+                    self._queue.dequeue_by_session(draft_id)
                 return
 
             # Gate passed — record score
@@ -692,6 +735,10 @@ class RefinementWorker:
             )
             raise RuntimeError(f"update_experience failed: {update_result.get('message')}")
 
+        # Step 4.5: Bi-temporal supersede check against similar context candidates
+        if context_hits:
+            await self._resolve_refinement_supersede(experience_id, structured, context_hits)
+
         # Step 5: title quality check + mark published
         if self._metrics:
             title_str = structured.get("title", "")
@@ -702,6 +749,8 @@ class RefinementWorker:
                 {"project": project},
             )
         await self._buf.mark_published(draft_id)
+        if self._queue and hasattr(self._queue, "dequeue_by_session"):
+            self._queue.dequeue_by_session(draft_id)
         from team_memory.daemon.runtime.structured_logger import StructuredLogger
 
         sl = StructuredLogger(logger)
@@ -714,8 +763,52 @@ class RefinementWorker:
         )
 
     # ------------------------------------------------------------------
-    # Pre-refinement dedup helpers
+    # Pre-refinement dedup & bi-temporal supersede helpers
     # ------------------------------------------------------------------
+
+    async def _resolve_refinement_supersede(
+        self,
+        new_experience_id: str,
+        structured: dict[str, Any],
+        context_hits: list[dict],
+    ) -> None:
+        """Check if the newly refined experience supersedes any context candidate."""
+        if not context_hits or not hasattr(self._sink, "supersede_experience"):
+            return
+        try:
+            from team_memory.services.memory.mutation_resolver import MutationResolver
+
+            resolver = MutationResolver(
+                mutation_threshold=float(getattr(self._cfg, "dedup_context_threshold", 0.70)),
+            )
+            decision = resolver.resolve_by_rules(
+                title=str(structured.get("title") or ""),
+                problem=str(structured.get("problem") or structured.get("description") or ""),
+                solution=structured.get("solution"),
+                candidates=context_hits,
+            )
+            if (
+                decision.action == "SUPERSEDE"
+                and decision.target_id
+                and str(decision.target_id) != str(new_experience_id)
+            ):
+                await self._sink.supersede_experience(
+                    old_experience_id=str(decision.target_id),
+                    new_experience_id=str(new_experience_id),
+                    reason=decision.reason,
+                )
+                logger.info(
+                    "RefinementWorker: new experience %s superseded %s (%s)",
+                    new_experience_id,
+                    decision.target_id,
+                    decision.reason,
+                )
+        except Exception:
+            logger.debug(
+                "RefinementWorker supersede resolution failed for %s (non-critical)",
+                new_experience_id,
+                exc_info=True,
+            )
 
     async def _dedup_search(self, content: str, project: str) -> tuple[tuple[str, str, float] | None, list[dict]]:
         """Single recall for both dedup check and context extraction.
@@ -831,7 +924,9 @@ class RefinementWorker:
 
         Uses the custom _REFINEMENT_PROMPT for technical conversation extraction.
         Supports "litellm" (OpenAI-compatible) and "ollama" providers.
-        Retries up to max_retries on transient failures.
+        Retries up to max_retries on transient failures for `model`; if that is
+        still exhausted and `fallback_model` is configured, retries the same
+        way against `fallback_model` before giving up.
         """
         last_error: Exception | None = None
         max_retries = max(0, self._cfg.max_retries)
@@ -844,52 +939,65 @@ class RefinementWorker:
             )
             raise LLMUnavailableError(f"LLM API {self._cfg.base_url} is unreachable")
 
-        for attempt in range(max_retries + 1):
-            try:
-                if self._cfg.provider == "litellm":
-                    api_key = os.environ.get(self._cfg.api_key_env, "")
-                    return await _refine_via_openai(
-                        content,
-                        project=project,
-                        model=self._cfg.model,
-                        base_url=self._cfg.base_url,
-                        api_key=api_key or None,
-                        timeout=self._cfg.timeout,
-                        max_input_chars=self._cfg.max_input_chars,
-                        similar_context=similar_context,
-                    )
-                elif self._cfg.provider == "ollama":
-                    # Fallback to existing Ollama parse_content
-                    from team_memory.config.llm import LLMConfig
-                    from team_memory.services.llm.llm_parser import parse_content
+        models_to_try = [self._cfg.model]
+        if self._cfg.fallback_model and self._cfg.fallback_model != self._cfg.model:
+            models_to_try.append(self._cfg.fallback_model)
 
-                    llm_config = LLMConfig(
-                        model=self._cfg.model,
-                        base_url=self._cfg.base_url,
+        for model_idx, model in enumerate(models_to_try):
+            for attempt in range(max_retries + 1):
+                try:
+                    if self._cfg.provider == "litellm":
+                        api_key = os.environ.get(self._cfg.api_key_env, "")
+                        return await _refine_via_openai(
+                            content,
+                            project=project,
+                            model=model,
+                            base_url=self._cfg.base_url,
+                            api_key=api_key or None,
+                            timeout=self._cfg.timeout,
+                            max_input_chars=self._cfg.max_input_chars,
+                            similar_context=similar_context,
+                        )
+                    elif self._cfg.provider == "ollama":
+                        # Fallback to existing Ollama parse_content
+                        from team_memory.config.llm import LLMConfig
+                        from team_memory.services.llm.llm_parser import parse_content
+
+                        llm_config = LLMConfig(
+                            model=model,
+                            base_url=self._cfg.base_url,
+                        )
+                        return await parse_content(
+                            content,
+                            llm_config=llm_config,
+                            max_input_chars=self._cfg.max_input_chars,
+                        )
+                    else:
+                        raise ValueError(f"Unsupported refinement provider: {self._cfg.provider}")
+                except LLMUnavailableError:
+                    # API unreachable — don't retry, propagate immediately
+                    raise
+                except LLMParseError as e:
+                    last_error = e
+                    logger.warning(
+                        "LLM refinement attempt %d/%d (model=%s) failed: %s",
+                        attempt + 1,
+                        max_retries + 1,
+                        model,
+                        e,
                     )
-                    return await parse_content(
-                        content,
-                        llm_config=llm_config,
-                        max_input_chars=self._cfg.max_input_chars,
-                    )
-                else:
-                    raise ValueError(f"Unsupported refinement provider: {self._cfg.provider}")
-            except LLMUnavailableError:
-                # API unreachable — don't retry, propagate immediately
-                raise
-            except LLMParseError as e:
-                last_error = e
+                    if attempt < max_retries:
+                        await asyncio.sleep(1.0 * (attempt + 1))
+            if model_idx < len(models_to_try) - 1:
                 logger.warning(
-                    "LLM refinement attempt %d/%d failed: %s",
-                    attempt + 1,
+                    "Model %s exhausted %d retries, falling back to %s",
+                    model,
                     max_retries + 1,
-                    e,
+                    models_to_try[model_idx + 1],
                 )
-                if attempt < max_retries:
-                    await asyncio.sleep(1.0 * (attempt + 1))
 
-        # All retries exhausted
-        raise last_error or LLMParseError("LLM refinement failed after all retries")
+        # All models/retries exhausted
+        raise last_error or LLMParseError(f"LLM refinement failed after all retries (models tried: {models_to_try})")
 
     async def _fallback_publish_from_payload(self, payload: dict[str, Any], session_id: str) -> None:
         """Fallback publish from a queue payload / 从队列 payload 恢复并发布。"""
@@ -949,6 +1057,8 @@ class RefinementWorker:
                 )
                 return
             await self._buf.mark_published(draft_id)
+            if self._queue and hasattr(self._queue, "dequeue_by_session"):
+                self._queue.dequeue_by_session(draft_id)
             # Clear stale refined_payload after fallback
             try:
                 await self._buf._db.execute(

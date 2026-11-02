@@ -19,6 +19,8 @@ make harness-check  # Harness 门禁：import 检查 + ruff + lint-js + doc-harn
 make sync-agent-artifacts  # 由 agents/shared 生成 .claude/.cursor agents、.cursor prompts、.claude skills
 
 tm-cli --help    # CLI 兼容层（MCP 工具的 Shell 等价）
+tm-cli status               # 全景查看 TM 四大平面运行状态（Core/Daemon/精炼漏斗/图谱）
+tm-cli status --watch       # 终端实时持续刷新监控面板（等价于 tm-cli watch，Ctrl+C 退出）
 tm-cli recall --query "..." # 搜索团队知识
 tm-cli config show          # 显示当前生效配置及值来源
 tm-cli config init          # 交互式生成 ~/.config/tm/config.toml

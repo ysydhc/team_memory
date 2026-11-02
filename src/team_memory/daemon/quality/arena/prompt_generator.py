@@ -22,7 +22,7 @@ SEED_PROMPT = """你是一个 Prompt 工程专家。你的任务是设计两个�
 
 ## 背景
 我们有一个 RAG 系统，用户发出 query，系统检索相关内容（contexts），agent 基于检索结果生成 response。
-我们需要一个评估 Prompt，交给 glm-4-flash 来打分，判断检索结果的质量。
+我们需要一个评估 Prompt，交给 gemini-3.6-flash 来打分，判断检索结果的质量。
 
 ## 评估维度
 1. **relevance** (0.0-1.0): 检索结果与用户 query 的相关程度
@@ -31,7 +31,7 @@ SEED_PROMPT = """你是一个 Prompt 工程专家。你的任务是设计两个�
 ## 你要生成的内容
 生成两个评估 Prompt 模板，每个模板必须：
 - 包含占位符：{query}、{contexts}、{response}
-- 指示 glm-4-flash 输出严格 JSON：{"relevance": 0.0-1.0, "helpfulness": 0.0-1.0, "reasoning": "..."}
+- 指示 gemini-3.6-flash 输出严格 JSON：{"relevance": 0.0-1.0, "helpfulness": 0.0-1.0, "reasoning": "..."}
 - 两个 Prompt 采用不同的评估策略（例如：一个更分析性/逐步推理，另一个更整体性/直觉判断）
 
 ## 输出格式
@@ -52,7 +52,7 @@ EVOLVE_PROMPT = """你是一个 Prompt 进化专家。基于 Arena 对战历史�
 ## 你的任务
 生成一个新的挑战者评估 Prompt，它必须：
 1. 包含占位符：{query}、{contexts}、{response}
-2. 指示 glm-4-flash 输出 JSON：{"relevance": 0.0-1.0, "helpfulness": 0.0-1.0, "reasoning": "..."}
+2. 指示 gemini-3.6-flash 输出 JSON：{"relevance": 0.0-1.0, "helpfulness": 0.0-1.0, "reasoning": "..."}
 3. 尝试与冠军不同的评估策略
 4. 避免已退役 Prompt 的失败模式
 5. 针对裁判评语中提到的问题进行优化

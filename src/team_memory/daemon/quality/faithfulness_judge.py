@@ -24,7 +24,7 @@ logger = logging.getLogger("daemon.faithfulness_judge")
 
 # Default LLM config — overridable via env vars or constructor
 DEFAULT_BASE_URL = os.environ.get("FAITHFULNESS_LLM_BASE_URL", "http://localhost:4000/v1")
-DEFAULT_MODEL = os.environ.get("FAITHFULNESS_LLM_MODEL", "glm-4-flash")
+DEFAULT_MODEL = os.environ.get("FAITHFULNESS_LLM_MODEL", "DeepSeek-V4-Flash")
 DEFAULT_API_KEY = os.environ.get("FAITHFULNESS_LLM_API_KEY", "") or os.environ.get("LITELLM_MASTER_KEY", "")
 DEFAULT_TIMEOUT = int(os.environ.get("FAITHFULNESS_LLM_TIMEOUT", "60"))
 DEFAULT_MAX_RETRIES = int(os.environ.get("FAITHFULNESS_LLM_MAX_RETRIES", "3"))
@@ -112,9 +112,14 @@ class FaithfulnessJudge:
         max_retries: int | None = None,
         retry_base_delay: float | None = None,
     ) -> None:
-        self._base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
-        self._model = model or DEFAULT_MODEL
-        self._api_key = api_key or DEFAULT_API_KEY
+        self._base_url = (base_url or os.environ.get("FAITHFULNESS_LLM_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
+        self._model = model or os.environ.get("FAITHFULNESS_LLM_MODEL") or DEFAULT_MODEL
+        self._api_key = (
+            api_key
+            or os.environ.get("FAITHFULNESS_LLM_API_KEY", "")
+            or os.environ.get("LITELLM_MASTER_KEY", "")
+            or DEFAULT_API_KEY
+        )
         self._timeout = timeout or DEFAULT_TIMEOUT
         self._max_retries = max_retries if max_retries is not None else DEFAULT_MAX_RETRIES
         self._retry_base_delay = retry_base_delay if retry_base_delay is not None else DEFAULT_RETRY_BASE_DELAY

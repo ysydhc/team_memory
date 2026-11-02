@@ -1,7 +1,7 @@
 """IntentGate — LLM-based intent classification with circuit breaker.
 
 Determines whether a user prompt needs knowledge retrieval and what type.
-Uses glm-4-flash via LiteLLM proxy (same channel as FaithfulnessJudge).
+Uses gemini-3.6-flash via LiteLLM proxy (same channel as FaithfulnessJudge).
 Includes circuit breaker (fuse) with automatic recovery and alerting.
 """
 
@@ -20,7 +20,9 @@ logger = logging.getLogger("tm_daemon.intent_gate")
 DEFAULT_BASE_URL = os.environ.get("INTENT_GATE_LLM_BASE_URL", "") or os.environ.get(
     "FAITHFULNESS_LLM_BASE_URL", "http://localhost:4000/v1"
 )
-DEFAULT_MODEL = os.environ.get("INTENT_GATE_LLM_MODEL", "") or os.environ.get("FAITHFULNESS_LLM_MODEL", "glm-4-flash")
+DEFAULT_MODEL = os.environ.get("INTENT_GATE_LLM_MODEL", "") or os.environ.get(
+    "FAITHFULNESS_LLM_MODEL", "gemini-3.6-flash"
+)
 DEFAULT_API_KEY = (
     os.environ.get("INTENT_GATE_LLM_API_KEY", "")
     or os.environ.get("FAITHFULNESS_LLM_API_KEY", "")
@@ -280,7 +282,9 @@ class IntentGate:
             "model": self._model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.0,
-            "max_tokens": 10,
+            # gemini-3.6-flash is a reasoning model: hidden "thinking" tokens are
+            # billed against max_tokens, so a tiny budget returns empty content.
+            "max_tokens": 300,
         }
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:

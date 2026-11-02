@@ -13,7 +13,7 @@ from team_memory.daemon.quality.arena.models import EvalResult
 logger = logging.getLogger("arena.evaluator")
 
 DEFAULT_BASE_URL = os.environ.get("ARENA_LLM_BASE_URL", "http://localhost:4000/v1")
-DEFAULT_MODEL = os.environ.get("ARENA_EVALUATOR_MODEL", "glm-4-flash")
+DEFAULT_MODEL = os.environ.get("ARENA_EVALUATOR_MODEL", "gemini-3.6-flash")
 DEFAULT_API_KEY = os.environ.get("ARENA_LLM_API_KEY", "") or os.environ.get("LITELLM_MASTER_KEY", "")
 
 

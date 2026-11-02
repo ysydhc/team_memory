@@ -276,11 +276,11 @@ AI 从对话和文档中自动提取结构化经验，无需手动录入：
 基于 RAGAS 思路，用 LLM Judge 评估搜索结果是否被 Agent 真实使用：
 
 - **自动捕获**：Daemon 的 after_response hook 自动缓存 (query, response, result_ids) 到 response_buffer
-- **批量评估**：buffer 积累到阈值（默认 5 条）后自动触发 LLM Judge（glm-4-flash）
+- **批量评估**：buffer 积累到阈值（默认 5 条）后自动触发 LLM Judge（GLM-5-Turbo）
 - **评估逻辑**：拆解 Agent 回复为 claims → 逐条检查是否能从检索结果推断 → 输出 faithfulness score
 - **结果回流**：score ≥ 0.5 自动标记 search_log 为 was_used，影响 use_rate 统计
 - **查看方式**：`make stats`（Faithfulness 面板）、`make faithfulness-eval --show 10`、`curl localhost:3901/status/faithfulness`
-- **模型可配**：`--model glm-4-flash --base-url http://localhost:4000/v1`
+- **模型可配**：`--model GLM-5-Turbo --base-url http://localhost:4000/v1`
 
 ### Wiki 编译与实体关系
 
@@ -635,7 +635,7 @@ api_key = ""                         # 或由 TEAM_MEMORY_API_KEY 环境变量�
 
 [llm]
 base_url = "http://localhost:4000/v1"  # LLM API 地址（用于 Faithfulness 评估等）
-model = "DeepSeek-V3"                   # LLM 模型名
+model = "DeepSeek-V4-Flash"                   # LLM 模型名
 api_key_env = "LITELLM_MASTER_KEY"      # LLM API Key 的环境变量名（推荐）
 timeout = 30                             # 请求超时（秒）
 

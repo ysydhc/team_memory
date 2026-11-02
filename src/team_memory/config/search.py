@@ -84,6 +84,18 @@ class SearchConfig(BaseModel):
         default=0.3,
         description="Overall scale factor (γ) for popularity boost. Prevents popularity from overwhelming relevance.",
     )
+    enable_graph: bool = Field(
+        default=True,
+        description="Enable 2-hop entity-graph PPR retrieval and RRF4 fusion.",
+    )
+    enable_topic: bool = Field(
+        default=True,
+        description="Enable topic-cluster auxiliary retrieval in hybrid mode.",
+    )
+    enable_exact_boost: bool = Field(
+        default=True,
+        description="Enable exact token/tag match boost after RRF fusion.",
+    )
 
 
 class CacheConfig(BaseModel):

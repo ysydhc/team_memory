@@ -876,3 +876,126 @@ class TestSetupHermes:
 
         assert len(result["hooks"]["UserPromptSubmit"]) == 1, "Duplicate UserPromptSubmit!"
         assert len(result["hooks"]["Stop"]) == 1, "Duplicate Stop!"
+
+
+# ============================================================
+# T5: MCP & Scope (global / project) setup tests
+# ============================================================
+
+
+class TestSetupMcpAndScopes:
+    @pytest.fixture(autouse=True)
+    def _setup(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _mock_client_config(monkeypatch)
+
+    def test_setup_global_mcp_all_platforms(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """tm-cli setup --platform all --scope global --target mcp writes global MCP configs."""
+        home_dir = tmp_path / "home"
+        home_dir.mkdir()
+        monkeypatch.setattr("pathlib.Path.home", lambda: home_dir)
+
+        from team_memory.cli import main
+
+        captured = StringIO()
+        with (
+            patch("sys.argv", ["tm-cli", "setup", "--platform", "all", "--scope", "global", "--target", "mcp"]),
+            patch("sys.stdout", captured),
+        ):
+            main()
+
+        # Claude Code: ~/.claude.json
+        claude_mcp = json.loads((home_dir / ".claude.json").read_text())
+        assert "team_memory" in claude_mcp["mcpServers"]
+        assert "env" not in claude_mcp["mcpServers"]["team_memory"]
+
+        # Cursor: ~/.cursor/mcp.json
+        cursor_mcp = json.loads((home_dir / ".cursor" / "mcp.json").read_text())
+        assert "team_memory" in cursor_mcp["mcpServers"]
+
+        # Antigravity: ~/.gemini/config/mcp_config.json
+        agy_mcp = json.loads((home_dir / ".gemini" / "config" / "mcp_config.json").read_text())
+        assert "team_memory" in agy_mcp["mcpServers"]
+
+        # Windsurf: ~/.codeium/windsurf/mcp_config.json
+        ws_mcp = json.loads((home_dir / ".codeium" / "windsurf" / "mcp_config.json").read_text())
+        assert "team_memory" in ws_mcp["mcpServers"]
+
+        # Codex: ~/.codex/config.toml
+        import tomllib
+
+        with open(home_dir / ".codex" / "config.toml", "rb") as f:
+            codex_mcp = tomllib.load(f)
+        assert "team_memory" in codex_mcp["mcp_servers"]
+
+    def test_setup_project_scope_mcp_and_hooks(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """tm-cli setup --platform antigravity --scope project --project-dir <dir> --project demo_proj."""
+        proj_dir = tmp_path / "demo_repo"
+        proj_dir.mkdir()
+
+        from team_memory.cli import main
+
+        captured = StringIO()
+        with (
+            patch(
+                "sys.argv",
+                [
+                    "tm-cli",
+                    "setup",
+                    "--platform",
+                    "antigravity",
+                    "--scope",
+                    "project",
+                    "--project-dir",
+                    str(proj_dir),
+                    "--project",
+                    "demo_proj",
+                ],
+            ),
+            patch("sys.stdout", captured),
+        ):
+            main()
+
+        # Project MCP: <proj_dir>/.agents/mcp_config.json with TEAM_MEMORY_PROJECT=demo_proj
+        agy_mcp_file = proj_dir / ".agents" / "mcp_config.json"
+        assert agy_mcp_file.exists()
+        agy_mcp = json.loads(agy_mcp_file.read_text())
+        assert agy_mcp["mcpServers"]["team_memory"]["env"]["TEAM_MEMORY_PROJECT"] == "demo_proj"
+
+        # Project Hooks: <proj_dir>/.agents/hooks.json
+        agy_hooks_file = proj_dir / ".agents" / "hooks.json"
+        assert agy_hooks_file.exists()
+        agy_hooks = json.loads(agy_hooks_file.read_text())
+        for ev in ("SessionStart", "PreInvocation", "Stop"):
+            assert len(agy_hooks["hooks"][ev]) == 1
+            assert agy_hooks["hooks"][ev][0]["type"] == "command"
+            assert "matcher" not in agy_hooks["hooks"][ev][0]
+        assert len(agy_hooks["hooks"]["PostToolUse"]) == 1
+        assert agy_hooks["hooks"]["PostToolUse"][0]["matcher"] == "*"
+        assert agy_hooks["hooks"]["PostToolUse"][0]["hooks"][0]["type"] == "command"
+
+        # Uninstall project scope
+        captured_un = StringIO()
+        with (
+            patch(
+                "sys.argv",
+                [
+                    "tm-cli",
+                    "setup",
+                    "--platform",
+                    "antigravity",
+                    "--scope",
+                    "project",
+                    "--project-dir",
+                    str(proj_dir),
+                    "--uninstall",
+                ],
+            ),
+            patch("sys.stdout", captured_un),
+        ):
+            main()
+
+        agy_mcp_after = json.loads(agy_mcp_file.read_text())
+        assert "team_memory" not in agy_mcp_after.get("mcpServers", {})
+        agy_hooks_after = json.loads(agy_hooks_file.read_text())
+        assert agy_hooks_after.get("hooks", {}) == {}
+

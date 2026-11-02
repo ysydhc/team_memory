@@ -81,7 +81,7 @@ def _resolve_dsn() -> str:
 
 
 async def _faithfulness_breakdown(dsn: str, days: int, threshold: float = 0.7, above: bool = True) -> int:
-    """Count faithfulness entries above/below threshold."""
+    """Count faithfulness entries above/below threshold (excluding negative error sentinels)."""
     import asyncpg
 
     conn = await asyncpg.connect(dsn)
@@ -90,7 +90,7 @@ async def _faithfulness_breakdown(dsn: str, days: int, threshold: float = 0.7, a
         count = await conn.fetchval(
             f"SELECT count(*) FROM response_buffer rb "
             f"LEFT JOIN search_logs sl ON rb.search_log_id = sl.id "
-            f"WHERE rb.evaluated = TRUE AND rb.faithfulness_score {op} $1 "
+            f"WHERE rb.evaluated = TRUE AND rb.faithfulness_score >= 0 AND rb.faithfulness_score {op} $1 "
             f"AND {BUFFER_QUALITY_FILTER} "
             f"AND rb.created_at > NOW() - make_interval(days => $2)",
             threshold,
@@ -102,7 +102,7 @@ async def _faithfulness_breakdown(dsn: str, days: int, threshold: float = 0.7, a
 
 
 async def _faithfulness_avg(dsn: str, days: int) -> float:
-    """Average faithfulness score for evaluated entries."""
+    """Average faithfulness score for evaluated entries (excluding negative error sentinels)."""
     import asyncpg
 
     conn = await asyncpg.connect(dsn)
@@ -112,6 +112,7 @@ async def _faithfulness_avg(dsn: str, days: int) -> float:
             SELECT avg(rb.faithfulness_score) FROM response_buffer rb
             LEFT JOIN search_logs sl ON rb.search_log_id = sl.id
             WHERE rb.evaluated = TRUE
+              AND rb.faithfulness_score >= 0
               AND {BUFFER_QUALITY_FILTER}
               AND rb.created_at > NOW() - make_interval(days => $1)
             """,
@@ -149,6 +150,42 @@ async def _embedding_coverage(dsn: str) -> dict:
         return {"total": total, "missing": missing, "covered": covered, "ratio": ratio}
     finally:
         await conn.close()
+
+
+async def _bitemporal_health(dsn: str) -> dict:
+    """Bi-temporal memory health breakdown for published/promoted experiences."""
+    import asyncpg
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        row = await conn.fetchrow(
+            """
+            SELECT count(*) FILTER (WHERE valid_until IS NULL) AS active_count,
+                   count(*) FILTER (WHERE valid_until IS NOT NULL) AS superseded_count,
+                   count(*) FILTER (WHERE last_verified_at IS NOT NULL) AS verified_count
+            FROM experiences
+            WHERE exp_status IN ('published', 'promoted') AND is_deleted = FALSE
+            """
+        )
+        return {
+            "active_count": (row["active_count"] or 0) if row else 0,
+            "superseded_count": (row["superseded_count"] or 0) if row else 0,
+            "verified_count": (row["verified_count"] or 0) if row else 0,
+        }
+    finally:
+        await conn.close()
+
+
+def format_telemetry_panel_data(telemetry: dict, bitemporal: dict | None = None) -> dict:
+    """Normalize pipeline telemetry and bi-temporal health into display-ready numbers."""
+    return {
+        "avg_returned_tokens": round(float(telemetry.get("avg_returned_tokens") or 0.0), 1),
+        "avg_total_ms": round(float(telemetry.get("avg_total_ms") or 0.0), 1),
+        "graph_assisted_searches": int(telemetry.get("graph_assisted_searches") or 0),
+        "active_experiences": int((bitemporal or {}).get("active_count") or 0),
+        "superseded_experiences": int((bitemporal or {}).get("superseded_count") or 0),
+        "verified_experiences": int((bitemporal or {}).get("verified_count") or 0),
+    }
 
 
 async def _get_low_faithfulness_entries(dsn: str, days: int, limit: int = 5) -> list[dict]:
@@ -208,7 +245,7 @@ async def run_stats(days: int, granularity: str) -> None:
         total = stats["total_searches"]
         hit = stats["hit"]
         used = stats["used"]
-        used_faithfulness = stats.get("used_faithfulness", 0)
+        judged = stats.get("judged", 0)
         unjudged = stats["unjudged"]
         legacy_unjudged = stats.get("legacy_unjudged", 0)
         use_rate = stats["use_rate"]
@@ -217,11 +254,14 @@ async def run_stats(days: int, granularity: str) -> None:
         funnel_text.append(f"  Total searches:  {total}\n", style="bold")
         funnel_text.append(f"  Hit (has results): {hit}", style="green")
         funnel_text.append(f"  ({hit / total * 100:.0f}%)\n" if total else " (0%)\n")
+        # Use rate is adoption among JUDGED recalls, so it isn't dragged down by
+        # recalls still waiting for evaluation. Show judged + pending explicitly.
+        funnel_text.append(f"  Judged:  {judged}", style="cyan")
+        funnel_text.append(f"  ({judged / hit * 100:.0f}% of hits)\n" if hit else " (0%)\n")
         funnel_text.append(f"  Used by agent:  {used}", style="cyan")
-        funnel_text.append(f"  ({use_rate * 100:.1f}% use rate)\n")
-        funnel_text.append(f"    └─ faithfulness:  {used_faithfulness}\n", style="dim")
-        funnel_text.append(f"  Unjudged:  {unjudged}", style="yellow")
-        funnel_text.append(f"  ({unjudged / hit * 100:.0f}% of hits)\n" if hit else " (0%)\n")
+        funnel_text.append(f"  ({use_rate * 100:.1f}% use rate, of judged)\n", style="bold")
+        funnel_text.append(f"  Pending judge:  {unjudged}", style="yellow")
+        funnel_text.append("  (has results, awaiting eval)\n", style="dim")
         if legacy_unjudged:
             funnel_text.append(f"  Legacy (pre-hook):  {legacy_unjudged}\n", style="dim yellow")
 
@@ -260,6 +300,37 @@ async def run_stats(days: int, granularity: str) -> None:
                         style="red",
                     )
                 console.print(Panel(health_text, title="Embedding Health", border_style="yellow"))
+        except Exception:
+            pass
+
+        # --- 1c. Pipeline Telemetry & Bi-Temporal Health ---
+        try:
+            telemetry = await writer.get_telemetry_summary(days=days)
+            bitemp = await _bitemporal_health(dsn)
+            panel_data = format_telemetry_panel_data(telemetry, bitemp)
+            telem_text = Text()
+            telem_text.append(
+                f"  Avg returned tokens: {panel_data['avg_returned_tokens']}  |  "
+                f"Avg pipeline latency: {panel_data['avg_total_ms']} ms\n",
+                style="cyan",
+            )
+            telem_text.append(
+                f"  Graph-assisted recalls: {panel_data['graph_assisted_searches']}\n",
+                style="green",
+            )
+            telem_text.append(
+                f"  Bi-temporal experiences: {panel_data['active_experiences']} active, "
+                f"{panel_data['superseded_experiences']} superseded, "
+                f"{panel_data['verified_experiences']} verified\n",
+                style="bold",
+            )
+            console.print(
+                Panel(
+                    telem_text,
+                    title=f"Pipeline Telemetry & Bi-Temporal Health ({days}d)",
+                    border_style="cyan",
+                )
+            )
         except Exception:
             pass
 
@@ -414,7 +485,11 @@ async def run_stats(days: int, granularity: str) -> None:
                 else:
                     period = period[0:10]
 
-                rate_str = f"{t['use_rate'] * 100:.0f}%"
+                judged_cnt = t.get("judged")
+                if judged_cnt == 0 and t.get("hit", 0) > 0:
+                    rate_str = "—"
+                else:
+                    rate_str = f"{t['use_rate'] * 100:.0f}%"
                 rel = t.get("avg_relevance")
                 rel_str = f"{rel:.2f}" if rel is not None else "—"
                 bar = _bar(t["total"], max_total)
@@ -486,14 +561,21 @@ async def run_stats(days: int, granularity: str) -> None:
             proj_table = Table(title="By Project", show_lines=False)
             proj_table.add_column("Project")
             proj_table.add_column("Hit", justify="right")
+            proj_table.add_column("Judged", justify="right", style="dim")
             proj_table.add_column("Used", justify="right", style="cyan")
             proj_table.add_column("Use Rate", justify="right", style="bold")
 
             for proj, data in sorted(by_project.items(), key=lambda x: x[1]["total"], reverse=True):
                 proj_total = data["total"]
                 proj_used = data["used"]
-                proj_rate = f"{proj_used / proj_total * 100:.0f}%" if proj_total > 0 else "0%"
-                proj_table.add_row(proj, str(proj_total), str(proj_used), proj_rate)
+                proj_judged = data.get("judged", proj_total)
+                if proj_judged > 0:
+                    proj_rate = f"{proj_used / proj_judged * 100:.0f}%"
+                elif proj_total > 0:
+                    proj_rate = "—"
+                else:
+                    proj_rate = "0%"
+                proj_table.add_row(proj, str(proj_total), str(proj_judged), str(proj_used), proj_rate)
 
             console.print(proj_table)
 

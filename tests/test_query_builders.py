@@ -20,14 +20,14 @@ class TestActiveFilter:
     """Tests for active_filter visibility logic."""
 
     def test_active_filter_no_user_only_published(self) -> None:
-        """Without current_user: is_deleted + published + 2 placeholder-title guards."""
+        """Without current_user: is_deleted + published + valid_until + 2 placeholder-title guards."""
         filters = active_filter(current_user=None)
-        assert len(filters) == 4
+        assert len(filters) == 5
 
     def test_active_filter_with_user_includes_or_clause(self) -> None:
-        """With current_user: is_deleted + OR(published,owned) + 2 placeholder guards."""
+        """With current_user: is_deleted + OR(published,owned) + valid_until + 2 placeholder guards."""
         filters = active_filter(current_user="alice")
-        assert len(filters) == 4
+        assert len(filters) == 5
         # Second element is an OR clause
         second = filters[1]
         assert hasattr(second, "clauses") or "BooleanClauseList" in type(second).__name__

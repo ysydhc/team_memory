@@ -183,6 +183,7 @@ class WikiCompiler:
         await self._db.commit()
         # Ensure wiki directories exist
         os.makedirs(os.path.join(self._wiki_root, "concepts"), exist_ok=True)
+        os.makedirs(os.path.join(self._wiki_root, "modules"), exist_ok=True)
         os.makedirs(os.path.join(self._wiki_root, "queries"), exist_ok=True)
         os.makedirs(os.path.join(self._wiki_root, "topics"), exist_ok=True)
         return self
@@ -373,8 +374,9 @@ class WikiCompiler:
                 result.deleted += 1
         await db.commit()
 
-        # 4. Update index.md + log.md + topics if anything changed
+        # 4. Update index.md + log.md + topics + module pages if anything changed
         if result.created + result.updated + result.deleted > 0:
+            await self.compile_module_pages(all_experiences)
             await self._update_index()
             await self._update_topics()
             await self._generate_contradictions()
@@ -422,7 +424,8 @@ class WikiCompiler:
             except Exception:
                 result.errors += 1
 
-        # 4. Update index + topics + contradictions + log
+        # 4. Update module pages + index + topics + contradictions + log
+        await self.compile_module_pages(all_experiences)
         await self._update_index()
         await self._update_topics()
         await self._generate_contradictions()
@@ -432,6 +435,112 @@ class WikiCompiler:
         )
 
         return result
+
+    async def compile_module_pages(self, experiences: list[dict] | None = None) -> list[str]:
+        """Synthesize module-level Living Wiki pages by clustering experiences by (project, primary_tag).
+
+        Unlike 1:1 concept pages, module pages aggregate multiple experiences (>=2) into a
+        cohesive module guide with Architecture/Patterns, Troubleshooting/Pitfalls, and Linked Concepts.
+        """
+        exps = experiences if experiences is not None else self._all_experiences
+        if not exps:
+            return []
+
+        clusters: dict[tuple[str, str], list[dict]] = {}
+        for exp in exps:
+            project = str(exp.get("project") or "default").strip() or "default"
+            tags = exp.get("tags") or []
+            if isinstance(tags, str):
+                tags = [t.strip() for t in tags.split(",") if t.strip()]
+            primary_tag = str(tags[0]).strip() if tags else "general"
+            if not primary_tag:
+                primary_tag = "general"
+            clusters.setdefault((project, primary_tag), []).append(exp)
+
+        generated_paths: list[str] = []
+        for (project, module_tag), group in sorted(clusters.items()):
+            if len(group) < 2:
+                continue
+
+            proj_slug = self._slugify(project)
+            mod_slug = self._slugify(module_tag)
+            rel_path = f"modules/{proj_slug}/{mod_slug}.md"
+            full_path = os.path.join(self._wiki_root, rel_path)
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+            content = self._render_module_page(project, module_tag, group)
+            async with aiofiles.open(full_path, "w", encoding="utf-8") as f:
+                await f.write(content)
+
+            if self._llm_wiki is not None:
+                try:
+                    await self._llm_wiki.add(
+                        title=f"{project} / {module_tag} 模块知识库",
+                        content=content,
+                        project=project,
+                        tags=[module_tag, "living-wiki", "module"],
+                    )
+                except Exception:
+                    pass
+
+            generated_paths.append(rel_path)
+
+        return generated_paths
+
+    def _render_module_page(self, project: str, module_tag: str, group: list[dict]) -> str:
+        """Render a synthesized module-level Living Wiki markdown page."""
+        now_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        source_ids = [str(e.get("id", "")) for e in group if e.get("id")]
+        all_tags: set[str] = {module_tag}
+        for e in group:
+            t_list = e.get("tags") or []
+            if isinstance(t_list, str):
+                t_list = [t.strip() for t in t_list.split(",") if t.strip()]
+            for t in t_list:
+                if t:
+                    all_tags.add(str(t))
+
+        patterns_lines: list[str] = []
+        pitfalls_lines: list[str] = []
+        linked_lines: list[str] = []
+
+        for e in group:
+            title = str(e.get("title") or "Untitled").strip()
+            slug = self._slugify(title)
+            desc = str(e.get("description") or e.get("problem") or "").strip()
+            sol = str(e.get("solution") or "").strip()
+
+            linked_lines.append(f"- [[{slug}|{title}]]")
+            if sol:
+                sol_excerpt = sol.replace("\n", " ")[:220]
+                patterns_lines.append(f"- **{title}**: {sol_excerpt}")
+            if desc:
+                desc_excerpt = desc.replace("\n", " ")[:200]
+                pitfalls_lines.append(f"- **{title}**: {desc_excerpt}")
+
+        tags_str = ", ".join(sorted(all_tags))
+        sources_str = ", ".join(source_ids)
+
+        return (
+            f"---\n"
+            f"title: {project} - {module_tag} 模块知识库\n"
+            f"type: module_wiki\n"
+            f"project: {project}\n"
+            f"module: {module_tag}\n"
+            f"tags: [{tags_str}]\n"
+            f"source_ids: [{sources_str}]\n"
+            f"experience_count: {len(group)}\n"
+            f"updated_at: {now_date}\n"
+            f"---\n\n"
+            f"# {project} · {module_tag} 模块知识库\n\n"
+            f"> 自动聚合自 {len(group)} 条同模块经验，提供模块级架构约定、核心方案与排障指南。\n\n"
+            f"## 核心方案与架构约定\n\n"
+            f"{chr(10).join(patterns_lines) if patterns_lines else '（暂无记录）'}\n\n"
+            f"## 常见问题与避坑指南\n\n"
+            f"{chr(10).join(pitfalls_lines) if pitfalls_lines else '（暂无记录）'}\n\n"
+            f"## 关联原子经验\n\n"
+            f"{chr(10).join(linked_lines)}\n"
+        )
 
     # ------------------------------------------------------------------
     # Query API

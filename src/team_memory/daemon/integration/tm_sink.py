@@ -143,6 +143,16 @@ class TMSink(ABC):
     async def increment_used_count(self, experience_id: str) -> None:
         """Increment used_count for an experience (agent referenced it)."""
 
+    async def supersede_experience(
+        self,
+        *,
+        old_experience_id: str,
+        new_experience_id: str,
+        reason: str = "",
+    ) -> dict:
+        """Mark old_experience_id as superseded by new_experience_id (optional sink hook)."""
+        return {"resolved": False, "old_id": old_experience_id, "new_id": new_experience_id}
+
 
 # ---------------------------------------------------------------------------
 # LocalTMSink — 直接 Python 调用
@@ -312,6 +322,25 @@ class LocalTMSink(TMSink):
         _ensure_ops()
         ctx = _daemon_context()
         await ctx.service.increment_used_count(experience_id)
+
+    async def supersede_experience(
+        self,
+        *,
+        old_experience_id: str,
+        new_experience_id: str,
+        reason: str = "",
+    ) -> dict:
+        """Bi-temporally supersede old_experience_id and expire its stale graph relationships."""
+        from team_memory.services.analysis.contradiction_detector import resolve_contradiction
+
+        ctx = _daemon_context()
+        return await resolve_contradiction(
+            ctx.db_url,
+            old_experience_id=old_experience_id,
+            new_experience_id=new_experience_id,
+            reason=reason or "Superseded during daemon refinement",
+            actor=self._user,
+        )
 
 
 # ---------------------------------------------------------------------------

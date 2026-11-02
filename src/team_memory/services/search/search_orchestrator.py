@@ -7,6 +7,7 @@ Extracted from ExperienceService to separate read (search) from write
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -28,6 +29,8 @@ class OrchestratedSearchResult:
     reranked: bool = False
     cached: bool = False
     intent_type: str = "general"
+    stage_metrics: dict | None = None
+    stage_counts: dict | None = None
 
 
 class SearchOrchestrator:
@@ -64,6 +67,7 @@ class SearchOrchestrator:
         project: str | None = None,
         include_archives: bool = False,
         include_promoted: bool = False,
+        include_superseded: bool = False,
     ) -> OrchestratedSearchResult:
         """Search experiences using the enhanced search pipeline.
 
@@ -77,20 +81,22 @@ class SearchOrchestrator:
         # Classify query intent
         intent = await self._intent_router.classify(query)
 
-        # Graph retrieval — always attempt as supplemental signal
+        # Graph retrieval (legacy Kuzu/Graphiti PoC) — opt-in only via TEAM_MEMORY_GRAPHITI_ENABLED;
+        # production graph retrieval uses PostgreSQL 2-hop PPR inside SearchPipeline.
         graph_summary = None
-        try:
-            from team_memory.services.graph.graphiti_client import get_graph_client
+        if os.environ.get("TEAM_MEMORY_GRAPHITI_ENABLED", "").lower() in ("1", "true", "yes"):
+            try:
+                from team_memory.services.graph.graphiti_client import get_graph_client
 
-            graph_client = get_graph_client()
-            subgraph = await graph_client.query_subgraph(query, max_depth=2, max_nodes=20)
-            graph_summary = subgraph.get("summary")
-            if graph_summary:
-                logger.debug("Graphiti retrieval returned summary: %s", graph_summary[:100])
-        except ImportError:
-            pass
-        except Exception as e:
-            logger.debug("Graphiti retrieval skipped: %s", str(e))
+                graph_client = get_graph_client()
+                subgraph = await graph_client.query_subgraph(query, max_depth=2, max_nodes=20)
+                graph_summary = subgraph.get("summary")
+                if graph_summary:
+                    logger.debug("Graphiti retrieval returned summary: %s", graph_summary[:100])
+            except ImportError:
+                pass
+            except Exception as e:
+                logger.debug("Graphiti retrieval skipped: %s", str(e))
 
         async with get_session(self._db_url) as session:
             search_start = time.monotonic()
@@ -111,6 +117,11 @@ class SearchOrchestrator:
                     top_k_children=top_k_children,
                     project=project,
                     include_archives=include_archives,
+                    include_promoted=include_promoted,
+                    include_superseded=include_superseded,
+                    fallback_projects=(
+                        ["*"] if (source == "mcp" and project not in (None, "*", "all")) else None
+                    ),
                 )
                 pipeline_result = await self._search_pipeline.search(session, request)
                 duration_ms = int((time.monotonic() - search_start) * 1000)
@@ -137,8 +148,6 @@ class SearchOrchestrator:
                     for rid in result_ids:
                         try:
                             await repo.increment_recall_count(rid)
-                            # Add quality score bonus for recalled experiences
-                            await repo.increment_quality_score(rid, 2.0)
                         except Exception:
                             pass
 
@@ -167,6 +176,8 @@ class SearchOrchestrator:
                     reranked=pipeline_result.reranked,
                     cached=pipeline_result.cached,
                     intent_type=intent.intent_type,
+                    stage_metrics=getattr(pipeline_result, "stage_metrics", None),
+                    stage_counts=getattr(pipeline_result, "stage_counts", None),
                 )
 
             # Legacy fallback: direct vector/FTS search
@@ -229,6 +240,8 @@ class SearchOrchestrator:
         - Promoted experiences are excluded unless include_promoted=True.
         - Draft experiences have their score multiplied by _DRAFT_SCORE_MULTIPLIER.
         """
+        from team_memory.services.search.search_pipeline import _apply_bi_temporal_annotations
+
         filtered: list[dict] = []
         for r in results:
             status = r.get("status") or r.get("exp_status", "published")
@@ -238,8 +251,8 @@ class SearchOrchestrator:
             # Penalize draft scores
             if status == "draft" and "score" in r:
                 r = {**r, "score": round(r["score"] * self._DRAFT_SCORE_MULTIPLIER, 4)}
-            filtered.append(r)
-        return filtered
+            filtered.append(dict(r))
+        return _apply_bi_temporal_annotations(filtered)
 
     async def _legacy_search(
         self,

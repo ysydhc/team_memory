@@ -171,6 +171,7 @@ async def upload_archive_attachment(
         raise HTTPException(status_code=e.http_status, detail=e.message) from e
     except Exception as e:
         import logging
+
         logging.getLogger("team_memory.web.archives").exception(
             "Unexpected error uploading attachment for archive %s: %s", archive_id, e
         )

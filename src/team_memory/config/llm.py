@@ -20,7 +20,7 @@ class EntityExtractionConfig(BaseModel):
     """Entity extraction LLM configuration (separate from main LLM)."""
 
     enabled: bool = True
-    model: str = "DeepSeek-V3"
+    model: str = "DeepSeek-V4-Flash"
     base_url: str = "http://localhost:4000/v1"
     api_key_env: str = "LITELLM_MASTER_KEY"
     timeout: int = 30

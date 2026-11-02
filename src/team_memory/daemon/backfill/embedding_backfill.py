@@ -21,7 +21,7 @@ import time
 
 from team_memory.project_resolver import load_dotenv_if_exists
 
-load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+load_dotenv_if_exists(os.path.dirname(__file__))
 
 
 async def run_backfill(
@@ -83,6 +83,10 @@ async def run_backfill(
                 print("All published experiences have embeddings.")
             else:
                 print(f"Experiences backfill complete: {_total_succeeded} ok, {_total_failed} failed")
+            try:
+                _Path(checkpoint_path).unlink(missing_ok=True)
+            except Exception:
+                pass
             break
 
         _chunk_count += 1
@@ -168,6 +172,10 @@ async def run_backfill(
                 print("All archives have embeddings.")
             else:
                 print(f"Archives backfill complete ({_arch_succeeded} ok, {_arch_failed} failed)")
+            try:
+                _Path(checkpoint_path).unlink(missing_ok=True)
+            except Exception:
+                pass
             break
 
         _arch_chunks += 1

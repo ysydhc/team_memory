@@ -193,8 +193,20 @@ class TestEmbeddingBackfillRunBackfill:
     @pytest.mark.asyncio
     async def test_dry_run_shows_rows(self, capsys):
         rows = [
-            {"id": "id-1", "title": "Title 1", "description": "Desc 1", "solution": "Sol 1", "tags": ["tag1"]},
-            {"id": "id-2", "title": "Title 2", "description": "Desc 2", "solution": "Sol 2", "tags": []},
+            {
+                "id": "id-1",
+                "title": "Title 1",
+                "description": "Desc 1",
+                "solution": "Sol 1",
+                "tags": ["tag1"],
+            },
+            {
+                "id": "id-2",
+                "title": "Title 2",
+                "description": "Desc 2",
+                "solution": "Sol 2",
+                "tags": [],
+            },
         ]
         with (
             patch("team_memory.config.load_settings", return_value=_make_settings()),
@@ -212,7 +224,13 @@ class TestEmbeddingBackfillRunBackfill:
     @pytest.mark.asyncio
     async def test_dry_run_truncates_at_10(self, capsys):
         rows = [
-            {"id": f"id-{i}", "title": f"Title {i}", "description": f"Desc {i}", "solution": "", "tags": []}
+            {
+                "id": f"id-{i}",
+                "title": f"Title {i}",
+                "description": f"Desc {i}",
+                "solution": "",
+                "tags": [],
+            }
             for i in range(15)
         ]
         with (
@@ -244,7 +262,10 @@ class TestEmbeddingBackfillRunBackfill:
         mock_embedder.encode_single = AsyncMock(return_value=[0.1, 0.2])
         with (
             patch("team_memory.config.load_settings", return_value=_make_settings()),
-            patch("team_memory.embedding.factory.create_embedding_provider", return_value=mock_embedder),
+            patch(
+                "team_memory.embedding.factory.create_embedding_provider",
+                return_value=mock_embedder,
+            ),
             _patch_embedding_batchops(exp_rows=rows) as mocks,
         ):
             from team_memory.daemon.backfill.embedding_backfill import run_backfill
@@ -254,12 +275,23 @@ class TestEmbeddingBackfillRunBackfill:
 
     @pytest.mark.asyncio
     async def test_embedding_returns_none(self, capsys):
-        rows = [{"id": "exp-002", "title": "Title", "description": "Desc", "solution": "Sol", "tags": []}]
+        rows = [
+            {
+                "id": "exp-002",
+                "title": "Title",
+                "description": "Desc",
+                "solution": "Sol",
+                "tags": [],
+            }
+        ]
         mock_embedder = AsyncMock()
         mock_embedder.encode_single = AsyncMock(return_value=None)
         with (
             patch("team_memory.config.load_settings", return_value=_make_settings()),
-            patch("team_memory.embedding.factory.create_embedding_provider", return_value=mock_embedder),
+            patch(
+                "team_memory.embedding.factory.create_embedding_provider",
+                return_value=mock_embedder,
+            ),
             _patch_embedding_batchops(exp_rows=rows) as mocks,
         ):
             from team_memory.daemon.backfill.embedding_backfill import run_backfill
@@ -270,12 +302,23 @@ class TestEmbeddingBackfillRunBackfill:
 
     @pytest.mark.asyncio
     async def test_encode_exception_increments_failed(self, capsys):
-        rows = [{"id": "exp-003", "title": "T", "description": "D", "solution": "S", "tags": ["x"]}]
+        rows = [
+            {
+                "id": "exp-003",
+                "title": "T",
+                "description": "D",
+                "solution": "S",
+                "tags": ["x"],
+            }
+        ]
         mock_embedder = AsyncMock()
         mock_embedder.encode_single = AsyncMock(side_effect=RuntimeError("API down"))
         with (
             patch("team_memory.config.load_settings", return_value=_make_settings()),
-            patch("team_memory.embedding.factory.create_embedding_provider", return_value=mock_embedder),
+            patch(
+                "team_memory.embedding.factory.create_embedding_provider",
+                return_value=mock_embedder,
+            ),
             _patch_embedding_batchops(exp_rows=rows) as mocks,
         ):
             from team_memory.daemon.backfill.embedding_backfill import run_backfill
@@ -288,14 +331,23 @@ class TestEmbeddingBackfillRunBackfill:
     @pytest.mark.asyncio
     async def test_limit_truncates_rows(self, capsys):
         rows = [
-            {"id": f"id-{i}", "title": f"Title {i}", "description": f"Desc {i}", "solution": f"Sol {i}", "tags": []}
+            {
+                "id": f"id-{i}",
+                "title": f"Title {i}",
+                "description": f"Desc {i}",
+                "solution": f"Sol {i}",
+                "tags": [],
+            }
             for i in range(3)
         ]
         mock_embedder = AsyncMock()
         mock_embedder.encode_single = AsyncMock(return_value=[0.1])
         with (
             patch("team_memory.config.load_settings", return_value=_make_settings()),
-            patch("team_memory.embedding.factory.create_embedding_provider", return_value=mock_embedder),
+            patch(
+                "team_memory.embedding.factory.create_embedding_provider",
+                return_value=mock_embedder,
+            ),
             _patch_embedding_batchops(exp_rows=rows) as mocks,
         ):
             from team_memory.daemon.backfill.embedding_backfill import run_backfill
@@ -307,12 +359,23 @@ class TestEmbeddingBackfillRunBackfill:
     async def test_embed_text_truncation(self, capsys):
         """Ensure embed_text is truncated to 4000 chars."""
         long_desc = "x" * 5000
-        rows = [{"id": "exp-long", "title": "Title", "description": long_desc, "solution": "Sol", "tags": []}]
+        rows = [
+            {
+                "id": "exp-long",
+                "title": "Title",
+                "description": long_desc,
+                "solution": "Sol",
+                "tags": [],
+            }
+        ]
         mock_embedder = AsyncMock()
         mock_embedder.encode_single = AsyncMock(return_value=[0.1])
         with (
             patch("team_memory.config.load_settings", return_value=_make_settings()),
-            patch("team_memory.embedding.factory.create_embedding_provider", return_value=mock_embedder),
+            patch(
+                "team_memory.embedding.factory.create_embedding_provider",
+                return_value=mock_embedder,
+            ),
             _patch_embedding_batchops(exp_rows=rows) as mocks,
         ):
             from team_memory.daemon.backfill.embedding_backfill import run_backfill
@@ -335,7 +398,10 @@ class TestEntityBackfillMain:
         mock_coro = AsyncMock()
         with (
             patch.object(sys, "argv", ["entity_backfill.py"]),
-            patch("team_memory.daemon.backfill.entity_backfill.run_backfill", return_value=mock_coro) as mock_rb,
+            patch(
+                "team_memory.daemon.backfill.entity_backfill.run_backfill",
+                return_value=mock_coro,
+            ) as mock_rb,
             patch("team_memory.daemon.backfill.entity_backfill.asyncio") as mock_asyncio,
         ):
             mock_asyncio.run = MagicMock(side_effect=lambda c: None)
@@ -354,7 +420,10 @@ class TestEntityBackfillMain:
         mock_coro = AsyncMock()
         with (
             patch.object(sys, "argv", ["entity_backfill.py", "--dry-run"]),
-            patch("team_memory.daemon.backfill.entity_backfill.run_backfill", return_value=mock_coro) as mock_rb,
+            patch(
+                "team_memory.daemon.backfill.entity_backfill.run_backfill",
+                return_value=mock_coro,
+            ) as mock_rb,
             patch("team_memory.daemon.backfill.entity_backfill.asyncio") as mock_asyncio,
         ):
             mock_asyncio.run = MagicMock(side_effect=lambda c: None)
@@ -373,7 +442,7 @@ class TestEntityBackfillMain:
                 [
                     "entity_backfill.py",
                     "--model",
-                    "DeepSeek-V3",
+                    "DeepSeek-V4-Flash",
                     "--base-url",
                     "http://custom.local",
                     "--limit",
@@ -382,7 +451,10 @@ class TestEntityBackfillMain:
                     "5",
                 ],
             ),
-            patch("team_memory.daemon.backfill.entity_backfill.run_backfill", return_value=mock_coro) as mock_rb,
+            patch(
+                "team_memory.daemon.backfill.entity_backfill.run_backfill",
+                return_value=mock_coro,
+            ) as mock_rb,
             patch("team_memory.daemon.backfill.entity_backfill.asyncio") as mock_asyncio,
         ):
             mock_asyncio.run = MagicMock(side_effect=lambda c: None)
@@ -390,7 +462,7 @@ class TestEntityBackfillMain:
 
             main()
             _, kwargs = mock_rb.call_args
-            assert kwargs["model"] == "DeepSeek-V3"
+            assert kwargs["model"] == "DeepSeek-V4-Flash"
             assert kwargs["base_url"] == "http://custom.local"
             assert kwargs["limit"] == 10
             assert kwargs["concurrency"] == 5
@@ -441,7 +513,10 @@ class TestEntityBackfillHelpers:
     @pytest.mark.asyncio
     async def test_build_llm_config_missing_api_key(self):
         settings = _make_settings()
-        with patch("team_memory.config.load_settings", return_value=settings), patch.dict("os.environ", {}, clear=True):
+        with (
+            patch("team_memory.config.load_settings", return_value=settings),
+            patch.dict("os.environ", {}, clear=True),
+        ):
             from team_memory.daemon.backfill.entity_backfill import _build_llm_config
 
             cfg = await _build_llm_config()
@@ -506,7 +581,14 @@ class TestEntityBackfillRunBackfill:
     @pytest.mark.asyncio
     async def test_successful_processing(self, capsys):
         exps = [
-            {"id": "exp-1", "title": "Test", "description": "D", "solution": "S", "tags": ["t"], "project": "default"}
+            {
+                "id": "exp-1",
+                "title": "Test",
+                "description": "D",
+                "solution": "S",
+                "tags": ["t"],
+                "project": "default",
+            }
         ]
         mock_extractor = MagicMock()
         mock_extractor.extract_and_persist = AsyncMock(return_value=None)
@@ -529,9 +611,18 @@ class TestEntityBackfillRunBackfill:
                 new_callable=AsyncMock,
                 return_value=MagicMock(model="m", base_url="u"),
             ),
-            patch("team_memory.services.entity.entity_extractor.EntityExtractor", return_value=mock_extractor),
-            patch("team_memory.daemon.backfill.entity_backfill.asyncio.sleep", new_callable=AsyncMock),
-            patch("team_memory.daemon.backfill.entity_backfill.asyncio.gather", side_effect=_noop_gather),
+            patch(
+                "team_memory.services.entity.entity_extractor.EntityExtractor",
+                return_value=mock_extractor,
+            ),
+            patch(
+                "team_memory.daemon.backfill.entity_backfill.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "team_memory.daemon.backfill.entity_backfill.asyncio.gather",
+                side_effect=_noop_gather,
+            ),
         ):
             from team_memory.daemon.backfill.entity_backfill import run_backfill
 
@@ -563,9 +654,18 @@ class TestEntityBackfillRunBackfill:
                 new_callable=AsyncMock,
                 return_value=MagicMock(model="m", base_url="u"),
             ),
-            patch("team_memory.services.entity.entity_extractor.EntityExtractor", return_value=mock_extractor),
-            patch("team_memory.daemon.backfill.entity_backfill.asyncio.sleep", new_callable=AsyncMock),
-            patch("team_memory.daemon.backfill.entity_backfill.asyncio.gather", side_effect=_noop_gather),
+            patch(
+                "team_memory.services.entity.entity_extractor.EntityExtractor",
+                return_value=mock_extractor,
+            ),
+            patch(
+                "team_memory.daemon.backfill.entity_backfill.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "team_memory.daemon.backfill.entity_backfill.asyncio.gather",
+                side_effect=_noop_gather,
+            ),
         ):
             from team_memory.daemon.backfill.entity_backfill import run_backfill
 
@@ -600,9 +700,18 @@ class TestEntityBackfillRunBackfill:
                 new_callable=AsyncMock,
                 return_value=MagicMock(model="m", base_url="u"),
             ),
-            patch("team_memory.services.entity.entity_extractor.EntityExtractor", return_value=mock_extractor),
-            patch("team_memory.daemon.backfill.entity_backfill.asyncio.sleep", new_callable=AsyncMock),
-            patch("team_memory.daemon.backfill.entity_backfill.asyncio.gather", side_effect=_noop_gather),
+            patch(
+                "team_memory.services.entity.entity_extractor.EntityExtractor",
+                return_value=mock_extractor,
+            ),
+            patch(
+                "team_memory.daemon.backfill.entity_backfill.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "team_memory.daemon.backfill.entity_backfill.asyncio.gather",
+                side_effect=_noop_gather,
+            ),
         ):
             from team_memory.daemon.backfill.entity_backfill import run_backfill
 
@@ -631,7 +740,10 @@ class TestSolutionBackfillMain:
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py"]),
-            patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.bootstrap",
+                return_value=mock_ctx,
+            ),
             patch(_LES, new_callable=AsyncMock, return_value=[]),
         ):
             from team_memory.daemon.backfill.solution_backfill import main
@@ -645,7 +757,10 @@ class TestSolutionBackfillMain:
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py", "--limit", "10", "--dry-run"]),
-            patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.bootstrap",
+                return_value=mock_ctx,
+            ),
             patch(_LES, new_callable=AsyncMock, return_value=[]),
         ):
             from team_memory.daemon.backfill.solution_backfill import main
@@ -661,7 +776,10 @@ class TestSolutionBackfillMain:
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py"]),
-            patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.bootstrap",
+                return_value=mock_ctx,
+            ),
         ):
             from team_memory.daemon.backfill.solution_backfill import main
 
@@ -682,7 +800,10 @@ class TestSolutionBackfillExtractSolution:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             from team_memory.daemon.backfill.solution_backfill import extract_solution
 
             result = await extract_solution(
@@ -704,7 +825,10 @@ class TestSolutionBackfillExtractSolution:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             from team_memory.daemon.backfill.solution_backfill import extract_solution
 
             result = await extract_solution(
@@ -723,7 +847,10 @@ class TestSolutionBackfillExtractSolution:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             from team_memory.daemon.backfill.solution_backfill import extract_solution
 
             result = await extract_solution(
@@ -745,7 +872,10 @@ class TestSolutionBackfillExtractSolution:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             from team_memory.daemon.backfill.solution_backfill import extract_solution
 
             await extract_solution(
@@ -790,7 +920,10 @@ class TestSolutionBackfillMainProcessing:
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py"]),
-            patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.bootstrap",
+                return_value=mock_ctx,
+            ),
             patch(_LES, new_callable=AsyncMock, return_value=[]),
             patch(_UES, new_callable=AsyncMock) as mock_update,
         ):
@@ -807,7 +940,10 @@ class TestSolutionBackfillMainProcessing:
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py"]),
-            patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.bootstrap",
+                return_value=mock_ctx,
+            ),
             patch(_LES, new_callable=AsyncMock, return_value=rows),
             patch(_UES, new_callable=AsyncMock) as mock_update,
         ):
@@ -825,11 +961,20 @@ class TestSolutionBackfillMainProcessing:
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py"]),
-            patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.bootstrap",
+                return_value=mock_ctx,
+            ),
             patch(_LES, new_callable=AsyncMock, return_value=rows),
             patch(_UES, new_callable=AsyncMock) as mock_update,
-            patch("team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient", return_value=mock_client),
-            patch("team_memory.daemon.backfill.solution_backfill.asyncio.sleep", new_callable=AsyncMock),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
         ):
             from team_memory.daemon.backfill.solution_backfill import main
 
@@ -845,11 +990,20 @@ class TestSolutionBackfillMainProcessing:
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py"]),
-            patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.bootstrap",
+                return_value=mock_ctx,
+            ),
             patch(_LES, new_callable=AsyncMock, return_value=rows),
             patch(_UES, new_callable=AsyncMock) as mock_update,
-            patch("team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient", return_value=mock_client),
-            patch("team_memory.daemon.backfill.solution_backfill.asyncio.sleep", new_callable=AsyncMock),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
         ):
             from team_memory.daemon.backfill.solution_backfill import main
 
@@ -865,11 +1019,20 @@ class TestSolutionBackfillMainProcessing:
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py", "--dry-run"]),
-            patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.bootstrap",
+                return_value=mock_ctx,
+            ),
             patch(_LES, new_callable=AsyncMock, return_value=rows),
             patch(_UES, new_callable=AsyncMock) as mock_update,
-            patch("team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient", return_value=mock_client),
-            patch("team_memory.daemon.backfill.solution_backfill.asyncio.sleep", new_callable=AsyncMock),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
         ):
             from team_memory.daemon.backfill.solution_backfill import main
 
@@ -889,11 +1052,20 @@ class TestSolutionBackfillMainProcessing:
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py"]),
-            patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.bootstrap",
+                return_value=mock_ctx,
+            ),
             patch(_LES, new_callable=AsyncMock, return_value=rows),
             patch(_UES, new_callable=AsyncMock),
-            patch("team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient", return_value=mock_client),
-            patch("team_memory.daemon.backfill.solution_backfill.asyncio.sleep", new_callable=AsyncMock),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
         ):
             from team_memory.daemon.backfill.solution_backfill import main
 
@@ -913,11 +1085,20 @@ class TestSolutionBackfillMainProcessing:
 
         with (
             patch.object(sys, "argv", ["solution_backfill.py"]),
-            patch("team_memory.daemon.backfill.solution_backfill.bootstrap", return_value=mock_ctx),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.bootstrap",
+                return_value=mock_ctx,
+            ),
             patch(_LES, new_callable=AsyncMock, return_value=rows),
             patch(_UES, new_callable=AsyncMock),
-            patch("team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient", return_value=mock_client),
-            patch("team_memory.daemon.backfill.solution_backfill.asyncio.sleep", new_callable=AsyncMock),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "team_memory.daemon.backfill.solution_backfill.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
         ):
             from team_memory.daemon.backfill.solution_backfill import main
 

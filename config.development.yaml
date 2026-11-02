@@ -58,14 +58,16 @@ embedding:
     dimension: 4096
 
 # -----------------------------------------------------------------------------
-# llm — 文档解析、经验提取、个人记忆抽取等（调用 Ollama 的 /api/chat）
+# llm — 文档解析、经验提取、个人记忆抽取等（LiteLLM / OpenAI 兼容 /chat/completions）
 # -----------------------------------------------------------------------------
-# 与上一段 embedding 是两回事：nomic-embed-text 只做向量（/api/embed），不能填在 llm.model。
-# 带 *-cloud 的名称会走 Ollama 云端；纯本机请用已 ollama pull 的「对话模型」，例如 llama3.2。
-# 覆盖示例：TEAM_MEMORY_LLM__MODEL、TEAM_MEMORY_LLM__BASE_URL
+# 与上一段 embedding 是两回事：向量走 embedding.*，对话走本段。
+# provider: generic | openai | ollama（generic/openai 走 /v1/chat/completions）
+# 覆盖示例：TEAM_MEMORY_LLM__MODEL、TEAM_MEMORY_LLM__BASE_URL、TEAM_MEMORY_LLM__API_KEY
 llm:
-  model: llama3.2
-  base_url: http://localhost:11434
+  provider: generic
+  model: DeepSeek-V4-Flash
+  base_url: http://localhost:4000/v1
+  api_key: "${LITELLM_MASTER_KEY}"
   prompt_dir: null
 
 # -----------------------------------------------------------------------------
@@ -271,6 +273,23 @@ tag_synonyms:
   ts: TypeScript
   py: Python
   k8s: Kubernetes
+  tm: team_memory
+  召回: recall
+  状态: status
+  向量: vector
+  图谱: graph
+  重排: reranker
+  缓存: cache
+  抓包: mitmproxy
+  插屏: interstitial
+  横幅: banner
+  激励视频: rewarded
+  真机: phone_pilot
+  命令行: cli
+  守护进程: daemon
+  钩子: hook
+  数据库: PostgreSQL
+  知识库: wiki
 
 # -----------------------------------------------------------------------------
 # uploads — 档案附件本地上传（multipart → 磁盘；与 DB 元数据配合；默认 .tmp 便于本地开发不入库）

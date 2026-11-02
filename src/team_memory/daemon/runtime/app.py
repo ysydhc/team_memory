@@ -587,6 +587,33 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         watcher_task = asyncio.create_task(start_watcher(config, sink, draft_buf))
         application.state.watcher_task = watcher_task
 
+        # Periodic Antigravity transcript MCP recall sync (fallback when AGY hooks are skipped)
+        async def _agy_sync_loop() -> None:
+            import time as _time
+
+            from team_memory.daemon.observe.agy_transcript_watcher import sync_agy_mcp_recalls
+
+            try:
+                while True:
+                    try:
+                        sync_res = await sync_agy_mcp_recalls(
+                            response_buffer=response_buffer,
+                            since_ts=_time.time() - 86400 * 3,
+                        )
+                        if sync_res.get("buffered", 0) > 0:
+                            logger.info(
+                                "[EVAL]  agy_sync_loop buffered %d MCP recall(s)",
+                                sync_res["buffered"],
+                            )
+                    except Exception as exc:
+                        logger.debug("AGY transcript sync failed: %s", exc)
+                    await asyncio.sleep(300)
+            except asyncio.CancelledError:
+                pass
+
+        agy_sync_task = asyncio.create_task(_agy_sync_loop())
+        application.state.agy_sync_task = agy_sync_task
+
         logger.info("TM Daemon started (mode=%s)", config.tm.mode)
         yield
 
@@ -649,6 +676,14 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             watcher_task.cancel()
             try:
                 await asyncio.wait_for(watcher_task, timeout=3.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+
+        agy_sync_task_obj = getattr(application.state, "agy_sync_task", None)
+        if agy_sync_task_obj is not None:
+            agy_sync_task_obj.cancel()
+            try:
+                await asyncio.wait_for(agy_sync_task_obj, timeout=3.0)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 pass
 

@@ -16,7 +16,7 @@ import subprocess
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 
 from team_memory.services.maintenance.promotion_compiler import PromotionCompiler
 from team_memory.storage.models import Experience, PersonalMemory
@@ -27,6 +27,17 @@ logger = logging.getLogger("team_memory.services.maintenance.janitor")
 def _utcnow() -> datetime:
     """Get current UTC datetime."""
     return datetime.now(timezone.utc)
+
+
+def _is_eligible_for_promotion(exp, threshold: int, require_used: bool) -> bool:
+    """Check whether an experience is eligible for promotion."""
+    if isinstance(getattr(exp, "valid_until", None), datetime):
+        return False
+    if isinstance(getattr(exp, "negative_feedback_count", None), int) and exp.negative_feedback_count > 0:
+        return False
+    if require_used and isinstance(getattr(exp, "used_count", None), int) and exp.used_count < threshold:
+        return False
+    return True
 
 
 class MemoryJanitor:
@@ -85,7 +96,8 @@ class MemoryJanitor:
                 and_(
                     Experience.is_deleted == False,  # noqa: E712
                     Experience.is_pinned == False,  # noqa: E712
-                    Experience.last_scored_at < protection_cutoff,
+                    Experience.valid_until.is_(None),
+                    Experience.created_at < protection_cutoff,
                     Experience.quality_score > 0,
                 )
             )
@@ -98,21 +110,27 @@ class MemoryJanitor:
 
             updated_count = 0
             tier_changes = {"Gold": 0, "Silver": 0, "Bronze": 0, "Outdated": 0}
+            decay_high = self._get_config("decay_per_day", 1.0)
+            decay_low = self._get_config("decay_per_day_low", 0.5)
+            decay_threshold = self._get_config("decay_low_threshold", 50.0)
 
             for exp in experiences:
                 # Calculate days since last scoring
-                days_since_scored = (now - exp.last_scored_at).days
+                last_scored = exp.last_scored_at or exp.created_at
+                if last_scored is None:
+                    continue
+                days_since_scored = (now - last_scored).days
                 if days_since_scored <= 0:
                     continue
 
                 # Apply decay based on current score
                 old_score = exp.quality_score
-                if old_score >= 50:
+                if old_score >= decay_threshold:
                     # Standard decay: -1 per day
-                    new_score = max(0, old_score - days_since_scored)
+                    new_score = max(0, old_score - (days_since_scored * decay_high))
                 else:
                     # Slow decay: -0.5 per day
-                    new_score = max(0, old_score - (days_since_scored * 0.5))
+                    new_score = max(0, old_score - (days_since_scored * decay_low))
 
                 # Determine new tier
                 if new_score >= 120:
@@ -166,13 +184,39 @@ class MemoryJanitor:
             Dict with sweep statistics
         """
         async with self._session() as session:
-            # Find outdated experiences (quality_tier = "Outdated" and score <= 0)
+            outdated_threshold = self._get_config("outdated_threshold", 0.0)
+            stale_days = self._get_config("stale_prune_days", 30)
+            stale_cutoff = _utcnow() - timedelta(days=stale_days)
+            # Find outdated experiences (quality_tier = "Outdated" and score <= outdated_threshold),
+            # malformed published experiences with zero adoption (empty/Draft title or missing solution),
+            # or stale unreferenced low-tier experiences (>stale_days old with 0 recall and 0 use).
             query = select(Experience).where(
                 and_(
                     Experience.is_deleted == False,  # noqa: E712
                     Experience.is_pinned == False,  # noqa: E712
-                    Experience.quality_tier == "Outdated",
-                    Experience.quality_score <= 0,
+                    Experience.valid_until.is_(None),
+                    or_(
+                        and_(
+                            Experience.quality_tier == "Outdated",
+                            Experience.quality_score <= outdated_threshold,
+                        ),
+                        and_(
+                            Experience.exp_status == "published",
+                            Experience.used_count == 0,
+                            or_(
+                                Experience.title == "",
+                                Experience.title.like("Draft %"),
+                                Experience.solution.is_(None),
+                                Experience.solution == "",
+                            ),
+                        ),
+                        and_(
+                            Experience.quality_tier.in_(["Bronze", "Outdated"]),
+                            Experience.recall_count == 0,
+                            Experience.used_count == 0,
+                            Experience.created_at < stale_cutoff,
+                        ),
+                    ),
                 )
             )
 
@@ -400,6 +444,7 @@ class MemoryJanitor:
             Dict with promotion statistics
         """
         recall_count_threshold = self._get_config("promotion_use_count_threshold", 3)
+        require_used = bool(self._get_config("promotion_require_used", False))
         group_key_threshold = self._get_config("promotion_group_key_threshold", 5)
         output_dirs: dict[str, str] = self._get_config("promotion_output_dirs", {})
 
@@ -408,18 +453,32 @@ class MemoryJanitor:
 
         async with self._session() as session:
             # 1. Promote by recall_count threshold
+            count_condition = (
+                Experience.used_count >= recall_count_threshold
+                if require_used
+                else or_(
+                    Experience.used_count >= recall_count_threshold,
+                    Experience.recall_count >= recall_count_threshold,
+                )
+            )
             recall_count_query = select(Experience).where(
                 and_(
                     Experience.is_deleted == False,  # noqa: E712
                     Experience.exp_status == "published",
-                    Experience.recall_count >= recall_count_threshold,
+                    Experience.valid_until.is_(None),
+                    Experience.negative_feedback_count == 0,
+                    count_condition,
                 )
             )
             if project:
                 recall_count_query = recall_count_query.where(Experience.project == project)
 
             result = await session.execute(recall_count_query)
-            recall_count_experiences = list(result.scalars().all())
+            recall_count_experiences = [
+                e
+                for e in result.scalars().all()
+                if _is_eligible_for_promotion(e, recall_count_threshold, require_used)
+            ]
 
             # 2. Promote by group_key threshold
             # Find group_keys with enough published experiences
@@ -431,6 +490,8 @@ class MemoryJanitor:
                     and_(
                         Experience.is_deleted == False,  # noqa: E712
                         Experience.exp_status == "published",
+                        Experience.valid_until.is_(None),
+                        Experience.negative_feedback_count == 0,
                         Experience.group_key.isnot(None),
                     )
                 )
@@ -450,6 +511,8 @@ class MemoryJanitor:
                     and_(
                         Experience.is_deleted == False,  # noqa: E712
                         Experience.exp_status == "published",
+                        Experience.valid_until.is_(None),
+                        Experience.negative_feedback_count == 0,
                         Experience.group_key.in_(qualifying_groups),
                     )
                 )
@@ -457,7 +520,11 @@ class MemoryJanitor:
                     group_exp_query = group_exp_query.where(Experience.project == project)
 
                 group_exp_result = await session.execute(group_exp_query)
-                group_experiences = list(group_exp_result.scalars().all())
+                group_experiences = [
+                    e
+                    for e in group_exp_result.scalars().all()
+                    if _is_eligible_for_promotion(e, 0, False)
+                ]
 
             # ----------------------------------------------------------
             # 3. Compile Markdown + write files BEFORE status change
@@ -522,6 +589,7 @@ class MemoryJanitor:
 
         return {
             "promoted_by_recall_count": promoted_by_recall_count,
+            "promoted_by_used_count": promoted_by_recall_count,
             "promoted_by_group": promoted_by_group,
             "total": total,
             "recall_count_threshold": recall_count_threshold,
@@ -666,7 +734,7 @@ class MemoryJanitor:
 
         # Get configuration values
         protection_days = self._get_config("protection_period_days", 10)
-        auto_soft_delete = self._get_config("auto_soft_delete_outdated", False)
+        auto_soft_delete = self._get_config("auto_soft_delete_outdated", True)
         purge_days = self._get_config("purge_soft_deleted_days", 30)
         draft_expiry_days = self._get_config("draft_expiry_days", 7)
         personal_memory_days = self._get_config("personal_memory_retention_days", 90)

@@ -24,7 +24,9 @@ logger = logging.getLogger("services.archive.completeness_judge")
 DEFAULT_BASE_URL = os.environ.get("ARCHIVE_JUDGE_LLM_BASE_URL", "") or os.environ.get(
     "FAITHFULNESS_LLM_BASE_URL", "http://localhost:4000/v1"
 )
-DEFAULT_MODEL = os.environ.get("ARCHIVE_JUDGE_LLM_MODEL", "") or os.environ.get("FAITHFULNESS_LLM_MODEL", "glm-4-flash")
+DEFAULT_MODEL = os.environ.get("ARCHIVE_JUDGE_LLM_MODEL", "") or os.environ.get(
+    "FAITHFULNESS_LLM_MODEL", "gemini-3.6-flash"
+)
 DEFAULT_API_KEY = (
     os.environ.get("ARCHIVE_JUDGE_LLM_API_KEY", "")
     or os.environ.get("FAITHFULNESS_LLM_API_KEY", "")
@@ -71,7 +73,9 @@ class ArchiveCompletenessJudge:
         self._api_key = api_key or DEFAULT_API_KEY
         self._timeout = timeout or DEFAULT_TIMEOUT
 
-    async def judge(self, *, title: str, overview: str, solution_doc: str) -> CompletenessResult:
+    async def judge(
+        self, *, title: str, overview: str, solution_doc: str
+    ) -> CompletenessResult:
         """Return whether the archive is complete. Fails closed (not complete)."""
         prompt = _PROMPT.format(
             title=(title or "").strip()[:200],
@@ -113,7 +117,9 @@ class ArchiveCompletenessJudge:
             "model": self._model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.0,
-            "max_tokens": 200,
+            # gemini-3.6-flash reasoning tokens count against max_tokens; give it
+            # enough headroom to still emit the JSON verdict.
+            "max_tokens": 400,
         }
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             resp = await client.post(url, json=payload, headers=headers)

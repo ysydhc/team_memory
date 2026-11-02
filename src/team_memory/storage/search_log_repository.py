@@ -28,6 +28,9 @@ class SearchLogRepository:
         project: str = "default",
         source: str = "mcp",
         result_ids: list[dict] | None = None,
+        stage_metrics: dict | None = None,
+        stage_counts: dict | None = None,
+        returned_tokens: int | None = None,
     ) -> SearchLog:
         """Create a new search log entry."""
         log = SearchLog(
@@ -36,6 +39,9 @@ class SearchLogRepository:
             project=project,
             source=source,
             result_ids=result_ids,
+            stage_metrics=stage_metrics,
+            stage_counts=stage_counts,
+            returned_tokens=returned_tokens,
         )
         self._session.add(log)
         await self._session.flush()

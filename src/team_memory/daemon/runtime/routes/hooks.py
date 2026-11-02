@@ -23,11 +23,15 @@ from team_memory.daemon.refinement.pipeline import (
     process_before_prompt,
     process_session_end,
     process_session_start,
+    process_tool_observation,
 )
 from team_memory.daemon.runtime.app import _detect_source, send_daemon_alert
 from team_memory.daemon.runtime.models import HookPayload, MCPCallbackPayload
 from team_memory.project_resolver import find_project_root
-from team_memory.services.search.search_log_writer import SearchLogWriter
+from team_memory.services.search.search_log_writer import (
+    SearchLogWriter,
+    evaluate_rule_based_adoption,
+)
 
 logger = logging.getLogger("daemon.app")
 
@@ -88,8 +92,12 @@ async def hook_after_response(request: Request) -> dict[str, Any]:
         refiner=app.state.refiner,
         metrics=getattr(app.state, "metrics", None),
     )
-    # Resolve project from workspace_roots for logging
-    resolved_project = _resolve_project(payload.workspace_roots, app.state.config) or ""
+    # Resolve project from pipeline result (includes sticky session / prompt match) or workspace_roots
+    resolved_project = (
+        result.get("project")
+        or _resolve_project(payload.workspace_roots, app.state.config)
+        or ""
+    )
     action = result.get("action", "")
     convergence = result.get("convergence", False)
     result["project"] = resolved_project
@@ -99,34 +107,58 @@ async def hook_after_response(request: Request) -> dict[str, Any]:
         action,
         convergence,
     )
-    # Evaluate usage: buffer response for faithfulness judgment.
+    # Evaluate usage: rule-based fast adoption + buffer response for faithfulness judgment.
     response_text = payload.response_text or payload.prompt
     if response_text:
         search_log: SearchLogWriter = app.state.search_log
+        tool_obs = (
+            result.get("tool_observations")
+            or getattr(payload, "recent_tools", None)
+            or raw.get("recent_tools")
+            or []
+        )
 
         # Look up cached search from before_prompt
         recent_searches: dict = app.state.recent_searches
         key = payload.conversation_id or resolved_project or "default"
         cached_search = recent_searches.pop(key, None)
 
-        # Auto-buffer response for faithfulness evaluation
+        # Auto-buffer response for faithfulness evaluation + rule-based adoption
         try:
             response_buffer = getattr(app.state, "response_buffer", None)
-            if response_buffer is not None:
-                # --- Capture the daemon before_prompt recall (precise correlation) ---
-                if cached_search:
-                    recent_log = {
-                        "id": cached_search["log_id"],
-                        "query": cached_search["query"],
-                        "result_ids": cached_search["result_ids"],
-                    }
-                else:
-                    # No cached daemon recall — last resort: most recent log with results.
-                    recent_log = await search_log.get_recent_with_results(
-                        project=resolved_project or None,
-                        hours_window=1,
+            if cached_search and cached_search.get("log_id"):
+                recent_log = {
+                    "id": cached_search["log_id"],
+                    "query": cached_search["query"],
+                    "result_ids": cached_search["result_ids"],
+                }
+            elif not (cached_search and cached_search.get("mcp_calls")) and hasattr(
+                search_log, "get_recent_with_results"
+            ):
+                # No cached daemon recall or explicit mcp_callback — last resort: most recent log with results.
+                recent_log = await search_log.get_recent_with_results(
+                    project=resolved_project or None,
+                    hours_window=1,
+                )
+            else:
+                recent_log = None
+
+            if recent_log and recent_log.get("id"):
+                was_adopted, matched_exp_ids = evaluate_rule_based_adoption(
+                    recent_log.get("result_ids") or [],
+                    response_text,
+                    tool_obs,
+                )
+                if was_adopted and hasattr(search_log, "record_rule_adoption"):
+                    await search_log.record_rule_adoption(
+                        str(recent_log["id"]),
+                        matched_exp_ids,
                     )
-                if recent_log:
+                    result["rule_adopted"] = True
+                    result["adopted_experience_ids"] = matched_exp_ids
+
+            if response_buffer is not None:
+                if recent_log and recent_log.get("id"):
                     await response_buffer.add(
                         query=recent_log["query"],
                         agent_response=response_text[:10000],
@@ -142,7 +174,7 @@ async def hook_after_response(request: Request) -> dict[str, Any]:
                 # that hook; has_search_log() dedups against the paths above/below.
                 t_end = datetime.now(timezone.utc)
                 t_start = None
-                conv_buf = getattr(app.state, "conversation_buffer", None)
+                conv_buf = getattr(app.state, "buf", None) or getattr(app.state, "conversation_buffer", None)
                 if conv_buf and payload.conversation_id:
                     try:
                         t_start = await conv_buf.get_last_user_message_time(payload.conversation_id)
@@ -159,7 +191,25 @@ async def hook_after_response(request: Request) -> dict[str, Any]:
                     project=resolved_project or None,
                     source="mcp",
                 )
+                if not mcp_fallback and resolved_project:
+                    mcp_fallback = await search_log.find_unjudged_in_window(
+                        t_start=t_start,
+                        t_end=t_end,
+                        project=None,
+                        source="mcp",
+                    )
                 for mcp_log in mcp_fallback:
+                    mcp_adopted, mcp_matched_ids = evaluate_rule_based_adoption(
+                        mcp_log.get("result_ids") or [],
+                        response_text,
+                        tool_obs,
+                    )
+                    if mcp_adopted and hasattr(search_log, "record_rule_adoption"):
+                        await search_log.record_rule_adoption(
+                            str(mcp_log["id"]),
+                            mcp_matched_ids,
+                        )
+                        result["rule_adopted"] = True
                     if not await response_buffer.has_search_log(mcp_log["id"]):
                         await response_buffer.add(
                             query=mcp_log["query"] or "(mcp recall)",
@@ -179,6 +229,17 @@ async def hook_after_response(request: Request) -> dict[str, Any]:
                 for mcp in mcp_calls:
                     if not mcp.get("search_log_id"):
                         continue
+                    mcp_adopted, mcp_matched_ids = evaluate_rule_based_adoption(
+                        mcp.get("result_ids", []) or [],
+                        response_text,
+                        tool_obs,
+                    )
+                    if mcp_adopted and hasattr(search_log, "record_rule_adoption"):
+                        await search_log.record_rule_adoption(
+                            str(mcp["search_log_id"]),
+                            mcp_matched_ids,
+                        )
+                        result["rule_adopted"] = True
                     # Skip if this search_log_id was already buffered (dedup)
                     if await response_buffer.has_search_log(mcp["search_log_id"]):
                         logger.debug(
@@ -297,8 +358,34 @@ async def hook_before_prompt(request: Request) -> dict[str, Any]:
     # Write search log for evaluation (skip trivially short queries)
     min_query_len = 5
     if query_preview and len(query_preview.strip()) >= min_query_len:
+        recent_searches: dict = app.state.recent_searches
+        key = payload.conversation_id or project or "default"
+        existing = recent_searches.get(key)
+        now_mono = time.monotonic()
+        # Dedup repeated before_prompt calls with the exact same query in the active turn
+        if (
+            existing
+            and existing.get("log_id")
+            and existing.get("query") == query_preview
+            and (now_mono - float(existing.get("T1") or 0.0)) < 300.0
+        ):
+            logger.debug(
+                "[READ]  before_prompt duplicate query suppressed for key=%s log_id=%s",
+                key[:8],
+                str(existing["log_id"])[:8],
+            )
+            return result
+
         search_log: SearchLogWriter = app.state.search_log
-        log_result_ids = [{"id": r.get("id", ""), "score": r.get("score", 0)} for r in all_results[:5]]
+        log_result_ids = [
+            {
+                "id": r.get("id", ""),
+                "score": r.get("score", 0),
+                "source": str(r.get("_source", "mem")),
+                "title": str(r.get("title") or "")[:120],
+            }
+            for r in all_results[:5]
+        ]
         # Noise flags from the entry gate — written but excluded from stats.
         is_noise = result.get("is_noise")
         noise_reason = result.get("noise_reason")
@@ -306,23 +393,22 @@ async def hook_before_prompt(request: Request) -> dict[str, Any]:
             query=query_preview,
             project=project or "default",
             source="daemon",
+            intent_type=str(result.get("intent") or "general"),
             result_ids=log_result_ids if log_result_ids else None,
             is_noise=True if is_noise else None,
             noise_reason=noise_reason,
         )
         # Cache for after_response correlation
         if log_id:
-            recent_searches: dict = app.state.recent_searches
-            # Key: conversation_id if available, else project
-            key = payload.conversation_id or project or "default"
+            prev_mcp_calls = list((existing or {}).get("mcp_calls") or [])
             recent_searches[key] = {
                 "log_id": log_id,
                 "query": query_preview,
                 "result_ids": log_result_ids,
                 "project": project,
-                "T1": time.monotonic(),  # monotonic timestamp for window matching
+                "T1": now_mono,  # monotonic timestamp for window matching
                 "T1_iso": datetime.now(timezone.utc).isoformat(),
-                "mcp_calls": [],  # populated by /hooks/mcp_callback
+                "mcp_calls": prev_mcp_calls,  # populated by /hooks/mcp_callback
             }
     return result
 
@@ -437,3 +523,92 @@ async def hook_session_timeout_check(request: Request) -> dict[str, Any]:
         except (ValueError, TypeError):
             continue
     return {"timed_out_sessions": timed_out}
+
+
+@router.post("/hooks/tool_observation")
+async def hook_tool_observation(request: Request) -> dict[str, Any]:
+    """Record a coding/terminal tool execution observation from PostToolUse."""
+    app = request.app
+    raw = await request.json()
+    capture = getattr(app.state, "payload_capture", None)
+    if capture:
+        await capture.capture("/hooks/tool_observation", raw, source=_detect_source(raw))
+    result = await process_tool_observation(
+        input_data=raw,
+        config=app.state.config,
+        buf=app.state.buf,
+    )
+    logger.debug(
+        "[OBS]   tool_observation → session=%s tool=%s action=%s",
+        str(raw.get("conversation_id", ""))[:8],
+        raw.get("tool_name", "?"),
+        result.get("action", ""),
+    )
+    return result
+
+
+@router.post("/ingest/session")
+async def ingest_session(request: Request) -> dict[str, Any]:
+    """Ingest a single conversation session (e.g. from ChatGPT Userscript or AGY)."""
+    from team_memory.daemon.refinement.chatgpt_importer import import_chatgpt_sessions
+
+    app = request.app
+    raw = await request.json()
+    project = str(raw.get("project") or "")
+    dry_run = bool(raw.get("dry_run", False))
+    conversations = raw.get("conversations") if isinstance(raw.get("conversations"), list) else [raw]
+    result = await import_chatgpt_sessions(
+        buf=app.state.buf,
+        raw_conversations=conversations,
+        project=project,
+        dry_run=dry_run,
+    )
+    return result
+
+
+@router.post("/ingest/batch")
+async def ingest_batch(request: Request) -> dict[str, Any]:
+    """Ingest a batch of sessions from ChatGPT export or Antigravity brain directory."""
+    from datetime import datetime
+
+    from team_memory.daemon.observe.agy_transcript_watcher import import_agy_sessions
+    from team_memory.daemon.refinement.chatgpt_importer import import_chatgpt_sessions
+
+    app = request.app
+    raw = await request.json()
+    source = str(raw.get("source") or "chatgpt").lower()
+    project = str(raw.get("project") or "")
+    dry_run = bool(raw.get("dry_run", False))
+
+    since_val = raw.get("since_ts") if raw.get("since_ts") is not None else raw.get("since")
+    since_ts: float | None = None
+    if isinstance(since_val, (int, float)):
+        since_ts = float(since_val)
+    elif isinstance(since_val, str) and since_val.strip():
+        try:
+            since_ts = float(since_val)
+        except ValueError:
+            try:
+                since_ts = datetime.fromisoformat(since_val).timestamp()
+            except ValueError:
+                since_ts = None
+
+    if source in ("antigravity", "agy"):
+        return await import_agy_sessions(
+            buf=app.state.buf,
+            brain_dir=raw.get("brain_dir"),
+            file_path=raw.get("file_path"),
+            project=project,
+            since_ts=since_ts,
+            dry_run=dry_run,
+        )
+
+    conversations = raw.get("conversations") if isinstance(raw.get("conversations"), list) else None
+    return await import_chatgpt_sessions(
+        buf=app.state.buf,
+        file_path=raw.get("file_path"),
+        raw_conversations=conversations,
+        project=project,
+        since_ts=since_ts,
+        dry_run=dry_run,
+    )

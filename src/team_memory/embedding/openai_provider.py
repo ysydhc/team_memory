@@ -68,6 +68,7 @@ class OpenAIEmbedding(EmbeddingProvider):
                     response = await client.post(
                         f"{self._base_url}/embeddings",
                         headers={
+                            "Authorization": f"Bearer {self._api_key}",
                             "x-api-key": self._api_key,
                             "Content-Type": "application/json",
                         },

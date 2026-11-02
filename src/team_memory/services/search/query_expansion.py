@@ -84,17 +84,32 @@ async def llm_expand_query(
         return None
 
 
+def _term_in_query(term: str, q_lower: str) -> bool:
+    """Check if synonym term is present in lowercased query (handles CJK+ASCII mixed text)."""
+    import re
+
+    t = term.strip().lower()
+    if not t:
+        return False
+    if t.isascii():
+        return bool(re.search(rf"(?<![a-z0-9_]){re.escape(t)}(?![a-z0-9_])", q_lower))
+    return t in q_lower
+
+
 def expand_query_synonyms(query: str, tag_synonyms: dict[str, str]) -> str:
     """Expand query with tag_synonyms (key<->value) for better recall."""
     if not query or not tag_synonyms:
         return query.strip()
     q = query.strip()
+    q_lower = q.lower()
     added: list[str] = []
     for key, value in tag_synonyms.items():
         if key and value and key != value:
-            if key in q and value not in q:
+            k_in = _term_in_query(key, q_lower)
+            v_in = _term_in_query(value, q_lower)
+            if k_in and not v_in:
                 added.append(value)
-            if value in q and key not in q:
+            if v_in and not k_in:
                 added.append(key)
     if not added:
         return q

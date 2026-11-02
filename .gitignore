@@ -44,6 +44,7 @@ Thumbs.db
 .ruff_cache/
 .claude/
 .cursor/
+.codex/
 .tm_cursor/
 .mcpregistry_github_token
 .mcpregistry_registry_token

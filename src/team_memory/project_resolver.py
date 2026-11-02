@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,16 @@ logger = logging.getLogger("team_memory.project_resolver")
 
 # alias_name → canonical_name
 _alias_registry: dict[str, str] = {}
+_aliases = _alias_registry
+
+_BUILTIN_SHORTHAND_ALIASES: dict[str, list[str]] = {
+    "team_doc": ["tm", "team_memory", "team-memory", "team_doc", "tm-cli", "tm-daemon"],
+    "team_memory": ["tm", "team_memory", "team-memory", "team_doc", "tm-cli", "tm-daemon"],
+    "phone_pilot": ["pp", "phone_pilot", "phone-pilot"],
+    "adx-sdk-android": ["adx-sdk-android", "adx_android"],
+    "adx-sdk-ios": ["adx-sdk-ios", "adx_ios"],
+    "inapp-game-dollshooter": ["dollshooter", "doll_shooter"],
+}
 
 
 def register_aliases(canonical: str, aliases: list[str]) -> None:
@@ -154,6 +165,11 @@ def _normalize(name: str) -> str:
     return canonicalize_project_name(name)
 
 
+def normalize_project_name(name: str) -> str:
+    """Alias for :func:`canonicalize_project_name`."""
+    return canonicalize_project_name(name)
+
+
 # ---------------------------------------------------------------------------
 # Core inference
 # ---------------------------------------------------------------------------
@@ -188,6 +204,129 @@ def infer_project_name(cwd: str | None = None) -> str:
 
     # Last resort
     return "default"
+
+
+def resolve_project(cwd: str | None = None) -> str:
+    """Resolve project name for *cwd* (alias for :func:`infer_project_name`)."""
+    return infer_project_name(cwd)
+
+
+def _prompt_matches_keyword(prompt_lower: str, keyword: str) -> bool:
+    """Check if *keyword* appears in *prompt_lower* with ASCII identifier boundaries."""
+    kw = (keyword or "").strip().lower()
+    if len(kw) < 2:
+        return False
+    pattern = rf"(?<![a-z0-9_-]){re.escape(kw)}(?![a-z0-9_-])"
+    return bool(re.search(pattern, prompt_lower))
+
+
+def resolve_multi_root_project(
+    workspace_roots: list[str] | None = None,
+    prompt: str = "",
+    target_files: list[str] | None = None,
+    sticky_project: str = "",
+    config_project: str = "",
+) -> tuple[str, bool]:
+    """Resolve active project across multi-root workspaces.
+
+    Returns ``(resolved_project, is_explicit)`` where ``is_explicit`` is ``True``
+    if resolved via ``config_project``, single ``workspace_roots``,
+    ``target_files``, or ``prompt`` explicit match, and ``False`` if resolved
+    via ``sticky_project`` or multi-root fallback ``workspace_roots[0]``.
+    """
+    # 1. Explicit config_project override
+    if config_project and config_project != "default":
+        return (normalize_project_name(config_project), True)
+
+    # 2. Candidate roots (non-empty)
+    candidate_roots = [r.strip() for r in (workspace_roots or []) if r and r.strip()]
+
+    # 3. Check target_files against candidate roots
+    if target_files and candidate_roots:
+        for tf in target_files:
+            if not tf:
+                continue
+            tf_norm = str(Path(tf))
+            for root in candidate_roots:
+                root_norm = str(Path(root))
+                root_name = Path(root).name
+                if (
+                    tf.startswith(root)
+                    or tf_norm == root_norm
+                    or tf_norm.startswith(root_norm.rstrip("/") + "/")
+                    or (root_name and f"/{root_name}/" in tf)
+                ):
+                    return (resolve_project(cwd=root), True)
+
+    # 4. Check prompt (if non-empty)
+    if prompt and prompt.strip():
+        prompt_lower = prompt.lower()
+
+        # 4a. Direct root path or /{root_name}/ mention in prompt
+        for root in candidate_roots:
+            root_name = Path(root).name
+            if (root and root.lower() in prompt_lower) or (
+                root_name and f"/{root_name.lower()}/" in prompt_lower
+            ):
+                return (resolve_project(cwd=root), True)
+
+        # 4b. Keyword/alias match for candidate roots
+        for root in candidate_roots:
+            proj = resolve_project(cwd=root)
+            raw_basename = Path(root).name.lower()
+            basename = normalize_project_name(Path(root).name)
+            proj_hyphen = proj.replace("_", "-")
+            basename_hyphen = basename.replace("_", "-")
+
+            keywords: list[str] = [
+                proj,
+                basename,
+                proj_hyphen,
+                basename_hyphen,
+                raw_basename,
+            ]
+            for lookup_key in (proj, basename, proj_hyphen, basename_hyphen, raw_basename):
+                keywords.extend(_BUILTIN_SHORTHAND_ALIASES.get(lookup_key, []))
+            keywords.extend(
+                alias
+                for alias, canonical in _aliases.items()
+                if canonical in (proj, basename, proj_hyphen, basename_hyphen)
+                or normalize_project_name(canonical) in (proj, basename)
+            )
+
+            seen: set[str] = set()
+            for kw in keywords:
+                kw_lower = kw.lower()
+                if len(kw_lower) < 2 or kw_lower in seen:
+                    continue
+                seen.add(kw_lower)
+                if _prompt_matches_keyword(prompt_lower, kw_lower):
+                    return (proj, True)
+
+        # 4c. Shorthand or registered alias match even when workspace_roots is empty / unmatched
+        for canonical, aliases in _BUILTIN_SHORTHAND_ALIASES.items():
+            for kw in [canonical, *aliases]:
+                if len(kw) >= 2 and _prompt_matches_keyword(prompt_lower, kw):
+                    return (normalize_project_name(canonical), True)
+        for alias, canonical in _aliases.items():
+            for kw in (alias, canonical):
+                if len(kw) >= 2 and _prompt_matches_keyword(prompt_lower, kw):
+                    return (normalize_project_name(canonical), True)
+
+    # 5. Single candidate root
+    if len(candidate_roots) == 1:
+        return (resolve_project(cwd=candidate_roots[0]), True)
+
+    # 6. Sticky session project
+    if sticky_project and sticky_project != "default":
+        return (normalize_project_name(sticky_project), False)
+
+    # 7. Multi-root fallback to first root
+    if candidate_roots:
+        return (resolve_project(cwd=candidate_roots[0]), False)
+
+    # 8. Final fallback
+    return (resolve_project(), False)
 
 
 def infer_project_with_aliases(cwd: str | None = None) -> dict[str, Any]:

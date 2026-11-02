@@ -296,6 +296,7 @@ class ArchiveRepository:
         )
 
         proj = _project_value(project)
+        is_wildcard_project = project in ("*", "all")
         query = (
             select(Archive, similarity_expr, linked_ids_sub, att_count_sub)
             .where(Archive.embedding.is_not(None))
@@ -304,22 +305,30 @@ class ArchiveRepository:
             .limit(limit)
         )
         if current_user:
-            query = query.where(
-                or_(
-                    Archive.created_by == current_user,
-                    and_(
-                        Archive.status == "published",
-                        Archive.project == proj,
-                    ),
-                )
-            )
-        else:
-            query = query.where(
-                and_(
+            pub_cond = (
+                Archive.status == "published"
+                if is_wildcard_project
+                else and_(
                     Archive.status == "published",
                     Archive.project == proj,
                 )
             )
+            query = query.where(
+                or_(
+                    Archive.created_by == current_user,
+                    pub_cond,
+                )
+            )
+        else:
+            if is_wildcard_project:
+                query = query.where(Archive.status == "published")
+            else:
+                query = query.where(
+                    and_(
+                        Archive.status == "published",
+                        Archive.project == proj,
+                    )
+                )
 
         result = await self._session.execute(query)
         rows = result.all()

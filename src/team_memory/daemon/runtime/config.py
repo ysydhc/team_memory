@@ -87,6 +87,7 @@ class RefinementSettings:
     enabled: bool = True
     provider: str = "litellm"  # "litellm" | "ollama"
     model: str = "qwen-plus"
+    fallback_model: str = ""  # empty = no fallback; tried after `model` exhausts its retries
     base_url: str = "http://localhost:4000/v1"
     api_key_env: str = "LITELLM_MASTER_KEY"
     timeout: int = 30

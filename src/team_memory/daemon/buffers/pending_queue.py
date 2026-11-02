@@ -114,6 +114,14 @@ class PendingQueue:
         self._db.execute("DELETE FROM pending_ops WHERE id = ?", (op_id,))
         self._db.commit()
 
+    def dequeue_by_session(self, session_id: str) -> None:
+        """Remove any non-failed pending ops for a session once published."""
+        self._db.execute(
+            "DELETE FROM pending_ops WHERE session_id = ? AND status != 'failed'",
+            (session_id,),
+        )
+        self._db.commit()
+
     def bump_retry(self, op_id: str, error: str, backoff_seconds: int) -> None:
         """Increment retries and push next_retry_at forward / 递增重试计数，推迟重试时间。"""
         from datetime import timedelta

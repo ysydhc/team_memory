@@ -210,6 +210,12 @@ class LLMWiki:
         for row in rows:
             tags_raw = row["tags"]
             tags = json.loads(tags_raw) if tags_raw else []
+            raw_bm25 = float(row["score"] or 0.0)
+            norm_score = (
+                round(abs(raw_bm25) / (1.0 + abs(raw_bm25)), 4)
+                if raw_bm25 < 0
+                else round(raw_bm25, 4)
+            )
             results.append(
                 {
                     "id": row["id"],
@@ -218,7 +224,8 @@ class LLMWiki:
                     "project": row["project"],
                     "tags": tags,
                     "source_url": row["source_url"],
-                    "score": row["score"],
+                    "score": norm_score,
+                    "raw_bm25": raw_bm25,
                 }
             )
         return results

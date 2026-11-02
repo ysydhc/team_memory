@@ -52,6 +52,9 @@ async def write_search_log(
     project: str = "default",
     source: str = "mcp",
     result_ids: list[dict] | None = None,
+    stage_metrics: dict | None = None,
+    stage_counts: dict | None = None,
+    returned_tokens: int | None = None,
 ) -> str | None:
     """Write a SearchLog entry after a search completes.
 
@@ -63,13 +66,20 @@ async def write_search_log(
     try:
         async with get_session(db_url) as session:
             repo = SearchLogRepository(session)
-            log = await repo.create(
-                query=query,
-                intent_type=intent_type,
-                project=project,
-                source=source,
-                result_ids=result_ids,
-            )
+            create_kwargs: dict = {
+                "query": query,
+                "intent_type": intent_type,
+                "project": project,
+                "source": source,
+                "result_ids": result_ids,
+            }
+            if stage_metrics is not None:
+                create_kwargs["stage_metrics"] = stage_metrics
+            if stage_counts is not None:
+                create_kwargs["stage_counts"] = stage_counts
+            if returned_tokens is not None:
+                create_kwargs["returned_tokens"] = returned_tokens
+            log = await repo.create(**create_kwargs)
             await session.commit()
             return str(log.id)
     except Exception:

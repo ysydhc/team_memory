@@ -91,8 +91,16 @@ class TestParseResult:
         raw = json.dumps(
             {
                 "claims": [
-                    {"claim": "Docker uses containers", "supported": True, "reason": "found in context"},
-                    {"claim": "K8s is easy", "supported": False, "reason": "not in context"},
+                    {
+                        "claim": "Docker uses containers",
+                        "supported": True,
+                        "reason": "found in context",
+                    },
+                    {
+                        "claim": "K8s is easy",
+                        "supported": False,
+                        "reason": "not in context",
+                    },
                 ],
                 "score": 0.5,
             }
@@ -177,7 +185,11 @@ class TestEvaluate:
         mock_response = json.dumps(
             {
                 "claims": [
-                    {"claim": "PostgreSQL uses pgvector", "supported": True, "reason": "in context"},
+                    {
+                        "claim": "PostgreSQL uses pgvector",
+                        "supported": True,
+                        "reason": "in context",
+                    },
                 ],
                 "score": 1.0,
             }
@@ -197,7 +209,12 @@ class TestEvaluate:
     @pytest.mark.asyncio
     async def test_evaluate_llm_failure_returns_negative(self):
         """LLM failure should return score=-1 / LLM 失败应返回 score=-1"""
-        with patch.object(self.judge, "_call_llm", new_callable=AsyncMock, side_effect=Exception("timeout")):
+        with patch.object(
+            self.judge,
+            "_call_llm",
+            new_callable=AsyncMock,
+            side_effect=Exception("timeout"),
+        ):
             result = await self.judge.evaluate(query="test", contexts=["ctx"], response="some response")
             assert result.score == -1.0
 
@@ -260,7 +277,10 @@ class TestRetryMechanism:
     async def test_retry_exhausted_returns_negative_score(self):
         """Should return score=-1 when all retries are exhausted / 所有重试耗尽后应返回 score=-1"""
         with patch.object(
-            self.judge, "_call_llm", new_callable=AsyncMock, side_effect=httpx.ConnectError("Connection refused")
+            self.judge,
+            "_call_llm",
+            new_callable=AsyncMock,
+            side_effect=httpx.ConnectError("Connection refused"),
         ):
             result = await self.judge.evaluate(query="test", contexts=["ctx"], response="some response")
             assert result.score == -1.0
@@ -299,7 +319,11 @@ class TestRetryMechanism:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise httpx.HTTPStatusError("Rate Limited", request=rate_limit_resp.request, response=rate_limit_resp)
+                raise httpx.HTTPStatusError(
+                    "Rate Limited",
+                    request=rate_limit_resp.request,
+                    response=rate_limit_resp,
+                )
             return mock_response
 
         with patch.object(self.judge, "_call_llm", side_effect=_side_effect):
@@ -323,7 +347,11 @@ class TestRetryMechanism:
             nonlocal call_count
             call_count += 1
             if call_count <= 2:
-                raise httpx.HTTPStatusError("Service Unavailable", request=server_resp.request, response=server_resp)
+                raise httpx.HTTPStatusError(
+                    "Service Unavailable",
+                    request=server_resp.request,
+                    response=server_resp,
+                )
             return mock_response
 
         with patch.object(self.judge, "_call_llm", side_effect=_side_effect):
@@ -402,7 +430,7 @@ class TestCallLlm:
         """_call_llm should POST to /chat/completions / _call_llm 应 POST 到 /chat/completions"""
         judge = FaithfulnessJudge(
             base_url="http://fake:4000/v1",
-            model="glm-4-flash",
+            model="GLM-5-Turbo",
             api_key="sk-test",
         )
 
@@ -413,7 +441,7 @@ class TestCallLlm:
 
         async def fake_post(url, **kwargs):
             assert "/chat/completions" in url
-            assert kwargs["json"]["model"] == "glm-4-flash"
+            assert kwargs["json"]["model"] == "GLM-5-Turbo"
             assert kwargs["headers"]["x-api-key"] == "sk-test"
             return mock_resp
 

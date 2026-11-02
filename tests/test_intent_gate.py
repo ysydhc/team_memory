@@ -33,7 +33,7 @@ class TestIntentGateClassify:
     def gate(self) -> IntentGate:
         return IntentGate(
             base_url="http://localhost:4000/v1",
-            model="glm-4-flash",
+            model="GLM-5-Turbo",
             api_key="test-key",
         )
 
@@ -85,7 +85,7 @@ class TestIntentGateFallback:
     def gate(self) -> IntentGate:
         return IntentGate(
             base_url="http://localhost:4000/v1",
-            model="glm-4-flash",
+            model="GLM-5-Turbo",
             api_key="test-key",
         )
 
@@ -113,7 +113,7 @@ class TestIntentGateCircuitBreaker:
     def gate(self) -> IntentGate:
         return IntentGate(
             base_url="http://localhost:4000/v1",
-            model="glm-4-flash",
+            model="GLM-5-Turbo",
             api_key="test-key",
             fuse_threshold=3,
             fuse_cooldown_seconds=5,
@@ -192,7 +192,7 @@ class TestIntentGateAlert:
         """Should call send_daemon_alert when fuse triggers."""
         gate = IntentGate(
             base_url="http://localhost:4000/v1",
-            model="glm-4-flash",
+            model="GLM-5-Turbo",
             api_key="test-key",
             fuse_threshold=3,
         )
@@ -218,7 +218,7 @@ class TestIntentGateAlert:
         """Should log warning at alert_threshold (3) consecutive failures."""
         gate = IntentGate(
             base_url="http://localhost:4000/v1",
-            model="glm-4-flash",
+            model="GLM-5-Turbo",
             api_key="test-key",
             alert_threshold=3,
             fuse_threshold=10,
@@ -243,7 +243,7 @@ class TestIntentGateContext:
     def gate(self) -> IntentGate:
         return IntentGate(
             base_url="http://localhost:4000/v1",
-            model="glm-4-flash",
+            model="GLM-5-Turbo",
             api_key="test-key",
         )
 

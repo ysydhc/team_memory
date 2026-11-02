@@ -51,15 +51,31 @@ def main() -> None:
         resp = post_hook("before_prompt", payload)
         result = resp.json()
         results = result.get("results", [])
+        l1_context = result.get("l1_context") or result.get("context") or ""
         with open("/tmp/tm-hook-trace.log", "a") as f:
             f.write(f"  daemon_resp_results={len(results)}\n")
-        if results:
+        if l1_context:
+            print_claude_context(l1_context)
+        elif results:
             context_parts = []
-            for r in results[:5]:
-                title = r.get("title", "Untitled")
-                content = r.get("content", "")[:500]
-                context_parts.append(f"{title}\n{content}")
-            context = "\n---\n".join(context_parts)
+            for r in results[:3]:
+                if r.get("l1_summary"):
+                    context_parts.append(r["l1_summary"])
+                else:
+                    exp_id = str(r.get("id", "") or "")[:8]
+                    uri = f"tm://exp/{exp_id}" if exp_id else "tm://exp"
+                    title = r.get("title", "Untitled")
+                    body = (
+                        r.get("summary")
+                        or r.get("solution")
+                        or r.get("description")
+                        or r.get("problem")
+                        or r.get("content")
+                        or ""
+                    )
+                    cleaned = " ".join(str(body).split())[:180]
+                    context_parts.append(f"- [{uri}] {title}: {cleaned}" if cleaned else f"- [{uri}] {title}")
+            context = "[TM L1 Context]\n" + "\n".join(context_parts)
             print_claude_context(context)
         else:
             print_empty()

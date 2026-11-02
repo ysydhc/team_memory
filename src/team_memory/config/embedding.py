@@ -22,7 +22,9 @@ class OpenAIEmbeddingConfig(BaseModel):
         import os
 
         if self.api_key_env:
-            return os.environ.get(self.api_key_env, "")
+            env_val = os.environ.get(self.api_key_env, "")
+            if env_val:
+                return env_val
         return self.api_key
 
 
@@ -56,7 +58,7 @@ class EmbeddingConfig(BaseModel):
     """Embedding service configuration."""
 
     provider: Literal["ollama", "openai", "local", "generic"] = ""  # must be explicitly configured
-    ollama: OllamaEmbeddingConfig | None = None  # deprecated, kept for legacy compat
+    ollama: OllamaEmbeddingConfig = Field(default_factory=OllamaEmbeddingConfig)
     openai: OpenAIEmbeddingConfig = Field(default_factory=OpenAIEmbeddingConfig)
     local: LocalEmbeddingConfig = Field(default_factory=LocalEmbeddingConfig)
     generic: GenericEmbeddingConfig = Field(default_factory=GenericEmbeddingConfig)

@@ -104,6 +104,19 @@ class Experience(Base):
     recall_count: Mapped[int] = mapped_column(Integer, default=0)
     # Used counter (incremented when agent actually references the experience)
     used_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
+    # Negative feedback counter (incremented when rating <= 2)
+    negative_feedback_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
+
+    # Bi-temporal validity & lifecycle
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=True)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    superseded_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("experiences.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    mutation_history: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
@@ -147,6 +160,12 @@ class Experience(Base):
             "is_deleted": self.is_deleted,
             "recall_count": self.recall_count,
             "used_count": self.used_count,
+            "negative_feedback_count": self.negative_feedback_count or 0,
+            "valid_from": self.valid_from.isoformat() if self.valid_from else None,
+            "valid_until": self.valid_until.isoformat() if self.valid_until else None,
+            "superseded_by_id": str(self.superseded_by_id) if self.superseded_by_id else None,
+            "last_verified_at": self.last_verified_at.isoformat() if self.last_verified_at else None,
+            "mutation_history": self.mutation_history or [],
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -475,6 +494,9 @@ class SearchLog(Base):
     was_used: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # None=unjudged
     judgment_source: Mapped[str | None] = mapped_column(String(20), nullable=True)  # 'marker'|'fuzzy'|NULL
     agent_response_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stage_metrics: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    stage_counts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    returned_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
@@ -560,6 +582,8 @@ class Relationship(Base):
     weight: Mapped[float] = mapped_column(Float, nullable=False, server_default="1.0")
     evidence: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list)
     # evidence stores list of experience_id strings as supporting references
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=True)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     source: Mapped["Entity"] = relationship("Entity", foreign_keys=[source_entity_id], back_populates="outgoing")
@@ -582,6 +606,8 @@ class Relationship(Base):
             "relation_type": self.relation_type,
             "weight": self.weight,
             "evidence": self.evidence or [],
+            "valid_from": self.valid_from.isoformat() if self.valid_from else None,
+            "valid_until": self.valid_until.isoformat() if self.valid_until else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

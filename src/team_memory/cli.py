@@ -11,6 +11,8 @@ Subcommands:
     config       Manage client configuration (show/check/set/init)
     project      Manage project configuration (init/show/list)
     setup        Configure AI client hooks (with --uninstall support)
+    status       Show panoramic runtime status across all TM nodes (supports --watch)
+    watch        Continuously monitor TM runtime status in terminal (alias for status --watch)
 
 Usage:
     python -m team_memory.cli archive --title "..." --solution-doc "..." [options]
@@ -26,6 +28,8 @@ Usage:
     python -m team_memory.cli project init
     python -m team_memory.cli project show
     python -m team_memory.cli setup [--platform ...] [--uninstall]
+    python -m team_memory.cli status [--watch] [--interval 2] [--json]
+    python -m team_memory.cli watch [--interval 2]
 """
 
 from __future__ import annotations
@@ -34,6 +38,7 @@ import argparse
 import json
 import os
 import sys
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -670,24 +675,234 @@ def _test_connection(server_url: str, api_key: str | None) -> None:
         print(f"  ❌ Auth test error: {e}")
 
 
+ALL_SETUP_PLATFORMS = ["claude-code", "cursor", "antigravity", "windsurf", "codex", "hermes"]
+
+
+def _get_repo_root() -> Path:
+    """Resolve the team_doc repository root directory."""
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def _resolve_effective_scope(platform: str, scope: str | None) -> str:
+    """Resolve 'default'/None scope to platform default ('project' for cursor, 'global' for others)."""
+    if scope in ("global", "project"):
+        return scope
+    return "project" if platform == "cursor" else "global"
+
+
+def _resolve_mcp_config_path(platform: str, scope: str, project_dir: Path) -> Path | None:
+    """Return the MCP config file path for a given platform and scope ('global' or 'project')."""
+    eff = _resolve_effective_scope(platform, scope)
+    if platform == "claude-code":
+        return (Path.home() / ".claude.json") if eff == "global" else (project_dir / ".mcp.json")
+    if platform == "cursor":
+        return (Path.home() / ".cursor" / "mcp.json") if eff == "global" else (project_dir / ".cursor" / "mcp.json")
+    if platform == "antigravity":
+        return (
+            (Path.home() / ".gemini" / "config" / "mcp_config.json")
+            if eff == "global"
+            else (project_dir / ".agents" / "mcp_config.json")
+        )
+    if platform == "windsurf":
+        return (
+            (Path.home() / ".codeium" / "windsurf" / "mcp_config.json")
+            if eff == "global"
+            else (project_dir / ".windsurf" / "mcp.json")
+        )
+    if platform == "codex":
+        return (
+            (Path.home() / ".codex" / "config.toml")
+            if eff == "global"
+            else (project_dir / ".codex" / "config.toml")
+        )
+    return None
+
+
+def _build_mcp_server_entry(
+    scope: str,
+    project_dir: Path,
+    project_override: str | None = None,
+) -> dict[str, Any]:
+    """Build the team_memory MCP server configuration entry."""
+    repo_root = _get_repo_root()
+    runner_script = repo_root / "scripts" / "run_mcp_with_dotenv.sh"
+    if runner_script.exists():
+        entry: dict[str, Any] = {
+            "command": "/bin/bash",
+            "args": [str(runner_script)],
+        }
+    else:
+        entry = {
+            "command": sys.executable,
+            "args": ["-m", "team_memory.server"],
+        }
+
+    if scope == "project" or project_override:
+        from team_memory.project_resolver import infer_project_name
+
+        proj_name = project_override or infer_project_name(str(project_dir))
+        if proj_name:
+            entry["env"] = {"TEAM_MEMORY_PROJECT": proj_name}
+
+    return entry
+
+
+def _setup_mcp_for_platform(
+    platform: str,
+    scope: str = "default",
+    project_dir: Path | None = None,
+    project_override: str | None = None,
+) -> None:
+    """Write team_memory MCP server config for the given platform and scope."""
+    proj_dir = (project_dir or Path.cwd()).resolve()
+    eff_scope = _resolve_effective_scope(platform, scope)
+    mcp_path = _resolve_mcp_config_path(platform, eff_scope, proj_dir)
+    if mcp_path is None:
+        return
+
+    entry = _build_mcp_server_entry(eff_scope, proj_dir, project_override)
+    mcp_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if platform == "codex":
+        import tomli_w
+
+        data: dict[str, Any] = {}
+        if mcp_path.exists():
+            try:
+                with open(mcp_path, "rb") as f:
+                    data = tomllib.load(f)
+            except Exception:
+                data = {}
+        mcp_servers = data.setdefault("mcp_servers", {})
+        if not isinstance(mcp_servers, dict):
+            mcp_servers = {}
+            data["mcp_servers"] = mcp_servers
+        mcp_servers["team_memory"] = entry
+        with open(mcp_path, "wb") as f:
+            tomli_w.dump(data, f)
+        print(f"[{platform}] ✅ MCP server 'team_memory' ({eff_scope}) written to {mcp_path}")
+        return
+
+    data_json: dict[str, Any] = {}
+    if mcp_path.exists():
+        try:
+            with open(mcp_path, encoding="utf-8") as f:
+                data_json = json.load(f)
+        except Exception:
+            data_json = {}
+
+    mcp_servers = data_json.setdefault("mcpServers", {})
+    if not isinstance(mcp_servers, dict):
+        mcp_servers = {}
+        data_json["mcpServers"] = mcp_servers
+    mcp_servers["team_memory"] = entry
+
+    with open(mcp_path, "w", encoding="utf-8") as f:
+        json.dump(data_json, f, indent=2, ensure_ascii=False)
+    print(f"[{platform}] ✅ MCP server 'team_memory' ({eff_scope}) written to {mcp_path}")
+
+
+def _uninstall_mcp_for_platform(
+    platform: str,
+    scope: str = "default",
+    project_dir: Path | None = None,
+) -> bool:
+    """Remove team_memory MCP server entry from the platform's MCP config file."""
+    proj_dir = (project_dir or Path.cwd()).resolve()
+    eff_scope = _resolve_effective_scope(platform, scope)
+    mcp_path = _resolve_mcp_config_path(platform, eff_scope, proj_dir)
+    if mcp_path is None or not mcp_path.exists():
+        if platform in ("windsurf", "codex"):
+            print(f"[{platform}] ⚠️  No MCP config found at {mcp_path}, nothing to uninstall")
+        return False
+
+    try:
+        if platform == "codex":
+            import tomli_w
+
+            with open(mcp_path, "rb") as f:
+                data = tomllib.load(f)
+            mcp_servers = data.get("mcp_servers", {})
+            if isinstance(mcp_servers, dict) and "team_memory" in mcp_servers:
+                del mcp_servers["team_memory"]
+                with open(mcp_path, "wb") as f:
+                    tomli_w.dump(data, f)
+                print(f"[{platform}] ✅ Removed TM MCP server from {mcp_path}")
+                return True
+            print(f"[{platform}] ⚠️  No TM MCP server found in {mcp_path}")
+            return False
+
+        with open(mcp_path, encoding="utf-8") as f:
+            data_json = json.load(f)
+        mcp_servers = data_json.get("mcpServers", {})
+        if isinstance(mcp_servers, dict) and "team_memory" in mcp_servers:
+            del mcp_servers["team_memory"]
+            with open(mcp_path, "w", encoding="utf-8") as f:
+                json.dump(data_json, f, indent=2, ensure_ascii=False)
+            print(f"[{platform}] ✅ Removed TM MCP server from {mcp_path}")
+            return True
+        if platform == "windsurf":
+            print(f"[{platform}] ⚠️  No TM MCP server found in {mcp_path}")
+        return False
+    except Exception as e:
+        print(f"[{platform}] ❌ MCP uninstall error: {e}")
+        return False
+
+
+def _check_mcp_for_platform(
+    platform: str,
+    scope: str = "default",
+    project_dir: Path | None = None,
+) -> None:
+    """Check whether team_memory MCP server is configured for the platform."""
+    proj_dir = (project_dir or Path.cwd()).resolve()
+    eff_scope = _resolve_effective_scope(platform, scope)
+    mcp_path = _resolve_mcp_config_path(platform, eff_scope, proj_dir)
+    if mcp_path is None:
+        return
+    if not mcp_path.exists():
+        print(f"[{platform}] ❌ MCP ({eff_scope}: {mcp_path} not found)")
+        return
+    try:
+        if platform == "codex":
+            with open(mcp_path, "rb") as f:
+                data = tomllib.load(f)
+            ok = "team_memory" in (data.get("mcp_servers") or {})
+        else:
+            data_json = json.loads(mcp_path.read_text(encoding="utf-8"))
+            ok = "team_memory" in (data_json.get("mcpServers") or {})
+        print(f"[{platform}] {'✅' if ok else '❌'} MCP (team_memory @ {mcp_path})")
+    except Exception as e:
+        print(f"[{platform}] ❌ MCP parse error ({mcp_path}): {e}")
+
+
 def cmd_setup(args: argparse.Namespace) -> None:
-    """Configure AI client hooks / 一键配置 AI 客户端 hooks。"""
+    """Configure AI client MCP & hooks / 一键配置 AI 客户端 MCP 与 hooks。"""
     from team_memory.client_config import get_client_config
 
     cfg = get_client_config()
+    raw_scope = getattr(args, "scope", None) or "default"
+    scopes = ["global", "project"] if raw_scope == "both" else [raw_scope]
+    target = getattr(args, "target", None) or "all"
+    project_dir = Path(args.project_dir).resolve() if getattr(args, "project_dir", None) else Path.cwd()
+    project_override = getattr(args, "project", None)
+
+    platforms = ALL_SETUP_PLATFORMS if args.platform == "all" else ([args.platform] if args.platform else [])
 
     # Handle uninstall / 处理卸载
     if args.uninstall:
-        platforms = ["claude-code", "cursor", "hermes"] if args.platform == "all" else [args.platform]
-        for platform in platforms:
-            _uninstall_platform(platform)
+        target_platforms = platforms or ALL_SETUP_PLATFORMS
+        for sc in scopes:
+            for platform in target_platforms:
+                _uninstall_platform(platform, scope=sc, target=target, project_dir=project_dir)
         return
 
     # Handle check / 处理检查
     if args.check:
-        platforms = ["claude-code", "cursor", "hermes"] if args.platform == "all" else [args.platform]
-        for platform in platforms:
-            _check_platform(platform, cfg)
+        target_platforms = platforms or ALL_SETUP_PLATFORMS
+        for sc in scopes:
+            for platform in target_platforms:
+                _check_platform(platform, cfg, scope=sc, target=target, project_dir=project_dir)
         return
 
     # No --platform: interactive wizard / 无 --platform：交互式向导
@@ -696,14 +911,25 @@ def cmd_setup(args: argparse.Namespace) -> None:
         return
 
     # Specific platform / 指定平台
-    platforms = ["claude-code", "cursor", "hermes"] if args.platform == "all" else [args.platform]
-    for platform in platforms:
-        _setup_platform(platform, cfg)
+    for sc in scopes:
+        for platform in platforms:
+            _setup_platform(
+                platform,
+                cfg,
+                scope=sc,
+                target=target,
+                project_dir=project_dir,
+                project_override=project_override,
+            )
 
 
 def _setup_wizard(args: argparse.Namespace, cfg: Any) -> None:
     """Interactive setup wizard / 交互式配置向导。"""
     non_interactive = getattr(args, "non_interactive", False)
+    raw_scope = getattr(args, "scope", None) or "default"
+    target = getattr(args, "target", None) or "all"
+    project_dir = Path(args.project_dir).resolve() if getattr(args, "project_dir", None) else Path.cwd()
+    project_override = getattr(args, "project", None)
 
     # Step a: Server URL / 步骤 a: 服务器 URL
     server_url = getattr(args, "server_url", None)
@@ -719,15 +945,14 @@ def _setup_wizard(args: argparse.Namespace, cfg: Any) -> None:
 
     # Step c: Run config check / 步骤 c: 运行配置检查
     print("\nRunning connectivity check / 运行连通性检查 ...")
-    # Create a mock args for config check
     check_args = argparse.Namespace()
     cmd_config_check(check_args)
 
     # Step d: Ask which platforms / 步骤 d: 询问平台
-    platforms = ["claude-code", "cursor", "hermes"]
+    platforms = ALL_SETUP_PLATFORMS
     selected = []
     if non_interactive:
-        selected = platforms
+        selected = ["claude-code", "cursor", "hermes"]
     else:
         print("\nWhich platforms to configure? / 配置哪些平台？")
         for i, p in enumerate(platforms, 1):
@@ -744,22 +969,46 @@ def _setup_wizard(args: argparse.Namespace, cfg: Any) -> None:
     # Step e: Setup each platform / 步骤 e: 配置各平台
     for platform in selected:
         print()
-        _setup_platform(platform, cfg)
+        _setup_platform(
+            platform,
+            cfg,
+            scope=raw_scope,
+            target=target,
+            project_dir=project_dir,
+            project_override=project_override,
+        )
 
 
-def _uninstall_platform(platform: str) -> None:
-    """Remove TM hooks from platform config / 移除平台配置中的 TM hooks。"""
-    if platform == "claude-code":
-        _uninstall_claude_code()
-    elif platform == "cursor":
-        _uninstall_cursor()
-    elif platform == "hermes":
-        _uninstall_hermes()
+def _uninstall_platform(
+    platform: str,
+    scope: str = "default",
+    target: str = "all",
+    project_dir: Path | None = None,
+) -> None:
+    """Remove TM MCP & hooks from platform config / 移除平台配置中的 TM MCP 与 hooks。"""
+    if target in ("all", "mcp"):
+        _uninstall_mcp_for_platform(platform, scope=scope, project_dir=project_dir)
+
+    if target in ("all", "hooks"):
+        if platform == "claude-code":
+            _uninstall_claude_code(scope=scope, project_dir=project_dir)
+        elif platform == "cursor":
+            _uninstall_cursor(scope=scope, project_dir=project_dir)
+        elif platform == "hermes":
+            _uninstall_hermes()
+        elif platform == "antigravity":
+            _uninstall_antigravity(scope=scope, project_dir=project_dir)
 
 
-def _uninstall_claude_code() -> None:
+def _uninstall_claude_code(scope: str = "default", project_dir: Path | None = None) -> None:
     """Remove TM hooks from Claude Code settings / 从 Claude Code 设置移除 TM hooks。"""
-    settings_path = Path.home() / ".claude" / "settings.json"
+    proj_dir = (project_dir or Path.cwd()).resolve()
+    eff_scope = _resolve_effective_scope("claude-code", scope)
+    settings_path = (
+        (Path.home() / ".claude" / "settings.json")
+        if eff_scope == "global"
+        else (proj_dir / ".claude" / "settings.local.json")
+    )
     if not settings_path.exists():
         print("[claude-code] ⚠️  No settings.json found, nothing to uninstall")
         return
@@ -769,15 +1018,25 @@ def _uninstall_claude_code() -> None:
             settings = json.load(f)
 
         hooks = settings.get("hooks", {})
-        post_tool = hooks.get("PostToolUse", [])
-        original_len = len(post_tool)
-        post_tool = [h for h in post_tool if h.get("matcher") != "mcp__team_memory__recall"]
+        removed_any = False
+        for event in ("SessionStart", "UserPromptSubmit", "Stop", "PostToolUse"):
+            entries = hooks.get(event, [])
+            if not isinstance(entries, list):
+                continue
+            filtered = [
+                h
+                for h in entries
+                if h.get("matcher") != "mcp__team_memory__recall"
+                and "team_memory" not in json.dumps(h)
+            ]
+            if len(filtered) != len(entries):
+                removed_any = True
+                hooks[event] = filtered
 
-        if len(post_tool) == original_len:
+        if not removed_any:
             print("[claude-code] ⚠️  No TM hooks found to remove")
             return
 
-        hooks["PostToolUse"] = post_tool
         settings["hooks"] = hooks
 
         with open(settings_path, "w") as f:
@@ -789,9 +1048,15 @@ def _uninstall_claude_code() -> None:
         print(f"[claude-code] ❌ Error: {e}")
 
 
-def _uninstall_cursor() -> None:
+def _uninstall_cursor(scope: str = "default", project_dir: Path | None = None) -> None:
     """Remove TM hooks from Cursor hooks.json / 从 Cursor hooks.json 移除 TM hooks。"""
-    hooks_path = Path.cwd() / ".cursor" / "hooks.json"
+    proj_dir = (project_dir or Path.cwd()).resolve()
+    eff_scope = _resolve_effective_scope("cursor", scope)
+    hooks_path = (
+        (Path.home() / ".cursor" / "hooks.json")
+        if eff_scope == "global"
+        else (proj_dir / ".cursor" / "hooks.json")
+    )
     if not hooks_path.exists():
         print("[cursor] ⚠️  No hooks.json found, nothing to uninstall")
         return
@@ -805,17 +1070,27 @@ def _uninstall_cursor() -> None:
             print("[cursor] ⚠️  Unexpected hooks format, skipping")
             return
 
-        after_mcp = hooks_section.get("afterMCPExecution", [])
-        original_len = len(after_mcp)
-        after_mcp = [
-            entry for entry in after_mcp if not (isinstance(entry, dict) and "team_memory" in entry.get("matcher", ""))
-        ]
+        removed_any = False
+        for event in list(hooks_section.keys()):
+            entries = hooks_section.get(event, [])
+            if not isinstance(entries, list):
+                continue
+            filtered = [
+                entry
+                for entry in entries
+                if not (
+                    isinstance(entry, dict)
+                    and ("team_memory" in entry.get("matcher", "") or "team_memory" in json.dumps(entry))
+                )
+            ]
+            if len(filtered) != len(entries):
+                removed_any = True
+                hooks_section[event] = filtered
 
-        if len(after_mcp) == original_len:
+        if not removed_any:
             print("[cursor] ⚠️  No TM hooks found to remove")
             return
 
-        hooks_section["afterMCPExecution"] = after_mcp
         hooks_data["hooks"] = hooks_section
 
         with open(hooks_path, "w") as f:
@@ -834,21 +1109,116 @@ def _uninstall_hermes() -> None:
     print("  从 ~/.hermes/config.yaml 中移除 post_tool_call hook")
 
 
-def _check_platform(platform: str, cfg: Any) -> None:
-    """Check hook configuration status / 检查 hook 配置状态。"""
-    hook_dir = Path(__file__).resolve().parent.parent / "hooks"
+def _uninstall_antigravity(scope: str = "default", project_dir: Path | None = None) -> None:
+    """Remove TM hooks from Antigravity hooks.json / 从 Antigravity 配置移除 TM hooks。"""
+    proj_dir = (project_dir or Path.cwd()).resolve()
+    eff_scope = _resolve_effective_scope("antigravity", scope)
+    hooks_path = (
+        (Path.home() / ".gemini" / "config" / "hooks.json")
+        if eff_scope == "global"
+        else (proj_dir / ".agents" / "hooks.json")
+    )
+    if not hooks_path.exists():
+        print("[antigravity] ⚠️  No hooks.json found, nothing to uninstall")
+        return
 
-    if platform == "claude-code":
-        _check_claude(hook_dir)
-    elif platform == "cursor":
-        _check_cursor(hook_dir)
-    elif platform == "hermes":
-        _check_hermes(hook_dir)
+    try:
+        with open(hooks_path) as f:
+            hooks_data = json.load(f)
+
+        hooks_section = hooks_data.get("hooks", {})
+        if not isinstance(hooks_section, dict):
+            print("[antigravity] ⚠️  Unexpected hooks format, skipping")
+            return
+
+        removed_any = False
+        for event in list(hooks_section.keys()):
+            entries = hooks_section.get(event, [])
+            if not isinstance(entries, list):
+                continue
+            filtered = [entry for entry in entries if "team_memory" not in json.dumps(entry)]
+            if len(filtered) != len(entries):
+                removed_any = True
+                if filtered:
+                    hooks_section[event] = filtered
+                else:
+                    del hooks_section[event]
+
+        if not removed_any:
+            print("[antigravity] ⚠️  No TM hooks found to remove")
+            return
+
+        hooks_data["hooks"] = hooks_section
+        with open(hooks_path, "w") as f:
+            json.dump(hooks_data, f, indent=2)
+
+        print(f"[antigravity] ✅ Removed TM hooks from {hooks_path}")
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[antigravity] ❌ Error: {e}")
 
 
-def _check_claude(hook_dir: Path) -> None:
+def _check_platform(
+    platform: str,
+    cfg: Any,
+    scope: str = "default",
+    target: str = "all",
+    project_dir: Path | None = None,
+) -> None:
+    """Check MCP & hook configuration status / 检查 MCP 与 hook 配置状态。"""
+    if target in ("all", "mcp"):
+        _check_mcp_for_platform(platform, scope=scope, project_dir=project_dir)
+
+    if target in ("all", "hooks"):
+        hook_dir = Path(__file__).resolve().parent / "hooks" / "platforms"
+        if platform == "claude-code":
+            _check_claude(hook_dir / "claude", scope=scope, project_dir=project_dir)
+        elif platform == "cursor":
+            _check_cursor(hook_dir / "cursor", scope=scope, project_dir=project_dir)
+        elif platform == "hermes":
+            _check_hermes(hook_dir / "hermes", scope=scope, project_dir=project_dir)
+        elif platform == "antigravity":
+            _check_antigravity(scope=scope, project_dir=project_dir)
+
+
+def _check_antigravity(scope: str = "default", project_dir: Path | None = None) -> None:
+    """Check Antigravity hooks in hooks.json / 检查 Antigravity 全部 hook。"""
+    proj_dir = (project_dir or Path.cwd()).resolve()
+    eff_scope = _resolve_effective_scope("antigravity", scope)
+    hooks_file = (
+        (Path.home() / ".gemini" / "config" / "hooks.json")
+        if eff_scope == "global"
+        else (proj_dir / ".agents" / "hooks.json")
+    )
+    if not hooks_file.exists():
+        print(f"[antigravity] ❌ {hooks_file} not found")
+        return
+
+    try:
+        data = json.loads(hooks_file.read_text())
+    except Exception as e:
+        print(f"[antigravity] ❌ parse error: {e}")
+        return
+
+    hooks = data.get("hooks", {})
+    for event in ("SessionStart", "PreInvocation", "PostToolUse", "Stop"):
+        entries = hooks.get(event, [])
+        ok = any("team_memory.hooks.platforms.antigravity" in json.dumps(e) for e in entries)
+        print(f"[antigravity] {'✅' if ok else '❌'} {event}")
+
+
+def _check_claude(
+    hook_dir: Path,
+    scope: str = "default",
+    project_dir: Path | None = None,
+) -> None:
     """Check all Claude Code hooks / 检查 Claude Code 全部 hook。"""
-    settings = Path.home() / ".claude" / "settings.json"
+    proj_dir = (project_dir or Path.cwd()).resolve()
+    eff_scope = _resolve_effective_scope("claude-code", scope)
+    settings = (
+        (Path.home() / ".claude" / "settings.json")
+        if eff_scope == "global"
+        else (proj_dir / ".claude" / "settings.local.json")
+    )
     if not settings.exists():
         print(f"[claude-code] ❌ {settings} not found")
         return
@@ -860,19 +1230,29 @@ def _check_claude(hook_dir: Path) -> None:
         return
 
     hooks_map = {
-        "SessionStart": "claude_session_start.py",
-        "UserPromptSubmit": "claude_user_prompt_submit.py",
-        "Stop": "claude_stop.py",
-        "PostToolUse": "claude_post_tool.py",
+        "SessionStart": "session_start.py",
+        "UserPromptSubmit": "user_prompt_submit.py",
+        "Stop": "stop.py",
+        "PostToolUse": "post_tool_use.py",
     }
     for event, script in hooks_map.items():
         ok = _hook_ok(data, event, hook_dir / script)
         print(f"[claude-code] {'✅' if ok else '❌'} {event}")
 
 
-def _check_cursor(hook_dir: Path) -> None:
+def _check_cursor(
+    hook_dir: Path,
+    scope: str = "default",
+    project_dir: Path | None = None,
+) -> None:
     """Check all Cursor hooks / 检查 Cursor 全部 hook。"""
-    hooks_file = Path.cwd() / ".cursor" / "hooks.json"
+    proj_dir = (project_dir or Path.cwd()).resolve()
+    eff_scope = _resolve_effective_scope("cursor", scope)
+    hooks_file = (
+        (Path.home() / ".cursor" / "hooks.json")
+        if eff_scope == "global"
+        else (proj_dir / ".cursor" / "hooks.json")
+    )
     if not hooks_file.exists():
         print(f"[cursor] ❌ {hooks_file} not found")
         return
@@ -884,21 +1264,31 @@ def _check_cursor(hook_dir: Path) -> None:
         return
 
     hooks_map = {
-        "sessionStart": "cursor_session_start.py",
-        "beforeSubmitPrompt": "cursor_before_prompt.py",
-        "afterAgentResponse": "cursor_after_response.py",
-        "afterMCPExecution": "cursor_after_mcp.py",
+        "sessionStart": "session_start.py",
+        "beforeSubmitPrompt": "before_prompt.py",
+        "afterAgentResponse": "after_response.py",
+        "afterMCPExecution": "after_mcp.py",
     }
     for event, script in hooks_map.items():
         ok = _hook_ok(data, event, hook_dir / script)
         print(f"[cursor] {'✅' if ok else '❌'} {event}")
 
 
-def _check_hermes(hook_dir: Path) -> None:
+def _check_hermes(
+    hook_dir: Path,
+    scope: str = "default",
+    project_dir: Path | None = None,
+) -> None:
     """Check all Hermes hooks / 检查 Hermes 全部 hook。"""
     import yaml
 
-    config_file = Path.home() / ".hermes" / "config.yaml"
+    proj_dir = (project_dir or Path.cwd()).resolve()
+    eff_scope = _resolve_effective_scope("hermes", scope)
+    config_file = (
+        (Path.home() / ".hermes" / "config.yaml")
+        if eff_scope == "global"
+        else (proj_dir / ".hermes" / "config.yaml")
+    )
     if not config_file.exists():
         print(f"[hermes] ❌ {config_file} not found")
         return
@@ -910,9 +1300,9 @@ def _check_hermes(hook_dir: Path) -> None:
         return
 
     hooks_map = {
-        "UserPromptSubmit": "hermes_user_prompt_submit.py",
-        "Stop": "hermes_stop.py",
-        "PostToolUse": "hermes_post_tool_call.py",
+        "UserPromptSubmit": "user_prompt_submit.py",
+        "Stop": "stop.py",
+        "PostToolUse": "post_tool_call.py",
     }
     for event, script in hooks_map.items():
         ok = _hook_ok(config, event, hook_dir / script)
@@ -926,26 +1316,55 @@ def _hook_ok(data: dict, event: str, script_path: Path) -> bool:
     return len(entries) > 0 and script_path.exists()
 
 
-def _setup_platform(platform: str, cfg: Any) -> None:
-    """Write hook configuration / 写入 hook 配置。"""
+def _setup_platform(
+    platform: str,
+    cfg: Any,
+    scope: str = "default",
+    target: str = "all",
+    project_dir: Path | None = None,
+    project_override: str | None = None,
+) -> None:
+    """Write MCP & hook configuration / 写入 MCP 与 hook 配置。"""
     venv_python = sys.executable
 
-    if platform == "claude-code":
-        _setup_claude_code(cfg, venv_python)
-    elif platform == "cursor":
-        _setup_cursor(cfg, venv_python)
-    elif platform == "hermes":
-        _setup_hermes(cfg, venv_python)
+    if target in ("all", "mcp"):
+        _setup_mcp_for_platform(
+            platform,
+            scope=scope,
+            project_dir=project_dir,
+            project_override=project_override,
+        )
+
+    if target in ("all", "hooks"):
+        if platform == "claude-code":
+            _setup_claude_code(cfg, venv_python, scope=scope, project_dir=project_dir)
+        elif platform == "cursor":
+            _setup_cursor(cfg, venv_python, scope=scope, project_dir=project_dir)
+        elif platform == "hermes":
+            _setup_hermes(cfg, venv_python, scope=scope, project_dir=project_dir)
+        elif platform == "antigravity":
+            _setup_antigravity(cfg, venv_python, scope=scope, project_dir=project_dir)
 
 
-def _setup_claude_code(cfg: Any, venv_python: str) -> None:
+def _setup_claude_code(
+    cfg: Any,
+    venv_python: str,
+    scope: str = "default",
+    project_dir: Path | None = None,
+) -> None:
     """Configure Claude Code hooks (SessionStart, UserPromptSubmit, Stop, PostToolUse).
 
     配置 Claude Code 全部 hook 事件。
     """
     import json
 
-    settings_path = Path.home() / ".claude" / "settings.json"
+    proj_dir = (project_dir or Path.cwd()).resolve()
+    eff_scope = _resolve_effective_scope("claude-code", scope)
+    settings_path = (
+        (Path.home() / ".claude" / "settings.json")
+        if eff_scope == "global"
+        else (proj_dir / ".claude" / "settings.local.json")
+    )
     settings: dict[str, Any] = {}
     if settings_path.exists():
         with open(settings_path) as f:
@@ -1021,11 +1440,22 @@ def _setup_claude_code(cfg: Any, venv_python: str) -> None:
     print(f"[claude-code] ✅ All hooks configured in {settings_path}")
 
 
-def _setup_cursor(cfg: Any, venv_python: str) -> None:
+def _setup_cursor(
+    cfg: Any,
+    venv_python: str,
+    scope: str = "default",
+    project_dir: Path | None = None,
+) -> None:
     """Configure Cursor hooks: sessionStart, beforeSubmitPrompt, afterAgentResponse, afterMCPExecution."""
     import json
 
-    hooks_path = Path.cwd() / ".cursor" / "hooks.json"
+    proj_dir = (project_dir or Path.cwd()).resolve()
+    eff_scope = _resolve_effective_scope("cursor", scope)
+    hooks_path = (
+        (Path.home() / ".cursor" / "hooks.json")
+        if eff_scope == "global"
+        else (proj_dir / ".cursor" / "hooks.json")
+    )
     hooks_data: dict[str, Any] = {}
     if hooks_path.exists():
         with open(hooks_path) as f:
@@ -1056,11 +1486,22 @@ def _setup_cursor(cfg: Any, venv_python: str) -> None:
     print(f"[cursor] ✅ 4 hooks written to {hooks_path}")
 
 
-def _setup_hermes(cfg: Any, venv_python: str) -> None:
+def _setup_hermes(
+    cfg: Any,
+    venv_python: str,
+    scope: str = "default",
+    project_dir: Path | None = None,
+) -> None:
     """Configure Hermes hooks: UserPromptSubmit, Stop, PostToolUse. Auto-writes config.yaml."""
     import yaml
 
-    config_path = Path.home() / ".hermes" / "config.yaml"
+    proj_dir = (project_dir or Path.cwd()).resolve()
+    eff_scope = _resolve_effective_scope("hermes", scope)
+    config_path = (
+        (Path.home() / ".hermes" / "config.yaml")
+        if eff_scope == "global"
+        else (proj_dir / ".hermes" / "config.yaml")
+    )
     config: dict[str, Any] = {}
     if config_path.exists():
         config = yaml.safe_load(config_path.read_text()) or {}
@@ -1109,6 +1550,152 @@ def _setup_hermes(cfg: Any, venv_python: str) -> None:
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(yaml.dump(config, allow_unicode=True, default_flow_style=False, sort_keys=False))
     print(f"[hermes] ✅ 3 hooks written to {config_path}")
+
+
+def _setup_antigravity(
+    cfg: Any,
+    venv_python: str,
+    scope: str = "default",
+    project_dir: Path | None = None,
+) -> None:
+    """Configure Antigravity hooks in ~/.gemini/config/hooks.json (global) or .agents/hooks.json (project):
+    SessionStart, PreInvocation, PostToolUse, Stop.
+    """
+    proj_dir = (project_dir or Path.cwd()).resolve()
+    eff_scope = _resolve_effective_scope("antigravity", scope)
+    hooks_path = (
+        (Path.home() / ".gemini" / "config" / "hooks.json")
+        if eff_scope == "global"
+        else (proj_dir / ".agents" / "hooks.json")
+    )
+    hooks_data: dict[str, Any] = {}
+    if hooks_path.exists():
+        try:
+            with open(hooks_path) as f:
+                hooks_data = json.load(f)
+        except Exception:
+            hooks_data = {}
+
+    hooks_section = hooks_data.setdefault("hooks", {})
+    if not isinstance(hooks_section, dict):
+        hooks_section = {}
+        hooks_data["hooks"] = hooks_section
+
+    agy_hooks: list[tuple[str, str, str | None]] = [
+        ("SessionStart", "team_memory.hooks.platforms.antigravity.session_start", None),
+        ("PreInvocation", "team_memory.hooks.platforms.antigravity.pre_invocation", None),
+        ("PostToolUse", "team_memory.hooks.platforms.antigravity.post_tool_use", "*"),
+        ("Stop", "team_memory.hooks.platforms.antigravity.stop", None),
+    ]
+    for event, module_path, matcher in agy_hooks:
+        existing = hooks_section.get(event, [])
+        if not isinstance(existing, list):
+            existing = []
+        existing = [e for e in existing if "team_memory" not in json.dumps(e)]
+        handler = {
+            "type": "command",
+            "command": f"{venv_python} -m {module_path}",
+            "timeout": 10,
+        }
+        if matcher is not None:
+            existing.append(
+                {
+                    "matcher": matcher,
+                    "hooks": [handler],
+                }
+            )
+        else:
+            existing.append(handler)
+        hooks_section[event] = existing
+
+    hooks_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(hooks_path, "w") as f:
+        json.dump(hooks_data, f, indent=2)
+    print(f"[antigravity] ✅ 4 hooks written to {hooks_path}")
+
+
+def cmd_import(args: argparse.Namespace) -> None:
+    """Import and distill historical sessions from ChatGPT or Antigravity."""
+    import asyncio
+    from datetime import datetime
+
+    source = args.source
+    since_ts: float | None = None
+    if getattr(args, "since", None):
+        try:
+            since_ts = datetime.fromisoformat(args.since).timestamp()
+        except ValueError:
+            print(f"Error: Invalid --since date format '{args.since}' (expected YYYY-MM-DD)", file=sys.stderr)
+            sys.exit(1)
+
+    dry_run = bool(getattr(args, "dry_run", False))
+    project = getattr(args, "project", None) or ""
+
+    if source == "chatgpt":
+        if not getattr(args, "file", None):
+            print("Error: --file <path> is required when --source chatgpt is used", file=sys.stderr)
+            sys.exit(1)
+
+        from team_memory.daemon.refinement.chatgpt_importer import import_chatgpt_sessions
+
+        async def _run_chatgpt() -> None:
+            from team_memory.daemon.buffers.conversation_buffer import ConversationBuffer
+
+            if dry_run:
+                res = await import_chatgpt_sessions(
+                    file_path=args.file,
+                    project=project,
+                    since_ts=since_ts,
+                    dry_run=True,
+                )
+            else:
+                async with ConversationBuffer(db_path=_get_queue_db_path()) as buf:
+                    res = await import_chatgpt_sessions(
+                        buf=buf,
+                        file_path=args.file,
+                        project=project,
+                        since_ts=since_ts,
+                        dry_run=False,
+                    )
+            print(
+                f"[chatgpt {'dry-run' if dry_run else 'import'}] "
+                f"Total: {res['total_conversations']} | Imported: {res['imported']} | Skipped: {res['skipped']}"
+            )
+            for s in res.get("sessions", [])[:10]:
+                print(f"  - [{s['project']}] {s.get('title', s['session_id'])} (score={s.get('score')})")
+
+        asyncio.run(_run_chatgpt())
+
+    elif source == "antigravity":
+        from team_memory.daemon.observe.agy_transcript_watcher import import_agy_sessions
+
+        async def _run_agy() -> None:
+            from team_memory.daemon.buffers.conversation_buffer import ConversationBuffer
+
+            if dry_run:
+                res = await import_agy_sessions(
+                    file_path=getattr(args, "file", None),
+                    project=project,
+                    since_ts=since_ts,
+                    dry_run=True,
+                )
+            else:
+                async with ConversationBuffer(db_path=_get_queue_db_path()) as buf:
+                    res = await import_agy_sessions(
+                        buf=buf,
+                        file_path=getattr(args, "file", None),
+                        project=project,
+                        since_ts=since_ts,
+                        dry_run=False,
+                    )
+            print(
+                f"[antigravity {'dry-run' if dry_run else 'import'}] "
+                f"Discovered: {res['discovered']} | Imported: {res['imported']} | Skipped: {res['skipped']}"
+            )
+            for s in res.get("sessions", [])[:10]:
+                print(f"  - [{s['project']}] {s['session_id']} ({s['turns_count']} turns, {s['tools_count']} tools)")
+
+        asyncio.run(_run_agy())
 
 
 def cmd_archive(args: argparse.Namespace) -> None:
@@ -1347,6 +1934,43 @@ def cmd_metrics_summary(args: Any) -> None:
             print(f"  {label_key}: {val:.2f}")
 
 
+def cmd_status(args: argparse.Namespace) -> None:
+    """Show panoramic status across all TeamMemory nodes (one-shot, --trace, or --watch)."""
+    import asyncio
+
+    from team_memory.daemon.observe.status_monitor import run_status_monitor
+
+    watch = bool(getattr(args, "watch", False))
+    interval = float(getattr(args, "interval", 2.0))
+    as_json = bool(getattr(args, "json", False))
+    days = int(getattr(args, "days", 7))
+    server_url = getattr(args, "server_url", None)
+    daemon_url = getattr(args, "daemon_url", None)
+    db_path = getattr(args, "db_path", None)
+    trace_target = getattr(args, "trace", None) or getattr(args, "target", None)
+    no_interactive = bool(getattr(args, "no_interactive", False))
+    interactive = False if no_interactive else None
+    limit = int(getattr(args, "limit", 12) or 12)
+
+    exit_code = asyncio.run(
+        run_status_monitor(
+            watch=watch,
+            interval=interval,
+            as_json=as_json,
+            days=days,
+            limit=limit,
+            server_url=server_url,
+            daemon_url=daemon_url,
+            db_path=db_path,
+            trace_target=trace_target,
+            interactive=interactive,
+        )
+    )
+    if exit_code != 0 and not watch:
+        sys.exit(exit_code)
+
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="tm-cli",
@@ -1488,11 +2112,31 @@ def main() -> None:
     p_proj_list.set_defaults(func=cmd_project_list)
 
     # ── setup ──────────────────────────────────────────────────
-    p_setup = sub.add_parser("setup", help="Configure AI client hooks / 配置 AI 客户端 hooks")
+    p_setup = sub.add_parser("setup", help="Configure AI client MCP & hooks / 配置 AI 客户端 MCP 与 hooks")
     p_setup.add_argument(
         "--platform",
-        choices=["claude-code", "cursor", "hermes", "all"],
+        choices=["claude-code", "cursor", "antigravity", "windsurf", "codex", "hermes", "all"],
         help="Which platform to configure / 配置哪个平台 (omit for interactive wizard)",
+    )
+    p_setup.add_argument(
+        "--scope",
+        choices=["global", "project", "both"],
+        default=None,
+        help="Configuration scope: global (~/.xxx) or project (<cwd>/.xxx) / 配置范围：全局或单项目",
+    )
+    p_setup.add_argument(
+        "--target",
+        choices=["all", "mcp", "hooks"],
+        default="all",
+        help="Configure MCP server, hooks, or both (default: all) / 配置目标：mcp、hooks 或 all",
+    )
+    p_setup.add_argument(
+        "--project-dir",
+        help="Target project directory when --scope project/both (default: cwd) / 目标项目目录",
+    )
+    p_setup.add_argument(
+        "--project",
+        help="Override TEAM_MEMORY_PROJECT in project MCP config / 覆盖单项目 MCP 中的项目名",
     )
     p_setup.add_argument(
         "--check",
@@ -1502,7 +2146,7 @@ def main() -> None:
     p_setup.add_argument(
         "--uninstall",
         action="store_true",
-        help="Remove TM hooks instead of adding / 移除而非添加 TM hooks",
+        help="Remove TM MCP & hooks instead of adding / 移除而非添加 TM MCP 与 hooks",
     )
     p_setup.add_argument(
         "--non-interactive",
@@ -1518,6 +2162,123 @@ def main() -> None:
         help="TM API key (for wizard) / API 密钥（向导用）",
     )
     p_setup.set_defaults(func=cmd_setup)
+
+    # ── import ──────────────────────────────────────────────────
+    p_import = sub.add_parser("import", help="Import historical sessions (ChatGPT / Antigravity)")
+    p_import.add_argument(
+        "--source",
+        required=True,
+        choices=["chatgpt", "antigravity"],
+        help="Session source platform",
+    )
+    p_import.add_argument(
+        "--file",
+        help="Path to conversations.json/.zip (ChatGPT) or brain dir (Antigravity)",
+    )
+    p_import.add_argument(
+        "--project",
+        help="Default project scope when auto-inference falls back",
+    )
+    p_import.add_argument(
+        "--since",
+        help="Only import sessions created since YYYY-MM-DD",
+    )
+    p_import.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview session filtering and segmentation without writing",
+    )
+    p_import.set_defaults(func=cmd_import)
+
+    # ── status & watch ──────────────────────────────────────────
+    p_status = sub.add_parser(
+        "status",
+        help="Show panoramic runtime status & recent recall pipeline traces / 全景查看 TM 运行状态与召回全链路追踪",
+    )
+    p_status.add_argument(
+        "target",
+        nargs="?",
+        help="Optional recall index (e.g. 1) or Log ID to inspect recall trace / 输入召回序号或 Log ID",
+    )
+    p_status.add_argument(
+        "-t",
+        "--trace",
+        help="Inspect full recall pipeline trace for index (1-N) or Log ID / 打印完整召回链路图",
+    )
+    p_status.add_argument(
+        "-w",
+        "--watch",
+        action="store_true",
+        help="Continuously refresh status in terminal / 持续刷新观察状态 (Ctrl+C 退出)",
+    )
+    p_status.add_argument(
+        "-i",
+        "--interval",
+        type=float,
+        default=2.0,
+        help="Refresh interval in seconds when --watch is enabled (default: 2.0)",
+    )
+    p_status.add_argument(
+        "--json",
+        action="store_true",
+        help="Output machine-readable JSON snapshot or trace",
+    )
+    p_status.add_argument(
+        "--no-interactive",
+        action="store_true",
+        help="Disable interactive recall selection prompt in TTY / 禁用终端交互式选择提示",
+    )
+    p_status.add_argument(
+        "-n",
+        "--limit",
+        type=int,
+        default=12,
+        help="Number of recent recalls to display in list (default: 12, e.g. -n 30) / 展示最近召回条数",
+    )
+    p_status.add_argument(
+        "--days",
+        type=int,
+        default=7,
+        help="Time window in days for search/faithfulness telemetry (default: 7)",
+    )
+    p_status.add_argument("--server-url", help="Override Core Server URL (default: http://localhost:9111)")
+    p_status.add_argument("--daemon-url", help="Override TM Daemon URL (default: http://127.0.0.1:3901)")
+    p_status.add_argument("--db-path", help="Override local SQLite drafts.db path")
+    p_status.set_defaults(func=cmd_status)
+
+    p_watch = sub.add_parser(
+        "watch",
+        help="Continuously monitor TM runtime status in terminal / 命令行实时持续监控面板 (status --watch 快捷方式)",
+    )
+    p_watch.add_argument(
+        "-i",
+        "--interval",
+        type=float,
+        default=2.0,
+        help="Refresh interval in seconds (default: 2.0)",
+    )
+    p_watch.add_argument(
+        "--json",
+        action="store_true",
+        help="Output JSON Lines on each refresh tick",
+    )
+    p_watch.add_argument(
+        "-n",
+        "--limit",
+        type=int,
+        default=12,
+        help="Number of recent recalls to display in list (default: 12)",
+    )
+    p_watch.add_argument(
+        "--days",
+        type=int,
+        default=7,
+        help="Time window in days for search/faithfulness telemetry (default: 7)",
+    )
+    p_watch.add_argument("--server-url", help="Override Core Server URL")
+    p_watch.add_argument("--daemon-url", help="Override TM Daemon URL")
+    p_watch.add_argument("--db-path", help="Override local SQLite drafts.db path")
+    p_watch.set_defaults(func=cmd_status, watch=True)
 
     args = parser.parse_args()
     args.func(args)

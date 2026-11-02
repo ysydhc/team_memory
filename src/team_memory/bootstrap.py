@@ -538,7 +538,7 @@ def _register_entity_extraction(
 
         extract_llm_config = LLMConfig(
             provider="generic",
-            model=getattr(ee_cfg, "model", "DeepSeek-V3"),
+            model=getattr(ee_cfg, "model", "DeepSeek-V4-Flash"),
             base_url=getattr(ee_cfg, "base_url", "http://localhost:4000/v1"),
             api_key=api_key,
         )

@@ -7,7 +7,7 @@ with mocked database sessions.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -125,6 +125,71 @@ class TestMemoryJanitor:
         assert "purge_days" in config
         assert "draft_expiry_days" in config
         assert "personal_memory_days" in config
+
+    def test_default_config_auto_soft_delete_enabled(self):
+        """JanitorConfig enables auto_soft_delete_outdated by default."""
+        cfg = JanitorConfig()
+        assert cfg.auto_soft_delete_outdated is True
+
+    @pytest.mark.asyncio
+    async def test_run_score_decay_continues_after_previous_scoring(self):
+        """Experiences past protection period continue decaying on subsequent days."""
+        now = _utcnow()
+        exp = MagicMock()
+        exp.id = "exp-decay-1"
+        exp.created_at = now - timedelta(days=25)
+        exp.last_scored_at = now - timedelta(days=2)
+        exp.quality_score = 10.0
+        exp.quality_tier = "Outdated"
+
+        j = MemoryJanitor(db_url="sqlite+aiosqlite://", config=JanitorConfig())
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [exp]
+        mock_result = MagicMock()
+        mock_result.scalars.return_value = mock_scalars
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = mock_result
+        mock_session.commit = AsyncMock()
+
+        @asynccontextmanager
+        async def _fake_session():
+            yield mock_session
+
+        j._session = _fake_session
+        result = await j.run_score_decay()
+
+        assert result["updated_count"] == 1
+        assert exp.quality_score == 9.0
+        assert exp.quality_tier == "Outdated"
+
+    @pytest.mark.asyncio
+    async def test_sweep_outdated_auto_soft_delete_marks_deleted(self):
+        """sweep_outdated with auto_soft_delete=True marks items as deleted."""
+        exp = MagicMock()
+        exp.id = "exp-outdated-1"
+        exp.is_deleted = False
+        exp.deleted_at = None
+
+        j = MemoryJanitor(db_url="sqlite+aiosqlite://", config=JanitorConfig())
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [exp]
+        mock_result = MagicMock()
+        mock_result.scalars.return_value = mock_scalars
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = mock_result
+        mock_session.commit = AsyncMock()
+
+        @asynccontextmanager
+        async def _fake_session():
+            yield mock_session
+
+        j._session = _fake_session
+        result = await j.sweep_outdated(auto_soft_delete=True)
+
+        assert result["found_count"] == 1
+        assert result["deleted_count"] == 1
+        assert exp.is_deleted is True
+        assert exp.deleted_at is not None
 
 
 class TestMemoryJanitorIntegration:

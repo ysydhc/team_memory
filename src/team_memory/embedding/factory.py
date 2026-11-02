@@ -20,7 +20,7 @@ def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
     provider = cfg.provider
 
     def _try_openai() -> EmbeddingProvider | None:
-        api_key = cfg.openai.api_key or os.environ.get("OPENAI_API_KEY", "")
+        api_key = cfg.openai.resolved_api_key or os.environ.get("OPENAI_API_KEY", "")
         if api_key:
             from team_memory.embedding.openai_provider import OpenAIEmbedding
 
@@ -64,7 +64,12 @@ def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
         try:
             from team_memory.embedding.ollama_provider import OllamaEmbedding  # type: ignore[import]
 
-            return OllamaEmbedding(cfg=ollama_cfg)  # type: ignore[arg-type]
+            sub_cfg = getattr(ollama_cfg, "ollama", None) or ollama_cfg
+            return OllamaEmbedding(
+                model=getattr(sub_cfg, "model", "qwen3-embedding:0.6b"),
+                dim=getattr(sub_cfg, "dimension", 1024),
+                base_url=getattr(sub_cfg, "base_url", "http://localhost:11434"),
+            )
         except Exception:
             return None
 

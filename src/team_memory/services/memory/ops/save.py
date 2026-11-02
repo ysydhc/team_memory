@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import sys
 
 from team_memory.storage.database import get_session
 from team_memory.utils.project import resolve_project as _resolve_project
 
 logger = logging.getLogger("team_memory")
+
+_bg_tasks: set[asyncio.Task] = set()
 
 
 async def _try_extract_and_save_personal_memory(
@@ -34,11 +38,17 @@ async def _try_extract_and_save_personal_memory(
             len(conversation or ""),
             user,
         )
-        items = await parse_personal_memory(conversation, llm_config=settings.llm, timeout=25.0)
+        items = await parse_personal_memory(
+            conversation, llm_config=settings.llm, timeout=25.0
+        )
         if not items:
-            logger.info("personal_memory: no rows to save — LLM returned no preference items")
+            logger.info(
+                "personal_memory: no rows to save — LLM returned no preference items"
+            )
             return
-        pm_svc = PersonalMemoryService(embedding_provider=embedding_provider, db_url=db_url)
+        pm_svc = PersonalMemoryService(
+            embedding_provider=embedding_provider, db_url=db_url
+        )
         n_static = 0
         n_dynamic = 0
         for item in items:
@@ -69,6 +79,9 @@ async def _try_extract_and_save_personal_memory(
             e,
             exc_info=os.environ.get("TEAM_MEMORY_DEBUG", "0") == "1",
         )
+
+
+_ORIG_TRY_EXTRACT = _try_extract_and_save_personal_memory
 
 
 async def _save_from_content(
@@ -104,7 +117,7 @@ async def _save_from_content(
         return {
             "error": True,
             "message": f"Failed to parse content: {e}",
-            "code": "embedding_failed",
+            "code": "llm_parse_failed",
         }
 
     extracted_tags = parsed.get("tags", [])
@@ -135,18 +148,32 @@ async def _save_from_content(
 
     if result.get("status") == "duplicate_detected":
         return {
-            "message": (f"Found {len(result['candidates'])} similar experiences. The knowledge may already exist."),
+            "message": (
+                f"Found {len(result['candidates'])} similar experiences. The knowledge may already exist."
+            ),
             "duplicate_detected": True,
             "data": {"candidates": result["candidates"]},
         }
 
-    await _try_extract_and_save_personal_memory(
-        content,
-        user,
-        settings,
-        embedding_provider=embedding_provider,
-        db_url=db_url,
+    _ops_mod = sys.modules.get("team_memory.services.memory.memory_operations")
+    _facade_fn = getattr(_ops_mod, "_try_extract_and_save_personal_memory", None)
+    extract_fn = (
+        _facade_fn
+        if _facade_fn is not None and _facade_fn is not _ORIG_TRY_EXTRACT
+        else _try_extract_and_save_personal_memory
     )
+    task = asyncio.create_task(
+        extract_fn(
+            content,
+            user,
+            settings,
+            embedding_provider=embedding_provider,
+            db_url=db_url,
+        )
+    )
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+    await asyncio.sleep(0)
     return {
         "message": f"Knowledge extracted and saved: {parsed.get('title', 'Untitled')}",
         "data": {
@@ -154,6 +181,7 @@ async def _save_from_content(
             "title": result.get("title"),
             "tags": result.get("tags", []),
             "status": result.get("exp_status"),
+            "mutation_action": result.get("mutation_action", "ADD"),
         },
     }
 
@@ -174,6 +202,7 @@ async def op_save(
     experience_type: str | None = None,
     project: str | None = None,
     group_key: str | None = None,
+    resolve_mutations: bool = False,
 ) -> dict:
     """Unified write: route to direct save or LLM parse based on input."""
     resolved_project = _resolve_project(project)
@@ -196,7 +225,9 @@ async def op_save(
             if len(tag) > settings.mcp.max_tag_length:
                 return {
                     "error": True,
-                    "message": (f"Tag too long (max {settings.mcp.max_tag_length} chars): {tag[:20]}..."),
+                    "message": (
+                        f"Tag too long (max {settings.mcp.max_tag_length} chars): {tag[:20]}..."
+                    ),
                     "code": "validation_error",
                 }
 
@@ -224,25 +255,30 @@ async def op_save(
     if not title or not problem:
         return {
             "error": True,
-            "message": ("Provide either: (1) title + problem for direct save, or (2) content for LLM extraction."),
+            "message": (
+                "Provide either: (1) title + problem for direct save, or (2) content for LLM extraction."
+            ),
             "code": "validation_error",
         }
 
     async with get_session(db_url) as session:
-        result = await service.save(
-            session=session,
-            title=title,
-            problem=problem,
-            solution=solution,
-            created_by=user,
-            tags=tags,
-            source="auto_extract",
-            exp_status="published",
-            visibility="project" if scope == "project" else "private",
-            experience_type=experience_type or "general",
-            project=resolved_project,
-            group_key=group_key,
-        )
+        save_kwargs: dict = {
+            "session": session,
+            "title": title,
+            "problem": problem,
+            "solution": solution,
+            "created_by": user,
+            "tags": tags,
+            "source": "auto_extract",
+            "exp_status": "published",
+            "visibility": "project" if scope == "project" else "private",
+            "experience_type": experience_type or "general",
+            "project": resolved_project,
+            "group_key": group_key,
+        }
+        if resolve_mutations:
+            save_kwargs["resolve_mutations"] = True
+        result = await service.save(**save_kwargs)
 
     if result.get("error"):
         return {
@@ -253,18 +289,25 @@ async def op_save(
 
     if result.get("status") == "duplicate_detected":
         return {
-            "message": (f"Found {len(result['candidates'])} similar experiences. The knowledge may already exist."),
+            "message": (
+                f"Found {len(result['candidates'])} similar experiences. The knowledge may already exist."
+            ),
             "duplicate_detected": True,
             "data": {"candidates": result["candidates"]},
         }
 
+    data_out: dict = {
+        "id": result.get("id"),
+        "title": result.get("title"),
+        "status": result.get("exp_status") or result.get("status"),
+        "mutation_action": result.get("mutation_action", "ADD"),
+    }
+    if result.get("superseded_id"):
+        data_out["superseded_id"] = result["superseded_id"]
+
     return {
         "message": "Knowledge saved successfully.",
-        "data": {
-            "id": result.get("id"),
-            "title": result.get("title"),
-            "status": result.get("exp_status"),
-        },
+        "data": data_out,
     }
 
 

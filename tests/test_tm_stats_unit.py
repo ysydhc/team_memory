@@ -26,6 +26,7 @@ import pytest
 from team_memory.daemon.observe.tm_stats import (
     _bar,
     _embedding_coverage,
+    _faithfulness_avg,
     _faithfulness_breakdown,
     _get_low_faithfulness_entries,
     _resolve_dsn,
@@ -241,13 +242,28 @@ class TestFaithfulnessBreakdown:
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_below_threshold(self):
-        """Count entries below threshold."""
+        """Count entries below threshold (must exclude negative error sentinels)."""
         mock_conn = AsyncMock()
         mock_conn.fetchval = AsyncMock(return_value=10)
         mock_conn.close = AsyncMock()
         with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
             result = await _faithfulness_breakdown("postgresql://test", 30, threshold=0.7, above=False)
         assert result == 10
+        sql = mock_conn.fetchval.call_args[0][0]
+        assert "rb.faithfulness_score >= 0" in sql
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_faithfulness_avg_excludes_negative_sentinels(self):
+        """Average faithfulness query must exclude negative error sentinels."""
+        mock_conn = AsyncMock()
+        mock_conn.fetchval = AsyncMock(return_value=0.65)
+        mock_conn.close = AsyncMock()
+        with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
+            result = await _faithfulness_avg("postgresql://test", 7)
+        assert result == pytest.approx(0.65)
+        sql = mock_conn.fetchval.call_args[0][0]
+        assert "rb.faithfulness_score >= 0" in sql
 
     @pytest.mark.unit
     @pytest.mark.asyncio

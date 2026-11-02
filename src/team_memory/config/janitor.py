@@ -38,8 +38,11 @@ class JanitorConfig:
     outdated_threshold: float = 0.0
     """Quality score threshold for marking experiences as outdated."""
 
-    auto_soft_delete_outdated: bool = False
+    auto_soft_delete_outdated: bool = True
     """Whether to automatically soft-delete outdated experiences."""
+
+    stale_prune_days: int = 30
+    """Days after which unreferenced (0 recall, 0 use) Bronze/Outdated experiences are soft-deleted."""
 
     purge_soft_deleted_days: int = 30
     """Days after which soft-deleted experiences are permanently purged."""
@@ -55,6 +58,9 @@ class JanitorConfig:
 
     promotion_use_count_threshold: int = 3
     """recall_count reaching this value triggers promotion."""
+
+    promotion_require_used: bool = False
+    """When True, promotion strictly requires used_count >= promotion_use_count_threshold."""
 
     promotion_group_key_threshold: int = 5
     """Same group_key reaching this count triggers promotion."""

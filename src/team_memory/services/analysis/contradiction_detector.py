@@ -75,7 +75,7 @@ async def _validate_with_llm(
     base_url = getattr(llm_config, "base_url", "http://localhost:4000/v1").rstrip("/")
     if not base_url.endswith("/v1"):
         base_url = f"{base_url}/v1"
-    model = getattr(llm_config, "model", "DeepSeek-V3")
+    model = getattr(llm_config, "model", "DeepSeek-V4-Flash")
     api_key_env = getattr(llm_config, "api_key_env", "LITELLM_MASTER_KEY")
     api_key = os.environ.get(api_key_env, "none")
     timeout = getattr(llm_config, "timeout", 30)
@@ -222,7 +222,8 @@ async def detect_contradictions(
     # Step 1: Find experience pairs sharing 2+ entities
     async with get_session(db_url) as session:
         result = await session.execute(
-            text("""
+            text(
+                """
             SELECT ee1.experience_id as exp_a,
                    ee2.experience_id as exp_b,
                    array_agg(DISTINCT e.name) as shared_entities,
@@ -235,7 +236,8 @@ async def detect_contradictions(
             HAVING count(DISTINCT e.id) >= 2
             ORDER BY entity_count DESC
             LIMIT :limit
-        """),
+        """
+            ),
             {"limit": max_pairs * 3},
         )
 
@@ -251,15 +253,20 @@ async def detect_contradictions(
         exp_ids_set.add(str(row[0]))
         exp_ids_set.add(str(row[1]))
 
-    # Fetch experience data
+    # Fetch experience data (only active, non-superseded published experiences)
     exp_data: dict[str, dict] = {}
     async with get_session(db_url) as session:
         result = await session.execute(
-            text("""
+            text(
+                """
             SELECT id, title, description, solution
             FROM experiences
-            WHERE id = ANY(:ids) AND exp_status = 'published'
-        """),
+            WHERE id = ANY(:ids)
+              AND exp_status = 'published'
+              AND is_deleted = false
+              AND valid_until IS NULL
+        """
+            ),
             {"ids": list(exp_ids_set)},
         )
         for row in result.fetchall():
@@ -332,3 +339,47 @@ async def detect_contradictions(
         pairs = await _validate_with_llm(pairs, exp_data, llm_config)
 
     return pairs
+
+
+async def resolve_contradiction(
+    session: object,
+    *,
+    old_experience_id: str,
+    new_experience_id: str,
+    reason: str = "Contradiction resolved via bi-temporal supersede",
+    actor: str = "contradiction_detector",
+) -> dict:
+    """Resolve a contradiction by superseding the older experience and expiring stale graph edges."""
+    import uuid as _uuid
+
+    from team_memory.storage.repository import ExperienceRepository
+
+    if isinstance(session, str):
+        async with get_session(session) as db_session:
+            return await resolve_contradiction(
+                db_session,
+                old_experience_id=old_experience_id,
+                new_experience_id=new_experience_id,
+                reason=reason,
+                actor=actor,
+            )
+
+    repo = ExperienceRepository(session)  # type: ignore[arg-type]
+    old_uid = _uuid.UUID(str(old_experience_id))
+    new_uid = _uuid.UUID(str(new_experience_id))
+    superseded = await repo.supersede_experience(
+        old_uid,
+        new_uid,
+        reason=reason,
+        actor=actor,
+    )
+    if superseded is None:
+        return {"resolved": False, "old_id": str(old_experience_id), "new_id": str(new_experience_id)}
+    return {
+        "resolved": True,
+        "old_id": str(old_experience_id),
+        "new_id": str(new_experience_id),
+        "valid_until": superseded.valid_until.isoformat() if superseded.valid_until else None,
+        "reason": reason,
+    }
+

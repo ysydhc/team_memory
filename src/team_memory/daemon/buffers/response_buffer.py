@@ -46,9 +46,30 @@ class ResponseBuffer:
     ) -> str | None:
         """Add an entry to the buffer. Returns the buffer entry ID.
 
-        Skips insertion if search_log_id already exists (dedup).
+        Skips insertion when:
+          - there are no retrieval results (nothing to evaluate usage against —
+            these are the bulk of the noise: meta-chat and log pastes that
+            matched nothing), or
+          - the query is rule-level noise (slash command / test cmd /
+            confirmation), or
+          - search_log_id already exists (dedup).
+
+        Faithfulness only makes sense for "real query that DID recall something",
+        so gating here keeps non-retrieval traffic out of the buffer entirely.
         """
         try:
+            # Gate 1: no results → not a judgeable recall.
+            if not result_ids:
+                logger.debug("no result_ids, not buffering: %s", (query or "")[:40])
+                return None
+
+            # Gate 2: obvious rule-level noise.
+            from team_memory.daemon.refinement.query_noise import classify_noise_rule
+
+            if classify_noise_rule(query) is not None:
+                logger.debug("query is noise, not buffering: %s", (query or "")[:40])
+                return None
+
             # Dedup: skip if search_log_id already buffered
             if search_log_id and await self.has_search_log(search_log_id):
                 logger.debug("search_log %s already buffered, skipping", search_log_id[:8])
@@ -142,7 +163,7 @@ class ResponseBuffer:
                     WHERE rb.evaluated = FALSE
                       AND sl.is_noise IS NOT TRUE
                       AND NOT (char_length(rb.query) < 12 AND rb.query !~ '[A-Za-z]{4,}')
-                    ORDER BY rb.created_at ASC
+                    ORDER BY rb.created_at DESC
                     LIMIT $1
                     """,
                     limit,
@@ -203,6 +224,14 @@ class ResponseBuffer:
         as NULL and indistinguishable from genuinely unjudged rows, which
         inflated the "unjudged" count and made use-rate uninterpretable.
         """
+        if faithfulness_score < 0:
+            logger.debug(
+                "response_buffer.sync_to_search_log skipped for negative error sentinel score=%.2f entry=%s",
+                faithfulness_score,
+                entry_id,
+            )
+            return
+
         try:
             pool = await self._ensure_pool()
             async with pool.acquire() as conn:
@@ -245,7 +274,8 @@ class ResponseBuffer:
                 )
                 avg_score = await conn.fetchval(
                     "SELECT avg(faithfulness_score) FROM response_buffer "
-                    "WHERE evaluated = TRUE AND created_at > NOW() - make_interval(days => $1)",
+                    "WHERE evaluated = TRUE AND faithfulness_score >= 0 "
+                    "AND created_at > NOW() - make_interval(days => $1)",
                     days,
                 )
             return {

@@ -9,7 +9,7 @@ Usage:
     python -m team_memory.daemon.backfill.entity_backfill --dry-run
 
     # Override model
-    python -m team_memory.daemon.backfill.entity_backfill --model DeepSeek-V3
+    python -m team_memory.daemon.backfill.entity_backfill --model DeepSeek-V4-Flash
 
     # Limit batch size
     python -m team_memory.daemon.backfill.entity_backfill --limit 10

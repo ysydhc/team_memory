@@ -44,7 +44,12 @@ async def _test_litellm_models(
     if api_key:
         headers["x-api-key"] = api_key
 
-    result: dict[str, Any] = {"url": url, "status": "unknown", "models": [], "error": None}
+    result: dict[str, Any] = {
+        "url": url,
+        "status": "unknown",
+        "models": [],
+        "error": None,
+    }
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.get(url, headers=headers)
@@ -252,7 +257,7 @@ async def run_tests(args: argparse.Namespace) -> int:
 
     # Defaults
     llm_base = base_url or "http://localhost:4000/v1"
-    llm_model = model or "glm-4-flash"
+    llm_model = model or "gemini-3.6-flash"
     ollama_base = args.ollama_base or "http://127.0.0.1:11434"
     ollama_model = args.ollama_model or "qwen3-embedding:0.6b"
     web_base = args.web_base or "http://localhost:9111"
@@ -336,9 +341,21 @@ def main() -> None:
     parser.add_argument("--model", default="", help="LiteLLM model name")
     parser.add_argument("--api-key", default="", help="LiteLLM API key")
     parser.add_argument("--timeout", type=int, default=0, help="Request timeout (default: 30s)")
-    parser.add_argument("--ollama-base", default="", help="Ollama base URL (default: http://127.0.0.1:11434)")
-    parser.add_argument("--ollama-model", default="", help="Ollama embedding model (default: qwen3-embedding:0.6b)")
-    parser.add_argument("--web-base", default="", help="Web service base URL (default: http://localhost:9111)")
+    parser.add_argument(
+        "--ollama-base",
+        default="",
+        help="Ollama base URL (default: http://127.0.0.1:11434)",
+    )
+    parser.add_argument(
+        "--ollama-model",
+        default="",
+        help="Ollama embedding model (default: qwen3-embedding:0.6b)",
+    )
+    parser.add_argument(
+        "--web-base",
+        default="",
+        help="Web service base URL (default: http://localhost:9111)",
+    )
     parser.add_argument("--skip-litellm", action="store_true", help="Skip LiteLLM test")
     parser.add_argument("--skip-ollama", action="store_true", help="Skip Ollama test")
     parser.add_argument("--skip-web", action="store_true", help="Skip Web service test")

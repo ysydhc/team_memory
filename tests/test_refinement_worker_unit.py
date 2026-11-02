@@ -1019,7 +1019,7 @@ class TestQualityGateRefineOne:
 
     @pytest.mark.asyncio
     async def test_structural_check_discard_publishes_draft_but_skips_update(self):
-        """When structural check fails, draft is published but not updated with refined data."""
+        """When structural check fails, draft is NOT published to TM and local draft is marked published."""
         cfg = _make_config(quality_gate_enabled=True)
         buf = AsyncMock()
         sink = AsyncMock()
@@ -1034,8 +1034,8 @@ class TestQualityGateRefineOne:
             mock_llm.return_value = {"title": "X"}
             await worker._refine_one(draft)
 
-        # draft_publish should be called (to move draft out of draft state)
-        sink.draft_publish.assert_awaited_once_with(draft_id="exp-qg1")
+        # draft_publish should NOT be called when rejected by quality gate
+        sink.draft_publish.assert_not_awaited()
         # update_experience should NOT be called (refined data is discarded)
         sink.update_experience.assert_not_awaited()
         # Local draft should be marked published
@@ -1059,7 +1059,7 @@ class TestQualityGateRefineOne:
                 mock_score.return_value = 40
                 await worker._refine_one(draft)
 
-        sink.draft_publish.assert_awaited_once_with(draft_id="exp-qg2")
+        sink.draft_publish.assert_not_awaited()
         sink.update_experience.assert_not_awaited()
         buf.mark_published.assert_awaited_once_with("d-001")
 

@@ -1,8 +1,8 @@
 """LLM-based content parser — extracts structured experience fields from text.
 
 Shared module used by both the Web API (parse-document/parse-url endpoints)
-and the MCP server (tm_learn tool). Calls an Ollama-compatible LLM to parse
-free-form text into structured experience fields.
+and the MCP server (tm_learn tool). Calls an OpenAI-compatible or Ollama
+chat API to parse free-form text into structured experience fields.
 
 Prompt loading order (progressive complexity):
   1. Custom file in prompt_dir (if configured)
@@ -311,7 +311,11 @@ async def call_llm_openai(
     Raises:
         LLMParseError: On connection, timeout, or HTTP errors.
     """
-    api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+    api_key = (
+        api_key
+        or os.environ.get("LITELLM_MASTER_KEY", "")
+        or os.environ.get("OPENAI_API_KEY", "")
+    )
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["x-api-key"] = api_key
@@ -375,7 +379,9 @@ async def parse_content_openai(
     from team_memory.schemas import CATEGORIES, EXPERIENCE_TYPES, SEVERITY_LEVELS
 
     system_prompt = (
-        _BUILTIN_PARSE_SINGLE.replace("{{experience_types}}", ", ".join(EXPERIENCE_TYPES))
+        _BUILTIN_PARSE_SINGLE.replace(
+            "{{experience_types}}", ", ".join(EXPERIENCE_TYPES)
+        )
         .replace("{{severity_levels}}", ", ".join(SEVERITY_LEVELS))
         .replace("{{categories}}", ", ".join(CATEGORIES))
     )
@@ -399,6 +405,82 @@ async def parse_content_openai(
     return _normalize_single(parsed)
 
 
+def _coerce_str(value: object, default: str = "") -> str:
+    """Return value if it is a str, else default (avoids MagicMock truthiness)."""
+    return value if isinstance(value, str) else default
+
+
+def _llm_connection(llm_config: "LLMConfig | None") -> tuple[str, str, str, str]:
+    """Resolve model, base_url, api_key, provider from LLMConfig."""
+    model = "DeepSeek-V4-Flash"
+    base_url = "http://localhost:4000/v1"
+    api_key = ""
+    provider = "generic"
+    if llm_config is not None:
+        model = _coerce_str(getattr(llm_config, "model", None), model) or model
+        base_url = (
+            _coerce_str(getattr(llm_config, "base_url", None), base_url) or base_url
+        )
+        api_key = _coerce_str(getattr(llm_config, "api_key", None), "")
+        provider = _coerce_str(getattr(llm_config, "provider", None), "")
+    return model, base_url, api_key, provider
+
+
+def _use_openai_compat(provider: str, base_url: str) -> bool:
+    """True when endpoint should be OpenAI-compatible /chat/completions."""
+    base = base_url.rstrip("/")
+    return provider in ("generic", "openai", "litellm") or base.endswith("/v1")
+
+
+async def _chat_completion_text(
+    messages: list[dict[str, str]],
+    *,
+    model: str,
+    base_url: str,
+    api_key: str = "",
+    provider: str = "",
+    timeout: float = 120.0,
+    temperature: float = 0.3,
+) -> str:
+    """Chat completion via OpenAI-compat or legacy Ollama /api/chat."""
+    if _use_openai_compat(provider, base_url):
+        return await call_llm_openai(
+            messages,
+            model=model,
+            base_url=base_url,
+            api_key=api_key or None,
+            timeout=timeout,
+            temperature=temperature,
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                f"{base_url.rstrip('/')}/api/chat",
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "stream": False,
+                    "options": {"temperature": temperature},
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.ConnectError:
+        raise LLMParseError(
+            f"Cannot connect to LLM at {base_url}. Make sure the service is running."
+        )
+    except httpx.TimeoutException:
+        raise LLMParseError("LLM call timed out") from None
+    except httpx.HTTPStatusError as e:
+        raise LLMParseError(f"LLM API error: {e.response.text[:200]}")
+
+    llm_text = data.get("message", {}).get("content", "")
+    if not llm_text:
+        raise LLMParseError("LLM returned empty response")
+    return llm_text
+
+
 async def parse_content(
     content: str,
     llm_config: "LLMConfig | None" = None,
@@ -411,7 +493,7 @@ async def parse_content(
 
     Args:
         content: Free-form text (document, conversation, etc.)
-        llm_config: LLM configuration. If None, uses default Ollama config.
+        llm_config: LLM configuration. If None, uses LiteLLM defaults.
         as_group: If True, parse as parent + children group.
         max_input_chars: Maximum input characters sent to LLM.
         quality_min_score: Minimum quality score (0-5); below this may retry.
@@ -424,54 +506,31 @@ async def parse_content(
     Raises:
         LLMParseError: If LLM connection fails or response is unparseable.
     """
-    llm_model = "gpt-oss:120b-cloud"
-    llm_base_url = "http://localhost:11434"
-    if llm_config is not None:
-        llm_model = llm_config.model
-        llm_base_url = llm_config.base_url
+    _ = (quality_min_score, quality_retry_once)  # reserved for future quality gate
+    llm_model, llm_base_url, llm_api_key, llm_provider = _llm_connection(llm_config)
 
     prompt_name = "parse_group" if as_group else "parse_single"
     system_prompt = load_prompt(prompt_name, llm_config=llm_config)
     user_content = content[:max_input_chars]
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
 
-    while True:
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                messages = [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content},
-                ]
-                resp = await client.post(
-                    f"{llm_base_url.rstrip('/')}/api/chat",
-                    json={
-                        "model": llm_model,
-                        "messages": messages,
-                        "stream": False,
-                        "options": {"temperature": 0.3},
-                    },
-                )
-                resp.raise_for_status()
-                data = resp.json()
-        except httpx.ConnectError:
-            raise LLMParseError(f"Cannot connect to Ollama at {llm_base_url}. Make sure Ollama is running.")
-        except httpx.TimeoutException:
-            raise LLMParseError("LLM call timed out") from None
-        except httpx.HTTPStatusError as e:
-            raise LLMParseError(f"Ollama API error: {e.response.text[:200]}")
+    llm_text = await _chat_completion_text(
+        messages,
+        model=llm_model,
+        base_url=llm_base_url,
+        api_key=llm_api_key,
+        provider=llm_provider,
+        timeout=120.0,
+        temperature=0.3,
+    )
+    parsed = _extract_json(llm_text)
 
-        llm_text = data.get("message", {}).get("content", "")
-        if not llm_text:
-            raise LLMParseError("LLM returned empty response")
-
-        parsed = _extract_json(llm_text)
-
-        if as_group:
-            result = _normalize_group(parsed)
-        else:
-            result = _normalize_single(parsed)
-        break
-
-    return result
+    if as_group:
+        return _normalize_group(parsed)
+    return _normalize_single(parsed)
 
 
 async def parse_personal_memory(
@@ -489,7 +548,7 @@ async def parse_personal_memory(
         List of {"content": str, "scope": "generic"|"context", "profile_kind": "static"|"dynamic",
         "context_hint": str|None}.
     """
-    llm_model = "DeepSeek-V3"
+    llm_model = "DeepSeek-V4-Flash"
     llm_base_url = "http://localhost:4000/v1"
     llm_api_key = ""
     if llm_config is not None:
@@ -535,10 +594,14 @@ async def parse_personal_memory(
             resp.raise_for_status()
             data = resp.json()
     except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as e:
-        logger.warning("Personal memory extraction failed (no block): %s", e, exc_info=True)
+        logger.warning(
+            "Personal memory extraction failed (no block): %s", e, exc_info=True
+        )
         return []
     except Exception as e:
-        logger.warning("Personal memory extraction error (no block): %s", e, exc_info=True)
+        logger.warning(
+            "Personal memory extraction error (no block): %s", e, exc_info=True
+        )
         return []
 
     # Parse response — support both OpenAI and Ollama formats
@@ -629,7 +692,9 @@ def _extract_json(llm_text: str) -> dict:
                 return json.loads(clean_text[start:end])
             except json.JSONDecodeError:
                 pass
-        raise LLMParseError(f"Failed to parse LLM response as JSON. Raw: {llm_text[:300]}")
+        raise LLMParseError(
+            f"Failed to parse LLM response as JSON. Raw: {llm_text[:300]}"
+        )
 
 
 def _normalize_single(parsed: dict) -> dict:
@@ -692,36 +757,29 @@ async def suggest_experience_type(
     Returns:
         Dict with suggested_type, confidence, reason, fallback_types.
     """
-    llm_model = "gpt-oss:120b-cloud"
-    llm_base_url = "http://localhost:11434"
-    if llm_config is not None:
-        llm_model = llm_config.model
-        llm_base_url = llm_config.base_url
+    llm_model, llm_base_url, llm_api_key, llm_provider = _llm_connection(llm_config)
 
     user_content = f"标题：{title}"
     if problem:
         user_content += f"\n问题描述：{problem}"
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{llm_base_url.rstrip('/')}/api/chat",
-                json={
-                    "model": llm_model,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": load_prompt("suggest_type", llm_config=llm_config),
-                        },
-                        {"role": "user", "content": user_content[:2000]},
-                    ],
-                    "stream": False,
-                    "options": {"temperature": 0.2},
+        llm_text = await _chat_completion_text(
+            [
+                {
+                    "role": "system",
+                    "content": load_prompt("suggest_type", llm_config=llm_config),
                 },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as e:
+                {"role": "user", "content": user_content[:2000]},
+            ],
+            model=llm_model,
+            base_url=llm_base_url,
+            api_key=llm_api_key,
+            provider=llm_provider,
+            timeout=30.0,
+            temperature=0.2,
+        )
+    except LLMParseError as e:
         logger.warning("Type suggestion LLM call failed: %s", e)
         return {
             "suggested_type": "general",
@@ -730,7 +788,6 @@ async def suggest_experience_type(
             "fallback_types": [],
         }
 
-    llm_text = data.get("message", {}).get("content", "")
     if not llm_text:
         return {
             "suggested_type": "general",
@@ -763,7 +820,9 @@ async def suggest_experience_type(
     fallbacks = parsed.get("fallback_types", [])
     if not isinstance(fallbacks, list):
         fallbacks = []
-    fallbacks = [str(f).strip() for f in fallbacks if str(f).strip() in EXPERIENCE_TYPES][:2]
+    fallbacks = [
+        str(f).strip() for f in fallbacks if str(f).strip() in EXPERIENCE_TYPES
+    ][:2]
 
     return {
         "suggested_type": suggested,
@@ -799,41 +858,25 @@ async def generate_summary(
     Raises:
         LLMParseError: If LLM connection fails.
     """
-    llm_model = "gpt-oss:120b-cloud"
-    llm_base_url = "http://localhost:11434"
-    if llm_config is not None:
-        if hasattr(llm_config, "model"):
-            llm_model = llm_config.model
-        if hasattr(llm_config, "base_url"):
-            llm_base_url = llm_config.base_url
+    llm_model, llm_base_url, llm_api_key, llm_provider = _llm_connection(llm_config)
 
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{llm_base_url.rstrip('/')}/api/chat",
-                json={
-                    "model": llm_model,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": load_prompt("summary", llm_config=llm_config),
-                        },
-                        {"role": "user", "content": content[:max_input_chars]},
-                    ],
-                    "stream": False,
-                    "options": {"temperature": 0.2},
+    summary = (
+        await _chat_completion_text(
+            [
+                {
+                    "role": "system",
+                    "content": load_prompt("summary", llm_config=llm_config),
                 },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-    except httpx.ConnectError:
-        raise LLMParseError(f"Cannot connect to Ollama at {llm_base_url}. Make sure Ollama is running.")
-    except httpx.TimeoutException:
-        raise LLMParseError("LLM call timed out") from None
-    except httpx.HTTPStatusError as e:
-        raise LLMParseError(f"Ollama API error: {e.response.text[:200]}")
-
-    summary = data.get("message", {}).get("content", "").strip()
+                {"role": "user", "content": content[:max_input_chars]},
+            ],
+            model=llm_model,
+            base_url=llm_base_url,
+            api_key=llm_api_key,
+            provider=llm_provider,
+            timeout=60.0,
+            temperature=0.2,
+        )
+    ).strip()
     if not summary:
         raise LLMParseError("LLM returned empty summary")
 

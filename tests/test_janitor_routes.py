@@ -8,8 +8,10 @@ import pytest
 from fastapi import HTTPException
 
 from team_memory.auth.provider import User
+from team_memory.config.janitor import JanitorConfig
 from team_memory.web.routes.janitor import (
     get_janitor_status,
+    router,
     run_janitor,
 )
 
@@ -116,3 +118,26 @@ class TestJanitorRoutes:
         assert result["janitor_available"] is False
         assert result["scheduler_available"] is False
         assert result["scheduler_running"] is False
+
+    def test_route_paths_no_double_api_v1_prefix(self):
+        """Routes should not repeat /api/v1 prefix since v1_router adds it."""
+        paths = {route.path for route in router.routes}
+        assert "/janitor/run" in paths
+        assert "/janitor/status" in paths
+        assert "/experiences/outdated" in paths
+
+    @pytest.mark.asyncio
+    async def test_get_janitor_status_with_janitor_config_dataclass(
+        self, admin_user, mock_context, monkeypatch
+    ):
+        """Status route reads interval_hours and enabled from JanitorConfig."""
+        monkeypatch.setattr("team_memory.web.routes.janitor.get_context", lambda: mock_context)
+        cfg = JanitorConfig(interval_hours=12, enabled=True)
+        mock_context.janitor_scheduler.is_running.return_value = True
+        mock_context.janitor_scheduler._config = cfg
+        mock_context.janitor._config = cfg
+
+        result = await get_janitor_status(user=admin_user)
+        assert result["config"]["interval_hours"] == 12
+        assert result["config"]["enabled"] is True
+        assert result["janitor_config"]["auto_soft_delete_outdated"] is True

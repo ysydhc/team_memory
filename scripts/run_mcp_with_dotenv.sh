@@ -13,10 +13,20 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
+_CALLER_TM_PROJECT="${TEAM_MEMORY_PROJECT:-}"
+_CALLER_TM_API_KEY="${TEAM_MEMORY_API_KEY:-}"
+
 set -a
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 set +a
+
+if [ -n "$_CALLER_TM_PROJECT" ]; then
+  export TEAM_MEMORY_PROJECT="$_CALLER_TM_PROJECT"
+fi
+if [ -n "$_CALLER_TM_API_KEY" ]; then
+  export TEAM_MEMORY_API_KEY="$_CALLER_TM_API_KEY"
+fi
 
 export PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
 

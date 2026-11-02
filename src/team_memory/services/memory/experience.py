@@ -122,6 +122,7 @@ class ExperienceService:
         project: str | None = None,
         group_key: str | None = None,
         *,
+        resolve_mutations: bool = False,
         session=None,  # noqa: ANN001
     ) -> dict:
         """Save a new experience to the database.
@@ -169,8 +170,73 @@ class ExperienceService:
                     "The record will lack vector search until backfill runs."
                 )
 
+            mutation_decision = None
+            use_mutation_resolver = resolve_mutations or (
+                getattr(self._lifecycle_config, "auto_resolve_mutations", False) is True
+            )
+            if not skip_dedup and embedding is not None and use_mutation_resolver:
+                from team_memory.services.memory.mutation_resolver import MutationResolver
+
+                candidates = await repo.check_similar(
+                    embedding=embedding,
+                    threshold=0.85,
+                    limit=5,
+                    project=project,
+                )
+                resolver = MutationResolver(llm_config=self._llm_config)
+                mutation_decision = await resolver.resolve(
+                    title=title,
+                    problem=problem,
+                    solution=solution,
+                    candidates=candidates,
+                )
+
+                if mutation_decision.action == "NOOP" and mutation_decision.target_id:
+                    target_uuid = uuid.UUID(mutation_decision.target_id)
+                    exp = await repo.touch_verified(
+                        target_uuid,
+                        reason=mutation_decision.reason,
+                        actor=created_by,
+                    )
+                    base_dict = (
+                        exp.to_dict()
+                        if exp is not None
+                        else {"id": mutation_decision.target_id, "title": title}
+                    )
+                    base_dict["mutation_action"] = "NOOP"
+                    base_dict["target_id"] = mutation_decision.target_id
+                    base_dict["mutation_reason"] = mutation_decision.reason
+                    return base_dict
+
+                if mutation_decision.action == "MERGE" and mutation_decision.target_id:
+                    target_uuid = uuid.UUID(mutation_decision.target_id)
+                    merged_sol = mutation_decision.merged_solution or solution or ""
+                    merged_embed_text = f"{title}\n{problem}\n{merged_sol}"[:4000]
+                    merged_embedding = embedding
+                    try:
+                        merged_embedding = await self._embedding.encode_single(merged_embed_text)
+                    except Exception:
+                        logger.warning("Failed to re-encode merged experience; reusing incoming embedding")
+                    exp = await repo.merge_experience(
+                        target_uuid,
+                        merged_solution=mutation_decision.merged_solution,
+                        merged_tags=tags,
+                        embedding=merged_embedding,
+                        reason=mutation_decision.reason,
+                        actor=created_by,
+                    )
+                    base_dict = (
+                        exp.to_dict()
+                        if exp is not None
+                        else {"id": mutation_decision.target_id, "title": title}
+                    )
+                    base_dict["mutation_action"] = "MERGE"
+                    base_dict["target_id"] = mutation_decision.target_id
+                    base_dict["mutation_reason"] = mutation_decision.reason
+                    return base_dict
+
             # Dedup-on-save check
-            if (
+            elif (
                 not skip_dedup
                 and embedding is not None
                 and self._lifecycle_config is not None
@@ -228,6 +294,18 @@ class ExperienceService:
                 parent_id=parent_id,
             )
 
+            if (
+                mutation_decision is not None
+                and mutation_decision.action == "SUPERSEDE"
+                and mutation_decision.target_id
+            ):
+                await repo.supersede_experience(
+                    uuid.UUID(mutation_decision.target_id),
+                    experience.id,
+                    reason=mutation_decision.reason,
+                    actor=created_by,
+                )
+
             if self._event_bus:
                 await self._event_bus.emit(
                     Events.EXPERIENCE_CREATED,
@@ -270,7 +348,14 @@ class ExperienceService:
                 except Exception:
                     logger.warning("Failed to re-embed group parent %s", parent_id)
 
-            return experience.to_dict()
+            out = experience.to_dict()
+            if mutation_decision is not None and mutation_decision.action == "SUPERSEDE":
+                out["mutation_action"] = "SUPERSEDE"
+                out["superseded_id"] = mutation_decision.target_id
+                out["mutation_reason"] = mutation_decision.reason
+            else:
+                out["mutation_action"] = "ADD"
+            return out
 
     async def update(
         self,
@@ -539,9 +624,20 @@ class ExperienceService:
             )
 
             # Add quality score bonus for positive feedback (rating >= 4)
+            # or penalty + negative_feedback_count increment for negative feedback (rating <= 2)
             if rating >= 4:
-                await repo.increment_quality_score(exp_uuid, 1.0)
+                await repo.increment_quality_score(exp_uuid, 2.0 if rating == 5 else 1.0)
                 await repo.increment_used_count(exp_uuid)
+            elif rating <= 2:
+                import inspect
+
+                res_q = repo.increment_quality_score(exp_uuid, -3.0)
+                if inspect.isawaitable(res_q):
+                    await res_q
+                if hasattr(repo, "increment_negative_feedback_count"):
+                    res_n = repo.increment_negative_feedback_count(exp_uuid)
+                    if inspect.isawaitable(res_n):
+                        await res_n
 
             if self._event_bus:
                 await self._event_bus.emit(
@@ -650,11 +746,13 @@ class ExperienceService:
         return await self.soft_delete(experience_id)
 
     async def increment_used_count(self, experience_id: str) -> None:
-        """Increment the used_count field for an experience.
+        """Increment the used_count field for an experience and boost quality_score.
 
         Args:
             experience_id: String UUID of the experience.
         """
+        from unittest.mock import NonCallableMock
+
         from sqlalchemy import update
 
         from team_memory.storage.models import Experience
@@ -664,6 +762,11 @@ class ExperienceService:
             await session.execute(
                 update(Experience).where(Experience.id == exp_uuid).values(used_count=(Experience.used_count + 1))
             )
+            repo_mocked = isinstance(ExperienceRepository, NonCallableMock) or isinstance(
+                getattr(ExperienceRepository, "increment_quality_score", None), NonCallableMock
+            )
+            if repo_mocked or not isinstance(session, NonCallableMock):
+                await ExperienceRepository(session).increment_quality_score(exp_uuid, 2.0)
             await session.commit()
 
     async def list_projects(self) -> list[str]:

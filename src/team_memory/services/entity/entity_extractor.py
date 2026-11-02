@@ -6,7 +6,7 @@ then upserts them into the entity graph tables.
 Design constraints:
 - Async, non-blocking: extraction failure MUST NOT affect the Experience
   publish flow.  All errors are logged and swallowed.
-- Uses LLM (glm-4-flash via LiteLLM / generic OpenAI-compat endpoint)
+- Uses LLM (DeepSeek-V4-Flash via LiteLLM / generic OpenAI-compat endpoint)
   with structured JSON output.
 - Rule-based extraction for query path (see entity_search.py).
 """
@@ -34,7 +34,15 @@ logger = logging.getLogger("team_memory.entity_extractor")
 # Data classes
 # --------------------------------------------------------------------------- #
 
-VALID_ENTITY_TYPES = {"tool", "concept", "person", "project", "config", "error", "service"}
+VALID_ENTITY_TYPES = {
+    "tool",
+    "concept",
+    "person",
+    "project",
+    "config",
+    "error",
+    "service",
+}
 VALID_RELATION_TYPES = {
     "depends_on",
     "configures",
@@ -267,6 +275,7 @@ async def _upsert_relationship(
             constraint="uq_relationship_src_tgt_type",
             set_={
                 "weight": text("relationships.weight + 0.5"),
+                "valid_until": None,
                 "evidence": text(
                     f"(SELECT jsonb_agg(DISTINCT e) FROM jsonb_array_elements_text("
                     f"COALESCE(relationships.evidence, '[]'::jsonb) || "

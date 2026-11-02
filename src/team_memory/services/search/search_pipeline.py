@@ -73,6 +73,65 @@ class SearchRequest:
     top_k_children: int = 3
     project: str | None = None
     include_archives: bool = False
+    include_promoted: bool = False
+    include_superseded: bool = False
+    session_id: str | None = None
+    fallback_projects: list[str] | None = None
+
+
+SUPERSESSION_PENALTY: float = 0.3
+
+
+def _apply_bi_temporal_annotations(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Apply 0.3x down-weighting and explicit [已演进/Superseded] markers to superseded experiences."""
+    any_penalized = False
+    for d in results:
+        if not isinstance(d, dict):
+            continue
+        valid_until = d.get("valid_until")
+        sup_by = d.get("superseded_by_id")
+        if valid_until is not None or sup_by is not None:
+            if not d.get("_superseded_penalized"):
+                if "score" in d and d["score"] is not None:
+                    d["score"] = round(float(d["score"]) * SUPERSESSION_PENALTY, 4)
+                if "similarity" in d and d["similarity"] is not None:
+                    d["similarity"] = round(float(d["similarity"]) * SUPERSESSION_PENALTY, 4)
+                d["_superseded_penalized"] = True
+                any_penalized = True
+            d["is_superseded"] = True
+            sup_short = str(sup_by)[:8] if sup_by else ""
+            marker = (
+                f"[已演进/Superseded by tm://exp/{sup_short}]"
+                if sup_short
+                else "[已演进/Superseded]"
+            )
+            d["superseded_marker"] = marker
+            title = str(d.get("title") or "")
+            if not title.startswith("[已演进"):
+                d["title"] = f"{marker} {title}".strip()
+
+        mut_hist = d.get("mutation_history")
+        if isinstance(mut_hist, list):
+            for entry in reversed(mut_hist):
+                if isinstance(entry, dict) and (
+                    entry.get("action") == "SUPERSEDE_REPLACES"
+                    or entry.get("type") == "SUPERSEDE_REPLACES"
+                ):
+                    old_id = (
+                        entry.get("supersedes_id")
+                        or entry.get("old_id")
+                        or entry.get("replaces_id")
+                    )
+                    if old_id:
+                        d["supersedes_id"] = str(old_id)
+                        d["evolution_marker"] = f"[已演进自 tm://exp/{str(old_id)[:8]}]"
+                        break
+
+        d.pop("_superseded_penalized", None)
+
+    if any_penalized:
+        results.sort(key=lambda x: float(x.get("score", 0.0)), reverse=True)
+    return results
 
 
 @dataclass
@@ -99,6 +158,7 @@ class SearchPipelineResult:
     cached: bool = False
     duration_ms: int = 0
     stage_metrics: dict[str, int] = field(default_factory=dict)
+    stage_counts: dict[str, int] = field(default_factory=dict)
 
 
 def coerce_cached_search_pipeline_result(raw: SearchPipelineResult | Mapping[str, Any]) -> SearchPipelineResult:
@@ -114,6 +174,10 @@ def coerce_cached_search_pipeline_result(raw: SearchPipelineResult | Mapping[str
     if not isinstance(sm, dict):
         sm = {}
     stage_metrics = {str(k): int(v) for k, v in sm.items()}
+    sc = raw.get("stage_counts") or {}
+    if not isinstance(sc, dict):
+        sc = {}
+    stage_counts = {str(k): int(v) for k, v in sc.items()}
     return SearchPipelineResult(
         results=list(results),
         total_candidates=int(raw.get("total_candidates", 0)),
@@ -122,6 +186,7 @@ def coerce_cached_search_pipeline_result(raw: SearchPipelineResult | Mapping[str
         cached=bool(raw.get("cached", False)),
         duration_ms=int(raw.get("duration_ms", 0)),
         stage_metrics=stage_metrics,
+        stage_counts=stage_counts,
     )
 
 
@@ -187,6 +252,7 @@ class SearchPipeline:
         """Execute the full search pipeline."""
         start = time.monotonic()
         stage_metrics: dict[str, int] = {}
+        stage_counts: dict[str, int] = {}
         repo = ExperienceRepository(session)
 
         # Stage 1: Cache check
@@ -236,39 +302,66 @@ class SearchPipeline:
 
         # Stage 1.5: Entity-graph query enrichment (rule-based, best-effort)
         # Extracts entity names from query and appends them for better recall.
-        try:
-            from team_memory.services.entity.entity_search import extract_entities_from_query
+        enable_graph = getattr(self._search_config, "enable_graph", True) is not False
+        entity_names: list[str] = []
+        if enable_graph:
+            try:
+                from team_memory.services.entity.entity_search import (
+                    extract_entities_from_query,
+                    get_cached_entity_lexicon,
+                )
 
-            entity_names = extract_entities_from_query(retrieval_query)
-            if entity_names and self._db_url:
-                retrieval_query = retrieval_query.rstrip()
-                # Append entity names as additional search terms (deduplicated)
-                extra = " ".join(n for n in entity_names if n.lower() not in retrieval_query.lower())
-                if extra:
-                    retrieval_query = f"{retrieval_query} {extra}"
-                retrieval_query = retrieval_query[:2000]
-        except Exception:
-            pass  # entity enrichment must never break search
+                db_lexicon: set[str] = set()
+                if self._db_url and "test_db" not in self._db_url:
+                    try:
+                        db_lexicon = await get_cached_entity_lexicon(self._db_url)
+                    except Exception:
+                        db_lexicon = set()
+                entity_names = extract_entities_from_query(retrieval_query, lexicon=db_lexicon or None)
+                if entity_names and self._db_url:
+                    retrieval_query = retrieval_query.rstrip()
+                    # Append entity names as additional search terms (deduplicated)
+                    extra = " ".join(n for n in entity_names[:6] if n.lower() not in retrieval_query.lower())
+                    if extra:
+                        retrieval_query = f"{retrieval_query} {extra}"
+                    retrieval_query = retrieval_query[:2000]
+            except Exception:
+                pass  # entity enrichment must never break search
 
         # Stage 1.6: Entity-graph traversal — find related experiences via the
         # entity relationship graph (PostgreSQL recursive CTE, 2 hops).
         # 使用实体关系图查找相关经验（PostgreSQL 递归 CTE，2 跳）
+        graph_weighted_hits: list[tuple[str, float]] = []
         graph_experience_ids: list[str] = []
-        if entity_names and self._db_url and request.project:
+        if enable_graph and entity_names and self._db_url:
             try:
                 from team_memory.services.entity.entity_search import (
-                    find_experience_ids_by_entities,
+                    find_weighted_experiences_by_entities,
                 )
 
-                projects = [request.project]
+                projects = [request.project] if request.project else ["default"]
                 if request.fallback_projects:
-                    projects.extend(request.fallback_projects)
-                graph_experience_ids = await find_experience_ids_by_entities(
-                    db_url=self._db_url,
-                    entity_names=entity_names,
-                    projects=projects,
-                    max_depth=2,
-                )
+                    for fp in request.fallback_projects:
+                        if fp not in projects:
+                            projects.append(fp)
+                try:
+                    reusable_session = (
+                        session
+                        if (isinstance(AsyncSession, type) and isinstance(session, AsyncSession))
+                        else None
+                    )
+                except TypeError:
+                    reusable_session = None
+                graph_kwargs: dict[str, Any] = {
+                    "db_url": self._db_url,
+                    "entity_names": entity_names,
+                    "projects": projects,
+                    "max_depth": 2,
+                }
+                if reusable_session is not None:
+                    graph_kwargs["session"] = reusable_session
+                graph_weighted_hits = await find_weighted_experiences_by_entities(**graph_kwargs)
+                graph_experience_ids = [eid for eid, _ in graph_weighted_hits]
                 if graph_experience_ids:
                     logger.info(
                         "[GRAPH]  entity-graph found %d related experience(s) for query=%s",
@@ -300,6 +393,8 @@ class SearchPipeline:
             mode,
             retrieval_query=retrieval_query,
             effective_min_similarity=effective_min_similarity,
+            graph_weighted_hits=graph_weighted_hits,
+            stage_counts=stage_counts,
         )
         stage_metrics["retrieve_fuse_ms"] = int((time.monotonic() - stage_begin) * 1000)
         io_logger.log_internal(
@@ -312,21 +407,44 @@ class SearchPipeline:
             duration_ms=stage_metrics["retrieve_fuse_ms"],
         )
 
+        # Exclude promoted experiences before boost/adaptive-filter/truncation unless requested
+        if not getattr(request, "include_promoted", False):
+            candidates = [
+                c
+                for c in candidates
+                if (c.data.get("status") or c.data.get("exp_status", "published")) != "promoted"
+            ]
+
         # Stage 5: Exact match boost
-        candidates = self._apply_exact_match_boost(candidates, request.query)
+        if getattr(self._search_config, "enable_exact_boost", True) is not False:
+            candidates = self._apply_exact_match_boost(candidates, request.query)
 
         # Stage 5.5: Entity-graph boost — promote experiences found via graph
-        # traversal. Graph-related results get +0.15 score bonus.
-        if graph_experience_ids:
+        # traversal when not already fused via 4-way RRF in hybrid mode.
+        if graph_experience_ids and mode != "hybrid":
             graph_id_set = set(graph_experience_ids)
+            graph_score_map = {eid: float(g_score) for eid, g_score in graph_weighted_hits}
+            boosted_count = 0
             for c in candidates:
-                if c.get("id") in graph_id_set:
-                    old_score = c.get("score", 0) or 0
-                    c["score"] = old_score + 0.15
-                    logger.debug("[GRAPH]  boosted candidate %s from %.2f to %.2f", c.get("id","?")[:8], old_score, c["score"])
+                cid = c.data.get("id") or c.data.get("group_id")
+                if cid in graph_id_set:
+                    old_score = float(c.score or 0.0)
+                    g_factor = min(1.0, max(0.0, graph_score_map.get(str(cid), 1.0)))
+                    if 0.0 < old_score < 0.1:
+                        c.score = old_score * (1.0 + 0.08 * g_factor)
+                    else:
+                        c.score = old_score + 0.15 * g_factor
+                    boosted_count += 1
+                    logger.debug(
+                        "[GRAPH]  boosted candidate %s from %.4f to %.4f",
+                        str(cid)[:8],
+                        old_score,
+                        c.score,
+                    )
+            candidates.sort(key=lambda x: x.score, reverse=True)
             logger.info(
                 "[GRAPH]  boosted %d candidate(s) from graph traversal",
-                sum(1 for c in candidates if c.get("id") in graph_id_set),
+                boosted_count,
             )
 
         # Stage 5b: Popularity boost (反哺排序)
@@ -398,6 +516,8 @@ class SearchPipeline:
             d["confidence"] = item.confidence
             result_dicts.append(d)
 
+        result_dicts = _apply_bi_temporal_annotations(result_dicts)
+
         # Stage 7: Include archives when requested
         if request.include_archives and query_embedding is not None:
             archive_repo = ArchiveRepository(session)
@@ -433,6 +553,8 @@ class SearchPipeline:
                         d["archive_ids"] = archive_mapping.get(str(d.get("id", "")), [])
 
         duration_ms = int((time.monotonic() - start) * 1000)
+        stage_metrics["total_ms"] = duration_ms
+        stage_counts["final_count"] = len(result_dicts)
 
         pipeline_result = SearchPipelineResult(
             results=result_dicts,
@@ -442,6 +564,7 @@ class SearchPipeline:
             cached=False,
             duration_ms=duration_ms,
             stage_metrics=stage_metrics,
+            stage_counts=stage_counts,
         )
 
         # Stage 8: Cache store
@@ -484,6 +607,8 @@ class SearchPipeline:
         mode: str,
         retrieval_query: str | None = None,
         effective_min_similarity: float | None = None,
+        graph_weighted_hits: list[tuple[str, float]] | None = None,
+        stage_counts: dict[str, int] | None = None,
     ) -> list[SearchResultItem]:
         """Execute retrieval and RRF fusion."""
         q = (retrieval_query or request.query).strip()
@@ -491,18 +616,48 @@ class SearchPipeline:
         min_sim = effective_min_similarity if effective_min_similarity is not None else request.min_similarity
 
         if mode == "vector" and query_embedding:
-            return await self._vector_search(repo, query_embedding, over_fetch, request, min_similarity=min_sim)
+            vec_res = await self._vector_search(repo, query_embedding, over_fetch, request, min_similarity=min_sim)
+            if stage_counts is not None:
+                stage_counts["vec_count"] = len(vec_res)
+                stage_counts["fts_count"] = 0
+                stage_counts["topic_count"] = 0
+                stage_counts["graph_count"] = 0
+                stage_counts["graph_unique_added"] = 0
+                stage_counts["fused_count"] = len(vec_res)
+            return vec_res
 
         if mode == "fts":
-            return await self._fts_search(repo, q, over_fetch, request)
+            fts_res = await self._fts_search(repo, q, over_fetch, request)
+            if stage_counts is not None:
+                stage_counts["vec_count"] = 0
+                stage_counts["fts_count"] = len(fts_res)
+                stage_counts["topic_count"] = 0
+                stage_counts["graph_count"] = 0
+                stage_counts["graph_unique_added"] = 0
+                stage_counts["fused_count"] = len(fts_res)
+            return fts_res
 
-        # Hybrid mode: parallel vector + FTS + topic
+        # Hybrid mode: parallel vector + FTS + topic + graph
         if query_embedding is None:
-            return await self._fts_search(repo, q, over_fetch, request)
+            fts_res = await self._fts_search(repo, q, over_fetch, request)
+            if stage_counts is not None:
+                stage_counts["vec_count"] = 0
+                stage_counts["fts_count"] = len(fts_res)
+                stage_counts["topic_count"] = 0
+                stage_counts["graph_count"] = 0
+                stage_counts["graph_unique_added"] = 0
+                stage_counts["fused_count"] = len(fts_res)
+            return fts_res
 
+        enable_topic = getattr(self._search_config, "enable_topic", True) is not False
+        enable_graph = getattr(self._search_config, "enable_graph", True) is not False
         vector_task = self._vector_search(repo, query_embedding, over_fetch, request, min_similarity=min_sim)
         fts_task = self._fts_search(repo, q, over_fetch, request)
-        topic_task = self._topic_search(query_embedding, over_fetch, request)
+        topic_task = (
+            self._topic_search(query_embedding, over_fetch, request)
+            if enable_topic
+            else asyncio.sleep(0, result=[])
+        )
 
         vector_results, fts_results, topic_results = await asyncio.gather(
             vector_task, fts_task, topic_task, return_exceptions=True
@@ -518,7 +673,256 @@ class SearchPipeline:
             logger.warning("Topic search failed in hybrid mode: %s", topic_results, exc_info=True)
             topic_results = []
 
-        return self._rrf_fuse3(vector_results, fts_results, topic_results, over_fetch)
+        existing_by_id = {
+            str(item.data.get("id")): item.data
+            for item in (vector_results + fts_results + topic_results)
+            if isinstance(item.data, dict) and item.data.get("id")
+        }
+
+        if enable_graph:
+            try:
+                graph_results = await self._graph_search(
+                    repo,
+                    graph_weighted_hits or [],
+                    over_fetch,
+                    request,
+                    existing_by_id=existing_by_id,
+                )
+            except Exception as e:
+                logger.warning("Graph search failed in hybrid mode: %s", e, exc_info=True)
+                graph_results = []
+        else:
+            graph_results = []
+
+        non_graph_ids = {
+            item.data.get("id") or item.data.get("group_id")
+            for item in (vector_results + fts_results + topic_results)
+            if item.data.get("id") or item.data.get("group_id")
+        }
+        graph_ids = {
+            item.data.get("id") or item.data.get("group_id")
+            for item in graph_results
+            if item.data.get("id") or item.data.get("group_id")
+        }
+
+        if stage_counts is not None:
+            stage_counts["vec_count"] = len(vector_results)
+            stage_counts["fts_count"] = len(fts_results)
+            stage_counts["topic_count"] = len(topic_results)
+            stage_counts["graph_count"] = len(graph_results)
+            stage_counts["graph_unique_added"] = len(graph_ids - non_graph_ids)
+
+        if graph_results:
+            fused = self._rrf_fuse4(vector_results, fts_results, topic_results, graph_results, over_fetch)
+        else:
+            fused = self._rrf_fuse3(vector_results, fts_results, topic_results, over_fetch)
+
+        if stage_counts is not None:
+            stage_counts["fused_count"] = len(fused)
+
+        return fused
+
+    async def _graph_search(
+        self,
+        repo: ExperienceRepository,
+        graph_weighted_hits: list[tuple[str, float]],
+        limit: int,
+        request: SearchRequest,
+        *,
+        existing_by_id: dict[str, dict[str, Any]] | None = None,
+        session: AsyncSession | None = None,
+    ) -> list[SearchResultItem]:
+        """Fetch active experiences discovered via weighted entity-graph traversal."""
+        if not graph_weighted_hits:
+            return []
+
+        top_hits = graph_weighted_hits[:limit]
+        score_by_id: dict[str, float] = {}
+        ordered_ids: list[str] = []
+        for eid, g_score in top_hits:
+            eid_str = str(eid)
+            if eid_str not in score_by_id:
+                score_by_id[eid_str] = float(g_score)
+                ordered_ids.append(eid_str)
+
+        if not ordered_ids:
+            return []
+
+        fetched_map: dict[str, dict[str, Any]] = {}
+        if existing_by_id:
+            for eid_str in ordered_ids:
+                existing = existing_by_id.get(eid_str)
+                if isinstance(existing, dict) and existing:
+                    fetched_map[eid_str] = existing
+
+        missing_ids = [eid for eid in ordered_ids if eid not in fetched_map]
+        db_query_succeeded = False
+        if missing_ids:
+            repo_session = getattr(repo, "_session", None)
+            try:
+                active_session = (
+                    session
+                    if (isinstance(AsyncSession, type) and isinstance(session, AsyncSession))
+                    else (
+                        repo_session
+                        if (isinstance(AsyncSession, type) and isinstance(repo_session, AsyncSession))
+                        else None
+                    )
+                )
+            except TypeError:
+                active_session = None
+            status_clause = (
+                "exp_status IN ('published', 'promoted')"
+                if getattr(request, "include_promoted", False)
+                else "exp_status = 'published'"
+            )
+            inc_superseded = bool(getattr(request, "include_superseded", False))
+            valid_clause = "" if inc_superseded else "AND valid_until IS NULL"
+            query_sql = f"""
+                SELECT id, title, description, solution, tags, project,
+                       experience_type, exp_status, recall_count, used_count,
+                       negative_feedback_count, created_at
+                FROM experiences
+                WHERE id::text = ANY(:ids)
+                  AND {status_clause}
+                  AND is_deleted = false
+                  {valid_clause}
+                  AND coalesce(trim(title), '') <> ''
+                  AND title !~ '^(Draft [0-9a-zA-Z_-]+|Session [0-9a-zA-Z_-]+ draft|主题-.*)$'
+            """
+            if active_session is not None:
+                try:
+                    from sqlalchemy import text as sql_text
+
+                    result = await active_session.execute(
+                        sql_text(query_sql),
+                        {"ids": missing_ids},
+                    )
+                    rows = result.fetchall()
+                    if isinstance(rows, list):
+                        db_query_succeeded = True
+                        for row in rows:
+                            rid = str(row[0])
+                            fetched_map[rid] = {
+                                "id": rid,
+                                "title": row[1],
+                                "description": row[2],
+                                "solution": row[3],
+                                "tags": row[4] or [],
+                                "project": row[5],
+                                "experience_type": row[6],
+                                "status": row[7] or "published",
+                                "recall_count": row[8] or 0,
+                                "used_count": row[9] or 0,
+                                "negative_feedback_count": (row[10] or 0) if len(row) > 10 else 0,
+                                "created_at": (
+                                    row[11].isoformat()
+                                    if len(row) > 11 and row[11]
+                                    else None
+                                ),
+                            }
+                except Exception:
+                    if hasattr(active_session, "rollback"):
+                        try:
+                            await active_session.rollback()
+                        except Exception:
+                            pass
+            elif self._db_url:
+                try:
+                    from sqlalchemy import text as sql_text
+
+                    async with get_session(self._db_url) as s:
+                        result = await s.execute(
+                            sql_text(query_sql),
+                            {"ids": missing_ids},
+                        )
+                        rows = result.fetchall()
+                        if isinstance(rows, list):
+                            db_query_succeeded = True
+                            for row in rows:
+                                rid = str(row[0])
+                                fetched_map[rid] = {
+                                    "id": rid,
+                                    "title": row[1],
+                                    "description": row[2],
+                                    "solution": row[3],
+                                    "tags": row[4] or [],
+                                    "project": row[5],
+                                    "experience_type": row[6],
+                                    "status": row[7] or "published",
+                                    "recall_count": row[8] or 0,
+                                    "used_count": row[9] or 0,
+                                    "negative_feedback_count": (row[10] or 0) if len(row) > 10 else 0,
+                                    "created_at": (
+                                        row[11].isoformat()
+                                        if len(row) > 11 and row[11]
+                                        else None
+                                    ),
+                                }
+                except Exception:
+                    pass
+
+        if not db_query_succeeded and len(fetched_map) < len(ordered_ids) and hasattr(repo, "get_by_id"):
+            for eid_str in ordered_ids:
+                if eid_str in fetched_map:
+                    continue
+                try:
+                    try:
+                        lookup_id: Any = uuid.UUID(eid_str)
+                    except (ValueError, TypeError):
+                        lookup_id = eid_str
+                    exp_obj = await repo.get_by_id(lookup_id)
+                    if exp_obj is None:
+                        continue
+                    if isinstance(exp_obj, dict):
+                        d = dict(exp_obj)
+                    elif hasattr(exp_obj, "to_dict") and callable(exp_obj.to_dict):
+                        if getattr(exp_obj, "is_deleted", False) is True:
+                            continue
+                        valid_until = getattr(exp_obj, "valid_until", None)
+                        if (
+                            not getattr(request, "include_superseded", False)
+                            and valid_until is not None
+                            and not hasattr(valid_until, "_mock_name")
+                        ):
+                            continue
+                        exp_status = getattr(exp_obj, "exp_status", "published")
+                        if isinstance(exp_status, str) and exp_status not in ("published", "promoted"):
+                            continue
+                        d = exp_obj.to_dict()
+                    else:
+                        continue
+                    if isinstance(d, dict) and d.get("id"):
+                        fetched_map[str(d["id"])] = d
+                except Exception:
+                    continue
+
+        req_proj = (request.project or "").strip()
+        items: list[SearchResultItem] = []
+        for eid_str in ordered_ids:
+            data = fetched_map.get(eid_str)
+            if not data:
+                continue
+            g_score = score_by_id.get(eid_str, 0.5)
+            d_copy = dict(data)
+            exp_proj = str(d_copy.get("project") or "").strip()
+            if (
+                req_proj
+                and req_proj not in ("default", "team_memory", "*", "all")
+                and exp_proj
+                and exp_proj not in (req_proj, "default", "global")
+            ):
+                d_copy["cross_project"] = True
+            d_copy["graph_score"] = round(g_score, 4)
+            items.append(
+                SearchResultItem(
+                    data=d_copy,
+                    score=float(g_score),
+                    similarity=max(0.5, min(0.95, float(g_score))),
+                    source_type="graph",
+                )
+            )
+        return items
 
     async def _vector_search(
         self,
@@ -528,8 +932,13 @@ class SearchPipeline:
         request: SearchRequest,
         min_similarity: float | None = None,
     ) -> list[SearchResultItem]:
-        """Execute vector similarity search."""
+        """Execute vector similarity search with optional cross-project fallback."""
         min_sim = min_similarity if min_similarity is not None else request.min_similarity
+        prom_kw: dict[str, Any] = {}
+        if getattr(request, "include_promoted", False):
+            prom_kw["include_promoted"] = True
+        if getattr(request, "include_superseded", False):
+            prom_kw["include_superseded"] = True
         raw = await repo.search_by_vector(
             query_embedding=query_embedding,
             max_results=limit,
@@ -537,7 +946,34 @@ class SearchPipeline:
             tags=request.tags,
             project=request.project,
             current_user=request.current_user,
+            **prom_kw,
         )
+        best_sim = max((float(r.get("similarity", 0.0)) for r in raw), default=0.0) if raw else 0.0
+        is_default_proj = (request.project or "default") in ("default", "team_memory")
+        should_fallback = bool(request.fallback_projects) and (
+            not raw or is_default_proj or best_sim < 0.80
+        )
+        if should_fallback:
+            seen_ids = {str(r.get("id")) for r in raw if r.get("id")}
+            for fb_proj in request.fallback_projects:
+                if fb_proj == request.project:
+                    continue
+                fb_raw = await repo.search_by_vector(
+                    query_embedding=query_embedding,
+                    max_results=limit,
+                    min_similarity=min_sim,
+                    tags=request.tags,
+                    project=fb_proj,
+                    current_user=request.current_user,
+                    **prom_kw,
+                )
+                for r in fb_raw:
+                    rid = str(r.get("id", ""))
+                    if rid and rid not in seen_ids:
+                        seen_ids.add(rid)
+                        raw.append(r)
+            raw.sort(key=lambda x: float(x.get("similarity", 0.0)), reverse=True)
+            raw = raw[:limit]
         items = []
         for r in raw:
             items.append(
@@ -562,6 +998,12 @@ class SearchPipeline:
         When self._db_url is set (hybrid mode), uses a separate session to avoid
         SQLAlchemy "concurrent operations not permitted" on the same session.
         """
+        prom_kw: dict[str, Any] = {}
+        if getattr(request, "include_promoted", False):
+            prom_kw["include_promoted"] = True
+        if getattr(request, "include_superseded", False):
+            prom_kw["include_superseded"] = True
+        is_default_proj = (request.project or "default") in ("default", "team_memory")
         if self._db_url:
             async with get_session(self._db_url) as session2:
                 repo_fts = ExperienceRepository(session2)
@@ -571,7 +1013,28 @@ class SearchPipeline:
                     tags=request.tags,
                     project=request.project,
                     current_user=request.current_user,
+                    **prom_kw,
                 )
+                if request.fallback_projects and (not raw or is_default_proj):
+                    seen_ids = {str(r.get("id")) for r in raw if r.get("id")}
+                    for fb_proj in request.fallback_projects:
+                        if fb_proj == request.project:
+                            continue
+                        fb_raw = await repo_fts.search_by_fts(
+                            query_text=query_text,
+                            max_results=limit,
+                            tags=request.tags,
+                            project=fb_proj,
+                            current_user=request.current_user,
+                            **prom_kw,
+                        )
+                        for r in fb_raw:
+                            rid = str(r.get("id", ""))
+                            if rid and rid not in seen_ids:
+                                seen_ids.add(rid)
+                                raw.append(r)
+                    raw.sort(key=lambda x: float(x.get("fts_rank", 0.0)), reverse=True)
+                    raw = raw[:limit]
         else:
             raw = await repo.search_by_fts(
                 query_text=query_text,
@@ -579,7 +1042,28 @@ class SearchPipeline:
                 tags=request.tags,
                 project=request.project,
                 current_user=request.current_user,
+                **prom_kw,
             )
+            if request.fallback_projects and (not raw or is_default_proj):
+                seen_ids = {str(r.get("id")) for r in raw if r.get("id")}
+                for fb_proj in request.fallback_projects:
+                    if fb_proj == request.project:
+                        continue
+                    fb_raw = await repo.search_by_fts(
+                        query_text=query_text,
+                        max_results=limit,
+                        tags=request.tags,
+                        project=fb_proj,
+                        current_user=request.current_user,
+                        **prom_kw,
+                    )
+                    for r in fb_raw:
+                        rid = str(r.get("id", ""))
+                        if rid and rid not in seen_ids:
+                            seen_ids.add(rid)
+                            raw.append(r)
+                raw.sort(key=lambda x: float(x.get("fts_rank", 0.0)), reverse=True)
+                raw = raw[:limit]
         items = []
         for r in raw:
             items.append(
@@ -630,6 +1114,28 @@ class SearchPipeline:
             fts_weight=self._search_config.fts_weight,
         )
 
+    def _rrf_fuse4(
+        self,
+        vector_results: list[SearchResultItem],
+        fts_results: list[SearchResultItem],
+        topic_results: list[SearchResultItem],
+        graph_results: list[SearchResultItem],
+        limit: int,
+    ) -> list[SearchResultItem]:
+        """Merge vector + FTS + topic + graph results using 4-way RRF."""
+        from team_memory.services.search.scoring import rrf_fuse4
+
+        return rrf_fuse4(
+            vector_results,
+            fts_results,
+            topic_results,
+            graph_results,
+            limit,
+            rrf_k=self._search_config.rrf_k,
+            vector_weight=self._search_config.vector_weight,
+            fts_weight=self._search_config.fts_weight,
+        )
+
     async def _topic_search(
         self,
         query_embedding: list[float],
@@ -674,7 +1180,7 @@ class SearchPipeline:
                 continue
             c_vec = np.array(topic.center, dtype=np.float32)
             sim = float(np.dot(q_vec, c_vec) / (q_norm * np.linalg.norm(c_vec) + 1e-8))
-            if sim >= 0.5:
+            if sim >= 0.52:
                 for eid in topic.experience_ids:
                     scored.append((sim, eid))
 
@@ -684,11 +1190,14 @@ class SearchPipeline:
         scored.sort(key=lambda x: x[0], reverse=True)
         seen: set[str] = set()
         exp_ids: list[str] = []
-        for _, eid in scored:
+        sim_by_id: dict[str, float] = {}
+        candidate_pool_limit = max(limit * 15, 50)
+        for sim_val, eid in scored:
             if eid not in seen:
                 seen.add(eid)
                 exp_ids.append(eid)
-            if len(exp_ids) >= limit:
+                sim_by_id[eid] = sim_val
+            if len(exp_ids) >= candidate_pool_limit:
                 break
 
         if not exp_ids:
@@ -700,19 +1209,53 @@ class SearchPipeline:
         from team_memory.storage.database import get_session
 
         items: list[SearchResultItem] = []
+        allowed_statuses = (
+            ["published", "promoted"]
+            if getattr(request, "include_promoted", False)
+            else ["published"]
+        )
+        req_proj = (request.project or "default").strip()
+        allow_all_projects = req_proj in ("*", "all") or (
+            bool(request.fallback_projects)
+            and any(p in ("*", "all") for p in request.fallback_projects)
+        )
         try:
             async with get_session(self._db_url) as session:
                 result = await session.execute(
                     sql_text("""
                         SELECT id, title, description, solution, tags, project,
-                               experience_type, confidence, recall_count, used_count
+                               experience_type, exp_status, recall_count, used_count,
+                               negative_feedback_count, created_at
                         FROM experiences
-                        WHERE id = ANY(:ids) AND exp_status = 'published'
+                        WHERE id::text = ANY(:ids)
+                          AND exp_status = ANY(:statuses)
+                          AND is_deleted = false
+                          AND valid_until IS NULL
+                          AND coalesce(trim(title), '') <> ''
+                          AND title !~ '^(Draft [0-9a-zA-Z_-]+|Session [0-9a-zA-Z_-]+ draft|主题-.*)$'
+                          AND (:allow_all = true OR project = :project)
                     """),
-                    {"ids": exp_ids},
+                    {
+                        "ids": exp_ids,
+                        "statuses": allowed_statuses,
+                        "allow_all": allow_all_projects,
+                        "project": req_proj,
+                    },
                 )
                 rows = result.fetchall()
-                for row in rows:
+                row_map = {str(r[0]): r for r in rows}
+                # Sort matched rows: prefer same-project first, then cluster similarity, then recall_count
+                ordered_eids = [eid for eid in exp_ids if eid in row_map]
+                ordered_eids.sort(
+                    key=lambda eid: (
+                        0 if str(row_map[eid][5] or "") == req_proj else 1,
+                        -sim_by_id.get(eid, 0.52),
+                        -int(row_map[eid][8] or 0),
+                    )
+                )
+                for eid in ordered_eids[:limit]:
+                    row = row_map[eid]
+                    t_sim = sim_by_id.get(eid, 0.55)
                     items.append(
                         SearchResultItem(
                             data={
@@ -723,12 +1266,15 @@ class SearchPipeline:
                                 "tags": row[4],
                                 "project": row[5],
                                 "experience_type": row[6],
-                                "confidence": row[7],
-                                "recall_count": row[8],
-                                "used_count": row[9],
+                                "status": row[7] or "published",
+                                "exp_status": row[7] or "published",
+                                "recall_count": row[8] or 0,
+                                "used_count": row[9] or 0,
+                                "negative_feedback_count": row[10] or 0,
+                                "created_at": row[11].isoformat() if row[11] else None,
                             },
-                            score=0.5,  # Will be overridden by RRF
-                            similarity=0.5,
+                            score=t_sim,
+                            similarity=t_sim,
                             source_type="topic",
                         )
                     )

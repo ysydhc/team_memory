@@ -31,18 +31,27 @@ def _make_llm_config(
     model: str = "test-model",
     base_url: str = "http://localhost:11434",
     prompt_dir: str | None = None,
+    provider: str = "ollama",
+    api_key: str = "",
 ) -> MagicMock:
     """Build a minimal LLMConfig-like mock."""
     cfg = MagicMock()
     cfg.model = model
     cfg.base_url = base_url
     cfg.prompt_dir = prompt_dir
+    cfg.provider = provider
+    cfg.api_key = api_key
     return cfg
 
 
 def _ollama_response(content: str) -> dict:
     """Wrap a string into the Ollama API response shape."""
     return {"message": {"content": content}}
+
+
+def _openai_response(content: str) -> dict:
+    """Wrap a string into the OpenAI chat.completions response shape."""
+    return {"choices": [{"message": {"content": content}}]}
 
 
 def _mock_httpx_post(return_json: dict, status_code: int = 200) -> AsyncMock:
@@ -53,7 +62,9 @@ def _mock_httpx_post(return_json: dict, status_code: int = 200) -> AsyncMock:
     resp.raise_for_status = MagicMock()
     if status_code >= 400:
         resp.text = json.dumps(return_json)
-        resp.raise_for_status.side_effect = httpx.HTTPStatusError("error", request=MagicMock(), response=resp)
+        resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "error", request=MagicMock(), response=resp
+        )
     return resp
 
 
@@ -92,6 +103,41 @@ class TestParseContent:
         assert result["solution"] == "Increase proxy_read_timeout"
         assert "nginx" in result["tags"]
         assert result["experience_type"] == "bugfix"
+
+    @pytest.mark.asyncio
+    async def test_parse_content_openai_compat_endpoint(self):
+        """generic + /v1 base_url posts to /chat/completions (LiteLLM)."""
+        llm_output = json.dumps(
+            {
+                "title": "LiteLLM parse",
+                "problem": "Need OpenAI-compat path",
+                "solution": "Use /v1/chat/completions",
+                "tags": ["llm"],
+                "experience_type": "general",
+            }
+        )
+        resp = _mock_httpx_post(_openai_response(llm_output))
+        mock_post = AsyncMock(return_value=resp)
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=MagicMock(post=mock_post)
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            result = await parse_content(
+                "some content",
+                llm_config=_make_llm_config(
+                    model="DeepSeek-V4-Flash",
+                    base_url="http://localhost:4000/v1",
+                    provider="generic",
+                    api_key="sk-test",
+                ),
+            )
+
+        assert result["title"] == "LiteLLM parse"
+        called_url = mock_post.await_args.args[0]
+        assert called_url.endswith("/v1/chat/completions")
 
     @pytest.mark.asyncio
     async def test_parse_content_malformed_json(self):
@@ -147,7 +193,9 @@ class TestParseContent:
         """LLM times out -- raises LLMParseError."""
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_post = AsyncMock(side_effect=httpx.TimeoutException("timed out"))
-            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=MagicMock(post=mock_post)
+            )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
             with pytest.raises(LLMParseError, match="timed out"):
@@ -158,7 +206,9 @@ class TestParseContent:
         """LLM connection refused -- raises LLMParseError."""
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_post = AsyncMock(side_effect=httpx.ConnectError("refused"))
-            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=MagicMock(post=mock_post)
+            )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
             with pytest.raises(LLMParseError, match="Cannot connect"):
@@ -249,7 +299,9 @@ class TestParsePersonalMemory:
             )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await parse_personal_memory("some conversation", llm_config=_make_llm_config())
+            result = await parse_personal_memory(
+                "some conversation", llm_config=_make_llm_config()
+            )
 
         assert len(result) == 2
         assert result[0]["content"] == "Prefers concise responses"
@@ -271,7 +323,9 @@ class TestParsePersonalMemory:
             )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await parse_personal_memory("trivial chat", llm_config=_make_llm_config())
+            result = await parse_personal_memory(
+                "trivial chat", llm_config=_make_llm_config()
+            )
 
         assert result == []
 
@@ -280,10 +334,14 @@ class TestParsePersonalMemory:
         """Timeout handled gracefully -- returns empty list, no exception."""
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_post = AsyncMock(side_effect=httpx.TimeoutException("timed out"))
-            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=MagicMock(post=mock_post)
+            )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await parse_personal_memory("some content", llm_config=_make_llm_config())
+            result = await parse_personal_memory(
+                "some content", llm_config=_make_llm_config()
+            )
 
         assert result == []
 
@@ -292,10 +350,14 @@ class TestParsePersonalMemory:
         """Connection error handled gracefully -- returns empty list."""
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_post = AsyncMock(side_effect=httpx.ConnectError("refused"))
-            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=MagicMock(post=mock_post)
+            )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await parse_personal_memory("some content", llm_config=_make_llm_config())
+            result = await parse_personal_memory(
+                "some content", llm_config=_make_llm_config()
+            )
 
         assert result == []
 
@@ -311,7 +373,9 @@ class TestParsePersonalMemory:
             )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await parse_personal_memory("some content", llm_config=_make_llm_config())
+            result = await parse_personal_memory(
+                "some content", llm_config=_make_llm_config()
+            )
 
         assert result == []
 
@@ -326,7 +390,12 @@ class TestParsePersonalMemory:
                     "scope": "generic",
                     "context_hint": None,
                 },
-                {"content": "", "profile_kind": "static", "scope": "generic", "context_hint": None},
+                {
+                    "content": "",
+                    "profile_kind": "static",
+                    "scope": "generic",
+                    "context_hint": None,
+                },
                 {
                     "content": "  ",
                     "profile_kind": "static",
@@ -343,7 +412,9 @@ class TestParsePersonalMemory:
             )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await parse_personal_memory("some content", llm_config=_make_llm_config())
+            result = await parse_personal_memory(
+                "some content", llm_config=_make_llm_config()
+            )
 
         assert len(result) == 1
         assert result[0]["content"] == "Valid preference"
@@ -369,7 +440,9 @@ class TestParsePersonalMemory:
             )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await parse_personal_memory("some content", llm_config=_make_llm_config())
+            result = await parse_personal_memory(
+                "some content", llm_config=_make_llm_config()
+            )
 
         assert len(result) == 1
         # Invalid scope normalises to "generic"; invalid profile_kind with generic scope -> "static"
@@ -425,7 +498,9 @@ class TestSuggestExperienceType:
             )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await suggest_experience_type("Some title", llm_config=_make_llm_config())
+            result = await suggest_experience_type(
+                "Some title", llm_config=_make_llm_config()
+            )
 
         assert result["suggested_type"] == "general"
         assert result["confidence"] == 0.0
@@ -435,10 +510,14 @@ class TestSuggestExperienceType:
         """Timeout -- returns default 'general' without raising."""
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_post = AsyncMock(side_effect=httpx.TimeoutException("timed out"))
-            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=MagicMock(post=mock_post)
+            )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await suggest_experience_type("Some title", llm_config=_make_llm_config())
+            result = await suggest_experience_type(
+                "Some title", llm_config=_make_llm_config()
+            )
 
         assert result["suggested_type"] == "general"
         assert result["confidence"] == 0.0
@@ -454,7 +533,9 @@ class TestSuggestExperienceType:
             )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await suggest_experience_type("Some title", llm_config=_make_llm_config())
+            result = await suggest_experience_type(
+                "Some title", llm_config=_make_llm_config()
+            )
 
         assert result["suggested_type"] == "general"
         assert result["confidence"] == 0.0
@@ -478,7 +559,9 @@ class TestSuggestExperienceType:
             )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await suggest_experience_type("Some title", llm_config=_make_llm_config())
+            result = await suggest_experience_type(
+                "Some title", llm_config=_make_llm_config()
+            )
 
         assert result["suggested_type"] == "general"
 
@@ -494,7 +577,9 @@ class TestGenerateSummary:
     @pytest.mark.asyncio
     async def test_generate_summary_valid(self):
         """Returns summary string from LLM."""
-        llm_output = "This experience describes fixing a 502 error by increasing timeout."
+        llm_output = (
+            "This experience describes fixing a 502 error by increasing timeout."
+        )
         resp = _mock_httpx_post(_ollama_response(llm_output))
 
         with patch("httpx.AsyncClient") as mock_client_cls:
@@ -503,16 +588,23 @@ class TestGenerateSummary:
             )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            result = await generate_summary("Fix 502 error...", llm_config=_make_llm_config())
+            result = await generate_summary(
+                "Fix 502 error...", llm_config=_make_llm_config()
+            )
 
-        assert result == "This experience describes fixing a 502 error by increasing timeout."
+        assert (
+            result
+            == "This experience describes fixing a 502 error by increasing timeout."
+        )
 
     @pytest.mark.asyncio
     async def test_generate_summary_timeout(self):
         """Timeout -- raises LLMParseError."""
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_post = AsyncMock(side_effect=httpx.TimeoutException("timed out"))
-            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=MagicMock(post=mock_post)
+            )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
             with pytest.raises(LLMParseError, match="timed out"):
@@ -529,7 +621,7 @@ class TestGenerateSummary:
             )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with pytest.raises(LLMParseError, match="empty summary"):
+            with pytest.raises(LLMParseError, match="empty"):
                 await generate_summary("some content", llm_config=_make_llm_config())
 
     @pytest.mark.asyncio
@@ -537,7 +629,9 @@ class TestGenerateSummary:
         """Connection error -- raises LLMParseError."""
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_post = AsyncMock(side_effect=httpx.ConnectError("refused"))
-            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=MagicMock(post=mock_post)
+            )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
             with pytest.raises(LLMParseError, match="Cannot connect"):
@@ -573,7 +667,9 @@ class TestNormalizeSingle:
     """Tests for _normalize_single() -- field normalization."""
 
     def test_tags_normalised_to_lowercase(self):
-        result = _normalize_single({"title": "T", "problem": "P", "tags": ["Python", "DJANGO"]})
+        result = _normalize_single(
+            {"title": "T", "problem": "P", "tags": ["Python", "DJANGO"]}
+        )
         assert result["tags"] == ["python", "django"]
 
     def test_non_list_tags_reset(self):

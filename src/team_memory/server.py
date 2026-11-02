@@ -207,6 +207,9 @@ def _guard_output(
                             child[field] = val[:max_solution_chars] + "... [truncated]"
                             truncated = True
 
+    if not truncated and estimate_tokens(result_json) <= max_tokens:
+        return result_json
+
     if truncated:
         data["truncated"] = True
 
@@ -256,6 +259,13 @@ mcp = FastMCP(
         "- `memory_feedback`: Rate a helpful result"
     ),
 )
+
+if not hasattr(mcp, "get_tools") and hasattr(mcp, "list_tools"):
+
+    async def _compat_get_tools() -> dict:
+        return {t.name: t for t in await mcp.list_tools()}
+
+    mcp.get_tools = _compat_get_tools  # type: ignore[attr-defined]
 
 # ---------------------------------------------------------------------------
 # Auto-inferred project name (zero-config)

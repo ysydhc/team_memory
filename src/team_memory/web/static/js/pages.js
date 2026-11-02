@@ -299,10 +299,15 @@ export async function loadList(page = 1) {
     const container = document.getElementById('list-content');
     container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
+    // getSelectedProjects returns [] both when "全部项目" is selected and when the
+    // switcher hasn't rendered yet — in the former case fall back to the full known
+    // project list (not a single default project) so "全部项目" actually means all.
     const multiProjects = window.getSelectedProjects ? window.getSelectedProjects('list') : [];
     const projectFilter = multiProjects.length > 0
         ? multiProjects.join(',')
-        : (state.activeProject || state.defaultProject || 'default');
+        : (state.availableProjects && state.availableProjects.length > 0
+            ? state.availableProjects.join(',')
+            : (state.activeProject || state.defaultProject || 'default'));
 
     try {
         const statusFilter = document.getElementById('list-status-filter')?.value || '';

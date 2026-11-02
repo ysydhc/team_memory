@@ -441,7 +441,7 @@ class ArenaRunner:
                     UPDATE search_logs
                     SET relevance_score = $2,
                         helpfulness_score = $3,
-                        was_used = CASE WHEN $3::float >= 0.5 THEN TRUE ELSE was_used END,
+                        was_used = CASE WHEN $3::float >= 0.5 THEN TRUE ELSE COALESCE(was_used, FALSE) END,
                         judgment_source = 'arena',
                         updated_at = $4
                     WHERE id = $1

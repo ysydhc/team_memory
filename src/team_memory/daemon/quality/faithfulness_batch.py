@@ -5,7 +5,7 @@ Usage:
     python -m team_memory.daemon.quality.faithfulness_batch [OPTIONS]
 
 Options:
-    --model MODEL       LLM model for judge (default: from env or glm-4-flash)
+    --model MODEL       LLM model for judge (default: from env or gemini-3.6-flash)
     --base-url URL      LLM base URL (default: from env or http://localhost:4000/v1)
     --api-key KEY       LLM API key (default: from env LITELLM_MASTER_KEY)
     --batch-size N      Max entries per run (default: 20)
@@ -23,9 +23,9 @@ import logging
 import os
 import sys
 
-from team_memory.project_resolver import load_dotenv_if_exists
+from team_memory.project_resolver import find_project_root, load_dotenv_if_exists
 
-load_dotenv_if_exists(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+load_dotenv_if_exists(find_project_root() or os.path.dirname(__file__))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("faithfulness_batch")
@@ -91,9 +91,24 @@ async def run_batch(
             # Skip entries with no retrieval results — nothing to evaluate usage against
             if not result_ids:
                 if not dry_run:
-                    await buffer.mark_evaluated(entry_id, faithfulness_score=0.0, judge_reasoning="skipped: no results")
+                    await buffer.mark_evaluated(
+                        entry_id,
+                        faithfulness_score=0.0,
+                        judge_reasoning="skipped: no results",
+                    )
+                    # Record the verdict on the search_log too, else it stays
+                    # was_used=NULL forever and pollutes the unjudged count.
+                    await buffer.sync_to_search_log(entry_id, faithfulness_score=0.0)
                 logger.info("  [%s] skipped (no result_ids) query=%s", entry_id[:8], query[:50])
-                results.append({"id": entry_id, "query": query[:100], "score": 0.0, "supported": 0, "total": 0})
+                results.append(
+                    {
+                        "id": entry_id,
+                        "query": query[:100],
+                        "score": 0.0,
+                        "supported": 0,
+                        "total": 0,
+                    }
+                )
                 continue
 
             # Load experience context
@@ -103,10 +118,21 @@ async def run_batch(
             if not contexts:
                 if not dry_run:
                     await buffer.mark_evaluated(
-                        entry_id, faithfulness_score=0.0, judge_reasoning="skipped: no valid contexts"
+                        entry_id,
+                        faithfulness_score=0.0,
+                        judge_reasoning="skipped: no valid contexts",
                     )
+                    await buffer.sync_to_search_log(entry_id, faithfulness_score=0.0)
                 logger.info("  [%s] skipped (empty contexts) query=%s", entry_id[:8], query[:50])
-                results.append({"id": entry_id, "query": query[:100], "score": 0.0, "supported": 0, "total": 0})
+                results.append(
+                    {
+                        "id": entry_id,
+                        "query": query[:100],
+                        "score": 0.0,
+                        "supported": 0,
+                        "total": 0,
+                    }
+                )
                 continue
 
             # Evaluate
@@ -134,10 +160,11 @@ async def run_batch(
                     faithfulness_score=score,
                     judge_reasoning=reasoning,
                 )
-                await buffer.sync_to_search_log(
-                    entry_id,
-                    faithfulness_score=score,
-                )
+                if score >= 0:
+                    await buffer.sync_to_search_log(
+                        entry_id,
+                        faithfulness_score=score,
+                    )
 
             results.append(
                 {
@@ -261,8 +288,18 @@ def main():
     parser.add_argument("--batch-size", type=int, default=20, help="Max entries per run")
     parser.add_argument("--dry-run", action="store_true", help="Don't write results")
     parser.add_argument("--force", action="store_true", help="Ignore threshold")
-    parser.add_argument("--recent", type=int, default=0, help="Evaluate the N most recent buffer entries immediately")
-    parser.add_argument("--show", type=int, default=0, help="Show the N most recent buffer entries with scores")
+    parser.add_argument(
+        "--recent",
+        type=int,
+        default=0,
+        help="Evaluate the N most recent buffer entries immediately",
+    )
+    parser.add_argument(
+        "--show",
+        type=int,
+        default=0,
+        help="Show the N most recent buffer entries with scores",
+    )
     parser.add_argument("--db-url", default=None, help="Database URL")
     parser.add_argument(
         "--checkpoint",

@@ -170,7 +170,7 @@ async def _generate_topic_name(
     base_url = getattr(llm_config, "base_url", "http://localhost:4000/v1").rstrip("/")
     if not base_url.endswith("/v1"):
         base_url = f"{base_url}/v1"
-    model = getattr(llm_config, "model", "DeepSeek-V3")
+    model = getattr(llm_config, "model", "DeepSeek-V4-Flash")
     api_key_env = getattr(llm_config, "api_key_env", "LITELLM_MASTER_KEY")
     api_key = os.environ.get(api_key_env, "none")
     timeout = getattr(llm_config, "timeout", 30)
@@ -243,12 +243,16 @@ async def discover_topics(
         return TopicResult()
 
     async with get_session(db_url) as session:
-        # Load experience embeddings + titles
+        # Load experience embeddings + titles (include both published and promoted active experiences)
         result = await session.execute(
-            text("""
+            text(
+                """
             SELECT id, embedding, tags, title FROM experiences
-            WHERE embedding IS NOT NULL AND exp_status = 'published'
-        """)
+            WHERE embedding IS NOT NULL
+              AND is_deleted = false
+              AND exp_status IN ('published', 'promoted')
+        """
+            )
         )
         import json
 
@@ -274,11 +278,13 @@ async def discover_topics(
 
         # Load entity associations
         result2 = await session.execute(
-            text("""
+            text(
+                """
             SELECT ee.experience_id, e.name
             FROM experience_entities ee
             JOIN entities e ON e.id = ee.entity_id
-        """)
+        """
+            )
         )
         for row in result2.fetchall():
             exp_id = str(row[0])

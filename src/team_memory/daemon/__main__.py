@@ -4,14 +4,17 @@ Run with: python -m team_memory.daemon
 """
 
 import logging
+import os
 
 import uvicorn
 
 from team_memory.daemon.runtime.app import create_app
 from team_memory.daemon.runtime.config import load_config
+from team_memory.project_resolver import load_dotenv_if_exists
 
 
 def main() -> None:
+    load_dotenv_if_exists(os.path.dirname(__file__))
     # Configure app-level logging so our [READ]/[WRITE]/[WATCH] lines are visible
     logging.basicConfig(
         level=logging.INFO,

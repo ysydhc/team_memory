@@ -35,3 +35,24 @@ def print_hermes_context(text: str) -> None:
         print_json({"context": text})
     else:
         print_empty()
+
+
+def print_antigravity_system_message(text: str) -> None:
+    """Print Antigravity SessionStart/PreInvocation systemMessage injection."""
+    if text:
+        print_json({"injectSteps": [{"systemMessage": {"systemMessage": text}}]})
+    else:
+        print_empty()
+
+
+def print_antigravity_ephemeral_message(text: str) -> None:
+    """Print Antigravity SessionStart/PreInvocation ephemeralMessage injection."""
+    if text:
+        print_json({"injectSteps": [{"ephemeralMessage": text}]})
+    else:
+        print_empty()
+
+
+def print_antigravity_stop(decision: str = "allow") -> None:
+    """Print Antigravity Stop hook decision."""
+    print_json({"decision": decision})

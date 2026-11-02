@@ -56,6 +56,8 @@ class AdaptiveResult:
     cached: bool = False
     intent_type: str = "general"
     hop_log: list[dict] = field(default_factory=list)
+    stage_metrics: dict | None = None
+    stage_counts: dict | None = None
 
 
 class AdaptiveRetriever:
@@ -143,6 +145,7 @@ class AdaptiveRetriever:
             top_k_children=3,
             project=project,
             include_archives=include_archives,
+            include_promoted=True,
         )
         new_items = self._merge_dedup(collected, search_result.results, seen_ids)
         hop_log.append({"hop": 1, "query": query, "new_results": len(new_items)})
@@ -157,6 +160,8 @@ class AdaptiveRetriever:
                 cached=search_result.cached,
                 intent_type=search_result.intent_type,
                 hop_log=hop_log,
+                stage_metrics=getattr(search_result, "stage_metrics", None),
+                stage_counts=getattr(search_result, "stage_counts", None),
             )
 
         loop_count = 1
@@ -196,6 +201,7 @@ class AdaptiveRetriever:
                     top_k_children=3,
                     project=project,
                     include_archives=include_archives,
+                    include_promoted=True,
                 )
                 new_items = self._merge_dedup(collected, sub_result.results, seen_ids)
                 hop_new_total += len(new_items)
@@ -233,6 +239,8 @@ class AdaptiveRetriever:
             reranked=search_result.reranked,
             intent_type=search_result.intent_type,
             hop_log=hop_log,
+            stage_metrics=getattr(search_result, "stage_metrics", None),
+            stage_counts=getattr(search_result, "stage_counts", None),
         )
 
     @staticmethod

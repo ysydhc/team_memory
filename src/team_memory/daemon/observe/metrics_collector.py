@@ -49,6 +49,28 @@ class MetricsCollector:
         except sqlite3.Error as e:
             logger.error("metrics_record_failed name=%s error=%s", name, e)
 
+    def record_search_telemetry(
+        self,
+        *,
+        returned_tokens: int | None = None,
+        saved_tokens_pct: float | None = None,
+        stage_metrics: dict | None = None,
+        stage_counts: dict | None = None,
+    ) -> None:
+        """Record search pipeline telemetry metrics."""
+        if returned_tokens is not None:
+            self.record("recall_returned_tokens", float(returned_tokens))
+        if saved_tokens_pct is not None:
+            self.record("recall_saved_tokens_pct", float(saved_tokens_pct))
+        if isinstance(stage_metrics, dict) and stage_metrics.get("total_ms") is not None:
+            self.record("pipeline_total_ms", float(stage_metrics["total_ms"]))
+        if isinstance(stage_counts, dict) and stage_counts.get("graph_unique_added") is not None:
+            self.record("graph_unique_added", float(stage_counts["graph_unique_added"]))
+
+    def record_mutation_action(self, action: str, project: str = "default") -> None:
+        """Record a memory mutation state machine action (ADD/MERGE/SUPERSEDE/NOOP)."""
+        self.record("memory_mutation_action", 1.0, labels={"action": action, "project": project})
+
     def query(self, name: str | None = None, hours: int = 24) -> list[dict]:
         """Query recent metrics (pinned to MAX_DAYS max)."""
         hours = min(hours, self.MAX_DAYS * 24)
@@ -118,6 +140,21 @@ class MetricsCollector:
                 if row and row["total"] > 0:
                     rate = row["used"] / row["total"]
                     self.record("search_hit_rate", rate)
+
+                try:
+                    tok_row = await conn.fetchrow(
+                        "SELECT AVG(returned_tokens) AS avg_tokens FROM search_logs WHERE returned_tokens IS NOT NULL"
+                    )
+                    if tok_row and tok_row["avg_tokens"] is not None:
+                        self.record("avg_returned_tokens", float(tok_row["avg_tokens"]))
+
+                    sup_row = await conn.fetchrow(
+                        "SELECT COUNT(*) FILTER (WHERE valid_until IS NOT NULL) AS superseded_count FROM experiences"
+                    )
+                    if sup_row and sup_row["superseded_count"] is not None:
+                        self.record("superseded_experiences_count", float(sup_row["superseded_count"]))
+                except Exception:
+                    pass
             finally:
                 await conn.close()
         except Exception as e:

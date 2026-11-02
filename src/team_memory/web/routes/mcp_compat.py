@@ -31,7 +31,7 @@ def _http_status_for_result(result: dict) -> int:
         return 413
     if code == "scope_removed":
         return 400
-    if code == "embedding_failed":
+    if code in ("embedding_failed", "llm_parse_failed"):
         return 502
     return 500
 

@@ -282,11 +282,12 @@ class AutoDreamWorker:
     async def _get_dream_candidates(self, last_dream: datetime | None) -> list[dict]:
         """Fetch candidate experiences via ExperienceService."""
         ctx = _daemon_context()
-        return await ctx.service.list_published(
+        candidates = await ctx.service.list_published(
             quality_tier="Bronze",
             since=last_dream,
             limit=200,
         )
+        return [c for c in candidates if c.get("valid_until") is None]
 
     async def _query_candidates_recall(self, last_dream: datetime | None) -> list[dict]:
         """Fallback: use recall() to discover candidate experiences.
@@ -435,10 +436,10 @@ class AutoDreamWorker:
 
         Returns the number of secondary experiences soft-deleted.
         """
-        # Pick primary: highest quality_score, then highest recall_count as tiebreaker
+        # Pick primary: highest quality_score, then highest used_count, then recall_count as tiebreaker
         primary = max(
             cluster,
-            key=lambda x: (x.get("quality_score", 0), x.get("recall_count", 0)),
+            key=lambda x: (x.get("quality_score", 0), x.get("used_count", 0), x.get("recall_count", 0)),
         )
         primary_id = primary.get("id", "")
         primary_title = primary.get("title", "Untitled")
@@ -548,11 +549,20 @@ class AutoDreamWorker:
         """Find and soft-delete stale experiences via ExperienceService."""
         cutoff = _utcnow() - timedelta(days=self._cfg.prune_max_age_days)
         ctx = _daemon_context()
-        candidates = await ctx.service.list_published(quality_tier="Bronze")
+        seen_ids: set[str] = set()
+        candidates: list[dict] = []
+        for tier in ("Bronze", "Outdated"):
+            items = await ctx.service.list_published(quality_tier=tier, limit=500)
+            for item in items:
+                exp_id = item.get("id")
+                if exp_id and exp_id not in seen_ids:
+                    seen_ids.add(exp_id)
+                    candidates.append(item)
         pruned = 0
         for exp in candidates:
             if (
                 exp.get("recall_count", 1) == 0
+                and exp.get("used_count", 0) == 0
                 and not exp.get("is_pinned")
                 and exp.get("created_at") is not None
                 and exp["created_at"] < cutoff

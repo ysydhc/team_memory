@@ -326,6 +326,7 @@ class TestGetStats:
             "total": 100,
             "hit": 80,
             "used": 50,
+            "judged": 60,
             "unjudged": 20,
             "legacy_unjudged": 5,
             "used_faithfulness": 30,
@@ -369,7 +370,8 @@ class TestGetStats:
         assert result["unjudged"] == 20
         assert result["legacy_unjudged"] == 5
         assert result["used_faithfulness"] == 30
-        assert result["use_rate"] == 0.625  # 50/80
+        assert result["judged"] == 60
+        assert result["use_rate"] == 0.833  # used/judged = 50/60
         assert "default" in result["by_project"]
         assert len(result["top_queries"]) == 1
 
@@ -379,6 +381,7 @@ class TestGetStats:
             "total": 10,
             "hit": 0,
             "used": 0,
+            "judged": 0,
             "unjudged": 0,
             "legacy_unjudged": 0,
             "used_faithfulness": 0,
@@ -406,6 +409,7 @@ class TestGetStats:
             "total": None,
             "hit": None,
             "used": None,
+            "judged": None,
             "unjudged": None,
             "legacy_unjudged": None,
             "used_faithfulness": None,
@@ -547,6 +551,7 @@ class TestGetTrends:
             "total": 10,
             "hit": 8,
             "used": 5,
+            "judged": 8,
             "used_faithfulness": 3,
             "avg_relevance": None,
             "avg_helpfulness": None,
@@ -568,7 +573,7 @@ class TestGetTrends:
         assert result[0]["total"] == 10
         assert result[0]["hit"] == 8
         assert result[0]["used"] == 5
-        assert result[0]["use_rate"] == 0.625  # 5/8
+        assert result[0]["use_rate"] == 0.625  # used/judged = 5/8
         assert result[0]["period"] is not None
 
     @pytest.mark.asyncio
@@ -578,6 +583,7 @@ class TestGetTrends:
             "total": 5,
             "hit": 3,
             "used": 1,
+            "judged": 1,
             "used_faithfulness": 0,
             "avg_relevance": None,
             "avg_helpfulness": None,
@@ -711,6 +717,9 @@ class TestGetLowUseQueries:
 
         result = await w.get_low_use_queries()
         assert len(result[0]["query"]) == 80
+        conn = mock_pool.acquire.return_value.__aenter__.return_value
+        sql = conn.fetch.call_args[0][0]
+        assert "WHERE was_used IS NOT NULL" in sql
 
 
 # ===================================================================

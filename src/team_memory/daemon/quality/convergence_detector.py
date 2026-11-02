@@ -89,7 +89,7 @@ class ConvergenceDetector:
             return False
 
         for entry in recent_tools:
-            cmd = entry.get("cmd", "")
+            cmd = entry.get("command_summary") or entry.get("cmd") or entry.get("command") or ""
             if not cmd:
                 continue
 
@@ -100,6 +100,48 @@ class ConvergenceDetector:
             # test command with exit_code == 0
             if self._is_test_command(cmd) and entry.get("exit_code") == 0:
                 return True
+
+        return False
+
+    def check_error_to_pass_resolution(
+        self,
+        tool_observations: list[dict[str, Any]],
+    ) -> bool:
+        """Return True if *tool_observations* show an error-to-pass trajectory.
+
+        An error-to-pass trajectory occurs when:
+        1. An earlier tool execution failed (``succeeded == False``, non-zero
+           ``exit_code``, or non-empty ``error_excerpt``), AND
+        2. A subsequent command/test execution succeeded (``exit_code == 0`` or
+           ``succeeded == True`` on a command/test tool after a file edit or retry).
+        """
+        if not tool_observations or len(tool_observations) < 2:
+            return False
+
+        saw_error = False
+        for obs in tool_observations:
+            if not isinstance(obs, dict):
+                continue
+            exit_code = obs.get("exit_code")
+            succeeded = obs.get("succeeded", True)
+            error_excerpt = str(obs.get("error_excerpt") or "").strip()
+            cmd = str(obs.get("command_summary") or obs.get("command") or obs.get("cmd") or "").strip()
+
+            is_failure = (
+                (succeeded is False)
+                or (exit_code is not None and exit_code != 0)
+                or bool(error_excerpt)
+            )
+            if is_failure:
+                saw_error = True
+                continue
+
+            if saw_error:
+                # Subsequent command/test succeeded with exit_code == 0
+                if exit_code == 0 and (cmd or self._is_test_command(cmd)):
+                    return True
+                if succeeded is True and self._is_test_command(cmd):
+                    return True
 
         return False
 
@@ -159,9 +201,12 @@ class ConvergenceDetector:
         if self._check_explicit_signals(text):
             return True
 
-        # 2. Tool patterns
-        if recent_tools and self.check_tool_pattern(recent_tools):
-            return True
+        # 2. Tool patterns & error-to-pass resolution
+        if recent_tools:
+            if self.check_tool_pattern(recent_tools):
+                return True
+            if self.check_error_to_pass_resolution(recent_tools):
+                return True
 
         # 3. Topic shift
         if self.check_topic_shift(current_path, previous_path):

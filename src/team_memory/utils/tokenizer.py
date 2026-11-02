@@ -91,3 +91,16 @@ def _tokenize_simple(text: str) -> str:
             if part.strip():
                 result.append(part.strip())
     return " ".join(result)
+
+
+def estimate_tokens(text: str) -> int:
+    """Estimate token count from text length.
+
+    Uses ~1 token per CJK character and ~4 characters per token for non-CJK text.
+    """
+    if not text:
+        return 0
+    cjk_count = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
+    non_cjk_count = len(text) - cjk_count
+    return max(1, cjk_count + non_cjk_count // 4)
+

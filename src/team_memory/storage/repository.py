@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 from team_memory.storage.models import (
     Experience,
     ExperienceFeedback,
+    Relationship,
 )
 
 logger = logging.getLogger("team_memory.storage.repository")
@@ -316,6 +317,8 @@ class ExperienceRepository:
         project: str | None = None,
         current_user: str | None = None,
         offset: int = 0,
+        include_promoted: bool = False,
+        include_superseded: bool = False,
     ) -> list[dict]:
         """Search experiences by vector similarity using pgvector."""
         from team_memory.storage.query_builders import build_vector_search
@@ -328,6 +331,8 @@ class ExperienceRepository:
             min_similarity=min_similarity,
             limit=max_results,
             offset=offset,
+            include_promoted=include_promoted,
+            include_superseded=include_superseded,
         )
         result = await self._session.execute(stmt)
         rows = result.all()
@@ -347,12 +352,19 @@ class ExperienceRepository:
         project: str | None = None,
         current_user: str | None = None,
         offset: int = 0,
+        include_promoted: bool = False,
+        include_superseded: bool = False,
     ) -> list[dict]:
         """Full-text search using PostgreSQL tsvector/tsquery with jieba."""
+        import re
+
         from team_memory.storage.query_builders import build_fts_search
         from team_memory.utils.tokenizer import tokenize
 
+        snake_tokens = re.findall(r"[a-zA-Z0-9]+(?:_[a-zA-Z0-9]+)+", query_text or "")
         tokenized_query = tokenize(query_text)
+        if snake_tokens:
+            tokenized_query = " ".join(snake_tokens) + " " + tokenized_query
         stmt = build_fts_search(
             tokenized_query,
             project=project,
@@ -360,6 +372,8 @@ class ExperienceRepository:
             tags=tags,
             limit=max_results,
             offset=offset,
+            include_promoted=include_promoted,
+            include_superseded=include_superseded,
         )
         result = await self._session.execute(stmt)
         rows = result.all()
@@ -404,6 +418,9 @@ class ExperienceRepository:
                 "tags": exp.tags or [],
                 "similarity": round(float(sim), 4),
                 "description": ((exp.description[:200] + "...") if len(exp.description) > 200 else exp.description),
+                "solution": (
+                    (exp.solution[:300] + "...") if exp.solution and len(exp.solution) > 300 else exp.solution
+                ),
             }
             for exp, sim in rows
         ]
@@ -488,6 +505,201 @@ class ExperienceRepository:
         experience.updated_at = datetime.now(timezone.utc)
         await self._session.flush()
         return experience
+
+    async def expire_relationships_for_experience(
+        self,
+        experience_id: uuid.UUID | str,
+        *,
+        now: datetime | None = None,
+    ) -> int:
+        """Bi-temporally expire entity relationships whose only active evidence is experience_id.
+
+        When an experience is superseded, any Relationship edge in the knowledge graph
+        whose supporting evidence exclusively relies on the superseded experience (or has no
+        remaining active experiences in its evidence list) gets ``valid_until`` set to ``now``.
+        """
+        ts = now or _utcnow()
+        exp_str = str(experience_id)
+        expired_count = 0
+        try:
+            stmt = select(Relationship).where(Relationship.valid_until.is_(None))
+            result = await self._session.execute(stmt)
+            scalars = result.scalars()
+            rows = scalars.all() if hasattr(scalars, "all") else []
+            if not isinstance(rows, list):
+                return 0
+
+            # Collect candidate relationships that reference exp_str in evidence
+            affected: list[Relationship] = []
+            other_exp_ids: set[uuid.UUID] = set()
+            for rel in rows:
+                ev_list = getattr(rel, "evidence", None) or []
+                if not isinstance(ev_list, list):
+                    continue
+                ev_strs = [str(x) for x in ev_list if x]
+                if exp_str in ev_strs:
+                    affected.append(rel)
+                    for other in ev_strs:
+                        if other != exp_str:
+                            try:
+                                other_exp_ids.add(uuid.UUID(other))
+                            except ValueError:
+                                pass
+
+            if not affected:
+                return 0
+
+            active_other_ids: set[str] = set()
+            if other_exp_ids:
+                active_stmt = select(Experience.id).where(
+                    Experience.id.in_(other_exp_ids),
+                    Experience.is_deleted == False,  # noqa: E712
+                    Experience.valid_until.is_(None),
+                )
+                active_res = await self._session.execute(active_stmt)
+                active_rows = active_res.all() if hasattr(active_res, "all") else []
+                if isinstance(active_rows, list):
+                    active_other_ids = {str(r[0]) for r in active_rows if r}
+
+            for rel in affected:
+                ev_strs = [str(x) for x in (rel.evidence or []) if x]
+                remaining_active = [e for e in ev_strs if e != exp_str and e in active_other_ids]
+                if not remaining_active:
+                    rel.valid_until = ts
+                    expired_count += 1
+        except Exception:
+            logger.debug(
+                "expire_relationships_for_experience skipped or failed for %s",
+                exp_str,
+                exc_info=True,
+            )
+        return expired_count
+
+    async def supersede_experience(
+        self,
+        old_experience_id: uuid.UUID,
+        new_experience_id: uuid.UUID,
+        *,
+        reason: str = "",
+        actor: str = "system",
+    ) -> Experience | None:
+        """Mark an existing experience as superseded by a newer experience."""
+        old_exp = await self.get_by_id(old_experience_id, include_deleted=True)
+        if old_exp is None:
+            return None
+
+        now = _utcnow()
+        old_exp.valid_until = now
+        old_exp.superseded_by_id = new_experience_id
+        old_exp.updated_at = now
+
+        old_history = list(old_exp.mutation_history) if isinstance(old_exp.mutation_history, list) else []
+        old_history.append(
+            {
+                "action": "SUPERSEDE",
+                "superseded_by_id": str(new_experience_id),
+                "reason": reason,
+                "actor": actor,
+                "timestamp": now.isoformat(),
+            }
+        )
+        old_exp.mutation_history = old_history
+
+        new_exp = await self.get_by_id(new_experience_id, include_deleted=True)
+        if new_exp is not None:
+            new_exp.last_verified_at = now
+            new_history = list(new_exp.mutation_history) if isinstance(new_exp.mutation_history, list) else []
+            new_history.append(
+                {
+                    "action": "SUPERSEDE_REPLACES",
+                    "supersedes_id": str(old_experience_id),
+                    "reason": reason,
+                    "actor": actor,
+                    "timestamp": now.isoformat(),
+                }
+            )
+            new_exp.mutation_history = new_history
+
+        await self.expire_relationships_for_experience(old_experience_id, now=now)
+        await self._session.flush()
+        return old_exp
+
+    async def merge_experience(
+        self,
+        target_experience_id: uuid.UUID,
+        *,
+        merged_solution: str | None = None,
+        merged_description: str | None = None,
+        merged_tags: list[str] | None = None,
+        embedding: list[float] | None = None,
+        reason: str = "",
+        actor: str = "system",
+    ) -> Experience | None:
+        """Merge complementary content into an existing active experience."""
+        exp = await self.get_by_id(target_experience_id, include_deleted=False)
+        if exp is None:
+            return None
+
+        if merged_solution is not None:
+            exp.solution = merged_solution
+        if merged_description is not None:
+            exp.description = merged_description
+        if merged_tags is not None:
+            existing_tags = list(exp.tags) if isinstance(exp.tags, list) else []
+            combined_tags: list[str] = []
+            for t in existing_tags + list(merged_tags):
+                if t and t not in combined_tags:
+                    combined_tags.append(t)
+            exp.tags = combined_tags
+        if embedding is not None:
+            exp.embedding = embedding
+
+        now = _utcnow()
+        exp.updated_at = now
+        exp.last_verified_at = now
+
+        history = list(exp.mutation_history) if isinstance(exp.mutation_history, list) else []
+        history.append(
+            {
+                "action": "MERGE",
+                "reason": reason,
+                "actor": actor,
+                "timestamp": now.isoformat(),
+            }
+        )
+        exp.mutation_history = history
+
+        await self._session.flush()
+        return exp
+
+    async def touch_verified(
+        self,
+        experience_id: uuid.UUID,
+        *,
+        reason: str = "NOOP duplicate verification",
+        actor: str = "system",
+    ) -> Experience | None:
+        """Touch last_verified_at and record NOOP audit entry when duplicate knowledge is re-verified."""
+        exp = await self.get_by_id(experience_id, include_deleted=False)
+        if exp is None:
+            return None
+
+        now = _utcnow()
+        exp.last_verified_at = now
+
+        history = list(exp.mutation_history) if isinstance(exp.mutation_history, list) else []
+        history.append(
+            {
+                "action": "NOOP",
+                "reason": reason,
+                "actor": actor,
+                "timestamp": now.isoformat(),
+            }
+        )
+        exp.mutation_history = history
+
+        await self._session.flush()
+        return exp
 
     async def change_status(
         self,
@@ -584,6 +796,14 @@ class ExperienceRepository:
         """Increment used_count (agent actually referenced the experience)."""
         await self._session.execute(
             update(Experience).where(Experience.id == experience_id).values(used_count=Experience.used_count + 1)
+        )
+
+    async def increment_negative_feedback_count(self, experience_id: uuid.UUID) -> None:
+        """Increment negative_feedback_count (experience received rating <= 2)."""
+        await self._session.execute(
+            update(Experience)
+            .where(Experience.id == experience_id)
+            .values(negative_feedback_count=Experience.negative_feedback_count + 1)
         )
 
     # ======================== PROJECT ========================

@@ -65,6 +65,26 @@ CREATE INDEX IF NOT EXISTS idx_search_corr_session
 ON search_correlations(session_id, consumed)
 """
 
+_CREATE_TOOL_OBSERVATIONS = """
+CREATE TABLE IF NOT EXISTS tool_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    command_summary TEXT DEFAULT '',
+    target_files TEXT DEFAULT '[]',
+    exit_code INTEGER,
+    error_excerpt TEXT DEFAULT '',
+    succeeded INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+)
+"""
+
+_CREATE_TOOL_OBS_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_tool_obs_session
+ON tool_observations(session_id)
+"""
+
 
 class ConversationBuffer:
     """Async SQLite-backed conversation buffer.
@@ -96,6 +116,8 @@ class ConversationBuffer:
         await self._db.execute(_CREATE_INDEX)
         await self._db.execute(_CREATE_SEARCH_CORRELATIONS)
         await self._db.execute(_CREATE_SEARCH_CORR_INDEX)
+        await self._db.execute(_CREATE_TOOL_OBSERVATIONS)
+        await self._db.execute(_CREATE_TOOL_OBS_INDEX)
         # Enable WAL for crash safety (skip for in-memory DB)
         if self._db_path != ":memory:":
             await self._db.execute("PRAGMA journal_mode=WAL")
@@ -130,7 +152,12 @@ class ConversationBuffer:
     # Session management
     # ------------------------------------------------------------------
 
-    async def ensure_session(self, session_id: str, project: str = "default") -> str:
+    async def ensure_session(
+        self,
+        session_id: str,
+        project: str = "default",
+        force_update_project: bool = False,
+    ) -> str:
         """Ensure a session exists; create if not.
 
         Returns the session_id.
@@ -139,6 +166,8 @@ class ConversationBuffer:
         row = await db.execute("SELECT id FROM sessions WHERE id = ?", (session_id,))
         existing = await row.fetchone()
         if existing:
+            if force_update_project and project and project != "default":
+                await self.update_session_project(session_id, project)
             return session_id
 
         now = datetime.now(timezone.utc).isoformat()
@@ -148,6 +177,21 @@ class ConversationBuffer:
         )
         await db.commit()
         return session_id
+
+    async def update_session_project(self, session_id: str, project: str) -> bool:
+        """Update the project associated with an existing session.
+
+        Returns True if a session row was updated, False otherwise.
+        """
+        if not session_id or not project or project == "default":
+            return False
+        db = self._require_db()
+        cursor = await db.execute(
+            "UPDATE sessions SET project = ? WHERE id = ?",
+            (project, session_id),
+        )
+        await db.commit()
+        return (cursor.rowcount or 0) > 0
 
     async def get_session(self, session_id: str) -> dict[str, Any] | None:
         """Get session metadata. Returns None if not found."""
@@ -337,6 +381,77 @@ class ConversationBuffer:
     async def get_assistant_messages(self, session_id: str) -> list[dict[str, Any]]:
         """Get only assistant messages for a session."""
         return await self.get_messages(session_id, role="assistant")
+
+    async def add_tool_observation(
+        self,
+        session_id: str,
+        tool_name: str,
+        *,
+        command_summary: str = "",
+        command: str = "",
+        target_files: list[str] | None = None,
+        target_file: str = "",
+        exit_code: int | None = None,
+        error_excerpt: str = "",
+        succeeded: bool = True,
+        project: str = "default",
+    ) -> int:
+        """Record a structured tool execution observation for trajectory distillation."""
+        import json
+
+        db = self._require_db()
+        await self.ensure_session(session_id, project)
+        now = datetime.now(timezone.utc).isoformat()
+        effective_cmd = command_summary or command
+        effective_files = (
+            list(target_files)
+            if target_files is not None
+            else ([target_file] if target_file else [])
+        )
+        files_json = json.dumps(effective_files)
+        cursor = await db.execute(
+            """
+            INSERT INTO tool_observations
+                (session_id, tool_name, command_summary, target_files, exit_code, error_excerpt, succeeded, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                tool_name,
+                effective_cmd[:300],
+                files_json,
+                exit_code,
+                error_excerpt[:500],
+                1 if succeeded else 0,
+                now,
+            ),
+        )
+        await db.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (now, session_id))
+        await db.commit()
+        return cursor.lastrowid or 0
+
+    async def get_tool_observations(self, session_id: str) -> list[dict[str, Any]]:
+        """Return ordered tool observations for a session."""
+        import json
+
+        db = self._require_db()
+        cursor = await db.execute(
+            "SELECT * FROM tool_observations WHERE session_id = ? ORDER BY id",
+            (session_id,),
+        )
+        rows = await cursor.fetchall()
+        results: list[dict[str, Any]] = []
+        for r in rows:
+            d = self._row_to_dict(r)
+            try:
+                d["target_files"] = json.loads(d.get("target_files") or "[]")
+            except Exception:
+                d["target_files"] = []
+            d["command"] = d.get("command_summary") or ""
+            d["target_file"] = ", ".join(d["target_files"]) if d.get("target_files") else ""
+            d["succeeded"] = bool(d.get("succeeded", 1))
+            results.append(d)
+        return results
 
     async def get_last_user_message_time(self, session_id: str) -> datetime | None:
         """Get the timestamp of the last user message in a session.
