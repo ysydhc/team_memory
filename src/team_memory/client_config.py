@@ -50,7 +50,7 @@ def _find_project_root(start: str | None = None) -> Path | None:
 
 
 def _load_dotenv() -> None:
-    """Load .env from project root if dotenv is available."""
+    """Load .env from project root, cwd, or ~/.config/tm/.env if dotenv is available."""
     if load_dotenv is None:
         return
     # Try project root .env first
@@ -59,6 +59,10 @@ def _load_dotenv() -> None:
         load_dotenv(root / ".env", override=False)
     # Also try CWD
     load_dotenv(override=False)
+    # Also try user global ~/.config/tm/.env (for source-free installs)
+    global_env = _CONFIG_DIR / ".env"
+    if global_env.exists():
+        load_dotenv(global_env, override=False)
 
 
 def _read_config_toml() -> dict[str, Any]:

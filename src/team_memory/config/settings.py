@@ -106,19 +106,40 @@ def _resolve_dict(d: dict) -> dict:
     return result
 
 
+def _hydrate_env_from_user_toml() -> None:
+    """Populate TEAM_MEMORY_API_KEY from ~/.config/tm/config.toml when unset in env."""
+    if os.environ.get("TEAM_MEMORY_API_KEY"):
+        return
+    toml_path = Path.home() / ".config" / "tm" / "config.toml"
+    if not toml_path.exists():
+        return
+    try:
+        import tomllib
+
+        with open(toml_path, "rb") as f:
+            data = tomllib.load(f)
+        srv_key = (data.get("server") or {}).get("api_key", "")
+        if srv_key and not str(srv_key).startswith("${"):
+            os.environ["TEAM_MEMORY_API_KEY"] = str(srv_key)
+    except Exception:
+        pass
+
+
 def _load_dotenv_if_available() -> None:
-    """Load .env into os.environ."""
+    """Load .env into os.environ (project root, repo root, or ~/.config/tm/.env)."""
     try:
         from dotenv import load_dotenv
     except ImportError:
+        _hydrate_env_from_user_toml()
         return
     for candidate in (
         Path.cwd() / ".env",
         Path(__file__).resolve().parent.parent.parent.parent / ".env",
+        Path.home() / ".config" / "tm" / ".env",
     ):
         if candidate.exists():
-            load_dotenv(candidate)
-            return
+            load_dotenv(candidate, override=False)
+    _hydrate_env_from_user_toml()
 
 
 def _normalize_env_name(raw: str) -> str:
@@ -165,12 +186,14 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
                 yaml_data = _resolve_dict(raw)
         else:
             env_name = _normalize_env_name(os.environ.get("TEAM_MEMORY_ENV", "development"))
-            cfg_path = Path(f"config.{env_name}.yaml")
-            if not cfg_path.exists():
-                repo_cfg = Path(__file__).resolve().parent.parent.parent.parent / f"config.{env_name}.yaml"
-                if repo_cfg.exists():
-                    cfg_path = repo_cfg
-            if cfg_path.exists():
+            candidates = (
+                Path(f"config.{env_name}.yaml"),
+                Path(__file__).resolve().parent.parent.parent.parent / f"config.{env_name}.yaml",
+                Path.home() / ".config" / "tm" / f"config.{env_name}.yaml",
+                Path(__file__).resolve().parent.parent / f"_bundled_config.{env_name}.yaml",
+            )
+            cfg_path = next((p for p in candidates if p.exists()), None)
+            if cfg_path is not None:
                 with open(cfg_path) as f:
                     raw = yaml.safe_load(f) or {}
                 yaml_data = _resolve_dict(raw)

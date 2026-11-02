@@ -75,6 +75,11 @@ tm-daemon = "team_memory.daemon.__main__:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/team_memory"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"migrations" = "team_memory/_bundled_migrations"
+"alembic.ini" = "team_memory/_bundled_alembic.ini"
+"config.development.yaml" = "team_memory/_bundled_config.development.yaml"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

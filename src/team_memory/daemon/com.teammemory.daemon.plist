@@ -8,7 +8,7 @@
     <array>
         <string>/bin/bash</string>
         <string>-c</string>
-        <string>cd __REPO_ROOT__ &amp;&amp; set -a &amp;&amp; source .env &amp;&amp; set +a &amp;&amp; exec __PYTHON_PATH__ -m team_memory.daemon</string>
+        <string>cd "__REPO_ROOT__" &amp;&amp; set -a; [ -f "$HOME/.config/tm/.env" ] &amp;&amp; source "$HOME/.config/tm/.env"; [ -f .env ] &amp;&amp; source .env; set +a; exec "__PYTHON_PATH__" -m team_memory.daemon</string>
     </array>
     <key>WorkingDirectory</key>
     <string>__REPO_ROOT__</string>

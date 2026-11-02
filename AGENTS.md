@@ -25,6 +25,10 @@ tm-cli recall --query "..." # 搜索团队知识
 tm-cli config show          # 显示当前生效配置及值来源
 tm-cli config init          # 交互式生成 ~/.config/tm/config.toml
 tm-cli setup --platform all # 一键配置平台 Hook
+tm-cli setup --all-in-one   # 免源码一键拉起本地全栈（PostgreSQL + 迁移 + Web + Daemon + IDE 挂载）
+tm-cli server up            # 免源码启动本地服务端栈（pgvector 容器 + Alembic 迁移 + Web + Daemon）
+tm-cli daemon install       # 免源码安装/启动 macOS launchd 守护进程（tm-daemon）
+tm-cli recall-list --since 7d # 查看最近召回列表与链路追踪（等价于 status -n N --since）
 
 # 单测 / 筛选
 pytest tests/test_server.py::TestLiteToolRegistration::test_exactly_six_tools -v
