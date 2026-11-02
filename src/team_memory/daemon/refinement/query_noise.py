@@ -45,7 +45,9 @@ _COMMAND_PREFIXES = (
 _TRIVIAL_PATTERNS = re.compile(
     r"^(ok|okay|好|好的|可以|行|确定|确认|是的|对|对的|继续|嗯+|"
     r"continue|yes|no|不|不是|不用|got it|done|next|下一步|"
-    r"出错了[,，]?重试|重试|retry|算了|等等|稍等)$",
+    r"出错了[,，]?重试|重试|retry|算了|等等|稍等|"
+    r"(好|好的|可以|行|没问题)[,，、\s]*(开始|继续|执行|开始优化|开始执行|开始修改|继续修改|继续优化|按这个来|动手吧)?|"
+    r"进入\s*phase\s*\d+)[!！。.]*$",
     re.IGNORECASE,
 )
 

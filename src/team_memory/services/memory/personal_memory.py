@@ -115,7 +115,7 @@ class PersonalMemoryService:
                     context_similarity_threshold=context_similarity_threshold,
                 )
 
-        def _extract_item(r: Any) -> tuple[str, str, str, float, str]:
+        def _extract_item(r: Any) -> tuple[str, str, str, float, str, float]:
             if isinstance(r, dict):
                 content = str(r.get("content") or r.get("rule_text") or "").strip()
                 r_persona = str(r.get("persona") or "general")
@@ -129,6 +129,7 @@ class PersonalMemoryService:
                 else:
                     conf = float((r.get("priority", 80) or 80) / 100.0)
                 ctx_hint = str(r.get("context_hint") or "")
+                vec_sim = float(r.get("_similarity") or r.get("similarity") or 0.0)
             else:
                 content = str(getattr(r, "content", None) or getattr(r, "rule_text", None) or "").strip()
                 r_persona = str(getattr(r, "persona", None) or "general")
@@ -139,7 +140,8 @@ class PersonalMemoryService:
                 else:
                     conf = float((getattr(r, "priority", 80) or 80) / 100.0)
                 ctx_hint = str(getattr(r, "context_hint", None) or "")
-            return content, r_persona, p_kind, conf, ctx_hint
+                vec_sim = float(getattr(r, "_similarity", None) or getattr(r, "similarity", None) or 0.0)
+            return content, r_persona, p_kind, conf, ctx_hint, vec_sim
 
         extracted = [_extract_item(r) for r in rows]
         if persona:
@@ -150,7 +152,7 @@ class PersonalMemoryService:
             hint_tokens = set(re.findall(r"[a-z0-9_]{2,}|[\u4e00-\u9fff]{2,}", hint_source))
             seen_keys: set[str] = set()
             scored_candidates: list[tuple[float, int, str, str]] = []
-            for idx, (content, _r_persona, p_kind, conf, ctx_hint) in enumerate(extracted):
+            for idx, (content, _r_persona, p_kind, conf, ctx_hint, vec_sim) in enumerate(extracted):
                 if not content:
                     continue
                 dedupe_key = content.lower()
@@ -164,7 +166,12 @@ class PersonalMemoryService:
                     if hint_tokens
                     else 0
                 )
-                score = (overlap_count * 2.0) + conf + (0.2 if is_static else 0.0)
+                score = (
+                    (max(0.0, vec_sim) * 3.0)
+                    + (overlap_count * 1.5)
+                    + (conf * 2.0)
+                    + (0.2 if is_static else 0.0)
+                )
                 scored_candidates.append((score, idx, content, p_kind))
 
             scored_candidates.sort(key=lambda x: (-x[0], x[1]))
@@ -178,7 +185,7 @@ class PersonalMemoryService:
 
         static_ordered = []
         dynamic_ordered = []
-        for content, _r_persona, p_kind, _conf, _ctx_hint in extracted:
+        for content, _r_persona, p_kind, _conf, _ctx_hint, _vec_sim in extracted:
             if not content:
                 continue
             if p_kind == "dynamic":

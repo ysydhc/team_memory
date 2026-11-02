@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -26,39 +27,73 @@ logger = logging.getLogger("tm_daemon.personal_memory")
 
 _VALID_PERSONAS = frozenset({"coding", "writing", "research", "debugging", "general"})
 
+# Keywords indicating a single-session / single-feature ephemeral directive rather than a durable cross-project trait
+_EPHEMERAL_TASK_PATTERNS = (
+    "高德与滴滴",
+    "下拉菜单",
+    "卡片互相遮挡",
+    "sandbox 页面",
+    "sandbox页面",
+    "302 跳转",
+    "302跳转",
+    "原始链接",
+    "前端同学",
+    "其他前端成员",
+    "进入phase",
+    "p1, p2",
+)
+
+
+def _is_ephemeral_task_memory(content: str) -> bool:
+    """Return True if content looks like a one-off feature/bug instruction rather than a durable user trait."""
+    text = (content or "").strip()
+    if len(text) < 8:
+        return True
+    low = text.lower()
+    if any(pat in low for pat in _EPHEMERAL_TASK_PATTERNS):
+        return True
+    if re.search(r"设置为\s*\d+\s*px", low):
+        return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # LLM Prompt
 # ---------------------------------------------------------------------------
 
 _EXTRACT_PROMPT = """\
-你是一个对话分析助手。从下面的用户发言中提取与该用户个人相关的信息。
+你是一个对话分析助手。从下面的用户发言中提取**跨项目、长期稳定**的个人工程画像与偏好。
 
 重点提取:
-1. 技术偏好 (编程语言、框架、工具链、编辑器)
-2. 工作习惯 (沟通风格、决策方式、时间偏好)
-3. 项目上下文 (负责的项目、团队角色、工作环境)
-4. 个人特征 (语言习惯、关注点、常见需求模式)
+1. 技术偏好 (编程语言、框架、工具链、编辑器、CLI/自动化测试倾向)
+2. 工作习惯 (沟通风格、先调研后改码、决策评估方式如要求基准与打分)
+3. 工程纪律 (Git 提交规范、真机验证要求、代码整洁与分层边界偏好)
+4. 表达与文档偏好 (图表形式、信息密度、汇报结构)
 
-注意:
-- 只提取明确表达或可直接推断的事实，不要猜测
-- 忽略一次性的任务指令，关注可复用的持久信息
-- 如果没有可提取的个人信息，返回空数组
-- 每条记忆应独立且具体，避免泛泛而谈
+严格过滤铁律（必须遵守）:
+- 【去业务化】：严禁提取单次任务、单个页面或特定业务场景下的临时要求
+  （例如："修复某页面下拉菜单"、"坚持使用原始302跳转链接"、"同时支持高德与滴滴"、"解决卡片遮挡"等一律不得提取！）。
+- 如果某条发言体现了通用工程态度，必须剥离具体业务名词，抽象为跨所有项目通用的准则
+  （例如将"拒绝改302链接规避问题"抽象为"排查问题时坚持修复根因，拒绝通过修改测试输入规避问题"）。
+- 只提取明确表达或高置信度体现的持久习惯，如果没有可提取的持久跨项目信息，返回空数组 `"memories": []`。
 
-每条记忆必须标注 persona 字段，表示该偏好属于哪个场景:
-- coding: 编程/调试/部署/测试相关的偏好 (如 "偏好 pytest", "不喜欢 Java")
-- writing: 写作/文档/翻译相关的偏好 (如 "中英双语输出", "注释用中文")
-- research: 调研/对比/分析相关的偏好 (如 "先比较再决策")
-- debugging: 排障/日志分析相关的偏好 (如 "先看日志再改代码")
-- general: 通用偏好 (如 "不喜欢太长的回复")
+每条记忆必须标注:
+- `persona` 字段:
+  - coding: 编程/架构/部署/测试相关的偏好
+  - writing: 写作/文档/图表/结构化表达相关的偏好
+  - research: 调研/对比/基准打分/方案分析相关的偏好
+  - debugging: 排障/日志分析/真机验证相关的偏好
+  - general: 跨领域通用沟通与协作习惯
+- `priority` 字段 (50-85 整数):
+  - 75-85: 用户明确强调的长期铁律或核心工程习惯
+  - 55-70: 稳定的常规偏好
 
 输出 JSON 格式:
 ```json
 {{
   "memories": [
-    {{"category": "preference", "persona": "coding", "content": "具体偏好描述"}},
-    {{"category": "habit", "persona": "general", "content": "具体习惯描述"}},
-    {{"category": "context", "persona": "research", "content": "具体上下文描述"}}
+    {{"category": "preference", "persona": "coding", "priority": 75, "content": "具体跨项目偏好描述"}},
+    {{"category": "habit", "persona": "research", "priority": 80, "content": "具体跨项目习惯描述"}}
   ]
 }}
 ```
@@ -123,8 +158,8 @@ class PersonalMemoryExtractor:
         saved = 0
         for mem in memories:
             category = mem.get("category", "preference")
-            content = mem.get("content", "")
-            if not content:
+            content = str(mem.get("content", "") or "").strip()
+            if not content or _is_ephemeral_task_memory(content):
                 continue
 
             # Resolve persona: use LLM-extracted value, validate, fallback to classifier
@@ -132,8 +167,17 @@ class PersonalMemoryExtractor:
             if persona not in _VALID_PERSONAS:
                 persona = classify_persona(content)
 
+            raw_pri = mem.get("priority", 60)
             try:
-                await self._save_memory(category, content, persona=persona)
+                priority = max(50, min(90, int(raw_pri)))
+            except (TypeError, ValueError):
+                priority = 60
+
+            try:
+                try:
+                    await self._save_memory(category, content, persona=persona, priority=priority)
+                except TypeError:
+                    await self._save_memory(category, content, persona=persona)
                 saved += 1
             except Exception:
                 logger.warning("Failed to save personal memory: %s", content[:50], exc_info=True)
@@ -193,7 +237,14 @@ class PersonalMemoryExtractor:
         parsed = json.loads(content)
         return parsed.get("memories", [])
 
-    async def _save_memory(self, category: str, content: str, *, persona: str = "general") -> None:
+    async def _save_memory(
+        self,
+        category: str,
+        content: str,
+        *,
+        persona: str = "general",
+        priority: int = 60,
+    ) -> None:
         """Save a personal memory to the TM database.
 
         Maps extractor category to TM scope/profile_kind:
@@ -221,4 +272,5 @@ class PersonalMemoryExtractor:
             scope=scope,
             context_hint=category,
             persona=persona,
+            priority=priority,
         )

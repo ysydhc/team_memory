@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from team_memory.storage.models import PersonalMemory
 
-PERSONAL_MEMORY_OVERWRITE_THRESHOLD = 0.88
+PERSONAL_MEMORY_OVERWRITE_THRESHOLD = 0.82
 VALID_PERSONAS = ("coding", "debugging", "writing", "research", "general")
 
 __all__ = [
@@ -47,21 +47,37 @@ class PersonalMemoryRepository:
         context_similarity_threshold: float = 0.5,
     ) -> list[PersonalMemory]:
         """Static rows all + dynamic rows (all if no embedding, else similarity-filtered)."""
-        static_rows = await self.list_by_user(user_id, profile_kind="static")
         if not context_embedding:
+            static_rows = await self.list_by_user(user_id, profile_kind="static")
             dynamic_rows = await self.list_by_user(user_id, profile_kind="dynamic")
             return static_rows + dynamic_rows
+
         similarity_expr = (1 - PersonalMemory.embedding.cosine_distance(context_embedding)).label("similarity")
-        q = (
-            select(PersonalMemory)
+        q_static = (
+            select(PersonalMemory, similarity_expr)
+            .where(PersonalMemory.user_id == user_id)
+            .where(PersonalMemory.profile_kind == "static")
+            .order_by(desc(PersonalMemory.priority), desc(PersonalMemory.updated_at))
+        )
+        res_static = await self._session.execute(q_static)
+        static_rows: list[PersonalMemory] = []
+        for mem, sim in res_static.all():
+            mem._similarity = float(sim) if sim is not None else 0.0
+            static_rows.append(mem)
+
+        q_dynamic = (
+            select(PersonalMemory, similarity_expr)
             .where(PersonalMemory.user_id == user_id)
             .where(PersonalMemory.profile_kind == "dynamic")
             .where(PersonalMemory.embedding.is_not(None))
             .where(similarity_expr >= context_similarity_threshold)
-            .order_by(desc(PersonalMemory.updated_at))
+            .order_by(desc(similarity_expr), desc(PersonalMemory.updated_at))
         )
-        result = await self._session.execute(q)
-        dynamic_items = list(result.scalars().all())
+        res_dynamic = await self._session.execute(q_dynamic)
+        dynamic_items: list[PersonalMemory] = []
+        for mem, sim in res_dynamic.all():
+            mem._similarity = float(sim) if sim is not None else 0.0
+            dynamic_items.append(mem)
         return static_rows + dynamic_items
 
     async def get_by_id(self, memory_id: uuid.UUID, user_id: str) -> PersonalMemory | None:
@@ -181,6 +197,9 @@ class PersonalMemoryRepository:
         pk = profile_kind or ("dynamic" if scope == "context" else "static")
         existing = await self.find_most_similar(user_id, embedding, threshold, pk)
         if existing:
+            prev_pri = int(existing.priority or 50)
+            in_pri = int(priority or 50)
+            boosted_priority = min(100, max(prev_pri, in_pri) + 10)
             await self.update(
                 existing.id,
                 user_id,
@@ -190,7 +209,7 @@ class PersonalMemoryRepository:
                 embedding=embedding,
                 profile_kind=pk,
                 persona=persona,
-                priority=priority,
+                priority=boosted_priority,
             )
             await self._session.refresh(existing)
             return existing
