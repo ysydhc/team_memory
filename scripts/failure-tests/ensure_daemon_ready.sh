@@ -8,4 +8,8 @@ for i in $(seq 1 30); do
     sleep 1
 done
 echo "Daemon NOT ready after 30s"
+if [ -f /tmp/tm-daemon.log ]; then
+    echo "--- /tmp/tm-daemon.log ---"
+    tail -n 50 /tmp/tm-daemon.log
+fi
 exit 1

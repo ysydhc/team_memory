@@ -243,11 +243,37 @@ hooks-install:  ## 安装 Git hooks（post-commit 自动更新任务）
 	chmod +x .git/hooks/post-commit
 	@echo "  ✔ Git post-commit hook installed."
 
-daemon-start:    ## Start TM Daemon (launchd)
-	launchctl load ~/Library/LaunchAgents/com.teammemory.daemon.plist
+daemon-start:    ## Start TM Daemon (launchd on macOS if plist exists, background process otherwise)
+	@if [ "$$(uname)" = "Darwin" ] && [ -f "$$HOME/Library/LaunchAgents/com.teammemory.daemon.plist" ] && command -v launchctl >/dev/null 2>&1; then \
+		launchctl load "$$HOME/Library/LaunchAgents/com.teammemory.daemon.plist"; \
+	else \
+		if [ -f /tmp/tm-daemon.pid ] && kill -0 "$$(cat /tmp/tm-daemon.pid 2>/dev/null)" 2>/dev/null; then \
+			echo "  ℹ TM Daemon already running (PID $$(cat /tmp/tm-daemon.pid))"; \
+		else \
+			set -a && [ -f .env ] && source .env || true && set +a; \
+			nohup $(PYTHON_BIN) -m team_memory.daemon > /tmp/tm-daemon.log 2>&1 & echo $$! > /tmp/tm-daemon.pid; \
+			echo "  ✔ TM Daemon started in background (PID $$(cat /tmp/tm-daemon.pid))"; \
+		fi; \
+	fi
 
-daemon-stop:     ## Stop TM Daemon (launchd)
-	launchctl unload ~/Library/LaunchAgents/com.teammemory.daemon.plist
+daemon-stop:     ## Stop TM Daemon (launchd on macOS if plist exists, background process otherwise)
+	@if [ "$$(uname)" = "Darwin" ] && [ -f "$$HOME/Library/LaunchAgents/com.teammemory.daemon.plist" ] && command -v launchctl >/dev/null 2>&1; then \
+		launchctl unload "$$HOME/Library/LaunchAgents/com.teammemory.daemon.plist" 2>/dev/null || true; \
+	fi; \
+	if [ -f /tmp/tm-daemon.pid ]; then \
+		PID="$$(cat /tmp/tm-daemon.pid 2>/dev/null)"; \
+		if [ -n "$$PID" ] && kill -0 "$$PID" 2>/dev/null; then \
+			kill "$$PID" 2>/dev/null || true; \
+			for i in 1 2 3 4 5; do \
+				kill -0 "$$PID" 2>/dev/null || break; \
+				sleep 1; \
+			done; \
+			kill -9 "$$PID" 2>/dev/null || true; \
+		fi; \
+		rm -f /tmp/tm-daemon.pid; \
+	fi; \
+	pkill -f "team_memory.daemon" 2>/dev/null || true; \
+	echo "  ✔ TM Daemon stopped"
 
 watchdog-start:  ## Start TM Watchdog (launchd)
 	launchctl load ~/Library/LaunchAgents/com.teammemory.watchdog.plist
