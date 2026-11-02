@@ -1934,6 +1934,29 @@ def cmd_metrics_summary(args: Any) -> None:
             print(f"  {label_key}: {val:.2f}")
 
 
+def _parse_since_to_days(since_val: str | None, default_days: int = 7) -> int:
+    """Convert --since (e.g. '7d', '24h', '2026-10-25') into days lookback window."""
+    if not since_val:
+        return default_days
+    s = str(since_val).strip().lower()
+    if s.endswith("d") and s[:-1].isdigit():
+        return max(1, int(s[:-1]))
+    if s.endswith("h") and s[:-1].isdigit():
+        return max(1, (int(s[:-1]) + 23) // 24)
+    if s.isdigit():
+        return max(1, int(s))
+    try:
+        from datetime import datetime, timezone
+
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        delta_days = (datetime.now(timezone.utc) - dt).days + 1
+        return max(1, delta_days)
+    except Exception:
+        return default_days
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     """Show panoramic status across all TeamMemory nodes (one-shot, --trace, or --watch)."""
     import asyncio
@@ -1943,7 +1966,8 @@ def cmd_status(args: argparse.Namespace) -> None:
     watch = bool(getattr(args, "watch", False))
     interval = float(getattr(args, "interval", 2.0))
     as_json = bool(getattr(args, "json", False))
-    days = int(getattr(args, "days", 7))
+    raw_days = int(getattr(args, "days", 7) or 7)
+    days = _parse_since_to_days(getattr(args, "since", None), default_days=raw_days)
     server_url = getattr(args, "server_url", None)
     daemon_url = getattr(args, "daemon_url", None)
     db_path = getattr(args, "db_path", None)
@@ -2241,10 +2265,78 @@ def main() -> None:
         default=7,
         help="Time window in days for search/faithfulness telemetry (default: 7)",
     )
+    p_status.add_argument(
+        "--since",
+        nargs="?",
+        const="7d",
+        default=None,
+        help="Optional lookback window (e.g. 7d, 24h, YYYY-MM-DD)",
+    )
     p_status.add_argument("--server-url", help="Override Core Server URL (default: http://localhost:9111)")
     p_status.add_argument("--daemon-url", help="Override TM Daemon URL (default: http://127.0.0.1:3901)")
     p_status.add_argument("--db-path", help="Override local SQLite drafts.db path")
     p_status.set_defaults(func=cmd_status)
+
+    p_recall_list = sub.add_parser(
+        "recall-list",
+        help="List recent recalls & inspect pipeline traces (shortcut for status -n N) / 查看最近召回列表与链路",
+    )
+    p_recall_list.add_argument(
+        "-n",
+        "--limit",
+        type=int,
+        default=20,
+        help="Number of recent recalls to display (default: 20)",
+    )
+    p_recall_list.add_argument(
+        "--days",
+        type=int,
+        default=7,
+        help="Time window in days (default: 7)",
+    )
+    p_recall_list.add_argument(
+        "--since",
+        nargs="?",
+        const="7d",
+        default=None,
+        help="Optional lookback window (e.g. 7d, 24h, YYYY-MM-DD)",
+    )
+    p_recall_list.add_argument(
+        "--json",
+        action="store_true",
+        help="Output JSON snapshot",
+    )
+    p_recall_list.add_argument(
+        "--no-interactive",
+        action="store_true",
+        help="Disable interactive recall selection prompt",
+    )
+    p_recall_list.add_argument("--server-url", help="Override Core Server URL")
+    p_recall_list.add_argument("--daemon-url", help="Override TM Daemon URL")
+    p_recall_list.add_argument("--db-path", help="Override local SQLite drafts.db path")
+    p_recall_list.set_defaults(func=cmd_status)
+
+    p_recall_trace = sub.add_parser(
+        "recall-trace",
+        help="Inspect full recall pipeline trace for index (1-N) or Log ID (shortcut for status <target>)",
+    )
+    p_recall_trace.add_argument(
+        "target",
+        help="Recall index (1-N) or Log ID to inspect",
+    )
+    p_recall_trace.add_argument(
+        "-n",
+        "--limit",
+        type=int,
+        default=50,
+        help="Lookback limit when resolving index (default: 50)",
+    )
+    p_recall_trace.add_argument(
+        "--json",
+        action="store_true",
+        help="Output machine-readable JSON trace",
+    )
+    p_recall_trace.set_defaults(func=cmd_status)
 
     p_watch = sub.add_parser(
         "watch",
