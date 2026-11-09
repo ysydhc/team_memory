@@ -125,6 +125,7 @@ async def _probe_daemon_status(daemon_url: str, timeout: float = 2.5) -> dict[st
                 "tm_mode": data.get("tm_mode", "unknown"),
                 "refinement_worker": data.get("refinement_worker", {}),
                 "heartbeat": data.get("heartbeat", {}),
+                "maintenance": data.get("maintenance", {}),
             }
     except Exception as exc:
         return {
@@ -943,6 +944,16 @@ def render_status_plain(snapshot: dict[str, Any], watch_meta: dict[str, Any] | N
         f"│ Sleep/Wake Heartbeat:  checks={hb.get('check_count', 0)}, "
         f"wake_recoveries={hb.get('sleep_wake_count', 0)}"
     )
+    maint = dm.get("maintenance") or {}
+    ad_running = bool(maint.get("auto_dream_running"))
+    jn_running = bool(maint.get("janitor_running"))
+    last_j = str(maint.get("last_janitor_at") or "")[:19]
+    if maint:
+        m_badge = "ACTIVE" if (ad_running and jn_running) else "DEGRADED"
+        lines.append(
+            f"│ AutoDream & Janitor:   [{m_badge}] (dream={'up' if ad_running else 'off'}, "
+            f"janitor={'up' if jn_running else 'off'}, last_run={last_j or 'none'})"
+        )
     if latest_ev:
         lines.append(
             f"│ IDE Hook Capture:      total={cap.get('total_payloads', 0)} events | "
@@ -1189,6 +1200,20 @@ def build_rich_renderable(snapshot: dict[str, Any], watch_meta: dict[str, Any] |
             else "no hook events yet"
         ),
     )
+    maint = dm.get("maintenance") or {}
+    ad_running = bool(maint.get("auto_dream_running"))
+    jn_running = bool(maint.get("janitor_running"))
+    last_j = str(maint.get("last_janitor_at") or "")[:19]
+    if maint:
+        maint_badge = (
+            "[green]● ACTIVE[/green]"
+            if (ad_running and jn_running)
+            else "[yellow]● DEGRADED[/yellow]"
+        )
+        maint_desc = f"dream: {'up' if ad_running else 'off'} | janitor: {'up' if jn_running else 'off'}"
+        if last_j:
+            maint_desc += f" | last: {last_j}"
+        t_daemon.add_row("AutoDream & Janitor", maint_badge, maint_desc)
 
     p_daemon = Panel(t_daemon, title="2. 守护进程与 Hook 感知 (Daemon & Hooks)", border_style="magenta")
 

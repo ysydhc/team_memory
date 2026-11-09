@@ -516,6 +516,14 @@ async def start_background_tasks(ctx: AppContext) -> None:
     except RuntimeError:
         logger.debug("No running event loop, task polling will not start")
 
+    if ctx.janitor_scheduler is not None:
+        try:
+            if hasattr(ctx.janitor_scheduler, "enable_state_persistence"):
+                ctx.janitor_scheduler.enable_state_persistence()
+            await ctx.janitor_scheduler.start()
+        except Exception as e:
+            logger.warning("Failed to start janitor scheduler in background tasks: %s", e)
+
 
 def _register_entity_extraction(
     event_bus: EventBus,
@@ -538,8 +546,8 @@ def _register_entity_extraction(
 
         extract_llm_config = LLMConfig(
             provider="generic",
-            model=getattr(ee_cfg, "model", "DeepSeek-V4-Flash"),
-            base_url=getattr(ee_cfg, "base_url", "http://localhost:4000/v1"),
+            model=getattr(ee_cfg, "model", "gbu-gemini-3.8-flash"),
+            base_url=getattr(ee_cfg, "base_url", "https://gw.gburouter.com/v1"),
             api_key=api_key,
         )
     else:

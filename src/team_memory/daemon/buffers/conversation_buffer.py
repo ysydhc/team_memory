@@ -28,7 +28,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     project TEXT NOT NULL DEFAULT 'default',
     status TEXT DEFAULT 'active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    refined_payload TEXT,
+    profile_extracted_msg_id INTEGER NOT NULL DEFAULT 0
 )
 """
 
@@ -121,12 +123,16 @@ class ConversationBuffer:
         # Enable WAL for crash safety (skip for in-memory DB)
         if self._db_path != ":memory:":
             await self._db.execute("PRAGMA journal_mode=WAL")
-        # Schema migration: add refined_payload column if missing
+        # Schema migration: add refined_payload & profile_extracted_msg_id columns if missing
         cursor = await self._db.execute("PRAGMA table_info(sessions)")
         rows = await cursor.fetchall()
         columns = {row[1] for row in rows}
         if "refined_payload" not in columns:
             await self._db.execute("ALTER TABLE sessions ADD COLUMN refined_payload TEXT")
+        if "profile_extracted_msg_id" not in columns:
+            await self._db.execute(
+                "ALTER TABLE sessions ADD COLUMN profile_extracted_msg_id INTEGER NOT NULL DEFAULT 0"
+            )
         await self._db.commit()
         return self
 
@@ -377,6 +383,48 @@ class ConversationBuffer:
     async def get_user_messages(self, session_id: str) -> list[dict[str, Any]]:
         """Get only user messages for a session."""
         return await self.get_messages(session_id, role="user")
+
+    async def get_unextracted_user_messages(
+        self, session_id: str
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Get user messages with id > profile_extracted_msg_id for incremental persona extraction.
+
+        Returns:
+            Tuple of (unextracted_user_messages, max_message_id).
+        """
+        db = self._require_db()
+        cursor = await db.execute(
+            "SELECT COALESCE(profile_extracted_msg_id, 0) FROM sessions WHERE id = ?",
+            (session_id,),
+        )
+        row = await cursor.fetchone()
+        watermark = int(row[0] or 0) if row else 0
+
+        cursor = await db.execute(
+            "SELECT * FROM messages WHERE session_id = ? AND role = 'user' AND id > ? ORDER BY id",
+            (session_id, watermark),
+        )
+        rows = await cursor.fetchall()
+        msgs = [self._row_to_dict(r) for r in rows]
+        max_id = max((int(m.get("id") or 0) for m in msgs), default=watermark)
+        return msgs, max_id
+
+    async def update_profile_extracted_watermark(
+        self, session_id: str, max_msg_id: int
+    ) -> None:
+        """Advance the per-session watermark of extracted user messages."""
+        if max_msg_id <= 0:
+            return
+        db = self._require_db()
+        await db.execute(
+            """
+            UPDATE sessions
+            SET profile_extracted_msg_id = MAX(COALESCE(profile_extracted_msg_id, 0), ?)
+            WHERE id = ?
+            """,
+            (int(max_msg_id), session_id),
+        )
+        await db.commit()
 
     async def get_assistant_messages(self, session_id: str) -> list[dict[str, Any]]:
         """Get only assistant messages for a session."""

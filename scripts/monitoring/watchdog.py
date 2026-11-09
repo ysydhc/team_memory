@@ -68,6 +68,20 @@ class ServiceWatchdog:
                                 degraded_checks.append(f"{check_name}: {err[:60]}")
                     except Exception:
                         pass
+                elif ok and svc.name == "team-memory-daemon":
+                    try:
+                        data = resp.json()
+                        rw = data.get("refinement_worker", {})
+                        if rw and not rw.get("healthy", True):
+                            degraded_checks.append(f"refinement_worker: unhealthy (fails={rw.get('fail_count', 0)})")
+                        maint = data.get("maintenance", {})
+                        if maint:
+                            if not maint.get("janitor_running", True):
+                                degraded_checks.append("janitor: not running")
+                            if not maint.get("auto_dream_running", True):
+                                degraded_checks.append("auto_dream: not running")
+                    except Exception:
+                        pass
         except Exception:
             ok = False
             degraded_checks = []
@@ -81,6 +95,9 @@ class ServiceWatchdog:
                 await self.alert_manager.send_alert(
                     f"{svc.name} recovered", "Service is back online", AlertSeverity.INFO
                 )
+            if hasattr(self.alert_manager, "clear_alert"):
+                self.alert_manager.clear_alert(f"{svc.name} degraded")
+                self.alert_manager.clear_alert(f"{svc.name} down")
             svc.consecutive_failures = 0
             svc.is_up = True
             svc.last_ok = now

@@ -1995,7 +1995,13 @@ def cmd_status(args: argparse.Namespace) -> None:
     daemon_url = getattr(args, "daemon_url", None)
     db_path = getattr(args, "db_path", None)
     trace_target = getattr(args, "trace", None) or getattr(args, "target", None)
-    no_interactive = bool(getattr(args, "no_interactive", False))
+    no_interactive = bool(
+        getattr(args, "no_interactive", False)
+        or getattr(args, "batch", False)
+        or os.environ.get("CI")
+        or os.environ.get("TM_BATCH")
+        or os.environ.get("NON_INTERACTIVE")
+    )
     interactive = False if no_interactive else None
     limit = int(getattr(args, "limit", 12) or 12)
 
@@ -2722,6 +2728,12 @@ def main() -> None:
         help="Output machine-readable JSON snapshot or trace",
     )
     p_status.add_argument(
+        "-b",
+        "--batch",
+        action="store_true",
+        help="Run in headless / batch mode without interactive terminal prompt (alias for --no-interactive)",
+    )
+    p_status.add_argument(
         "--no-interactive",
         action="store_true",
         help="Disable interactive recall selection prompt in TTY / 禁用终端交互式选择提示",
@@ -2779,6 +2791,12 @@ def main() -> None:
         "--json",
         action="store_true",
         help="Output JSON snapshot",
+    )
+    p_recall_list.add_argument(
+        "-b",
+        "--batch",
+        action="store_true",
+        help="Run in headless / batch mode without interactive terminal prompt (alias for --no-interactive)",
     )
     p_recall_list.add_argument(
         "--no-interactive",

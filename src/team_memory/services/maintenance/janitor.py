@@ -11,17 +11,85 @@ Provides automated maintenance operations for team memory:
 from __future__ import annotations
 
 import logging
+import math
 import os
 import subprocess
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 
+from team_memory.project_resolver import normalize_project_name
 from team_memory.services.maintenance.promotion_compiler import PromotionCompiler
-from team_memory.storage.models import Experience, PersonalMemory
+from team_memory.storage.models import Archive, ArchiveExperienceLink, Experience, PersonalMemory
 
 logger = logging.getLogger("team_memory.services.maintenance.janitor")
+
+_CANONICAL_ARCHIVE_CONTENT_TYPES = {
+    "session_archive",
+    "tech_design",
+    "incident_review",
+    "decision_record",
+    "bugfix",
+    "engineering_experience",
+}
+
+
+def _cosine_similarity(vec_a: object, vec_b: object) -> float:
+    """Compute cosine similarity between two vector-like sequences."""
+    if vec_a is None or vec_b is None:
+        return 0.0
+    try:
+        a = [float(x) for x in vec_a]  # type: ignore[attr-defined]
+        b = [float(x) for x in vec_b]  # type: ignore[attr-defined]
+    except (TypeError, ValueError):
+        return 0.0
+    if len(a) != len(b) or not a:
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def _normalize_archive_content_type(raw: str | None) -> str:
+    """Map free-form archive content_type strings to the 6 canonical types."""
+    if not raw or not isinstance(raw, str):
+        return "session_archive"
+    ct = raw.strip().lower()
+    if ct in _CANONICAL_ARCHIVE_CONTENT_TYPES:
+        return ct
+    if any(
+        k in ct
+        for k in (
+            "incident",
+            "postmortem",
+            "retrospective",
+            "audit",
+            "analysis",
+            "test_report",
+            "troubleshooting",
+            "verification",
+        )
+    ):
+        return "incident_review"
+    if any(k in ct for k in ("decision", "adr")):
+        return "decision_record"
+    if any(k in ct for k in ("bug", "fix", "hotfix", "patch")):
+        return "bugfix"
+    if any(
+        k in ct
+        for k in ("design", "architecture", "refactor", "spec", "plan", "migration", "feature", "optimization")
+    ):
+        return "tech_design"
+    if any(
+        k in ct
+        for k in ("guide", "sop", "experience", "best_practice", "onboarding", "deployment", "workflow", "handbook")
+    ):
+        return "engineering_experience"
+    return "session_archive"
 
 
 def _utcnow() -> datetime:
@@ -188,7 +256,7 @@ class MemoryJanitor:
             stale_days = self._get_config("stale_prune_days", 30)
             stale_cutoff = _utcnow() - timedelta(days=stale_days)
             # Find outdated experiences (quality_tier = "Outdated" and score <= outdated_threshold),
-            # malformed published experiences with zero adoption (empty/Draft title or missing solution),
+            # malformed published/promoted experiences (empty/Draft title or missing/blank solution),
             # or stale unreferenced low-tier experiences (>stale_days old with 0 recall and 0 use).
             query = select(Experience).where(
                 and_(
@@ -198,16 +266,23 @@ class MemoryJanitor:
                     or_(
                         and_(
                             Experience.quality_tier == "Outdated",
-                            Experience.quality_score <= outdated_threshold,
+                            or_(
+                                Experience.quality_score <= outdated_threshold,
+                                Experience.used_count == 0,
+                            ),
                         ),
                         and_(
-                            Experience.exp_status == "published",
-                            Experience.used_count == 0,
+                            Experience.exp_status.in_(["published", "promoted", "draft"]),
                             or_(
-                                Experience.title == "",
-                                Experience.title.like("Draft %"),
                                 Experience.solution.is_(None),
-                                Experience.solution == "",
+                                func.trim(Experience.solution) == "",
+                                and_(
+                                    Experience.used_count == 0,
+                                    or_(
+                                        Experience.title == "",
+                                        Experience.title.like("Draft %"),
+                                    ),
+                                ),
                             ),
                         ),
                         and_(
@@ -273,10 +348,11 @@ class MemoryJanitor:
             cutoff_date = _utcnow() - timedelta(days=older_than_days)
 
             # Find soft-deleted experiences older than cutoff
+            # (falling back to updated_at/created_at when deleted_at is NULL)
             query = select(Experience).where(
                 and_(
                     Experience.is_deleted == True,  # noqa: E712
-                    Experience.deleted_at < cutoff_date,
+                    func.coalesce(Experience.deleted_at, Experience.updated_at, Experience.created_at) < cutoff_date,
                 )
             )
 
@@ -380,18 +456,19 @@ class MemoryJanitor:
             }
 
     async def prune_personal_memory(self, older_than_days: int = 90) -> dict:
-        """Remove old personal memory entries.
+        """Remove old dynamic personal memories and semantically compact static user personas.
 
         Args:
-            older_than_days: Days threshold for personal memory removal
+            older_than_days: Days threshold for dynamic personal memory removal
 
         Returns:
-            Dict with pruning statistics
+            Dict with pruning and semantic compaction statistics
         """
         async with self._session() as session:
             cutoff_date = _utcnow() - timedelta(days=older_than_days)
+            dedup_threshold = float(self._get_config("personal_memory_dedup_threshold", 0.83))
 
-            # Find old personal memories (only dynamic ones, keep static preferences)
+            # 1. Find old dynamic personal memories
             query = select(PersonalMemory).where(
                 and_(
                     PersonalMemory.profile_kind == "dynamic",
@@ -402,23 +479,90 @@ class MemoryJanitor:
             result = await session.execute(query)
             old_memories = result.scalars().all()
 
-            pruned_count = len(old_memories)
+            expired_dynamic_count = len(old_memories)
 
-            # Delete old personal memories
             for memory in old_memories:
                 await session.delete(memory)
-                logger.debug("Pruned personal memory: %s", memory.id)
+                logger.debug("Pruned expired dynamic personal memory: %s", memory.id)
+
+            # 2. Semantically compact static personal memories per (user_id, persona)
+            static_query = select(PersonalMemory).where(PersonalMemory.profile_kind == "static")
+            static_result = await session.execute(static_query)
+            static_memories = [
+                m
+                for m in static_result.scalars().all()
+                if isinstance(getattr(m, "content", None), str) and isinstance(getattr(m, "user_id", None), str)
+            ]
+
+            by_group: dict[str, list[PersonalMemory]] = {}
+            local_aliases = {"default", "developer", "admin", "yeshouyou"}
+            for m in static_memories:
+                uid_key = "local_user" if m.user_id in local_aliases else m.user_id
+                by_group.setdefault(uid_key, []).append(m)
+
+            deduped_static_count = 0
+            for _uid, items in by_group.items():
+                if len(items) < 2:
+                    continue
+                # Sort by priority DESC, content length DESC, updated_at DESC
+                items.sort(
+                    key=lambda x: (
+                        int(getattr(x, "priority", 50) or 50),
+                        len((getattr(x, "content", "") or "").strip()),
+                        getattr(x, "updated_at", None)
+                        or getattr(x, "created_at", None)
+                        or datetime.min.replace(tzinfo=timezone.utc),
+                    ),
+                    reverse=True,
+                )
+                kept: list[PersonalMemory] = []
+                for candidate in items:
+                    cand_text = (candidate.content or "").strip()
+                    cand_norm = " ".join(cand_text.lower().split())
+                    matched_primary: PersonalMemory | None = None
+                    for primary in kept:
+                        prim_text = (primary.content or "").strip()
+                        prim_norm = " ".join(prim_text.lower().split())
+                        if cand_norm == prim_norm:
+                            matched_primary = primary
+                            break
+                        sim = _cosine_similarity(
+                            getattr(primary, "embedding", None),
+                            getattr(candidate, "embedding", None),
+                        )
+                        if sim >= dedup_threshold:
+                            matched_primary = primary
+                            break
+
+                    if matched_primary is not None:
+                        # Boost primary priority (capped at 100) and keep richer wording if much longer
+                        cur_prio = int(getattr(matched_primary, "priority", 50) or 50)
+                        cand_prio = int(getattr(candidate, "priority", 50) or 50)
+                        matched_primary.priority = min(100, max(cur_prio, cand_prio) + 10)
+                        if len(cand_text) > int(len((matched_primary.content or "").strip()) * 1.15):
+                            matched_primary.content = cand_text
+                            if getattr(candidate, "embedding", None) is not None:
+                                matched_primary.embedding = candidate.embedding
+                        matched_primary.updated_at = _utcnow()
+                        await session.delete(candidate)
+                        deduped_static_count += 1
+                    else:
+                        kept.append(candidate)
 
             await session.commit()
 
+            pruned_count = expired_dynamic_count + deduped_static_count
             logger.info(
-                "Personal memory pruning completed: %d entries removed (older than %d days)",
-                pruned_count,
+                "Personal memory pruning completed: %d expired dynamic, %d redundant static compacted (>%d days)",
+                expired_dynamic_count,
+                deduped_static_count,
                 older_than_days,
             )
 
             return {
                 "pruned_count": pruned_count,
+                "expired_dynamic_count": expired_dynamic_count,
+                "deduped_static_count": deduped_static_count,
                 "older_than_days": older_than_days,
                 "cutoff_date": cutoff_date.isoformat(),
             }
@@ -638,18 +782,22 @@ class MemoryJanitor:
             pass  # best effort
 
     async def dedup_experiences(self, project: str | None = None) -> dict:
-        """Soft-delete duplicate experiences, keeping the latest version / 去重经验，保留最新版本.
+        """Soft-delete duplicate experiences, keeping the latest/best version / 去重经验，保留最佳版本.
 
-        For each group of experiences with the same title+project,
-        keep the one with the latest updated_at and soft-delete the rest.
+        Combines:
+        1. Exact (title, project) duplicate soft-deletion
+        2. Project name canonicalization (e.g. hyphen -> underscore)
+        3. Vector semantic deduplication (cosine >= 0.90) within the same canonical project
 
         Returns:
             Dict with dedup statistics.
         """
         from sqlalchemy import text
 
+        semantic_threshold = float(self._get_config("experience_dedup_threshold", 0.90))
+
         async with self._session() as session:
-            # Find and soft-delete duplicates: keep latest (max updated_at), delete others
+            # 1. Exact (title, project) duplicates via SQL
             result = await session.execute(
                 text("""
                     WITH duplicates AS (
@@ -670,16 +818,259 @@ class MemoryJanitor:
                 """),
                 {"project": project},
             )
-            deleted_count = result.rowcount
+            exact_deleted_count = result.rowcount if isinstance(getattr(result, "rowcount", None), int) else 0
 
+            # 2. Load active experiences for project canonicalization + vector semantic dedup
+            exp_query = select(Experience).where(Experience.is_deleted == False)  # noqa: E712
+            if project:
+                exp_query = exp_query.where(Experience.project == project)
+            exp_result = await session.execute(exp_query)
+            active_exps = [
+                e
+                for e in exp_result.scalars().all()
+                if isinstance(getattr(e, "title", None), str) and isinstance(getattr(e, "project", None), str)
+            ]
+
+            normalized_project_count = 0
+            by_project: dict[str, list[Experience]] = {}
+            for exp in active_exps:
+                canon_proj = normalize_project_name(exp.project) or "default"
+                if exp.project != canon_proj:
+                    exp.project = canon_proj
+                    normalized_project_count += 1
+                by_project.setdefault(canon_proj, []).append(exp)
+
+            semantic_deleted_count = 0
+            now = _utcnow()
+            for _proj, items in by_project.items():
+                if len(items) < 2:
+                    continue
+                # Prefer promoted > published > draft, higher used_count/recall_count, longer solution, newer updated_at
+                status_rank = {"promoted": 3, "published": 2, "review": 1, "draft": 0}
+                items.sort(
+                    key=lambda x: (
+                        bool(getattr(x, "is_pinned", False)),
+                        status_rank.get(getattr(x, "exp_status", "") or "", 0),
+                        int(getattr(x, "used_count", 0) or 0),
+                        int(getattr(x, "recall_count", 0) or 0),
+                        len((getattr(x, "solution", "") or "").strip()),
+                        getattr(x, "updated_at", None)
+                        or getattr(x, "created_at", None)
+                        or datetime.min.replace(tzinfo=timezone.utc),
+                    ),
+                    reverse=True,
+                )
+                kept: list[Experience] = []
+                for candidate in items:
+                    cand_title_norm = " ".join((candidate.title or "").lower().split())
+                    matched_primary: Experience | None = None
+                    for primary in kept:
+                        prim_title_norm = " ".join((primary.title or "").lower().split())
+                        if cand_title_norm and cand_title_norm == prim_title_norm:
+                            matched_primary = primary
+                            break
+                        sim = _cosine_similarity(
+                            getattr(primary, "embedding", None),
+                            getattr(candidate, "embedding", None),
+                        )
+                        if sim >= semantic_threshold:
+                            matched_primary = primary
+                            break
+
+                    if matched_primary is not None and not getattr(candidate, "is_pinned", False):
+                        # Merge tags & richer solution if needed
+                        prim_tags = list(getattr(matched_primary, "tags", None) or [])
+                        for t in getattr(candidate, "tags", None) or []:
+                            if t not in prim_tags:
+                                prim_tags.append(t)
+                        matched_primary.tags = prim_tags[:15]
+                        prim_sol = (getattr(matched_primary, "solution", "") or "").strip()
+                        cand_sol = (getattr(candidate, "solution", "") or "").strip()
+                        if len(cand_sol) > int(len(prim_sol) * 1.2) and cand_sol not in prim_sol:
+                            matched_primary.solution = f"{prim_sol}\n\n---\n{cand_sol}" if prim_sol else cand_sol
+                        matched_primary.recall_count = int(getattr(matched_primary, "recall_count", 0) or 0) + int(
+                            getattr(candidate, "recall_count", 0) or 0
+                        )
+                        matched_primary.used_count = int(getattr(matched_primary, "used_count", 0) or 0) + int(
+                            getattr(candidate, "used_count", 0) or 0
+                        )
+                        candidate.is_deleted = True
+                        candidate.deleted_at = now
+                        candidate.superseded_by_id = matched_primary.id
+                        semantic_deleted_count += 1
+                    else:
+                        kept.append(candidate)
+
+            await session.commit()
+
+            total_deleted = exact_deleted_count + semantic_deleted_count
             logger.info(
-                "Experience dedup completed: soft-deleted %d duplicates in project '%s'",
-                deleted_count,
+                "Experience dedup completed: soft-deleted %d (%d exact, %d semantic), normalized %d projects in '%s'",
+                total_deleted,
+                exact_deleted_count,
+                semantic_deleted_count,
+                normalized_project_count,
                 project or "all",
             )
 
             return {
-                "soft_deleted_count": deleted_count,
+                "soft_deleted_count": total_deleted,
+                "exact_deleted_count": exact_deleted_count,
+                "semantic_deleted_count": semantic_deleted_count,
+                "normalized_project_count": normalized_project_count,
+                "project": project,
+            }
+
+    async def maintain_archives(self, project: str | None = None) -> dict:
+        """Maintain archive quality: normalize types/projects, deduplicate, handle stale drafts, clean links.
+
+        Args:
+            project: Optional project filter.
+
+        Returns:
+            Dict with archive maintenance statistics.
+        """
+        draft_promote_days = int(self._get_config("archive_draft_promote_days", 7))
+        draft_purge_days = int(self._get_config("archive_draft_purge_days", 14))
+        semantic_threshold = float(self._get_config("archive_dedup_threshold", 0.92))
+
+        now = _utcnow()
+        promote_cutoff = now - timedelta(days=draft_promote_days)
+        purge_cutoff = now - timedelta(days=draft_purge_days)
+
+        async with self._session() as session:
+            arch_query = select(Archive)
+            if project:
+                arch_query = arch_query.where(Archive.project == project)
+            arch_result = await session.execute(arch_query)
+            archives = [
+                a
+                for a in arch_result.scalars().all()
+                if isinstance(getattr(a, "title", None), str) and isinstance(getattr(a, "solution_doc", None), str)
+            ]
+
+            normalized_type_count = 0
+            normalized_project_count = 0
+            promoted_draft_count = 0
+            purged_stub_draft_count = 0
+            deduped_archive_count = 0
+
+            # 1. Clean up dangling ArchiveExperienceLink rows pointing to soft-deleted Experiences first
+            dangling_link_query = (
+                select(ArchiveExperienceLink)
+                .join(Experience, ArchiveExperienceLink.experience_id == Experience.id)
+                .where(Experience.is_deleted == True)  # noqa: E712
+            )
+            dangling_res = await session.execute(dangling_link_query)
+            dangling_links = [
+                lnk
+                for lnk in dangling_res.scalars().all()
+                if getattr(lnk, "archive_id", None) is not None and getattr(lnk, "experience_id", None) is not None
+            ]
+            dangling_links_removed = 0
+            for lnk in dangling_links:
+                await session.delete(lnk)
+                dangling_links_removed += 1
+
+            # 2. Group archives by canonical project name and deduplicate BEFORE mutating project/title
+            #    so unique constraint uq_archives_title_project is never violated during flush.
+            by_project: dict[str, list[Archive]] = {}
+            for arch in archives:
+                created_at = getattr(arch, "created_at", None)
+                sol_text = (arch.solution_doc or "").strip()
+                if getattr(arch, "status", None) == "draft" and isinstance(created_at, datetime):
+                    if (created_at < purge_cutoff and len(sol_text) < 120) or (
+                        created_at < promote_cutoff and len(sol_text) < 120
+                    ):
+                        await session.delete(arch)
+                        purged_stub_draft_count += 1
+                        continue
+                canon_proj = normalize_project_name(getattr(arch, "project", None)) or "default"
+                by_project.setdefault(canon_proj, []).append(arch)
+
+            kept_by_project: list[tuple[str, Archive]] = []
+            for canon_proj, items in by_project.items():
+                items.sort(
+                    key=lambda a: (
+                        1 if getattr(a, "status", "") == "published" else 0,
+                        len((getattr(a, "solution_doc", "") or "").strip()),
+                        getattr(a, "updated_at", None)
+                        or getattr(a, "created_at", None)
+                        or datetime.min.replace(tzinfo=timezone.utc),
+                    ),
+                    reverse=True,
+                )
+                kept: list[Archive] = []
+                for candidate in items:
+                    cand_title_norm = " ".join((candidate.title or "").lower().split())
+                    matched_primary: Archive | None = None
+                    for primary in kept:
+                        prim_title_norm = " ".join((primary.title or "").lower().split())
+                        if cand_title_norm and cand_title_norm == prim_title_norm:
+                            matched_primary = primary
+                            break
+                        sim = _cosine_similarity(
+                            getattr(primary, "embedding", None),
+                            getattr(candidate, "embedding", None),
+                        )
+                        if sim >= semantic_threshold:
+                            matched_primary = primary
+                            break
+
+                    if matched_primary is not None:
+                        await session.delete(candidate)
+                        deduped_archive_count += 1
+                    else:
+                        kept.append(candidate)
+                for k in kept:
+                    kept_by_project.append((canon_proj, k))
+
+            # Flush deletions before mutating project/status on surviving archives
+            if hasattr(session, "flush"):
+                await session.flush()
+
+            # 3. Normalize content_type, project, and promote complete stale drafts on surviving archives
+            for canon_proj, arch in kept_by_project:
+                canon_ct = _normalize_archive_content_type(getattr(arch, "content_type", None))
+                if arch.content_type != canon_ct:
+                    arch.content_type = canon_ct
+                    normalized_type_count += 1
+
+                if arch.project != canon_proj:
+                    arch.project = canon_proj
+                    normalized_project_count += 1
+
+                created_at = getattr(arch, "created_at", None)
+                if getattr(arch, "status", None) == "draft" and isinstance(created_at, datetime):
+                    sol_text = (arch.solution_doc or "").strip()
+                    ov_text = (getattr(arch, "overview", "") or "").strip()
+                    if created_at < promote_cutoff and len(sol_text) >= 120:
+                        if not ov_text:
+                            arch.overview = sol_text[:200]
+                        arch.status = "published"
+                        arch.updated_at = now
+                        promoted_draft_count += 1
+
+            await session.commit()
+
+            logger.info(
+                "Archive maintenance completed: normalized_types=%d, normalized_projects=%d, "
+                "promoted_drafts=%d, purged_stub_drafts=%d, deduped=%d, dangling_links_removed=%d",
+                normalized_type_count,
+                normalized_project_count,
+                promoted_draft_count,
+                purged_stub_draft_count,
+                deduped_archive_count,
+                dangling_links_removed,
+            )
+
+            return {
+                "normalized_type_count": normalized_type_count,
+                "normalized_project_count": normalized_project_count,
+                "promoted_draft_count": promoted_draft_count,
+                "purged_stub_draft_count": purged_stub_draft_count,
+                "deduped_archive_count": deduped_archive_count,
+                "dangling_links_removed": dangling_links_removed,
                 "project": project,
             }
 
@@ -767,6 +1158,9 @@ class MemoryJanitor:
             if self._get_config("dedup_enabled", True):
                 results["dedup_experiences"] = await self.dedup_experiences(project)
                 results["dedup_search_logs"] = await self.dedup_search_logs(project)
+
+            # 8. Maintain archives (normalize content_type/project, dedup, stale drafts, dangling links)
+            results["archive_maintenance"] = await self.maintain_archives(project)
 
             logger.info("Full janitor run completed successfully for project '%s'", project or "all")
 

@@ -229,6 +229,44 @@ class TestAlertManager:
         assert isinstance(create_channel("wecom", webhook="x"), WeComChannel)
         assert isinstance(create_channel("webhook", url="x"), WebhookChannel)
 
+    def test_backoff_max_repeats_and_clear(self):
+        from team_memory.monitoring.alerting import AlertManager
+
+        mgr = AlertManager(channels=[], alert_cooldown=0, max_repeats=3)
+        assert mgr._should_alert("svc degraded") is True
+        assert mgr._should_alert("svc degraded") is True
+        assert mgr._should_alert("svc degraded") is True
+        # 4th time capped by max_repeats
+        assert mgr._should_alert("svc degraded") is False
+        # Clear on recovery allows alerting again
+        mgr.clear_alert("svc degraded")
+        assert mgr._should_alert("svc degraded") is True
+
+    @pytest.mark.asyncio
+    async def test_daemon_status_refinement_worker_recovers(self):
+        from team_memory.daemon.runtime.routes.status import get_status
+
+        req = MagicMock()
+        rw = MagicMock()
+        rw._tick_count = 100
+        rw._tick_fail_count = 8
+        rw._consecutive_tick_failures = 0
+        rw._last_tick_ok = "2026-11-09T12:00:00+00:00"
+        req.app.state.heartbeat = None
+        req.app.state.tm_mode = "local"
+        req.app.state.refinement_worker = rw
+        req.app.state.janitor_scheduler = None
+        req.app.state.dream_worker = None
+
+        res = await get_status(req)
+        assert res["refinement_worker"]["fail_count"] == 8
+        assert res["refinement_worker"]["consecutive_failures"] == 0
+        assert res["refinement_worker"]["healthy"] is True
+
+        rw._consecutive_tick_failures = 3
+        res2 = await get_status(req)
+        assert res2["refinement_worker"]["healthy"] is False
+
 
 # ── Watchdog ──
 

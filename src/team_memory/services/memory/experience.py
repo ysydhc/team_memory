@@ -669,6 +669,7 @@ class ExperienceService:
         quality_tier: str | None = None,
         since: object | None = None,
         limit: int = 100,
+        include_embedding: bool = False,
     ) -> list[dict]:
         """List published/promoted experiences with optional filters.
 
@@ -677,6 +678,7 @@ class ExperienceService:
             quality_tier: Optional quality tier filter.
             since: Optional datetime — only return experiences created after this.
             limit: Maximum number of results (default 100).
+            include_embedding: Whether to include raw vector embeddings in returned dicts.
 
         Returns:
             List of experience dicts with exp_status in ('published', 'promoted').
@@ -696,7 +698,15 @@ class ExperienceService:
                 stmt = stmt.where(Experience.created_at >= since)
             stmt = stmt.limit(limit)
             result = await session.execute(stmt)
-            return [exp.to_dict() for exp in result.scalars().all()]
+            rows = result.scalars().all()
+            out: list[dict] = []
+            for exp in rows:
+                d = exp.to_dict()
+                if include_embedding:
+                    emb = getattr(exp, "embedding", None)
+                    d["embedding"] = list(emb) if emb is not None else None
+                out.append(d)
+            return out
 
     async def count_published(
         self,

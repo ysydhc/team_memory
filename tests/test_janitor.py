@@ -191,6 +191,110 @@ class TestMemoryJanitor:
         assert exp.is_deleted is True
         assert exp.deleted_at is not None
 
+    @pytest.mark.asyncio
+    async def test_prune_personal_memory_semantic_compaction(self):
+        """prune_personal_memory compacts redundant static memories by vector similarity."""
+        now = _utcnow()
+        m1 = MagicMock()
+        m1.id = "m1"
+        m1.user_id = "user1"
+        m1.persona = "default"
+        m1.profile_kind = "static"
+        m1.priority = 70
+        m1.content = "回复使用简体中文，保持简洁直接"
+        m1.embedding = [1.0, 0.0, 0.0]
+        m1.updated_at = now
+
+        m2 = MagicMock()
+        m2.id = "m2"
+        m2.user_id = "user1"
+        m2.persona = "default"
+        m2.profile_kind = "static"
+        m2.priority = 60
+        m2.content = "使用简体中文回复，简洁为主"
+        m2.embedding = [0.99, 0.05, 0.0]
+        m2.updated_at = now - timedelta(hours=1)
+
+        j = MemoryJanitor(db_url="sqlite+aiosqlite://", config=JanitorConfig())
+
+        res_dynamic = MagicMock()
+        res_dynamic.scalars.return_value.all.return_value = []
+        res_static = MagicMock()
+        res_static.scalars.return_value.all.return_value = [m1, m2]
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[res_dynamic, res_static])
+        mock_session.commit = AsyncMock()
+        mock_session.delete = AsyncMock()
+
+        @asynccontextmanager
+        async def _fake_session():
+            yield mock_session
+
+        j._session = _fake_session
+        result = await j.prune_personal_memory()
+
+        assert result["expired_dynamic_count"] == 0
+        assert result["deduped_static_count"] == 1
+        assert result["pruned_count"] == 1
+        assert m1.priority == 80
+        mock_session.delete.assert_called_once_with(m2)
+
+    @pytest.mark.asyncio
+    async def test_maintain_archives_normalizes_and_deduplicates(self):
+        """maintain_archives normalizes content_type/project, promotes complete drafts, and deduplicates."""
+        now = _utcnow()
+        a1 = MagicMock()
+        a1.id = "arch-1"
+        a1.title = "Android WebView Blank Fix"
+        a1.project = "adx-sdk-android"
+        a1.content_type = "architecture_refactor"
+        a1.status = "draft"
+        a1.solution_doc = "A" * 250
+        a1.overview = "Detailed overview of the Android WebView blank screen fix."
+        a1.embedding = [1.0, 0.0, 0.0]
+        a1.created_at = now - timedelta(days=10)
+        a1.updated_at = now - timedelta(days=10)
+
+        a2 = MagicMock()
+        a2.id = "arch-2"
+        a2.title = "Android WebView Blank Fix"
+        a2.project = "adx_sdk_android"
+        a2.content_type = "session_archive"
+        a2.status = "draft"
+        a2.solution_doc = "A" * 220
+        a2.overview = "Duplicate overview."
+        a2.embedding = [0.99, 0.01, 0.0]
+        a2.created_at = now - timedelta(days=11)
+        a2.updated_at = now - timedelta(days=11)
+
+        j = MemoryJanitor(db_url="sqlite+aiosqlite://", config=JanitorConfig())
+        res_archives = MagicMock()
+        res_archives.scalars.return_value.all.return_value = [a1, a2]
+        res_links = MagicMock()
+        res_links.scalars.return_value.all.return_value = []
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[res_archives, res_links])
+        mock_session.commit = AsyncMock()
+        mock_session.delete = AsyncMock()
+
+        @asynccontextmanager
+        async def _fake_session():
+            yield mock_session
+
+        j._session = _fake_session
+        result = await j.maintain_archives()
+
+        assert result["normalized_type_count"] == 1
+        assert result["normalized_project_count"] == 1
+        assert result["promoted_draft_count"] == 1
+        assert result["deduped_archive_count"] == 1
+        assert a1.content_type == "tech_design"
+        assert a1.project == "adx_sdk_android"
+        assert a1.status == "published"
+        mock_session.delete.assert_called_once_with(a2)
+
 
 class TestMemoryJanitorIntegration:
     """Integration tests for MemoryJanitor with real database operations.

@@ -23,9 +23,14 @@ import httpx
 logger = logging.getLogger("daemon.faithfulness_judge")
 
 # Default LLM config — overridable via env vars or constructor
-DEFAULT_BASE_URL = os.environ.get("FAITHFULNESS_LLM_BASE_URL", "http://localhost:4000/v1")
-DEFAULT_MODEL = os.environ.get("FAITHFULNESS_LLM_MODEL", "DeepSeek-V4-Flash")
-DEFAULT_API_KEY = os.environ.get("FAITHFULNESS_LLM_API_KEY", "") or os.environ.get("LITELLM_MASTER_KEY", "")
+DEFAULT_BASE_URL = os.environ.get("FAITHFULNESS_LLM_BASE_URL", "https://gw.gburouter.com/v1")
+DEFAULT_MODEL = os.environ.get("FAITHFULNESS_LLM_MODEL", "gbu-gemini-3.8-flash")
+DEFAULT_API_KEY = (
+    os.environ.get("FAITHFULNESS_LLM_API_KEY", "")
+    or os.environ.get("GATEWAY_API_KEY", "")
+    or os.environ.get("GOOGLE_API_KEY", "")
+    or os.environ.get("LITELLM_MASTER_KEY", "")
+)
 DEFAULT_TIMEOUT = int(os.environ.get("FAITHFULNESS_LLM_TIMEOUT", "60"))
 DEFAULT_MAX_RETRIES = int(os.environ.get("FAITHFULNESS_LLM_MAX_RETRIES", "3"))
 DEFAULT_RETRY_BASE_DELAY = float(os.environ.get("FAITHFULNESS_LLM_RETRY_BASE_DELAY", "1.0"))
@@ -117,7 +122,6 @@ class FaithfulnessJudge:
         self._api_key = (
             api_key
             or os.environ.get("FAITHFULNESS_LLM_API_KEY", "")
-            or os.environ.get("LITELLM_MASTER_KEY", "")
             or DEFAULT_API_KEY
         )
         self._timeout = timeout or DEFAULT_TIMEOUT
@@ -219,6 +223,7 @@ class FaithfulnessJudge:
         url = f"{self._base_url}/chat/completions"
         headers = {"Content-Type": "application/json"}
         if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
             headers["x-api-key"] = self._api_key
 
         payload = {

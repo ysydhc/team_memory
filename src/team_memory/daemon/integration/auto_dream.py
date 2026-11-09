@@ -282,11 +282,19 @@ class AutoDreamWorker:
     async def _get_dream_candidates(self, last_dream: datetime | None) -> list[dict]:
         """Fetch candidate experiences via ExperienceService."""
         ctx = _daemon_context()
-        candidates = await ctx.service.list_published(
-            quality_tier="Bronze",
-            since=last_dream,
-            limit=200,
-        )
+        try:
+            candidates = await ctx.service.list_published(
+                quality_tier="Bronze",
+                since=last_dream,
+                limit=200,
+                include_embedding=True,
+            )
+        except TypeError:
+            candidates = await ctx.service.list_published(
+                quality_tier="Bronze",
+                since=last_dream,
+                limit=200,
+            )
         return [c for c in candidates if c.get("valid_until") is None]
 
     async def _query_candidates_recall(self, last_dream: datetime | None) -> list[dict]:

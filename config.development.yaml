@@ -65,10 +65,21 @@ embedding:
 # 覆盖示例：TEAM_MEMORY_LLM__MODEL、TEAM_MEMORY_LLM__BASE_URL、TEAM_MEMORY_LLM__API_KEY
 llm:
   provider: generic
-  model: DeepSeek-V4-Flash
-  base_url: http://localhost:4000/v1
-  api_key: "${LITELLM_MASTER_KEY}"
+  model: gbu-gemini-3.8-flash
+  base_url: https://gw.gburouter.com/v1
+  api_key: "${GATEWAY_API_KEY}"
   prompt_dir: null
+
+# -----------------------------------------------------------------------------
+# entity_extraction — L2.5 知识图谱实体与关系抽取
+# -----------------------------------------------------------------------------
+entity_extraction:
+  enabled: true
+  model: gbu-gemini-3.8-flash
+  base_url: https://gw.gburouter.com/v1
+  api_key_env: "GATEWAY_API_KEY"
+  timeout: 30
+  max_concurrent: 3
 
 # -----------------------------------------------------------------------------
 # extraction — 从对话/文档自动提取经验时的质量门控

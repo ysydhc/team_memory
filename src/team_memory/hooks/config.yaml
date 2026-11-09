@@ -11,7 +11,7 @@ obsidian:
   vaults:
     - path: "/Users/yeshouyou/Work/ad_learning"
       project: "ad_learning"
-      exclude: [".obsidian", ".trash"]
+      exclude: [".obsidian", ".trash", ".git", "node_modules", "source", "tools", ".learning", ".codex", ".claude", ".cursor"]
 
 projects:
   - name: "team_doc"
@@ -20,6 +20,20 @@ projects:
     path_patterns: ["ad_learning"]
   - name: "ai_learning"
     path_patterns: ["ai_learning"]
+  - name: "adx_sdk_android"
+    path_patterns: ["adx-sdk-android"]
+  - name: "adx_sdk_ios"
+    path_patterns: ["adx-sdk-ios"]
+  - name: "inapp_dsp"
+    path_patterns: ["inapp-dsp"]
+  - name: "adx_neo"
+    path_patterns: ["adx-neo"]
+  - name: "inapp_adx"
+    path_patterns: ["inapp-adx"]
+  - name: "inapp_jump"
+    path_patterns: ["inapp-jump"]
+  - name: "agent_common"
+    path_patterns: ["agent-common"]
 
 retrieval:
   session_start_top_k: 3
@@ -32,10 +46,10 @@ draft:
 refinement:
   enabled: true
   provider: "litellm"
-  model: "gemini-3.1-flash-lite"
-  fallback_model: "gemini-3.6-flash"
-  base_url: "http://localhost:4000/v1"
-  api_key_env: "LITELLM_MASTER_KEY"
+  model: "gbu-gemini-3.8-flash"
+  fallback_model: "gbu-azure-gpt-5.6-luna"
+  base_url: "https://gw.gburouter.com/v1"
+  api_key_env: "GATEWAY_API_KEY"
   timeout: 30
   scan_interval_seconds: 30
   max_input_chars: 6000
@@ -44,6 +58,9 @@ refinement:
 
 evaluation:
   faithfulness_batch_threshold: 5
+
+arena:
+  enabled: false
 
 auto_dream:
   enabled: true

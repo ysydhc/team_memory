@@ -213,16 +213,29 @@ class AlertManager:
 
     channels: list[AlertChannel] = field(default_factory=list)
     alert_cooldown: int = 300
+    max_repeats: int = 3
     _last_alert_times: dict[str, float] = field(default_factory=dict, repr=False)
+    _alert_counts: dict[str, int] = field(default_factory=dict, repr=False)
 
     def _should_alert(self, key: str) -> bool:
-        """Check cooldown / 冷却检查"""
+        """Check cooldown and exponential backoff with max_repeats cap / 冷却与指数退避上限检查"""
         now = time.time()
-        last = self._last_alert_times.get(key, 0)
-        if (now - last) < self.alert_cooldown:
+        count = self._alert_counts.get(key, 0)
+        if self.max_repeats > 0 and count >= self.max_repeats:
             return False
+        last = self._last_alert_times.get(key, 0)
+        if count > 0:
+            effective_cooldown = self.alert_cooldown * (2 ** (count - 1))
+            if (now - last) < effective_cooldown:
+                return False
         self._last_alert_times[key] = now
+        self._alert_counts[key] = count + 1
         return True
+
+    def clear_alert(self, key: str) -> None:
+        """Reset alert state for a key when condition recovers / 恢复后重置告警状态"""
+        self._last_alert_times.pop(key, None)
+        self._alert_counts.pop(key, None)
 
     async def send_alert(
         self,

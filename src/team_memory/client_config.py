@@ -100,10 +100,10 @@ class LLMConfig:
     personal_memory_extractor, auto_dream, solution_backfill.
     """
 
-    base_url: str = "http://localhost:4000/v1"
+    base_url: str = "https://gw.gburouter.com/v1"
     api_key: str = ""
-    api_key_env: str = "LITELLM_MASTER_KEY"  # Reference to env var name, e.g. "LITELLM_MASTER_KEY"
-    model: str = "DeepSeek-V4-Flash"
+    api_key_env: str = "GATEWAY_API_KEY"  # Reference to env var name, e.g. "GATEWAY_API_KEY"
+    model: str = "gbu-gemini-3.8-flash"
     timeout: int = 30
 
     @property

@@ -48,12 +48,20 @@ class OllamaLLMRerankerProvider(RerankerProvider):
         top_k: int = 10,
         batch_size: int = 5,
         prompt_template: str | None = None,
+        api_key: str = "",
     ):
+        import os
+
         self._model = model
         self._base_url = base_url.rstrip("/")
         self._top_k = top_k
         self._batch_size = batch_size
         self._prompt_template = prompt_template or DEFAULT_PROMPT_TEMPLATE
+        self._api_key = (
+            api_key
+            or os.environ.get("GATEWAY_API_KEY", "")
+            or os.environ.get("OPENAI_API_KEY", "")
+        )
 
     async def rank(
         self,
@@ -141,7 +149,15 @@ class OllamaLLMRerankerProvider(RerankerProvider):
 
     async def _call_openai_compatible(self, prompt: str) -> list[float] | None:
         """Call OpenAI-compatible /v1/chat/completions endpoint."""
-        url = f"{self._base_url}/v1/chat/completions"
+        url = (
+            f"{self._base_url}/chat/completions"
+            if self._base_url.endswith("/v1")
+            else f"{self._base_url}/v1/chat/completions"
+        )
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+            headers["x-api-key"] = self._api_key
         payload = {
             "model": self._model,
             "messages": [{"role": "user", "content": prompt}],
@@ -151,7 +167,7 @@ class OllamaLLMRerankerProvider(RerankerProvider):
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(url, json=payload)
+                resp = await client.post(url, json=payload, headers=headers)
                 if resp.status_code != 200:
                     return None
                 data = resp.json()

@@ -31,7 +31,7 @@ ALEMBIC ?= $(shell \
 	else echo alembic; fi)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp mcp-verify test test-acceptance lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-reload daemon-install daemon-uninstall verify-pipeline diagnose-pipeline e2e-verify logs watchdog-start test-regression watchdog-stop watchdog-status stats wiki-compile wiki-status entity-backfill entity-dedup embedding-backfill detect-contradictions search-eval solution-backfill faithfulness-eval test-llm
+.PHONY: help setup dev web mcp mcp-verify test test-acceptance lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-reload daemon-install daemon-uninstall verify-pipeline diagnose-pipeline e2e-verify logs watchdog-start test-regression watchdog-stop watchdog-status stats wiki-compile wiki-status entity-backfill entity-dedup embedding-backfill detect-contradictions search-eval solution-backfill faithfulness-eval test-llm janitor-run
 
 sync-agent-artifacts: ## 由 agents/shared + agents/manifest.yaml 生成 .claude/.cursor 下 agents、prompts、skills
 	python scripts/sync_agent_artifacts.py
@@ -86,6 +86,12 @@ dev:            ## 启动全部服务（Docker 基础设施 + 本机 Web）；�
 web:            ## 仅启动 Web 管理界面（默认端口 9111）；自动释放 9111 后启动
 	@$(MAKE) -s release-9111 || true
 	uv run python -m team_memory.web.app
+
+web-restart:    ## 后台非阻塞重启 Web 管理界面（供 watchdog 自动自愈调用）
+	@$(MAKE) -s release-9111 || true
+	@set -a && [ -f .env ] && source .env || true && set +a; \
+	nohup $(PYTHON_BIN) -m team_memory.web.app >/tmp/tm-web.log 2>&1 & \
+	echo "  ✔ TM Web restarted in background (PID $$!)"
 
 mcp:            ## 启动 MCP（需仓库根 .env；经 scripts/run_mcp_with_dotenv.sh）
 	bash scripts/run_mcp_with_dotenv.sh
@@ -285,6 +291,9 @@ watchdog-status: ## Check TM Watchdog status
 	@launchctl list | grep teammemory.watchdog || echo "Watchdog not running"
 	@echo "---"
 	@tail -5 /tmp/tm-watchdog.log 2>/dev/null || echo "No watchdog log"
+
+janitor-run:     ## 手动执行记忆与归档质量运维清理（去重、归一化、晋级与淘汰）
+	$(PYTHON_BIN) -c "import asyncio; from team_memory.bootstrap import bootstrap; ctx = bootstrap(enable_background=False); res = asyncio.run(ctx.janitor.run_all()); print('Janitor Operations Completed:', list(res.get('operations', {}).keys()))"
 
 daemon-run:      ## Run TM Daemon in foreground (for testing)
 	@set -a && [ -f .env ] && source .env || true && set +a; \

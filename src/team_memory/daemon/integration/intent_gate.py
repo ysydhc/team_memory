@@ -18,14 +18,16 @@ logger = logging.getLogger("tm_daemon.intent_gate")
 
 # LLM config — same env vars pattern as faithfulness_judge
 DEFAULT_BASE_URL = os.environ.get("INTENT_GATE_LLM_BASE_URL", "") or os.environ.get(
-    "FAITHFULNESS_LLM_BASE_URL", "http://localhost:4000/v1"
+    "FAITHFULNESS_LLM_BASE_URL", "https://gw.gburouter.com/v1"
 )
 DEFAULT_MODEL = os.environ.get("INTENT_GATE_LLM_MODEL", "") or os.environ.get(
-    "FAITHFULNESS_LLM_MODEL", "gemini-3.6-flash"
+    "FAITHFULNESS_LLM_MODEL", "gbu-gemini-3.8-flash"
 )
 DEFAULT_API_KEY = (
     os.environ.get("INTENT_GATE_LLM_API_KEY", "")
     or os.environ.get("FAITHFULNESS_LLM_API_KEY", "")
+    or os.environ.get("GATEWAY_API_KEY", "")
+    or os.environ.get("GOOGLE_API_KEY", "")
     or os.environ.get("LITELLM_MASTER_KEY", "")
 )
 DEFAULT_TIMEOUT = int(os.environ.get("INTENT_GATE_LLM_TIMEOUT", "10"))
@@ -276,6 +278,7 @@ class IntentGate:
         url = f"{self._base_url}/chat/completions"
         headers = {"Content-Type": "application/json"}
         if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
             headers["x-api-key"] = self._api_key
 
         payload = {

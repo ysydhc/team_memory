@@ -36,17 +36,40 @@ class PayloadCapture:
     记录原始 hook payload 到 SQLite，用于后续契约分析。
     """
 
+    MAX_ROWS_PER_ENDPOINT = 200
+
     def __init__(self, db_path: str = ":memory:") -> None:
         self._db_path = db_path
         self._conn: sqlite3.Connection | None = None
+        self._write_count: int = 0
 
     async def start(self) -> None:
         """Initialize SQLite connection and create table."""
         self._conn = sqlite3.connect(self._db_path)
         self._conn.execute(_CREATE_TABLE)
         self._conn.execute(_CREATE_INDEX)
+        self._prune_old_rows()
         self._conn.commit()
         logger.info("PayloadCapture started (db=%s)", self._db_path)
+
+    def _prune_old_rows(self) -> None:
+        """Keep at most MAX_ROWS_PER_ENDPOINT most recent payloads per endpoint."""
+        if self._conn is None:
+            return
+        try:
+            endpoints = [
+                r[0]
+                for r in self._conn.execute("SELECT DISTINCT endpoint FROM raw_payloads").fetchall()
+            ]
+            for ep in endpoints:
+                self._conn.execute(
+                    "DELETE FROM raw_payloads WHERE endpoint = ? AND id NOT IN ("
+                    "SELECT id FROM raw_payloads WHERE endpoint = ? ORDER BY id DESC LIMIT ?"
+                    ")",
+                    (ep, ep, self.MAX_ROWS_PER_ENDPOINT),
+                )
+        except Exception:
+            logger.debug("Failed to prune old payloads", exc_info=True)
 
     async def capture(self, endpoint: str, payload: dict[str, Any], source: str = "unknown") -> None:
         """Record a raw payload. Non-blocking, logs errors but does not raise.
@@ -65,6 +88,9 @@ class PayloadCapture:
                     datetime.now(timezone.utc).isoformat(),
                 ),
             )
+            self._write_count += 1
+            if self._write_count % 50 == 0:
+                self._prune_old_rows()
             self._conn.commit()
         except Exception:
             logger.debug("Failed to capture payload for %s", endpoint, exc_info=True)
@@ -103,8 +129,8 @@ class PayloadCapture:
         if self._conn is None:
             return {}
         rows = self._conn.execute(
-            "SELECT payload_json FROM raw_payloads WHERE endpoint = ?",
-            (endpoint,),
+            "SELECT payload_json FROM raw_payloads WHERE endpoint = ? ORDER BY id DESC LIMIT ?",
+            (endpoint, self.MAX_ROWS_PER_ENDPOINT),
         ).fetchall()
         if not rows:
             return {"endpoint": endpoint, "count": 0, "fields": {}}

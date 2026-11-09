@@ -72,7 +72,7 @@ if failed:
 # Also verify that required top-level imports exist in source code
 # (catches accidentally deleted imports like "import asyncpg")
 REQUIRED_SOURCE_IMPORTS = {
-    "team_memory.daemon.observe.search_log_writer": ["import asyncpg"],
+    "team_memory.services.search.search_log_writer": ["import asyncpg"],
     "team_memory.daemon.buffers.response_buffer": ["import asyncpg"],
     "team_memory.daemon.quality.faithfulness_batch": ["import asyncpg"],
 }

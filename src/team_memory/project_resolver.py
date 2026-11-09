@@ -38,8 +38,13 @@ _BUILTIN_SHORTHAND_ALIASES: dict[str, list[str]] = {
     "team_doc": ["tm", "team_memory", "team-memory", "team_doc", "tm-cli", "tm-daemon"],
     "team_memory": ["tm", "team_memory", "team-memory", "team_doc", "tm-cli", "tm-daemon"],
     "phone_pilot": ["pp", "phone_pilot", "phone-pilot"],
-    "adx-sdk-android": ["adx-sdk-android", "adx_android"],
-    "adx-sdk-ios": ["adx-sdk-ios", "adx_ios"],
+    "adx-sdk-android": ["adx-sdk-android", "adx_sdk_android", "adx_android"],
+    "adx-sdk-ios": ["adx-sdk-ios", "adx_sdk_ios", "adx_ios"],
+    "inapp-dsp": ["inapp-dsp", "inapp_dsp"],
+    "adx-neo": ["adx-neo", "adx_neo"],
+    "inapp-adx": ["inapp-adx", "inapp_adx"],
+    "inapp-jump": ["inapp-jump", "inapp_jump"],
+    "agent-common": ["agent-common", "agent_common"],
     "inapp-game-dollshooter": ["dollshooter", "doll_shooter"],
 }
 

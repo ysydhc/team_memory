@@ -14,30 +14,43 @@ FAILURES=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# Determine Python interpreter (prefer conda env, fallback to python3)
-# 确定解释器路径（优先 conda 环境，回退 python3）
-_TM_PYTHON=""
-if [ -n "${CONDA_PREFIX}" ]; then
-    _TM_PYTHON="${CONDA_PREFIX}/bin/python"
-elif [ -f "${ROOT_DIR}/.venv/bin/python" ]; then
-    _TM_PYTHON="${ROOT_DIR}/.venv/bin/python"
+if [ -f "${ROOT_DIR}/.env" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "${ROOT_DIR}/.env"
+    set +a
 fi
-[ -z "${_TM_PYTHON}" ] && _TM_PYTHON="python3"
 
-# Load embedding provider/base_url/model from config
-# 从配置加载 embedding provider / base_url / 模型
+# Determine Python interpreter (prefer PYTHON from .env, then conda env, then .venv, fallback to python3)
+# 确定解释器路径（优先 .env PYTHON / conda 环境，回退 python3）
+_TM_PYTHON="${PYTHON:-}"
+if [ -z "${_TM_PYTHON}" ] || [ ! -x "${_TM_PYTHON}" ]; then
+    if [ -n "${CONDA_PREFIX:-}" ] && [ -x "${CONDA_PREFIX}/bin/python" ]; then
+        _TM_PYTHON="${CONDA_PREFIX}/bin/python"
+    elif [ -x "/Users/yeshouyou/miniconda3/envs/team_memory/bin/python" ]; then
+        _TM_PYTHON="/Users/yeshouyou/miniconda3/envs/team_memory/bin/python"
+    elif [ -f "${ROOT_DIR}/.venv/bin/python" ]; then
+        _TM_PYTHON="${ROOT_DIR}/.venv/bin/python"
+    else
+        _TM_PYTHON="python3"
+    fi
+fi
+
+# Load embedding provider/base_url/model and DB port from config
+# 从配置加载 embedding provider / base_url / 模型及数据库端口
 EMB_PROVIDER=""
 EMB_BASE_URL=""
 EMB_MODEL=""
 EMB_API_KEY=""
-EMB_API_KEY=""
+PG_PORT="5433"
 if [ -f "${ROOT_DIR}/config.development.yaml" ] || [ -f "${ROOT_DIR}/config.production.yaml" ]; then
-    # Read embedding config from YAML using Python (more reliable than YAML parsing in bash)
-    EMB_VALUES=$(cd "${ROOT_DIR}" && python3 -c "
+    EMB_VALUES=$(cd "${ROOT_DIR}" && PYTHONPATH=src "${_TM_PYTHON}" -c "
+from urllib.parse import urlparse
 from team_memory.config import load_settings
 s = load_settings()
 e = s.embedding
-print(f'{e.provider}|{e.openai.base_url}|{e.openai.model}|{e.openai.dimension}|{e.openai.api_key}')
+db_port = urlparse(s.database.url.replace('+asyncpg', '')).port or 5433
+print(f'{e.provider}|{e.openai.base_url}|{e.openai.model}|{e.openai.dimension}|{e.openai.resolved_api_key}|{db_port}')
 " 2>/dev/null)
     if [ -n "$EMB_VALUES" ]; then
         EMB_PROVIDER=$(echo "$EMB_VALUES" | cut -d'|' -f1)
@@ -45,6 +58,7 @@ print(f'{e.provider}|{e.openai.base_url}|{e.openai.model}|{e.openai.dimension}|{
         EMB_MODEL=$(echo "$EMB_VALUES" | cut -d'|' -f3)
         EMB_DIM=$(echo "$EMB_VALUES" | cut -d'|' -f4)
         EMB_API_KEY=$(echo "$EMB_VALUES" | cut -d'|' -f5)
+        PG_PORT=$(echo "$EMB_VALUES" | cut -d'|' -f6)
     fi
 fi
 # Fall back to old YAML parsing if Python method failed
@@ -92,9 +106,9 @@ echo "===== team_memory Health Check ====="
 echo ""
 
 # 1. PostgreSQL
-printf "  %-22s" "PostgreSQL:"
+printf "  %-22s" "PostgreSQL (:${PG_PORT:-5433}):"
 if command -v pg_isready >/dev/null 2>&1; then
-    if pg_isready -h localhost -p 5432 -U developer -q 2>/dev/null; then
+    if pg_isready -h localhost -p "${PG_PORT:-5433}" -U developer -q 2>/dev/null; then
         echo "OK"
     else
         echo "FAIL  (run: docker compose up -d postgres)"
@@ -175,6 +189,31 @@ if [ $? -eq 0 ]; then
 else
     echo "FAIL  (daemon not responding on port ${DAEMON_PORT:-3901})"
     FAILURES=$((FAILURES + 1))
+fi
+
+# Quality & Maintenance (AutoDream + Janitor via Daemon /status)
+printf "  %-22s" "AutoDream & Janitor:"
+if [ -n "$WORKER_CHECK" ]; then
+    MAINT_STATUS=$(echo "$WORKER_CHECK" | "${_TM_PYTHON}" -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    m = d.get('maintenance', {})
+    ad = m.get('auto_dream_running', False)
+    jn = m.get('janitor_running', False)
+    last_j = m.get('last_janitor_at', '')
+    if ad and jn:
+        print(f'OK  (AutoDream: running, Janitor: running, last_run: {last_j[:19] if last_j else \"none\"})')
+    elif not ad and not jn:
+        print('WARN  (AutoDream & Janitor stopped)')
+    else:
+        print(f'WARN  (AutoDream: {ad}, Janitor: {jn})')
+except Exception:
+    print('SKIP')
+" 2>/dev/null || echo "UNKNOWN")
+    echo "$MAINT_STATUS"
+else
+    echo "SKIP  (daemon down)"
 fi
 
 # 5. Web Service

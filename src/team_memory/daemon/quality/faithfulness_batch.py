@@ -5,9 +5,9 @@ Usage:
     python -m team_memory.daemon.quality.faithfulness_batch [OPTIONS]
 
 Options:
-    --model MODEL       LLM model for judge (default: from env or gemini-3.6-flash)
-    --base-url URL      LLM base URL (default: from env or http://localhost:4000/v1)
-    --api-key KEY       LLM API key (default: from env LITELLM_MASTER_KEY)
+    --model MODEL       LLM model for judge (default: from env or gbu-gemini-3.8-flash)
+    --base-url URL      LLM base URL (default: from env or https://gw.gburouter.com/v1)
+    --api-key KEY       LLM API key (default: from env GATEWAY_API_KEY)
     --batch-size N      Max entries per run (default: 20)
     --dry-run           Evaluate but don't write results to DB
     --force             Evaluate all pending, ignore threshold

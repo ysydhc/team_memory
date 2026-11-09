@@ -14,9 +14,13 @@ from team_memory.daemon.quality.arena.models import PromptEntry, RoundRecord
 
 logger = logging.getLogger("arena.prompt_generator")
 
-DEFAULT_BASE_URL = os.environ.get("ARENA_LLM_BASE_URL", "http://localhost:4000/v1")
-DEFAULT_GENERATOR_MODEL = os.environ.get("ARENA_GENERATOR_MODEL", "gpt-5.4")
-DEFAULT_API_KEY = os.environ.get("ARENA_LLM_API_KEY", "") or os.environ.get("LITELLM_MASTER_KEY", "")
+DEFAULT_BASE_URL = os.environ.get("ARENA_LLM_BASE_URL", "https://gw.gburouter.com/v1")
+DEFAULT_GENERATOR_MODEL = os.environ.get("ARENA_GENERATOR_MODEL", "gbu-azure-gpt-5.6-luna")
+DEFAULT_API_KEY = (
+    os.environ.get("ARENA_LLM_API_KEY", "")
+    or os.environ.get("GATEWAY_API_KEY", "")
+    or os.environ.get("LITELLM_MASTER_KEY", "")
+)
 
 SEED_PROMPT = """你是一个 Prompt 工程专家。你的任务是设计两个不同风格的「检索质量评估 Prompt」。
 
@@ -157,6 +161,7 @@ class PromptGenerator:
         url = f"{self._base_url}/chat/completions"
         headers = {"Content-Type": "application/json"}
         if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
             headers["x-api-key"] = self._api_key
 
         payload = {

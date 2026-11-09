@@ -134,11 +134,12 @@ async def _call_llm(prompt: str, llm_config: LLMConfig) -> str | None:
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.1,
-        "max_tokens": 1024,
+        "max_tokens": 2048,
     }
 
     headers = {
         "Authorization": f"Bearer {api_key}",
+        "x-api-key": api_key,
         "Content-Type": "application/json",
     }
 

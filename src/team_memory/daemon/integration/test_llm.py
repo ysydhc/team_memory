@@ -42,6 +42,7 @@ async def _test_litellm_models(
     url = f"{base_url.rstrip('/')}/models"
     headers: dict[str, str] = {}
     if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
         headers["x-api-key"] = api_key
 
     result: dict[str, Any] = {
@@ -79,6 +80,7 @@ async def _test_litellm_chat(
     url = f"{base_url.rstrip('/')}/chat/completions"
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
         headers["x-api-key"] = api_key
 
     payload = {
@@ -256,8 +258,8 @@ async def run_tests(args: argparse.Namespace) -> int:
             pass
 
     # Defaults
-    llm_base = base_url or "http://localhost:4000/v1"
-    llm_model = model or "gemini-3.6-flash"
+    llm_base = base_url or "https://gw.gburouter.com/v1"
+    llm_model = model or "gbu-gemini-3.8-flash"
     ollama_base = args.ollama_base or "http://127.0.0.1:11434"
     ollama_model = args.ollama_model or "qwen3-embedding:0.6b"
     web_base = args.web_base or "http://localhost:9111"

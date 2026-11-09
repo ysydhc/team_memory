@@ -53,6 +53,18 @@ class MonitoringConfig:
     workspace: str = ""
 
 
+def _expand_env_var(val: str) -> str:
+    """Expand ${VAR} from environment; return empty string if unresolved."""
+    import os
+
+    if not val:
+        return ""
+    expanded = os.path.expandvars(str(val)).strip()
+    if expanded.startswith("${") and expanded.endswith("}"):
+        return ""
+    return expanded
+
+
 def load_monitoring_config(config_path: str | None = None) -> MonitoringConfig:
     """Load monitoring.yaml into MonitoringConfig dataclass."""
     import yaml
@@ -75,11 +87,15 @@ def load_monitoring_config(config_path: str | None = None) -> MonitoringConfig:
     for ch in admin.get("channels", []):
         if not ch:
             continue
+        raw_webhook = _expand_env_var(ch.get("webhook", ch.get("url", "")))
+        raw_secret = _expand_env_var(ch.get("secret", ""))
+        if not raw_webhook:
+            continue
         channels.append(
             ChannelConfig(
                 type=ch.get("type", "webhook"),
-                webhook=ch.get("webhook", ch.get("url", "")),
-                secret=ch.get("secret", ""),
+                webhook=raw_webhook,
+                secret=raw_secret,
             )
         )
 

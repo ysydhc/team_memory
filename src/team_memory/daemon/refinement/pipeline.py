@@ -216,18 +216,40 @@ def _resolve_project(
     return proj
 
 
-async def _try_extract_personal_memory(session_id: str, buf: Any, config: DaemonConfig) -> None:
-    """Extract personal memory from user messages in a session.
+async def _try_extract_personal_memory(
+    session_id: str,
+    buf: Any,
+    config: DaemonConfig,
+    *,
+    min_new_messages: int = 2,
+) -> None:
+    """Incrementally extract personal memory from unextracted user messages in a session.
 
     Non-blocking: logs errors but does not raise.
     """
     try:
-        user_messages = await buf.get_user_messages(session_id)
-        if not user_messages:
-            logger.debug("No user messages for session=%s, skipping personal memory", session_id[:8])
-            return
-
+        from team_memory.daemon.buffers.conversation_buffer import ConversationBuffer
         from team_memory.daemon.integration.personal_memory_extractor import PersonalMemoryExtractor
+
+        if isinstance(buf, ConversationBuffer):
+            user_messages, max_msg_id = await buf.get_unextracted_user_messages(session_id)
+            substantive = [
+                m for m in user_messages if len((m.get("content") or "").strip()) >= 15
+            ]
+            if len(substantive) < min_new_messages:
+                logger.debug(
+                    "Only %d new substantive user messages (< %d) for session=%s, deferring persona extraction",
+                    len(substantive),
+                    min_new_messages,
+                    session_id[:8],
+                )
+                return
+            await buf.update_profile_extracted_watermark(session_id, max_msg_id)
+        else:
+            user_messages = await buf.get_user_messages(session_id)
+            if not user_messages:
+                logger.debug("No user messages for session=%s, skipping personal memory", session_id[:8])
+                return
 
         extractor = PersonalMemoryExtractor(config)
         saved = await extractor.extract_and_save(session_id, user_messages)
@@ -884,8 +906,8 @@ async def process_session_end(
     if not session or session.get("status") != "active":
         return {"action": "ok", "flushed": False}
 
-    # Always try personal memory extraction on session end
-    await _try_extract_personal_memory(session_id, buf, config)
+    # Always try personal memory extraction on session end (flush even 1 remaining substantive message)
+    await _try_extract_personal_memory(session_id, buf, config, min_new_messages=1)
 
     # Check if there are any assistant messages
     messages = await buf.get_assistant_messages(session_id)

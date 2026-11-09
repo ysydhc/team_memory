@@ -514,6 +514,20 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         application.state.dream_worker = dream_worker
         application.state.dream_task = dream_task
 
+        # Start JanitorScheduler inside persistent tm-daemon (with cross-restart timestamp file)
+        try:
+            from team_memory.daemon.integration.tm_sink import _daemon_context
+
+            _tm_ctx_janitor = _daemon_context()
+            if _tm_ctx_janitor and _tm_ctx_janitor.janitor_scheduler is not None:
+                if hasattr(_tm_ctx_janitor.janitor_scheduler, "enable_state_persistence"):
+                    _tm_ctx_janitor.janitor_scheduler.enable_state_persistence()
+                await _tm_ctx_janitor.janitor_scheduler.start()
+                application.state.janitor_scheduler = _tm_ctx_janitor.janitor_scheduler
+                logger.info("[INIT] janitor_scheduler started in tm-daemon")
+        except Exception as exc:
+            logger.warning("Failed to start janitor_scheduler in tm-daemon: %s", exc)
+
         # Search log writer for evaluation
         from team_memory.config import load_settings as _load_tm_settings
 
@@ -648,6 +662,14 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             try:
                 await asyncio.wait_for(refinement_task_obj, timeout=5.0)
             except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+
+        # Stop janitor scheduler if hosted in daemon
+        janitor_sched_obj = getattr(application.state, "janitor_scheduler", None)
+        if janitor_sched_obj is not None:
+            try:
+                await janitor_sched_obj.stop()
+            except Exception:
                 pass
 
         # Stop auto dream worker

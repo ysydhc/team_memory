@@ -86,10 +86,10 @@ class RefinementSettings:
 
     enabled: bool = True
     provider: str = "litellm"  # "litellm" | "ollama"
-    model: str = "qwen-plus"
-    fallback_model: str = ""  # empty = no fallback; tried after `model` exhausts its retries
-    base_url: str = "http://localhost:4000/v1"
-    api_key_env: str = "LITELLM_MASTER_KEY"
+    model: str = "gbu-gemini-3.8-flash"
+    fallback_model: str = "gbu-azure-gpt-5.6-luna"  # empty = no fallback; tried after `model` exhausts its retries
+    base_url: str = "https://gw.gburouter.com/v1"
+    api_key_env: str = "GATEWAY_API_KEY"
     timeout: int = 30
     scan_interval_seconds: int = 30
     idle_timeout_minutes: int = 30  # sessions idle longer than this are auto-refined

@@ -13,9 +13,13 @@ from team_memory.daemon.quality.arena.models import EvalResult, TaskEval
 
 logger = logging.getLogger("arena.meta_judge")
 
-DEFAULT_BASE_URL = os.environ.get("ARENA_LLM_BASE_URL", "http://localhost:4000/v1")
-DEFAULT_META_MODEL = os.environ.get("ARENA_META_MODEL", "gpt-5.4")
-DEFAULT_API_KEY = os.environ.get("ARENA_LLM_API_KEY", "") or os.environ.get("LITELLM_MASTER_KEY", "")
+DEFAULT_BASE_URL = os.environ.get("ARENA_LLM_BASE_URL", "https://gw.gburouter.com/v1")
+DEFAULT_META_MODEL = os.environ.get("ARENA_META_MODEL", "gbu-azure-gpt-5.6-luna")
+DEFAULT_API_KEY = (
+    os.environ.get("ARENA_LLM_API_KEY", "")
+    or os.environ.get("GATEWAY_API_KEY", "")
+    or os.environ.get("LITELLM_MASTER_KEY", "")
+)
 
 META_JUDGE_PROMPT = """你是一位高级评估质量裁判。你的任务是比较两位评估者对 RAG 检索结果的评估质量，判断哪位评估者做得更好。
 
@@ -253,6 +257,7 @@ class MetaJudge:
         url = f"{self._base_url}/chat/completions"
         headers = {"Content-Type": "application/json"}
         if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
             headers["x-api-key"] = self._api_key
 
         payload = {

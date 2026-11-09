@@ -134,8 +134,8 @@ async def _refine_via_openai(
     content: str,
     *,
     project: str = "default",
-    model: str = "qwen-plus",
-    base_url: str = "http://localhost:4000/v1",
+    model: str = "gbu-gemini-3.8-flash",
+    base_url: str = "https://gw.gburouter.com/v1",
     api_key: str | None = None,
     timeout: float = 30.0,
     max_input_chars: int = 6000,
@@ -254,6 +254,7 @@ class RefinementWorker:
         # Tick health tracking
         self._tick_count = 0
         self._tick_fail_count = 0
+        self._consecutive_tick_failures = 0
         self._last_tick_ok: str | None = None
 
         # ------------------------------------------------------------------
@@ -309,12 +310,14 @@ class RefinementWorker:
             try:
                 self._tick_count += 1
                 await self._tick()
+                self._consecutive_tick_failures = 0
                 self._last_tick_ok = datetime.now(timezone.utc).isoformat()
             except asyncio.CancelledError:
                 logger.debug("RefinementWorker loop cancelled")
                 raise
             except Exception:
                 self._tick_fail_count += 1
+                self._consecutive_tick_failures += 1
                 logger.exception("RefinementWorker tick failed")
 
             try:
@@ -471,18 +474,21 @@ class RefinementWorker:
                 if draft.get("skip_llm") and draft.get("refined_payload"):
                     payload = draft["refined_payload"]
                     logger.info("skip_llm: replaying publish for %s", draft_id)
-                    await self._sink.draft_publish(draft_id=payload["experience_id"])
-                    await self._sink.update_experience(
-                        experience_id=payload["experience_id"],
-                        title=payload["structured"].get("title"),
-                        problem=payload["structured"].get("problem") or payload["structured"].get("description"),
-                        solution=payload["structured"].get("solution"),
-                        tags=payload["structured"].get("tags"),
-                        experience_type=payload["structured"].get("experience_type", "general"),
-                    )
-                    await self._buf.mark_published(draft_id)
-                    if self._queue and hasattr(self._queue, "dequeue_by_session"):
-                        self._queue.dequeue_by_session(draft_id)
+                    try:
+                        await self._sink.draft_publish(draft_id=payload["experience_id"])
+                        await self._sink.update_experience(
+                            experience_id=payload["experience_id"],
+                            title=payload["structured"].get("title"),
+                            problem=payload["structured"].get("problem") or payload["structured"].get("description"),
+                            solution=payload["structured"].get("solution"),
+                            tags=payload["structured"].get("tags"),
+                            experience_type=payload["structured"].get("experience_type", "general"),
+                        )
+                        await self._buf.mark_published(draft_id)
+                        if self._queue and hasattr(self._queue, "dequeue_by_session"):
+                            self._queue.dequeue_by_session(draft_id)
+                    except Exception:
+                        logger.exception("skip_llm: failed to replay publish for %s, will retry next tick", draft_id)
                     continue
 
                 # Mark as refining before processing / 处理前标记 refining

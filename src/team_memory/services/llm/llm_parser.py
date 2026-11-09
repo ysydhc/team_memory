@@ -286,8 +286,8 @@ class LLMParseError(Exception):
 async def call_llm_openai(
     messages: list[dict[str, str]],
     *,
-    model: str = "qwen-plus",
-    base_url: str = "http://localhost:4000/v1",
+    model: str = "gbu-gemini-3.8-flash",
+    base_url: str = "https://gw.gburouter.com/v1",
     api_key: str | None = None,
     timeout: float = 30.0,
     temperature: float = 0.3,
@@ -313,11 +313,14 @@ async def call_llm_openai(
     """
     api_key = (
         api_key
+        or os.environ.get("GATEWAY_API_KEY", "")
+        or os.environ.get("GOOGLE_API_KEY", "")
         or os.environ.get("LITELLM_MASTER_KEY", "")
         or os.environ.get("OPENAI_API_KEY", "")
     )
     headers = {"Content-Type": "application/json"}
     if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
         headers["x-api-key"] = api_key
 
     try:
@@ -351,8 +354,8 @@ async def call_llm_openai(
 async def parse_content_openai(
     content: str,
     *,
-    model: str = "qwen-plus",
-    base_url: str = "http://localhost:4000/v1",
+    model: str = "gbu-gemini-3.8-flash",
+    base_url: str = "https://gw.gburouter.com/v1",
     api_key: str | None = None,
     timeout: float = 30.0,
     max_input_chars: int = 6000,
@@ -412,8 +415,8 @@ def _coerce_str(value: object, default: str = "") -> str:
 
 def _llm_connection(llm_config: "LLMConfig | None") -> tuple[str, str, str, str]:
     """Resolve model, base_url, api_key, provider from LLMConfig."""
-    model = "DeepSeek-V4-Flash"
-    base_url = "http://localhost:4000/v1"
+    model = "gbu-gemini-3.8-flash"
+    base_url = "https://gw.gburouter.com/v1"
     api_key = ""
     provider = "generic"
     if llm_config is not None:
@@ -548,13 +551,19 @@ async def parse_personal_memory(
         List of {"content": str, "scope": "generic"|"context", "profile_kind": "static"|"dynamic",
         "context_hint": str|None}.
     """
-    llm_model = "DeepSeek-V4-Flash"
-    llm_base_url = "http://localhost:4000/v1"
+    llm_model = "gbu-gemini-3.8-flash"
+    llm_base_url = "https://gw.gburouter.com/v1"
     llm_api_key = ""
     if llm_config is not None:
         llm_model = llm_config.model
         llm_base_url = llm_config.base_url
         llm_api_key = getattr(llm_config, "api_key", "") or ""
+    if not llm_api_key:
+        llm_api_key = (
+            os.environ.get("GATEWAY_API_KEY", "")
+            or os.environ.get("LITELLM_MASTER_KEY", "")
+            or os.environ.get("OPENAI_API_KEY", "")
+        )
 
     system_prompt = load_prompt("parse_personal_memory", llm_config=llm_config)
     user_content = content[:max_input_chars]
@@ -562,6 +571,7 @@ async def parse_personal_memory(
     try:
         headers = {"Content-Type": "application/json"}
         if llm_api_key:
+            headers["Authorization"] = f"Bearer {llm_api_key}"
             headers["x-api-key"] = llm_api_key
 
         async with httpx.AsyncClient(timeout=timeout) as client:

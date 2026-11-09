@@ -195,3 +195,23 @@ class TestJanitorScheduler:
 
         # Clean up
         await scheduler.stop()
+
+    @pytest.mark.asyncio
+    async def test_state_persistence_runs_overdue_quickly(self, mock_janitor, mock_config, tmp_path):
+        """When state persistence is enabled and no state file exists, overdue pass runs after startup delay."""
+        mock_config.interval_hours = 24
+        state_file = tmp_path / "last_janitor.txt"
+        scheduler = JanitorScheduler(mock_janitor, mock_config).enable_state_persistence(
+            state_file=state_file,
+            initial_delay_seconds=0.05,
+        )
+
+        assert scheduler._compute_next_wait_seconds(86400.0) == pytest.approx(0.05)
+
+        await scheduler.start()
+        await asyncio.sleep(0.2)
+        await scheduler.stop()
+
+        mock_janitor.run_all.assert_called_with(project=None)
+        assert state_file.exists()
+        assert scheduler._compute_next_wait_seconds(86400.0) > 3600

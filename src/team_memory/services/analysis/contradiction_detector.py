@@ -72,12 +72,12 @@ async def _validate_with_llm(
     if not pairs:
         return []
 
-    base_url = getattr(llm_config, "base_url", "http://localhost:4000/v1").rstrip("/")
+    base_url = getattr(llm_config, "base_url", "https://gw.gburouter.com/v1").rstrip("/")
     if not base_url.endswith("/v1"):
         base_url = f"{base_url}/v1"
-    model = getattr(llm_config, "model", "DeepSeek-V4-Flash")
-    api_key_env = getattr(llm_config, "api_key_env", "LITELLM_MASTER_KEY")
-    api_key = os.environ.get(api_key_env, "none")
+    model = getattr(llm_config, "model", "gbu-gemini-3.8-flash")
+    api_key_env = getattr(llm_config, "api_key_env", "GATEWAY_API_KEY")
+    api_key = os.environ.get(api_key_env, "") or getattr(llm_config, "api_key", "") or "none"
     timeout = getattr(llm_config, "timeout", 30)
 
     # Build batch prompt — all pairs in one call

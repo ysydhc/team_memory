@@ -35,18 +35,34 @@ async def get_status(request: Request) -> dict[str, Any]:
     # Worker health — exposes RefinementWorker tick status
     rw = getattr(app.state, "refinement_worker", None)
     if rw:
+        consecutive_fails = getattr(rw, "_consecutive_tick_failures", None)
+        if consecutive_fails is None:
+            fail_cnt = getattr(rw, "_tick_fail_count", 0)
+            tick_cnt = getattr(rw, "_tick_count", 0)
+            is_healthy = fail_cnt == 0 or (fail_cnt < 5 and tick_cnt > fail_cnt * 2)
+        else:
+            is_healthy = consecutive_fails < 3
         result["refinement_worker"] = {
             "tick_count": getattr(rw, "_tick_count", 0),
             "fail_count": getattr(rw, "_tick_fail_count", 0),
+            "consecutive_failures": consecutive_fails if consecutive_fails is not None else 0,
             "last_tick_ok": getattr(rw, "_last_tick_ok", None),
-            "healthy": (
-                getattr(rw, "_tick_fail_count", 0) == 0
-                or (
-                    getattr(rw, "_tick_fail_count", 0) < 5
-                    and getattr(rw, "_tick_count", 0) > getattr(rw, "_tick_fail_count", 0) * 2
-                )
-            ),
+            "healthy": is_healthy,
         }
+    janitor_sched = getattr(app.state, "janitor_scheduler", None)
+    dream_worker = getattr(app.state, "dream_worker", None)
+    last_janitor_dt = (
+        janitor_sched._read_last_run()
+        if janitor_sched and hasattr(janitor_sched, "_read_last_run")
+        else None
+    )
+    result["maintenance"] = {
+        "janitor_running": bool(janitor_sched and getattr(janitor_sched, "is_running", False)),
+        "last_janitor_at": last_janitor_dt.isoformat() if last_janitor_dt else None,
+        "auto_dream_running": bool(
+            dream_worker and getattr(dream_worker, "_task", None) and not dream_worker._task.done()
+        ),
+    }
     return result
 
 

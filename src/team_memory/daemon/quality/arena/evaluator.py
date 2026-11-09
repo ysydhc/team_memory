@@ -12,9 +12,14 @@ from team_memory.daemon.quality.arena.models import EvalResult
 
 logger = logging.getLogger("arena.evaluator")
 
-DEFAULT_BASE_URL = os.environ.get("ARENA_LLM_BASE_URL", "http://localhost:4000/v1")
-DEFAULT_MODEL = os.environ.get("ARENA_EVALUATOR_MODEL", "gemini-3.6-flash")
-DEFAULT_API_KEY = os.environ.get("ARENA_LLM_API_KEY", "") or os.environ.get("LITELLM_MASTER_KEY", "")
+DEFAULT_BASE_URL = os.environ.get("ARENA_LLM_BASE_URL", "https://gw.gburouter.com/v1")
+DEFAULT_MODEL = os.environ.get("ARENA_EVALUATOR_MODEL", "gbu-gemini-3.8-flash")
+DEFAULT_API_KEY = (
+    os.environ.get("ARENA_LLM_API_KEY", "")
+    or os.environ.get("GATEWAY_API_KEY", "")
+    or os.environ.get("GOOGLE_API_KEY", "")
+    or os.environ.get("LITELLM_MASTER_KEY", "")
+)
 
 
 def _is_retryable_error(exc: Exception) -> bool:
@@ -104,6 +109,7 @@ class ArenaEvaluator:
         url = f"{self._base_url}/chat/completions"
         headers = {"Content-Type": "application/json"}
         if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
             headers["x-api-key"] = self._api_key
 
         payload = {
