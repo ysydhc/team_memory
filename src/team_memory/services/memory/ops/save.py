@@ -84,6 +84,15 @@ async def _try_extract_and_save_personal_memory(
 _ORIG_TRY_EXTRACT = _try_extract_and_save_personal_memory
 
 
+def _derive_fallback_title(content: str, max_len: int = 60) -> str:
+    """Derive a concise title from the first non-empty line of content."""
+    for line in content.splitlines():
+        cleaned = line.lstrip("#*- \t").strip()
+        if cleaned:
+            return cleaned[:max_len]
+    return "Untitled"
+
+
 async def _save_from_content(
     *,
     content: str,
@@ -94,8 +103,11 @@ async def _save_from_content(
     service: object,
     db_url: str,
     embedding_provider: object,
+    group_key: str | None = None,
+    scope: str = "project",
+    experience_type: str | None = None,
 ) -> dict:
-    """LLM parse + save helper (tm_learn logic)."""
+    """LLM parse + save helper (tm_learn logic), with direct-save fallback on LLM parse failure."""
     from team_memory.services.llm.llm_parser import (
         LLMParseError,
         parse_content,
@@ -105,6 +117,7 @@ async def _save_from_content(
     quality_min = ext.quality_gate if ext is not None else 2
     retry_once = (ext.max_retries > 0) if ext is not None else True
 
+    fallback_used = False
     try:
         parsed = await parse_content(
             content=content,
@@ -114,10 +127,17 @@ async def _save_from_content(
             quality_retry_once=retry_once,
         )
     except LLMParseError as e:
-        return {
-            "error": True,
-            "message": f"Failed to parse content: {e}",
-            "code": "llm_parse_failed",
+        logger.warning(
+            "op_save: LLM parse failed (%s); falling back to direct save mode",
+            e,
+        )
+        fallback_used = True
+        parsed = {
+            "title": _derive_fallback_title(content),
+            "problem": content,
+            "solution": content,
+            "tags": [],
+            "experience_type": experience_type or "general",
         }
 
     extracted_tags = parsed.get("tags", [])
@@ -125,19 +145,22 @@ async def _save_from_content(
         extracted_tags = list(set(extracted_tags + [t.lower() for t in tags]))
 
     async with get_session(db_url) as session:
-        result = await service.save(
-            session=session,
-            title=parsed.get("title", "Untitled"),
-            problem=parsed.get("problem", ""),
-            solution=parsed.get("solution"),
-            created_by=user,
-            tags=extracted_tags,
-            source="pipeline",
-            exp_status="draft",
-            visibility="project",
-            experience_type=parsed.get("experience_type") or "general",
-            project=project,
-        )
+        save_kwargs: dict = {
+            "session": session,
+            "title": parsed.get("title", "Untitled"),
+            "problem": parsed.get("problem", ""),
+            "solution": parsed.get("solution"),
+            "created_by": user,
+            "tags": extracted_tags,
+            "source": "pipeline",
+            "exp_status": "draft",
+            "visibility": "project" if scope == "project" else "private",
+            "experience_type": parsed.get("experience_type") or experience_type or "general",
+            "project": project,
+        }
+        if group_key:
+            save_kwargs["group_key"] = group_key
+        result = await service.save(**save_kwargs)
 
     if result.get("error"):
         return {
@@ -174,15 +197,25 @@ async def _save_from_content(
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
     await asyncio.sleep(0)
+    data_payload: dict = {
+        "id": result.get("id"),
+        "title": result.get("title"),
+        "tags": result.get("tags", []),
+        "status": result.get("exp_status"),
+        "mutation_action": result.get("mutation_action", "ADD"),
+    }
+    if fallback_used:
+        data_payload["fallback"] = True
+        msg = (
+            f"Knowledge saved via fallback direct mode (LLM parse failed; "
+            f"tip: pass title + problem + solution directly for fast save): "
+            f"{parsed.get('title', 'Untitled')}"
+        )
+    else:
+        msg = f"Knowledge extracted and saved: {parsed.get('title', 'Untitled')}"
     return {
-        "message": f"Knowledge extracted and saved: {parsed.get('title', 'Untitled')}",
-        "data": {
-            "id": result.get("id"),
-            "title": result.get("title"),
-            "tags": result.get("tags", []),
-            "status": result.get("exp_status"),
-            "mutation_action": result.get("mutation_action", "ADD"),
-        },
+        "message": msg,
+        "data": data_payload,
     }
 
 
@@ -240,7 +273,13 @@ async def op_save(
             "code": "scope_removed",
         }
 
-    if content:
+    has_direct = bool(
+        title
+        and title.strip()
+        and ((problem and problem.strip()) or (solution and solution.strip()))
+    )
+
+    if not has_direct and content and content.strip():
         return await _save_from_content(
             content=content,
             tags=tags,
@@ -250,9 +289,12 @@ async def op_save(
             service=service,
             db_url=db_url,
             embedding_provider=embedding_provider,
+            group_key=group_key,
+            scope=scope,
+            experience_type=experience_type,
         )
 
-    if not title or not problem:
+    if not has_direct:
         return {
             "error": True,
             "message": (
@@ -260,6 +302,14 @@ async def op_save(
             ),
             "code": "validation_error",
         }
+
+    if content and content.strip():
+        if not solution or not solution.strip():
+            solution = content
+        elif content.strip() not in solution:
+            solution = f"{solution}\n\n{content}"
+    if not problem or not problem.strip():
+        problem = content or solution or title
 
     async with get_session(db_url) as session:
         save_kwargs: dict = {

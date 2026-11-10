@@ -151,28 +151,24 @@ def _get_mcp_json(path: str, *, params: dict[str, str] | None = None, timeout: f
 
 def cmd_save(args: argparse.Namespace) -> None:
     """POST /api/v1/mcp/save — direct fields or long-form content."""
-    has_direct = bool(args.title or args.problem or args.solution)
+    has_direct = bool(args.title and (args.problem or args.solution))
     has_content = bool(args.content)
-    if has_content and has_direct:
+    if not has_direct and not has_content:
         print(
-            "Error: --content cannot be used together with --title/--problem/--solution.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    if not has_content and not (args.title and args.problem and args.solution):
-        print(
-            "Error: use direct mode (--title, --problem, --solution) or --content.",
+            "Error: use direct mode (--title + --problem/--solution) or --content.",
             file=sys.stderr,
         )
         sys.exit(1)
 
     body: dict[str, Any] = {}
-    if has_content:
-        body["content"] = args.content
-    else:
+    if args.title:
         body["title"] = args.title
+    if args.problem:
         body["problem"] = args.problem
+    if args.solution:
         body["solution"] = args.solution
+    if args.content:
+        body["content"] = args.content
     if args.tags:
         body["tags"] = [t.strip() for t in args.tags.split(",") if t.strip()]
     if args.scope:
@@ -2434,7 +2430,7 @@ def main() -> None:
     p_save.add_argument("--solution", help="Solution (direct mode)")
     p_save.add_argument(
         "--content",
-        help="Long text for LLM parse mode (mutually exclusive with title/problem/solution)",
+        help="Raw text for LLM parse mode (prefer --title + --problem + --solution for fast direct save)",
     )
     p_save.add_argument("--tags", help="Comma-separated tags")
     p_save.add_argument(

@@ -291,7 +291,7 @@ async def call_llm_openai(
     api_key: str | None = None,
     timeout: float = 30.0,
     temperature: float = 0.3,
-    max_tokens: int = 2048,
+    max_tokens: int = 8192,
 ) -> str:
     """Call an OpenAI-compatible API (e.g. LiteLLM proxy) and return the text content.
 
@@ -444,6 +444,7 @@ async def _chat_completion_text(
     provider: str = "",
     timeout: float = 120.0,
     temperature: float = 0.3,
+    max_tokens: int = 8192,
 ) -> str:
     """Chat completion via OpenAI-compat or legacy Ollama /api/chat."""
     if _use_openai_compat(provider, base_url):
@@ -454,6 +455,7 @@ async def _chat_completion_text(
             api_key=api_key or None,
             timeout=timeout,
             temperature=temperature,
+            max_tokens=max_tokens,
         )
 
     try:

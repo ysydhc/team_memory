@@ -270,7 +270,6 @@ class ExperienceService:
             parent_id = None
             if group_key:
                 parent = await repo.find_or_create_group_parent(
-                    session=session,
                     project=project or "default",
                     group_key=group_key,
                     created_by=created_by,

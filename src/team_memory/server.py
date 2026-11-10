@@ -319,6 +319,9 @@ def _resolve_project(project: str | None) -> str | None:
     name="memory_save",
     description=(
         "Save valuable knowledge: solutions, decisions, patterns, pitfalls. "
+        "RECOMMENDED: Use Direct Mode by passing `title` + `problem` + `solution` "
+        "(without `content`) for millisecond-level saving; only pass `content` alone "
+        "when raw text has not been distilled into structured fields. "
         "Call this when you: "
         "fix an unexpected error "
         "(title=error summary, problem=what failed, solution=what fixed it); "

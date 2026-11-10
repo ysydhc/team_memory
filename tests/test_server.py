@@ -228,9 +228,15 @@ class TestMemorySave:
             "exp_status": "published",
         }
 
+        mock_settings = MagicMock()
+        mock_settings.mcp.max_content_chars = 200_000
+        mock_settings.mcp.max_tags = 20
+        mock_settings.mcp.max_tag_length = 50
         mock_service = MagicMock()
         mock_service.save = AsyncMock(return_value=mock_result)
-        mock_app = make_mock_app_context(service=mock_service, db_url="sqlite://")
+        mock_app = make_mock_app_context(
+            service=mock_service, settings=mock_settings, db_url="sqlite://"
+        )
         with (
             _patch_app_context(mock_app),
             _patch_user(),
@@ -350,6 +356,191 @@ class TestMemorySave:
 
         data = json.loads(result)
         assert data.get("error") is True
+
+    @pytest.mark.asyncio
+    async def test_direct_mode_priority_when_content_also_provided(self):
+        """When title + problem/solution AND content are all provided, skip LLM parse and merge content."""
+        mock_result = {
+            "id": str(uuid.uuid4()),
+            "title": "Fix MMKV lock",
+            "exp_status": "published",
+        }
+        mock_settings = MagicMock()
+        mock_settings.mcp.max_content_chars = 200_000
+        mock_settings.mcp.max_tags = 20
+        mock_settings.mcp.max_tag_length = 50
+        mock_service = MagicMock()
+        mock_service.save = AsyncMock(return_value=mock_result)
+        mock_app = make_mock_app_context(
+            service=mock_service, settings=mock_settings, db_url="sqlite://"
+        )
+
+        with (
+            _patch_app_context(mock_app),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_SAVE}.get_session") as mock_get_session,
+            patch(
+                "team_memory.services.llm.llm_parser.parse_content",
+                new_callable=AsyncMock,
+            ) as mock_parse_content,
+        ):
+            mock_session = AsyncMock()
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
+            fn = tools["memory_save"].fn
+            result = await fn(
+                title="Fix MMKV lock",
+                problem="Async callback deadlocked MMKV",
+                solution="Reset lock in finally block",
+                content="Additional code diff and verification log...",
+            )
+
+        data = json.loads(result)
+        assert "data" in data
+        assert data["data"]["title"] == "Fix MMKV lock"
+        mock_parse_content.assert_not_awaited()
+        mock_service.save.assert_awaited_once()
+        saved_kwargs = mock_service.save.call_args.kwargs
+        assert saved_kwargs["exp_status"] == "published"
+        assert "Reset lock in finally block" in saved_kwargs["solution"]
+        assert "Additional code diff and verification log..." in saved_kwargs["solution"]
+
+    @pytest.mark.asyncio
+    async def test_content_parse_fallback_on_llm_parse_error(self):
+        """When only content is provided and LLM parse fails, fallback to direct save instead of dropping data."""
+        from team_memory.services.llm.llm_parser import LLMParseError
+
+        mock_result = {
+            "id": str(uuid.uuid4()),
+            "title": "归因上报 v3.0 多商店合并真机验证",
+            "tags": ["android"],
+            "exp_status": "draft",
+        }
+        mock_settings = MagicMock()
+        mock_settings.extraction = None
+        mock_settings.llm = MagicMock()
+        mock_settings.mcp.max_content_chars = 200_000
+        mock_settings.mcp.max_tags = 20
+        mock_settings.mcp.max_tag_length = 50
+
+        mock_service = MagicMock()
+        mock_service.save = AsyncMock(return_value=mock_result)
+        mock_app = make_mock_app_context(
+            service=mock_service,
+            settings=mock_settings,
+            db_url="sqlite://",
+        )
+
+        with (
+            _patch_app_context(mock_app),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="default"),
+            patch(f"{_SAVE}.get_session") as mock_get_session,
+            patch(
+                "team_memory.services.llm.llm_parser.parse_content",
+                new_callable=AsyncMock,
+                side_effect=LLMParseError("Failed to parse LLM response as JSON. Raw: {"),
+            ),
+            _patch_personal(),
+        ):
+            mock_session = AsyncMock()
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
+            fn = tools["memory_save"].fn
+            raw_content = "# 归因上报 v3.0 多商店合并真机验证\n详细问题与修复步骤..."
+            result = await fn(content=raw_content, tags=["android"])
+
+        data = json.loads(result)
+        assert not data.get("error")
+        assert data["data"]["fallback"] is True
+        mock_service.save.assert_awaited_once()
+        saved_kwargs = mock_service.save.call_args.kwargs
+        assert saved_kwargs["title"] == "归因上报 v3.0 多商店合并真机验证"
+        assert saved_kwargs["problem"] == raw_content
+        assert saved_kwargs["solution"] == raw_content
+
+    @pytest.mark.asyncio
+    async def test_direct_save_with_group_key_integration(self):
+        """Calling memory_save with group_key succeeds through ExperienceService + ExperienceRepository."""
+        from team_memory.services.memory.experience import ExperienceService
+
+        mock_embedding = MagicMock()
+        mock_embedding.encode_single = AsyncMock(return_value=[0.1] * 16)
+        real_service = ExperienceService(
+            embedding_provider=mock_embedding, auth_provider=MagicMock()
+        )
+
+        parent_id = uuid.uuid4()
+        child_id = uuid.uuid4()
+
+        mock_parent = MagicMock()
+        mock_parent.id = parent_id
+        mock_parent.title = "adx-sdk-android-attribution"
+        mock_parent.description = "Auto-created group"
+        mock_parent.solution = None
+        mock_parent.tags = []
+        mock_parent.children = []
+
+        mock_child = MagicMock()
+        mock_child.id = child_id
+        mock_child.to_dict.return_value = {
+            "id": str(child_id),
+            "title": "Attribution v3 fix",
+            "exp_status": "published",
+            "group_key": "adx-sdk-android-attribution",
+            "parent_id": str(parent_id),
+        }
+
+        mock_session = AsyncMock()
+        mock_exec_res = MagicMock()
+        mock_exec_res.scalar_one_or_none.return_value = mock_parent
+        mock_session.execute = AsyncMock(return_value=mock_exec_res)
+
+        mock_app = make_mock_app_context(service=real_service, db_url="sqlite://")
+
+        with (
+            _patch_app_context(mock_app),
+            _patch_user(),
+            patch(f"{_P}._resolve_project", return_value="adx_sdk_android"),
+            patch(f"{_SAVE}.get_session") as mock_get_session,
+            patch(
+                "team_memory.storage.repository.ExperienceRepository.create",
+                new_callable=AsyncMock,
+                return_value=mock_child,
+            ) as mock_repo_create,
+            patch(
+                "team_memory.storage.repository.ExperienceRepository.get_with_children",
+                new_callable=AsyncMock,
+                return_value=mock_parent,
+            ),
+            patch(
+                "team_memory.storage.repository.ExperienceRepository.update",
+                new_callable=AsyncMock,
+            ),
+        ):
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            tools = {t.name: t for t in (await mcp.get_tools()).values()}
+            fn = tools["memory_save"].fn
+            result = await fn(
+                title="Attribution v3 fix",
+                problem="Duplicate activation report on cold start",
+                solution="Use MMKV atomic flag",
+                group_key="adx-sdk-android-attribution",
+            )
+
+        data = json.loads(result)
+        assert not data.get("error"), f"Unexpected error: {data}"
+        assert data["data"]["id"] == str(child_id)
+        mock_repo_create.assert_awaited_once()
+        assert mock_repo_create.call_args.kwargs["parent_id"] == parent_id
+        assert mock_repo_create.call_args.kwargs["group_key"] == "adx-sdk-android-attribution"
 
 
 # ============================================================

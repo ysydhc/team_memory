@@ -173,12 +173,14 @@ class ExperienceRepository:
         project: str,
         group_key: str,
         created_by: str,
+        session: AsyncSession | None = None,
     ) -> Experience:
         """Find existing parent by group_key, or create a new one.
 
         Used for automatic grouping: experiences with the same group_key
         are attached as children of a shared parent.
         """
+        sess = session or self._session
         proj = self._project_value(project)
         query = (
             select(Experience)
@@ -187,7 +189,7 @@ class ExperienceRepository:
             .where(Experience.project == proj)
             .where(Experience.is_deleted == False)  # noqa: E712
         )
-        result = await self._session.execute(query)
+        result = await sess.execute(query)
         parent = result.scalar_one_or_none()
         if parent is not None:
             return parent
