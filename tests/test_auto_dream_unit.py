@@ -203,7 +203,11 @@ class TestTriggerConditions:
         f = tmp_path / "last_dream.txt"
         f.write_text(old.isoformat())
 
-        with patch("team_memory.daemon.integration.auto_dream._LAST_DREAM_FILE", f):
+        with (
+            patch("team_memory.daemon.integration.auto_dream._LAST_DREAM_FILE", f),
+            patch("team_memory.daemon.integration.auto_dream._LAST_DREAM_STATS_FILE", tmp_path / "stats.json"),
+            patch("team_memory.daemon.integration.auto_dream._LOCK_FILE", tmp_path / "dream.lock"),
+        ):
             with patch.object(worker, "_count_new_experiences", return_value=10):
                 with patch.object(
                     worker, "_dream", return_value={"candidates": 5, "clusters": 2, "merged": 3, "pruned": 1}
