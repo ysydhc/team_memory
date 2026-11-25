@@ -252,7 +252,7 @@ class TestIntentGateContext:
         """Should include previous message in LLM prompt when provided."""
         with patch.object(gate, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "experience"
-            await gate.classify("继续", prev_message="帮我实现一个用户认证模块")
+            await gate.classify("再看看刚才那个认证模块怎么改", prev_message="帮我实现一个用户认证模块")
 
             # Verify the prompt sent to LLM includes the prev message
             call_args = mock_llm.call_args[0][0]  # first positional arg (prompt)
@@ -272,7 +272,7 @@ class TestIntentGateContext:
         with patch.object(gate, "_call_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "both"
             long_msg = "x" * 500
-            await gate.classify("继续", prev_message=long_msg)
+            await gate.classify("再看看刚才那个认证模块怎么改", prev_message=long_msg)
 
             call_args = mock_llm.call_args[0][0]
             # Should be truncated (max 200 chars for prev)

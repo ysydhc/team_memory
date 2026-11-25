@@ -88,7 +88,8 @@ JUDGE_PROMPT = """你是一个 RAG (Retrieval-Augmented Generation) 评估专家
   "used_indices": [1],
   "score": 0.0到1.0的浮点数
 }}
-其中 `used_indices` 为实际支撑了上述 supported claims 的检索结果编号（从 1 开始，如 [1, 2]；若未引用任何检索结果则为 []）。"""
+其中 `used_indices` 为实际支撑上述 supported claims 的检索结果编号
+（从 1 开始，如 [1, 2]；若未引用任何检索结果则为 []）。"""
 
 
 def _is_retryable_error(exc: Exception) -> bool:

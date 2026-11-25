@@ -28,7 +28,6 @@ from team_memory.daemon.refinement.pipeline import (
     _build_l1_context,
     _format_l1_item,
 )
-from team_memory.daemon.wiki.wiki_compiler import WikiCompiler
 from team_memory.hooks.core.transcript import (
     clean_antigravity_user_input,
     parse_antigravity_transcript,
@@ -420,58 +419,3 @@ class TestToolObservationAndConvergence:
         )
         assert conv is True
 
-
-# ---------------------------------------------------------------------------
-# Phase 4: Module-Level Living Wiki Synthesis
-# ---------------------------------------------------------------------------
-
-
-class TestLivingWikiModuleSynthesis:
-    @pytest.mark.asyncio
-    async def test_compile_module_pages_clusters_by_project_and_primary_tag(self, tmp_path: Path) -> None:
-        wiki_root = tmp_path / "wiki"
-        experiences = [
-            {
-                "id": "exp-1",
-                "title": "PostgreSQL 连接池超时配置",
-                "description": "高并发下 QueuePool 耗尽报错 TimeoutError",
-                "solution": "调大 pool_size=20, max_overflow=10 并开启 pool_pre_ping",
-                "tags": ["database", "postgresql"],
-                "project": "team_memory",
-            },
-            {
-                "id": "exp-2",
-                "title": "pgvector HNSW 索引构建参数优化",
-                "description": "向量检索在百万级数据下延迟超过 200ms",
-                "solution": "使用 HNSW 索引设置 m=16, ef_construction=64",
-                "tags": ["database", "pgvector"],
-                "project": "team_memory",
-            },
-            {
-                "id": "exp-3",
-                "title": "单条独立前端样式修复",
-                "description": "移动端按钮溢出",
-                "solution": "使用 flex-wrap",
-                "tags": ["frontend"],
-                "project": "team_memory",
-            },
-        ]
-
-        async with WikiCompiler(wiki_root=str(wiki_root)) as compiler:
-            res = await compiler.compile_incremental(experiences)
-            assert res.created == 3
-            stats = await compiler.get_stats()
-            assert stats["total"] == 3
-
-            module_file = wiki_root / "modules" / "team_memory" / "database.md"
-            assert module_file.exists()
-            content = module_file.read_text(encoding="utf-8")
-            assert "type: module_wiki" in content
-            assert "experience_count: 2" in content
-            assert "PostgreSQL 连接池超时配置" in content
-            assert "pgvector HNSW 索引构建参数优化" in content
-            assert "## 核心方案与架构约定" in content
-            assert "## 常见问题与避坑指南" in content
-
-            # Single-experience tag ("frontend") should not generate a module page
-            assert not (wiki_root / "modules" / "team_memory" / "frontend.md").exists()

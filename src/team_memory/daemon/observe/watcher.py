@@ -31,7 +31,7 @@ async def start_watcher(config: DaemonConfig, sink: TMSink, buf: Any = None) -> 
              are also recorded in the local SQLite buffer so RefinementWorker
              can pick them up for LLM refinement.
     """
-    from team_memory.daemon.wiki.markdown_indexer import MarkdownIndexer
+    from team_memory.daemon.observe.markdown_indexer import MarkdownIndexer
 
     indexer = MarkdownIndexer()
     paths = []

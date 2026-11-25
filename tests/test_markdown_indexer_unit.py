@@ -16,7 +16,7 @@ import os
 
 import pytest
 
-from team_memory.daemon.wiki.markdown_indexer import (
+from team_memory.daemon.observe.markdown_indexer import (
     MarkdownIndexer,
     _infer_tags,
     _match_pattern,

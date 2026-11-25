@@ -483,7 +483,7 @@ def _register_pattern_extraction(
         await task_runner.enqueue("pattern_extraction", payload, db_url=db_url)
         # Attempt immediate execution (best-effort, like the old create_task)
         try:
-            await task_runner.poll_and_execute(db_url, batch_size=1, exclude_types=["graphiti_ingest"])
+            await task_runner.poll_and_execute(db_url, batch_size=1)
         except Exception:
             logger.debug("Immediate task execution failed; will retry later", exc_info=True)
 
@@ -503,7 +503,6 @@ async def start_background_tasks(ctx: AppContext) -> None:
                 await task_runner.poll_and_execute(
                     ctx.db_url,
                     batch_size=1,
-                    exclude_types=["graphiti_ingest"],
                 )
             except Exception as e:
                 logger.error("Error in background task polling loop: %s", e)

@@ -93,11 +93,8 @@ class TestHandlerRegistration:
         task_runner.register_handler("a", AsyncMock())
         task_runner.register_handler("b", AsyncMock())
         task_runner.clear_handlers()
-        # clear_handlers re-registers the default graphiti_ingest handler.
         handlers = task_runner.get_handlers()
-        assert "a" not in handlers
-        assert "b" not in handlers
-        assert set(handlers) == {"graphiti_ingest"}
+        assert handlers == {}
 
 
 # ============================================================

@@ -32,9 +32,6 @@ from team_memory.daemon.runtime.models import (  # noqa: F401
     MCPCallbackPayload,
     RecallQuery,
 )
-from team_memory.daemon.wiki.llm_wiki import LLMWiki
-from team_memory.daemon.wiki.wiki_compiler import WikiCompiler
-from team_memory.project_resolver import find_project_root
 from team_memory.services.search.search_log_writer import SearchLogWriter
 
 logger = logging.getLogger("daemon.app")
@@ -409,13 +406,6 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         detector = ConvergenceDetector()
         application.state.detector = detector
 
-        # LLMWiki — local SQLite knowledge store with FTS5 search
-        wiki_db_path_default = os.path.expanduser("~/.cache/tm-pipeline/wiki.db")
-        llm_wiki = LLMWiki(db_path=wiki_db_path_default)
-        await llm_wiki.__aenter__()
-        application.state.llm_wiki = llm_wiki
-        logger.info("LLMWiki initialized (db=%s)", wiki_db_path_default)
-
         # IntentGate — LLM-based intent classification for retrieval routing
         from team_memory.daemon.integration.intent_gate import IntentGate
 
@@ -423,36 +413,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         application.state.intent_gate = intent_gate
         logger.info("[INIT] IntentGate initialized (model=%s)", intent_gate._model)
 
-        # Wiki compiler (must init before DraftRefiner)
-        wiki_compiler: WikiCompiler | None = None
-        if config.wiki.enabled:
-            # Determine wiki_root: explicit config > project root / wiki/
-            wiki_root = config.wiki.wiki_root
-            if not wiki_root:
-                # Default: <project_root>/wiki/
-                start = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-                project_root = find_project_root(start)
-                wiki_root = os.path.join(project_root, "wiki")
-            wiki_db_path = config.wiki.db_path or None  # None → WikiCompiler default
-            wiki_compiler = WikiCompiler(wiki_root=wiki_root, db_path=wiki_db_path, llm_wiki=llm_wiki)
-            await wiki_compiler.__aenter__()
-            # Pre-load entity/embedding data for enhanced cross-referencing
-            from team_memory.config import load_settings as _load_tm_settings
-
-            _tm_settings = _load_tm_settings()
-            pg_url = str(_tm_settings.database.url)
-            await wiki_compiler._load_pg_data(pg_url)
-            application.state.wiki_compiler = wiki_compiler
-            logger.info(
-                "WikiCompiler initialized (root=%s, entities=%d, embeddings=%d)",
-                wiki_root,
-                len(wiki_compiler._exp_entity_map),
-                len(wiki_compiler._exp_embeddings),
-            )
-        else:
-            application.state.wiki_compiler = None
-
-        refiner = DraftRefiner(sink=sink, draft_buffer=buf, wiki_compiler=wiki_compiler)
+        refiner = DraftRefiner(sink=sink, draft_buffer=buf)
         application.state.refiner = refiner
 
         # Startup recovery: reset any sessions stuck in "refining" status
@@ -467,8 +428,10 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             )
 
         # Metrics collector / 指标收集
+        from team_memory.config import load_settings as _load_tm_settings
         from team_memory.daemon.observe.metrics_collector import MetricsCollector
 
+        _tm_settings = _load_tm_settings()
         _pg_url_clean = str(_tm_settings.database.url).replace("+asyncpg", "")
         metrics = MetricsCollector(db_path=db_path, pg_url=_pg_url_clean)
         metrics.cleanup()
@@ -632,17 +595,6 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         yield
 
         # -- Shutdown --
-        # Close LLMWiki
-        llm_wiki_obj: LLMWiki | None = getattr(application.state, "llm_wiki", None)
-        if llm_wiki_obj is not None:
-            await llm_wiki_obj.__aexit__(None, None, None)
-            logger.info("LLMWiki shutdown")
-
-        wiki_compiler_obj: WikiCompiler | None = getattr(application.state, "wiki_compiler", None)
-        if wiki_compiler_obj is not None:
-            await wiki_compiler_obj.__aexit__(None, None, None)
-            logger.info("WikiCompiler shutdown")
-
         search_log_obj: SearchLogWriter | None = getattr(application.state, "search_log", None)
         if search_log_obj is not None:
             await search_log_obj.close()
@@ -734,12 +686,10 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         hooks_router,
         recall_router,
         status_router,
-        wiki_router,
     )
 
     app.include_router(hooks_router)
     app.include_router(drafts_router)
-    app.include_router(wiki_router)
     app.include_router(status_router)
     app.include_router(recall_router)
     app.include_router(debug_router)

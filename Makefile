@@ -31,7 +31,7 @@ ALEMBIC ?= $(shell \
 	else echo alembic; fi)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp mcp-verify test test-acceptance lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-reload daemon-install daemon-uninstall verify-pipeline diagnose-pipeline e2e-verify logs watchdog-start test-regression watchdog-stop watchdog-status stats wiki-compile wiki-status entity-backfill entity-dedup embedding-backfill detect-contradictions search-eval eval golden-set ops-digest solution-backfill faithfulness-eval test-llm janitor-run
+.PHONY: help setup dev web mcp mcp-verify test test-acceptance lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-reload daemon-install daemon-uninstall verify-pipeline diagnose-pipeline e2e-verify logs watchdog-start test-regression watchdog-stop watchdog-status stats entity-backfill entity-dedup embedding-backfill detect-contradictions search-eval eval golden-set ops-digest solution-backfill faithfulness-eval test-llm janitor-run
 
 sync-agent-artifacts: ## 由 agents/shared + agents/manifest.yaml 生成 .claude/.cursor 下 agents、prompts、skills
 	python scripts/sync_agent_artifacts.py
@@ -190,14 +190,6 @@ verify-entities: ## 验证 L2.5 实体图表（建表 + 规则提取 + 样例数
 stats:           ## 搜索质量报告（--days 30 --granularity day）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
 	$(PYTHON_BIN) -m team_memory.daemon.observe.tm_stats $(OPTS)
-
-wiki-compile:    ## 编译 Wiki（--full 全量重建）
-	@set -a && [ -f .env ] && source .env || true && set +a; \
-	$(PYTHON_BIN) -m team_memory.daemon.wiki.wiki_cli compile $(OPTS)
-
-wiki-status:     ## Wiki 编译状态
-	@set -a && [ -f .env ] && source .env || true && set +a; \
-	$(PYTHON_BIN) -m team_memory.daemon.wiki.wiki_cli status $(OPTS)
 
 entity-backfill: ## 全量补抽实体（--model 指定模型，--dry-run 预览，--limit N 限量）
 	@set -a && [ -f .env ] && source .env || true && set +a; \

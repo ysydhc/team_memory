@@ -38,12 +38,8 @@ MODULES = [
     "team_memory.daemon.quality.faithfulness_judge",
     "team_memory.daemon.quality.search_eval",
     "team_memory.daemon.quality.convergence_detector",
-    # wiki
-    "team_memory.daemon.wiki.llm_wiki",
-    "team_memory.daemon.wiki.wiki_cli",
-    "team_memory.daemon.wiki.wiki_compiler",
-    "team_memory.daemon.wiki.markdown_indexer",
     # observe
+    "team_memory.daemon.observe.markdown_indexer",
     "team_memory.daemon.observe.metrics_collector",
     "team_memory.daemon.observe.search_log_writer",
     "team_memory.daemon.observe.tm_stats",

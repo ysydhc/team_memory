@@ -476,7 +476,9 @@ async def get_observability_overview(
                         sa_text(
                             """
                             SELECT
-                                COUNT(*) FILTER (WHERE COALESCE(source, 'explicit_user') != 'implicit_judge') AS exp_tot,
+                                COUNT(*) FILTER (
+                                    WHERE COALESCE(source, 'explicit_user') != 'implicit_judge'
+                                ) AS exp_tot,
                                 COUNT(*) FILTER (WHERE source = 'implicit_judge') AS imp_tot,
                                 COUNT(*) FILTER (
                                     WHERE COALESCE(source, 'explicit_user') != 'implicit_judge'

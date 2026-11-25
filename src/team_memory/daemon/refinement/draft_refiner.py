@@ -50,13 +50,11 @@ class DraftRefiner:
     Args:
         sink: TMSink instance for calling TM endpoints.
         draft_buffer: ConversationBuffer instance.
-        wiki_compiler: Optional WikiCompiler instance for post-publish wiki compilation.
     """
 
-    def __init__(self, sink: TMSink, draft_buffer: Any, wiki_compiler: Any = None) -> None:
+    def __init__(self, sink: TMSink, draft_buffer: Any) -> None:
         self._sink = sink
         self._buf = draft_buffer
-        self._wiki_compiler = wiki_compiler
 
     # ------------------------------------------------------------------
     # Public API
@@ -156,31 +154,6 @@ class DraftRefiner:
 
         # Mark all pending drafts for this session as published locally.
         await self._buf.mark_published_by_session(session_id)
-
-        # Trigger wiki compilation for this experience
-        if self._wiki_compiler is not None:
-            try:
-                # Build a minimal experience dict from the published draft
-                experience = {
-                    "id": draft_id,
-                    "title": first_draft.get("title", ""),
-                    "description": accumulated[:500],
-                    "solution": refined_content,
-                    "project": first_draft.get("project", ""),
-                    "tags": first_draft.get("tags") or [],
-                }
-                wiki_path = await self._wiki_compiler.compile_one(experience)
-                logger.info(
-                    "[WIKI]  Compiled experience %s → %s",
-                    str(draft_id)[:8],
-                    wiki_path,
-                )
-            except Exception:
-                logger.warning(
-                    "[WIKI]  Failed to compile experience %s",
-                    str(draft_id)[:8],
-                    exc_info=True,
-                )
 
         return {"draft_id": draft_id, "status": "published"}
 

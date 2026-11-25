@@ -19,35 +19,6 @@ TaskHandler = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
 _handlers: dict[str, TaskHandler] = {}
 
 
-async def _handle_graphiti_ingest(payload: dict[str, Any]) -> None:
-    """Background task handler for Graphiti ingestion."""
-    try:
-        from team_memory.services.graph.graphiti_client import get_graph_client
-    except ImportError as e:
-        logger.warning("Graphiti not installed, skipping ingest task: %s", e)
-        return
-
-    record_id = payload.get("record_id")
-    content = payload.get("content")
-    source_type = payload.get("source_type", "experience")
-
-    if not record_id or not content:
-        logger.error("Missing record_id or content in graphiti_ingest payload")
-        return
-
-    try:
-        client = get_graph_client()
-        await client.ingest_to_graph(record_id=record_id, content=content, source_type=source_type)
-        logger.info("Successfully ingested %s to graphiti", record_id)
-        # Force garbage collection to clean up Kuzu resources
-        import gc
-
-        gc.collect()
-    except Exception as e:
-        logger.error("Failed to ingest %s to graphiti: %s", record_id, e)
-        raise
-
-
 def register_handler(task_type: str, handler: TaskHandler) -> None:
     """Register an async handler for a task type."""
     _handlers[task_type] = handler
@@ -62,13 +33,6 @@ def get_handlers() -> dict[str, TaskHandler]:
 def clear_handlers() -> None:
     """Remove all registered handlers (for testing)."""
     _handlers.clear()
-
-    # Re-register default handlers after clear
-    register_handler("graphiti_ingest", _handle_graphiti_ingest)
-
-
-# Register default handlers on module import
-register_handler("graphiti_ingest", _handle_graphiti_ingest)
 
 
 async def enqueue(task_type: str, payload: dict[str, Any], *, db_url: str) -> None:

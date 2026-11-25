@@ -138,39 +138,69 @@ class MemoryCacheBackend(CacheBackend):
 
 
 class RedisCacheBackend(CacheBackend):
-    """Redis-backed cache using redis.asyncio.
+    """Redis-backed cache using redis.asyncio with automatic in-memory fallback.
 
     Stores values as JSON-serialized strings with Redis native TTL.
-    Falls back gracefully if Redis is unavailable.
+    When Redis is unreachable or errors out, transparently degrades to an
+    in-process MemoryCacheBackend with a reconnect cooldown so startup and
+    requests are never blocked.
     """
 
-    def __init__(self, redis_url: str, ttl_seconds: int = 300, prefix: str = "td:"):
+    def __init__(
+        self,
+        redis_url: str,
+        ttl_seconds: int = 300,
+        prefix: str = "td:",
+        *,
+        max_size: int = 100,
+        connect_timeout: float = 1.0,
+        retry_cooldown_seconds: float = 30.0,
+    ):
         self._redis_url = redis_url
         self._ttl = ttl_seconds
         self._prefix = prefix
+        self._connect_timeout = connect_timeout
+        self._retry_cooldown = retry_cooldown_seconds
         self._redis = None
+        self._unavailable_until: float = 0.0
+        self._fallback = MemoryCacheBackend(max_size=max_size, ttl_seconds=ttl_seconds)
+
+    @property
+    def is_degraded(self) -> bool:
+        """True when currently serving from the in-memory fallback backend."""
+        return self._redis is None and time.monotonic() < self._unavailable_until
+
+    def _mark_unavailable(self, reason: str) -> None:
+        self._redis = None
+        self._unavailable_until = time.monotonic() + self._retry_cooldown
+        _warn_redis_once(
+            "Redis unavailable (%s) at %s — degraded to in-memory cache for %.0fs",
+            reason,
+            self._redis_url,
+            self._retry_cooldown,
+        )
 
     async def _get_client(self):
-        """Lazy-initialize Redis connection."""
-        if self._redis is None:
-            try:
-                import redis.asyncio as aioredis
+        """Lazy-initialize Redis connection with fast failure and reconnect backoff."""
+        if self._redis is not None:
+            return self._redis
+        if time.monotonic() < self._unavailable_until:
+            return None
+        try:
+            import redis.asyncio as aioredis
 
-                self._redis = aioredis.from_url(
-                    self._redis_url,
-                    decode_responses=True,
-                    socket_connect_timeout=5,
-                )
-                # Test connection
-                await self._redis.ping()
-                logger.info("Redis cache connected: %s", self._redis_url)
-            except Exception:
-                logger.warning(
-                    "Redis unavailable at %s, cache operations will be skipped",
-                    self._redis_url,
-                    exc_info=True,
-                )
-                self._redis = None
+            client = aioredis.from_url(
+                self._redis_url,
+                decode_responses=True,
+                socket_connect_timeout=self._connect_timeout,
+                socket_timeout=self._connect_timeout,
+            )
+            await client.ping()
+            self._redis = client
+            self._unavailable_until = 0.0
+            logger.info("Redis cache connected: %s", self._redis_url)
+        except Exception as exc:
+            self._mark_unavailable(type(exc).__name__)
         return self._redis
 
     def _key(self, key: str) -> str:
@@ -179,27 +209,30 @@ class RedisCacheBackend(CacheBackend):
     async def get(self, key: str) -> Any | None:
         client = await self._get_client()
         if client is None:
-            return None
+            return await self._fallback.get(key)
         try:
             raw = await client.get(self._key(key))
             if raw is None:
                 return None
             return json.loads(raw)
-        except Exception:
-            _warn_redis_once("Redis GET error for key %s", key)
-            return None
+        except Exception as exc:
+            self._mark_unavailable(f"GET:{type(exc).__name__}")
+            return await self._fallback.get(key)
 
     async def put(self, key: str, value: Any, ttl: int | None = None) -> None:
         client = await self._get_client()
         if client is None:
+            await self._fallback.put(key, value, ttl=ttl)
             return
         try:
             serialized = json.dumps(value, default=_redis_json_default)
             await client.setex(self._key(key), ttl or self._ttl, serialized)
-        except Exception:
-            _warn_redis_once("Redis SET error for key %s", key)
+        except Exception as exc:
+            self._mark_unavailable(f"SET:{type(exc).__name__}")
+            await self._fallback.put(key, value, ttl=ttl)
 
     async def clear(self) -> None:
+        await self._fallback.clear()
         client = await self._get_client()
         if client is None:
             return
@@ -213,13 +246,13 @@ class RedisCacheBackend(CacheBackend):
                 if cursor == 0:
                     break
             logger.info("Redis cache cleared (prefix=%s)", self._prefix)
-        except Exception:
-            logger.warning("Redis CLEAR error", exc_info=True)
+        except Exception as exc:
+            self._mark_unavailable(f"CLEAR:{type(exc).__name__}")
 
     async def size(self) -> int:
         client = await self._get_client()
         if client is None:
-            return 0
+            return await self._fallback.size()
         try:
             cursor = 0
             count = 0
@@ -230,7 +263,7 @@ class RedisCacheBackend(CacheBackend):
                     break
             return count
         except Exception:
-            return 0
+            return await self._fallback.size()
 
 
 # ============================================================
@@ -249,17 +282,18 @@ def create_cache_backend(
     Args:
         backend: "memory" or "redis".
         redis_url: Redis connection URL (only used when backend="redis").
-        max_size: Maximum entries for memory backend.
+        max_size: Maximum entries for memory backend (and Redis fallback).
         ttl_seconds: TTL for cached entries.
 
     Returns:
         A CacheBackend instance.
     """
     if backend == "redis":
-        logger.info("Using Redis cache backend: %s", redis_url)
+        logger.info("Using Redis cache backend (with memory fallback): %s", redis_url)
         return RedisCacheBackend(
             redis_url=redis_url,
             ttl_seconds=ttl_seconds,
+            max_size=max_size,
         )
     else:
         logger.info("Using in-memory cache backend (max_size=%d, ttl=%ds)", max_size, ttl_seconds)
@@ -312,13 +346,9 @@ class SearchCache:
         include_archives: bool = False,
         reranker_signature: str = "none",
     ) -> str:
-        """Create a cache key from query, tags, project, and optionally current_user.
-
-        When per-user expansion is used, current_user must be included to avoid
-        cross-user cache pollution. include_archives differentiates archive-inclusive results.
-        reranker_signature avoids serving un-reranked JSON when server-side rerank is enabled.
-        """
-        parts = [f"tenant:{get_current_tenant_id()}", query.strip().lower()]
+        """Create a tenant-prefixed cache key from query, tags, project, and user."""
+        tid = str(get_current_tenant_id())
+        parts = [f"tenant:{tid}", query.strip().lower()]
         if tags:
             parts.extend(sorted(tags))
         if project:
@@ -331,7 +361,26 @@ class SearchCache:
         if sig != "none":
             parts.append(f"rerank:{sig}")
         raw = "|".join(parts)
-        return hashlib.md5(raw.encode()).hexdigest()
+        digest = hashlib.md5(raw.encode()).hexdigest()
+        return f"tenant:{tid}:res:{digest}"
+
+    @staticmethod
+    def _make_embedding_key(
+        text: str,
+        embedding_provider: "EmbeddingProvider | None" = None,
+    ) -> str:
+        """Create a tenant- and model/dimension-prefixed key for query embeddings."""
+        tid = str(get_current_tenant_id())
+        model_name = (
+            getattr(embedding_provider, "model", None)
+            or getattr(embedding_provider, "_model", None)
+            or ""
+        )
+        dim = getattr(embedding_provider, "dimension", None)
+        model_sig = f"{model_name}:{dim}" if (model_name or dim) else "default"
+        model_hash = hashlib.md5(model_sig.encode()).hexdigest()[:8]
+        digest = hashlib.md5(text.strip().lower().encode()).hexdigest()
+        return f"tenant:{tid}:emb:{model_hash}:{digest}"
 
     async def get(
         self,
@@ -393,7 +442,7 @@ class SearchCache:
         Returns:
             The embedding vector.
         """
-        key = hashlib.md5(text.strip().lower().encode()).hexdigest()
+        key = self._make_embedding_key(text, embedding_provider)
         text_preview = (text or "")[:50]
 
         # Fast path: cache hit (no lock needed)

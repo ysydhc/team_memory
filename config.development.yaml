@@ -225,7 +225,7 @@ reranker:
 # embedding_cache_size: 查询向量缓存条数上限
 cache:
   enabled: true
-  backend: memory
+  backend: redis
   redis_url: "redis://localhost:6379/0"
   ttl_seconds: 300
   max_size: 100

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from enum import Enum
 
@@ -48,6 +49,61 @@ class IntentResult(str, Enum):
 FALLBACK_RESULT = IntentResult.BOTH
 
 _VALID_RESULTS = frozenset(r.value for r in IntentResult)
+
+# ---------------------------------------------------------------------------
+# 0ms local fast-screen rules (skip LLM call for obvious non-retrieval inputs)
+# ---------------------------------------------------------------------------
+
+_PURE_URL_RE = re.compile(r"^\s*https?://\S+\s*$", re.IGNORECASE)
+
+_PURE_FILE_PATH_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:/|\.{1,2}/|~/)[A-Za-z0-9_.\-/]+"
+    r"|(?:[A-Za-z0-9_.\-]+/)+[A-Za-z0-9_.\-]+"
+    r")(?::\d+(?:-\d+)?)?\s*$"
+)
+
+_PURE_OP_CMD_RE = re.compile(
+    r"^\s*(?:"
+    r"继续|继续吧|继续执行|确认|确定|好的|好|好呀|行|可以|没问题|收到|明白|了解|谢谢|多谢"
+    r"|重试|再试一次|重跑|跳过|取消|停止|暂停|开始|开始吧|执行|执行吧|按这个改|按上面改|就这样"
+    r"|ok|okay|yes|yep|yeah|no|nope|y|n|lgtm|done|next|continue|go|go ahead|proceed"
+    r"|retry|skip|cancel|stop|confirm|approve|approved|thanks|thx"
+    r"|commit|push|commit\s*\+\s*push|commit\s+and\s+push|git\s+push|git\s+commit|git\s+status"
+    r")[\s!！。\.?？,，~～]*$",
+    re.IGNORECASE,
+)
+
+# Technical identifier (e.g. OOM, RLS, pgvector, iCode, HTTP_500, 4096) — protect
+# short high-signal technical queries from being dropped by length threshold.
+_TECH_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{2,}|\b\d{3,}\b")
+_PUNCT_WS_RE = re.compile(r"[\s`~!@#$%^&*()\-_=+\[\]{}\\|;:'\",.<>/?！？。，、；：（）【】《》“”‘’…—]+")
+
+
+def fast_screen_intent(prompt: str, *, allow_bare_path: bool = True) -> IntentResult | None:
+    """0ms local regex/rule screen before calling the LLM intent classifier.
+
+    Returns ``IntentResult.NONE`` when the prompt is unambiguously a non-retrieval
+    command/noise, or ``None`` when the prompt should proceed to LLM classification.
+    """
+    text = (prompt or "").strip()
+    if not text:
+        return IntentResult.NONE
+
+    if _PURE_URL_RE.match(text):
+        return IntentResult.NONE
+
+    if _PURE_OP_CMD_RE.match(text):
+        return IntentResult.NONE
+
+    if allow_bare_path and _PURE_FILE_PATH_RE.match(text):
+        return IntentResult.NONE
+
+    effective = _PUNCT_WS_RE.sub("", text)
+    if len(effective) < 6 and not _TECH_IDENTIFIER_RE.search(text):
+        return IntentResult.NONE
+
+    return None
 
 _PROMPT_TEMPLATE = """你是一个意图分类器。根据用户输入判断是否需要从知识库检索。
 
@@ -132,6 +188,11 @@ class IntentGate:
         Returns:
             IntentResult indicating what type of retrieval is needed.
         """
+        fast = fast_screen_intent(prompt, allow_bare_path=True)
+        if fast is not None:
+            logger.debug("[INTENT_GATE] 0ms fast-screen -> %s", fast.value)
+            return fast
+
         if self.is_fused:
             return FALLBACK_RESULT
 
@@ -206,6 +267,11 @@ class IntentGate:
         Returns:
             IntentResult. Falls back to BOTH on any LLM failure.
         """
+        fast = fast_screen_intent(prompt, allow_bare_path=not bool(history))
+        if fast is not None:
+            logger.debug("[INTENT_GATE] 0ms fast-screen (multi-turn) -> %s", fast.value)
+            return fast
+
         if self.is_fused:
             return FALLBACK_RESULT
 

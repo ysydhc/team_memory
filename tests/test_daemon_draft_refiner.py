@@ -158,97 +158,19 @@ class TestSaveDraftNoPgId:
 # ---------------------------------------------------------------------------
 
 
-class TestRefineAndPublishWikiCompiler:
-    """Cover the wiki_compiler block in refine_and_publish."""
+class TestRefineAndPublishBasic:
+    """Cover refine_and_publish basic publish flow."""
 
     @pytest.mark.asyncio
-    async def test_wiki_compiler_called_on_publish(self, buf):
+    async def test_refine_and_publish_marks_published(self, buf):
         sink = _mock_sink()
-        wc = _mock_wiki_compiler("/tmp/wiki-test.md")
-        refiner = DraftRefiner(sink, buf, wiki_compiler=wc)
-        async with buf:
-            await buf.create_draft("team_doc", "sess-wiki", "因为服务器超时。需要重启。")
-            result = await refiner.refine_and_publish("sess-wiki")
-
-        assert result is not None
-        assert result["status"] == "published"
-        wc.compile_one.assert_awaited_once()
-        # Verify the experience dict passed to compile_one
-        call_args = wc.compile_one.call_args
-        experience = call_args[0][0]
-        assert "id" in experience
-        assert "title" in experience
-        assert "description" in experience
-        assert "solution" in experience
-        assert "project" in experience
-        assert "tags" in experience
-
-    @pytest.mark.asyncio
-    async def test_wiki_compiler_exception_does_not_crash(self, buf):
-        sink = _mock_sink()
-        wc = AsyncMock()
-        wc.compile_one = AsyncMock(side_effect=RuntimeError("wiki compile failed"))
-        refiner = DraftRefiner(sink, buf, wiki_compiler=wc)
-        async with buf:
-            await buf.create_draft("team_doc", "sess-wiki-err", "因为内存不足。")
-            result = await refiner.refine_and_publish("sess-wiki-err")
-
-        # Should still return published even if wiki compilation fails
-        assert result is not None
-        assert result["status"] == "published"
-        wc.compile_one.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_no_wiki_compiler_skips_compilation(self, buf):
-        sink = _mock_sink()
-        refiner = DraftRefiner(sink, buf, wiki_compiler=None)
+        refiner = DraftRefiner(sink, buf)
         async with buf:
             await buf.create_draft("team_doc", "sess-nowiki", "因为配置错误。")
             result = await refiner.refine_and_publish("sess-nowiki")
 
         assert result is not None
         assert result["status"] == "published"
-
-    @pytest.mark.asyncio
-    async def test_wiki_compiler_with_no_facts(self, buf):
-        """When no facts extracted, accumulated content is used as solution."""
-        sink = _mock_sink()
-        wc = _mock_wiki_compiler("/tmp/wiki-nofacts.md")
-        refiner = DraftRefiner(sink, buf, wiki_compiler=wc)
-        async with buf:
-            await buf.create_draft("team_doc", "sess-wiki-nof", "今天天气不错。")
-            result = await refiner.refine_and_publish("sess-wiki-nof")
-
-        assert result is not None
-        wc.compile_one.assert_awaited_once()
-        experience = wc.compile_one.call_args[0][0]
-        assert "今天天气不错" in experience["description"]
-
-    @pytest.mark.asyncio
-    async def test_wiki_compiler_experience_fields_populated(self, buf):
-        """All experience dict fields should be populated correctly."""
-        sink = _mock_sink()
-        wc = _mock_wiki_compiler()
-        refiner = DraftRefiner(sink, buf, wiki_compiler=wc)
-        async with buf:
-            await buf.create_draft(
-                "team_doc",
-                "sess-wiki-fields",
-                "因为配置错误。需要解决。",
-                # project is positional in create_draft but the buffer stores it
-            )
-            result = await refiner.refine_and_publish("sess-wiki-fields")
-
-        experience = wc.compile_one.call_args[0][0]
-        # id should be a draft id (UUID string)
-        assert isinstance(experience["id"], str)
-        assert len(experience["id"]) > 0
-        # title comes from first_draft.get("title", "")
-        assert isinstance(experience["title"], str)
-        # description is truncated to 500 chars
-        assert len(experience["description"]) <= 500
-        # tags defaults to [] if None
-        assert isinstance(experience["tags"], list)
 
 
 # ---------------------------------------------------------------------------

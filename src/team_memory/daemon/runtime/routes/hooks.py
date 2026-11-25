@@ -333,7 +333,6 @@ async def hook_before_prompt(request: Request) -> dict[str, Any]:
         config=app.state.config,
         sink=app.state.sink,
         buf=app.state.buf,
-        wiki=getattr(app.state, "llm_wiki", None),
         metrics=getattr(app.state, "metrics", None),
         intent_gate=getattr(app.state, "intent_gate", None),
     )

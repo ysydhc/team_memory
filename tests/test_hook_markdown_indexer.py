@@ -9,7 +9,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # Import target
 # ---------------------------------------------------------------------------
-from team_memory.daemon.wiki.markdown_indexer import MarkdownIndexer
+from team_memory.daemon.observe.markdown_indexer import MarkdownIndexer
 
 # ---------------------------------------------------------------------------
 # Fixtures
