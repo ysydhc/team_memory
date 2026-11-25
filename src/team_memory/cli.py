@@ -2387,6 +2387,133 @@ def cmd_server_migrate(args: argparse.Namespace) -> None:
     run_db_migrations(getattr(args, "db_url", None))
 
 
+def cmd_dream(args: argparse.Namespace) -> None:
+    """Trigger AutoDream semantic memory consolidation (supports --dry-run / --force / --project / --model)."""
+    import asyncio
+
+    from team_memory.bootstrap import bootstrap
+    from team_memory.daemon.integration.auto_dream import AutoDreamWorker
+    from team_memory.daemon.integration.tm_sink import create_sink
+    from team_memory.daemon.runtime.config import load_config
+
+    dry_run = bool(getattr(args, "dry_run", False))
+    force = bool(getattr(args, "force", False)) or dry_run
+    project = getattr(args, "project", None) or None
+    max_clusters = getattr(args, "max_clusters", None)
+    model = getattr(args, "model", None) or None
+    as_json = bool(getattr(args, "json", False))
+
+    config = load_config()
+    if config.tm.mode == "local":
+        bootstrap(enable_background=False)
+
+    sink = create_sink(
+        {
+            "mode": config.tm.mode,
+            "base_url": config.tm.base_url,
+            "user": config.tm.user,
+        }
+    )
+    worker = AutoDreamWorker(config=config, sink=sink)
+    result = asyncio.run(
+        worker.run_once(
+            dry_run=dry_run,
+            force=force,
+            project=project,
+            max_clusters=max_clusters,
+            model=model,
+            trigger="manual",
+        )
+    )
+
+    if as_json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if not result.get("success", True):
+            sys.exit(1)
+        return
+
+    mode_label = "DRY-RUN (no DB/watermark changes)" if dry_run else "LIVE"
+    print(f"=== TeamMemory AutoDream [{mode_label}] ===")
+    if result.get("skipped_run"):
+        print(f"Status:   SKIPPED ({result.get('skipped_reason', 'unknown')})")
+        if result.get("error"):
+            print(f"Error:    {result['error']}")
+            sys.exit(1)
+        return
+
+    tok = result.get("estimated_tokens") or {}
+    print(
+        f"Status:   {'OK' if result.get('success') else 'FAILED'}  "
+        f"(duration={result.get('duration_ms', 0)}ms, model={result.get('model', '?')}, "
+        f"watermark_updated={result.get('watermark_updated', False)})"
+    )
+    if project:
+        print(f"Project:  {project}")
+    print(
+        f"Summary:  candidates={result.get('candidates', 0)} "
+        f"(low_adoption={result.get('low_adoption_candidates', 0)}), "
+        f"clusters={result.get('clusters', 0)}, "
+        f"merged={result.get('merged', 0)}, "
+        f"superseded={result.get('superseded', 0)}, "
+        f"kept={result.get('kept', 0)}, "
+        f"distilled={result.get('distilled', 0)}, "
+        f"pruned={result.get('pruned', 0)}, "
+        f"errors={result.get('errors', 0)}"
+    )
+    print(
+        f"Tokens:   ~{tok.get('input', 0)} input + ~{tok.get('output', 0)} output "
+        f"(total ~{tok.get('input', 0) + tok.get('output', 0)})"
+    )
+    if result.get("error"):
+        print(f"Fatal:    {result['error']}")
+
+    plan = result.get("plan") or []
+    if plan:
+        print("\n--- Consolidation Plan ---")
+        for idx, item in enumerate(plan, start=1):
+            action = item.get("action", "?")
+            reason = item.get("reason", "")
+            titles = item.get("titles") or {}
+            print(f"\n[{idx}] {action}  ({len(item.get('cluster_ids', []))} items)")
+            print(f"    Reason: {reason}")
+            if action == "MERGE":
+                pid = item.get("primary_id", "")
+                sids = item.get("secondary_ids") or []
+                print(f"    Primary:    {pid[:8]} — {titles.get(pid, '')}")
+                for sid in sids:
+                    print(f"    SoftDelete: {sid[:8]} — {titles.get(sid, '')}")
+                prev = item.get("merged_preview") or {}
+                if prev.get("title"):
+                    print(f"    New Title:  {prev['title']}")
+                if prev.get("solution_preview"):
+                    snippet = prev["solution_preview"].replace("\n", " ")[:160]
+                    print(f"    Preview:    {snippet}")
+            elif action == "SUPERSEDE":
+                wid = item.get("winner_id", "")
+                sups = item.get("superseded_ids") or []
+                print(f"    Winner:     {wid[:8]} — {titles.get(wid, '')}")
+                for oid in sups:
+                    print(f"    Supersede:  {oid[:8]} — {titles.get(oid, '')}")
+            else:
+                for cid, title in titles.items():
+                    print(f"    Item:       {cid[:8]} — {title}")
+
+    distill_plan = result.get("distill_plan") or []
+    if distill_plan:
+        print("\n--- Playbook Distillation Plan ---")
+        for idx, d in enumerate(distill_plan, start=1):
+            print(
+                f"[{idx}] {d.get('title', '')} "
+                f"(project={d.get('project', '?')}, sources={len(d.get('source_ids', []))}, "
+                f"~{d.get('estimated_solution_tokens', 0)} tok)"
+            )
+            if d.get("reason"):
+                print(f"    Reason: {d['reason']}")
+
+    if not result.get("success", True):
+        sys.exit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="tm-cli",
@@ -2859,6 +2986,42 @@ def main() -> None:
     p_watch.add_argument("--daemon-url", help="Override TM Daemon URL")
     p_watch.add_argument("--db-path", help="Override local SQLite drafts.db path")
     p_watch.set_defaults(func=cmd_status, watch=True)
+
+    # ── dream ───────────────────────────────────────────────────
+    p_dream = sub.add_parser(
+        "dream",
+        help="Run AutoDream offline semantic consolidation & distillation / 手动触发 AutoDream 记忆整合",
+    )
+    p_dream.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview clusters and LLM decisions without writing to DB or advancing watermark",
+    )
+    p_dream.add_argument(
+        "--force",
+        action="store_true",
+        help="Bypass min_hours_since_last and min_new_experiences trigger gates",
+    )
+    p_dream.add_argument(
+        "--project",
+        help="Limit AutoDream scan to a specific project",
+    )
+    p_dream.add_argument(
+        "--max-clusters",
+        type=int,
+        default=None,
+        help="Override max_clusters_per_run cap for this run",
+    )
+    p_dream.add_argument(
+        "--model",
+        help="Override LLM model for this run (e.g. gbu-gemini-3.8-flash)",
+    )
+    p_dream.add_argument(
+        "--json",
+        action="store_true",
+        help="Output machine-readable JSON result",
+    )
+    p_dream.set_defaults(func=cmd_dream)
 
     args = parser.parse_args()
     args.func(args)

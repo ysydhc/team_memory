@@ -948,12 +948,35 @@ def render_status_plain(snapshot: dict[str, Any], watch_meta: dict[str, Any] | N
     ad_running = bool(maint.get("auto_dream_running"))
     jn_running = bool(maint.get("janitor_running"))
     last_j = str(maint.get("last_janitor_at") or "")[:19]
+    last_d = str(maint.get("last_dream_at") or "")[:19]
+    d_stats = maint.get("last_dream_stats") or {}
+    if not last_d or not d_stats:
+        try:
+            from team_memory.daemon.integration.auto_dream import _read_last_dream, read_last_dream_stats
+
+            if not last_d:
+                ld_dt = _read_last_dream()
+                last_d = ld_dt.isoformat()[:19] if ld_dt else ""
+            if not d_stats:
+                d_stats = read_last_dream_stats() or {}
+        except Exception:
+            pass
     if maint:
-        m_badge = "ACTIVE" if (ad_running and jn_running) else "DEGRADED"
+        dream_failed = isinstance(d_stats, dict) and d_stats.get("success") is False
+        m_badge = "ACTIVE" if (ad_running and jn_running and not dream_failed) else "DEGRADED"
         lines.append(
             f"│ AutoDream & Janitor:   [{m_badge}] (dream={'up' if ad_running else 'off'}, "
-            f"janitor={'up' if jn_running else 'off'}, last_run={last_j or 'none'})"
+            f"janitor={'up' if jn_running else 'off'}, last_janitor={last_j or 'none'}, "
+            f"last_dream={last_d or 'never'})"
         )
+        if isinstance(d_stats, dict) and d_stats:
+            lines.append(
+                f"│ Last Dream Output:     cand={d_stats.get('candidates', 0)}, "
+                f"clusters={d_stats.get('clusters', 0)}, merged={d_stats.get('merged', 0)}, "
+                f"superseded={d_stats.get('superseded', 0)}, distilled={d_stats.get('distilled', 0)}, "
+                f"pruned={d_stats.get('pruned', 0)}, err={d_stats.get('errors', 0)} "
+                f"({d_stats.get('trigger', '?')}, model={d_stats.get('model', '?')})"
+            )
     if latest_ev:
         lines.append(
             f"│ IDE Hook Capture:      total={cap.get('total_payloads', 0)} events | "
@@ -1204,16 +1227,41 @@ def build_rich_renderable(snapshot: dict[str, Any], watch_meta: dict[str, Any] |
     ad_running = bool(maint.get("auto_dream_running"))
     jn_running = bool(maint.get("janitor_running"))
     last_j = str(maint.get("last_janitor_at") or "")[:19]
+    last_d = str(maint.get("last_dream_at") or "")[:19]
+    d_stats = maint.get("last_dream_stats") or {}
+    if not last_d or not d_stats:
+        try:
+            from team_memory.daemon.integration.auto_dream import _read_last_dream, read_last_dream_stats
+
+            if not last_d:
+                ld_dt = _read_last_dream()
+                last_d = ld_dt.isoformat()[:19] if ld_dt else ""
+            if not d_stats:
+                d_stats = read_last_dream_stats() or {}
+        except Exception:
+            pass
     if maint:
+        dream_failed = isinstance(d_stats, dict) and d_stats.get("success") is False
         maint_badge = (
             "[green]● ACTIVE[/green]"
-            if (ad_running and jn_running)
+            if (ad_running and jn_running and not dream_failed)
             else "[yellow]● DEGRADED[/yellow]"
         )
         maint_desc = f"dream: {'up' if ad_running else 'off'} | janitor: {'up' if jn_running else 'off'}"
         if last_j:
-            maint_desc += f" | last: {last_j}"
+            maint_desc += f" | janitor: {last_j}"
+        if last_d:
+            maint_desc += f" | dream: {last_d}"
         t_daemon.add_row("AutoDream & Janitor", maint_badge, maint_desc)
+        if isinstance(d_stats, dict) and d_stats:
+            d_ok = d_stats.get("success", True)
+            d_badge = "[green]● OK[/green]" if d_ok else "[red]● FAIL[/red]"
+            d_desc = (
+                f"cand={d_stats.get('candidates', 0)} clus={d_stats.get('clusters', 0)} "
+                f"merge={d_stats.get('merged', 0)} sup={d_stats.get('superseded', 0)} "
+                f"distill={d_stats.get('distilled', 0)} err={d_stats.get('errors', 0)}"
+            )
+            t_daemon.add_row("Last Dream Output", d_badge, d_desc)
 
     p_daemon = Panel(t_daemon, title="2. 守护进程与 Hook 感知 (Daemon & Hooks)", border_style="magenta")
 

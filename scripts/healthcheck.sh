@@ -201,13 +201,26 @@ try:
     m = d.get('maintenance', {})
     ad = m.get('auto_dream_running', False)
     jn = m.get('janitor_running', False)
-    last_j = m.get('last_janitor_at', '')
+    last_j = m.get('last_janitor_at', '') or ''
+    last_d = m.get('last_dream_at', '') or ''
+    ds = m.get('last_dream_stats') or {}
+    dream_detail = ''
+    if isinstance(ds, dict) and ds:
+        dream_detail = (
+            f\", dream_out: cand={ds.get('candidates',0)}/clus={ds.get('clusters',0)}/\"
+            f\"merge={ds.get('merged',0)}/sup={ds.get('superseded',0)}/\"
+            f\"distill={ds.get('distilled',0)}/err={ds.get('errors',0)}\"
+        )
     if ad and jn:
-        print(f'OK  (AutoDream: running, Janitor: running, last_run: {last_j[:19] if last_j else \"none\"})')
+        status_tag = 'WARN' if (isinstance(ds, dict) and ds.get('success') is False) else 'OK'
+        print(
+            f'{status_tag}  (AutoDream: running, last_dream: {last_d[:19] if last_d else \"never\"}{dream_detail}; '
+            f'Janitor: running, last_run: {last_j[:19] if last_j else \"none\"})'
+        )
     elif not ad and not jn:
         print('WARN  (AutoDream & Janitor stopped)')
     else:
-        print(f'WARN  (AutoDream: {ad}, Janitor: {jn})')
+        print(f'WARN  (AutoDream: {ad}, Janitor: {jn}, last_dream: {last_d[:19] if last_d else \"never\"})')
 except Exception:
     print('SKIP')
 " 2>/dev/null || echo "UNKNOWN")

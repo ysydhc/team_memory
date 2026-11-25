@@ -56,12 +56,18 @@ async def get_status(request: Request) -> dict[str, Any]:
         if janitor_sched and hasattr(janitor_sched, "_read_last_run")
         else None
     )
+    from team_memory.daemon.integration.auto_dream import _read_last_dream, read_last_dream_stats
+
+    last_dream_dt = _read_last_dream()
+    last_dream_stats = read_last_dream_stats()
     result["maintenance"] = {
         "janitor_running": bool(janitor_sched and getattr(janitor_sched, "is_running", False)),
         "last_janitor_at": last_janitor_dt.isoformat() if last_janitor_dt else None,
         "auto_dream_running": bool(
             dream_worker and getattr(dream_worker, "_task", None) and not dream_worker._task.done()
         ),
+        "last_dream_at": last_dream_dt.isoformat() if last_dream_dt else None,
+        "last_dream_stats": last_dream_stats,
     }
     return result
 

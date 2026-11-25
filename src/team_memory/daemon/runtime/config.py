@@ -104,14 +104,25 @@ class RefinementSettings:
 
 @dataclass
 class AutoDreamSettings:
-    """Auto Dream 后台合并/裁剪配置。"""
+    """Auto Dream 后台语义整合与蒸馏配置。"""
 
     enabled: bool = True
     min_hours_since_last: int = 24
     min_new_experiences: int = 5
-    merge_similarity_threshold: float = 0.85
+    merge_similarity_threshold: float = 0.78
     prune_max_age_days: int = 30
     scan_interval_minutes: int = 60  # how often to check trigger conditions
+    max_clusters_per_run: int = 20
+    low_adoption_min_recall: int = 5
+    low_adoption_sample_limit: int = 50
+    enable_cross_project: bool = False
+    distill_enabled: bool = True
+    distill_min_cluster_size: int = 3
+    distill_max_tokens: int = 1500
+    max_distill_per_run: int = 3
+    llm_model: str = ""  # empty = inherit refinement.model / ClientConfig.llm.model
+    llm_fallback_model: str = ""  # empty = inherit refinement.fallback_model
+    llm_timeout: int = 60
 
 
 @dataclass

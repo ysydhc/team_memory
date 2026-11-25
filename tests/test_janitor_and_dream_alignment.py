@@ -193,8 +193,24 @@ class TestAutoDreamAlignment:
 
     @pytest.mark.asyncio
     async def test_merge_cluster_prioritizes_used_count_on_quality_tie(self):
-        """When quality_score is tied, experience with higher used_count is chosen as primary."""
+        """When LLM returns invalid primary_id on quality tie, higher used_count is chosen as primary."""
         worker, sink = _make_dream_worker()
+        mock_llm = AsyncMock()
+        mock_llm.chat_json = AsyncMock(
+            return_value={
+                "action": "MERGE",
+                "reason": "Near-duplicate solutions",
+                "primary_id": "invalid-id",
+                "secondary_ids": ["high-recall-zero-use", "high-use-low-recall"],
+                "merged": {
+                    "title": "Unified Experience",
+                    "problem": "Combined problem",
+                    "solution": "Clean rewritten solution",
+                    "tags": ["a", "b"],
+                },
+            }
+        )
+        worker._llm_client = mock_llm
 
         cluster = [
             {
@@ -218,9 +234,9 @@ class TestAutoDreamAlignment:
         ]
 
         with patch.object(worker, "_soft_delete", new_callable=AsyncMock) as mock_delete:
-            merged = await worker._merge_cluster(cluster)
+            res = await worker._phase_consolidate([cluster])
 
-        assert merged == 1
+        assert res["merged"] == 1
         sink.update_experience.assert_called_once()
         call_kwargs = sink.update_experience.call_args[1]
         assert call_kwargs["experience_id"] == "high-use-low-recall"
@@ -240,14 +256,16 @@ class TestAutoDreamAlignment:
                     "recall_count": 0,
                     "used_count": 2,
                     "is_pinned": False,
-                    "created_at": old_ts,
+                    "valid_until": None,
+                    "created_at": old_ts.isoformat(),
                 },
                 {
                     "id": "stale-exp",
                     "recall_count": 0,
                     "used_count": 0,
                     "is_pinned": False,
-                    "created_at": old_ts,
+                    "valid_until": None,
+                    "created_at": old_ts.isoformat(),
                 },
             ]
         )
@@ -262,17 +280,17 @@ class TestAutoDreamAlignment:
             call.kwargs.get("quality_tier")
             for call in mock_ctx.service.list_published.call_args_list
         ]
-        assert called_tiers == ["Bronze", "Outdated"]
+        assert called_tiers == ["Outdated"]
 
     @pytest.mark.asyncio
     async def test_get_dream_candidates_filters_superseded(self):
-        """_get_dream_candidates filters out candidates where valid_until is not None."""
+        """_get_dream_candidates queries all tiers (no Bronze deadlock) and filters superseded."""
         worker, _ = _make_dream_worker()
         mock_ctx = MagicMock()
         mock_ctx.service.list_published = AsyncMock(
             return_value=[
-                {"id": "active-1", "valid_until": None},
-                {"id": "superseded-1", "valid_until": "2026-04-01T00:00:00+00:00"},
+                {"id": "active-1", "quality_tier": "Silver", "valid_until": None},
+                {"id": "superseded-1", "quality_tier": "Silver", "valid_until": "2026-04-01T00:00:00+00:00"},
             ]
         )
 
@@ -280,3 +298,4 @@ class TestAutoDreamAlignment:
             candidates = await worker._get_dream_candidates(None)
 
         assert [c["id"] for c in candidates] == ["active-1"]
+        assert mock_ctx.service.list_published.call_args.kwargs.get("quality_tier") is None

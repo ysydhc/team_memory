@@ -66,9 +66,22 @@ auto_dream:
   enabled: true
   min_hours_since_last: 24
   min_new_experiences: 5
-  merge_similarity_threshold: 0.85
+  merge_similarity_threshold: 0.78
   prune_max_age_days: 30
   scan_interval_minutes: 60
+  max_clusters_per_run: 20
+  low_adoption_min_recall: 5
+  low_adoption_sample_limit: 50
+  enable_cross_project: false
+  distill_enabled: true
+  distill_min_cluster_size: 3
+  distill_max_tokens: 1500
+  max_distill_per_run: 3
+  # 留空自动复用 refinement.model (gbu-gemini-3.8-flash) 与 fallback_model (gbu-azure-gpt-5.6-luna)
+  # 也可在此指定或通过环境变量 TM_AUTO_DREAM_MODEL / CLI --model 覆盖
+  llm_model: ""
+  llm_fallback_model: ""
+  llm_timeout: 60
 
 wiki:
   enabled: true

@@ -669,6 +669,7 @@ class ExperienceService:
         since: object | None = None,
         limit: int = 100,
         include_embedding: bool = False,
+        active_only: bool = False,
     ) -> list[dict]:
         """List published/promoted experiences with optional filters.
 
@@ -678,6 +679,7 @@ class ExperienceService:
             since: Optional datetime — only return experiences created after this.
             limit: Maximum number of results (default 100).
             include_embedding: Whether to include raw vector embeddings in returned dicts.
+            active_only: If True, filter out superseded experiences (valid_until IS NULL).
 
         Returns:
             List of experience dicts with exp_status in ('published', 'promoted').
@@ -689,13 +691,15 @@ class ExperienceService:
                 Experience.exp_status.in_(["published", "promoted"]),
                 Experience.is_deleted == False,  # noqa: E712
             )
+            if active_only:
+                stmt = stmt.where(Experience.valid_until.is_(None))
             if project is not None:
                 stmt = stmt.where(Experience.project == project)
             if quality_tier is not None:
                 stmt = stmt.where(Experience.quality_tier == quality_tier)
             if since is not None:
                 stmt = stmt.where(Experience.created_at >= since)
-            stmt = stmt.limit(limit)
+            stmt = stmt.order_by(Experience.created_at.desc()).limit(limit)
             result = await session.execute(stmt)
             rows = result.scalars().all()
             out: list[dict] = []
@@ -704,6 +708,90 @@ class ExperienceService:
                 if include_embedding:
                     emb = getattr(exp, "embedding", None)
                     d["embedding"] = list(emb) if emb is not None else None
+                out.append(d)
+            return out
+
+    async def list_low_adoption(
+        self,
+        *,
+        min_recall_count: int = 5,
+        max_used_count: int = 0,
+        project: str | None = None,
+        limit: int = 50,
+        include_embedding: bool = True,
+    ) -> list[dict]:
+        """Sample active published experiences with high recall but zero/low adoption."""
+        from team_memory.storage.models import Experience
+
+        async with self._session() as session:
+            stmt = select(Experience).where(
+                Experience.exp_status.in_(["published", "promoted"]),
+                Experience.is_deleted == False,  # noqa: E712
+                Experience.valid_until.is_(None),
+                Experience.recall_count >= min_recall_count,
+                Experience.used_count <= max_used_count,
+            )
+            if project is not None:
+                stmt = stmt.where(Experience.project == project)
+            stmt = stmt.order_by(Experience.recall_count.desc()).limit(limit)
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+            out: list[dict] = []
+            for exp in rows:
+                d = exp.to_dict()
+                if include_embedding:
+                    emb = getattr(exp, "embedding", None)
+                    d["embedding"] = list(emb) if emb is not None else None
+                out.append(d)
+            return out
+
+    async def find_similar_active(
+        self,
+        embedding: list[float],
+        *,
+        threshold: float = 0.78,
+        limit: int = 10,
+        project: str | None = None,
+        include_cross_project: bool = False,
+        exclude_ids: list[str] | None = None,
+    ) -> list[dict]:
+        """Find active published experiences by pgvector cosine similarity without search_logs pollution."""
+        from sqlalchemy import desc
+
+        from team_memory.storage.models import Experience
+
+        similarity_expr = (1 - Experience.embedding.cosine_distance(embedding)).label("similarity")
+
+        async with self._session() as session:
+            stmt = (
+                select(Experience, similarity_expr)
+                .where(
+                    Experience.exp_status.in_(["published", "promoted"]),
+                    Experience.is_deleted == False,  # noqa: E712
+                    Experience.valid_until.is_(None),
+                    Experience.embedding.is_not(None),
+                    similarity_expr >= threshold,
+                )
+                .order_by(desc(similarity_expr))
+                .limit(limit)
+            )
+            if project is not None and not include_cross_project:
+                stmt = stmt.where(Experience.project == project)
+            if exclude_ids:
+                valid_uuids = []
+                for eid in exclude_ids:
+                    try:
+                        valid_uuids.append(uuid.UUID(str(eid)))
+                    except (ValueError, TypeError):
+                        continue
+                if valid_uuids:
+                    stmt = stmt.where(Experience.id.notin_(valid_uuids))
+
+            result = await session.execute(stmt)
+            out: list[dict] = []
+            for exp, sim in result.all():
+                d = exp.to_dict()
+                d["similarity"] = round(float(sim), 4)
                 out.append(d)
             return out
 

@@ -221,24 +221,15 @@ class TestPhaseOrient:
     """Tests for the orient phase (scanning for candidates)."""
 
     @pytest.mark.asyncio
-    async def test_orient_falls_back_to_recall(self):
-        """When DB query fails, orient falls back to recall-based scan."""
+    async def test_orient_propagates_db_failure_for_watermark_safety(self):
+        """When primary DB query fails, orient raises so watermark is not silently advanced."""
         cfg = _make_config()
         sink = _make_sink()
         worker = AutoDreamWorker(config=cfg, sink=sink)
 
-        # DB query fails, recall returns some results
-        sink.recall.return_value = [
-            _make_experience(exp_id="r1", quality_tier="Bronze", recall_count=0),
-            _make_experience(exp_id="r2", quality_tier="Silver", recall_count=5),  # Not a candidate
-        ]
-
-        with patch.object(worker, "_get_dream_candidates", side_effect=Exception("DB down")):
-            candidates = await worker._phase_orient(None)
-
-        # Should have found the Bronze experience
-        assert len(candidates) == 1
-        assert candidates[0]["id"] == "r1"
+        with patch.object(worker, "_get_dream_candidates", side_effect=RuntimeError("DB down")):
+            with pytest.raises(RuntimeError, match="DB down"):
+                await worker._phase_orient(None)
 
 
 # ---------------------------------------------------------------------------
@@ -324,14 +315,24 @@ class TestPhaseGather:
 
 
 class TestPhaseConsolidate:
-    """Tests for the consolidate phase (merging near-duplicates)."""
+    """Tests for the consolidate phase (LLM-driven semantic merging)."""
 
     @pytest.mark.asyncio
     async def test_consolidate_picks_highest_quality_as_primary(self):
-        """The experience with highest quality_score becomes the primary."""
+        """When LLM returns fallback/invalid primary_id, highest quality_score becomes primary."""
         cfg = _make_config()
         sink = _make_sink()
-        worker = AutoDreamWorker(config=cfg, sink=sink)
+        llm = AsyncMock()
+        llm.chat_json = AsyncMock(
+            return_value={
+                "action": "MERGE",
+                "reason": "Near-duplicate",
+                "primary_id": "",
+                "secondary_ids": ["low", "high"],
+                "merged": {"title": "Merged", "problem": "P", "solution": "Rewritten solution", "tags": ["test"]},
+            }
+        )
+        worker = AutoDreamWorker(config=cfg, sink=sink, llm_client=llm)
 
         cluster = [
             _make_experience(exp_id="low", quality_score=30.0, title="Low quality", solution="Solution A"),
@@ -339,19 +340,29 @@ class TestPhaseConsolidate:
         ]
 
         with patch.object(worker, "_soft_delete", new_callable=AsyncMock):
-            merged = await worker._merge_cluster(cluster)
+            res = await worker._phase_consolidate([cluster])
 
-        # Should update the high-quality one
+        assert res["merged"] == 1
         sink.update_experience.assert_called_once()
         call_kwargs = sink.update_experience.call_args[1]
         assert call_kwargs["experience_id"] == "high"
 
     @pytest.mark.asyncio
     async def test_consolidate_merges_tags(self):
-        """Tags from secondaries are merged into primary."""
+        """Tags from secondaries are merged into primary when LLM omits tags."""
         cfg = _make_config()
         sink = _make_sink()
-        worker = AutoDreamWorker(config=cfg, sink=sink)
+        llm = AsyncMock()
+        llm.chat_json = AsyncMock(
+            return_value={
+                "action": "MERGE",
+                "reason": "Duplicate",
+                "primary_id": "p1",
+                "secondary_ids": ["s1"],
+                "merged": {"title": "Merged", "problem": "P", "solution": "Rewritten solution"},
+            }
+        )
+        worker = AutoDreamWorker(config=cfg, sink=sink, llm_client=llm)
 
         cluster = [
             _make_experience(exp_id="p1", quality_score=80.0, tags=["docker", "postgres"]),
@@ -359,9 +370,8 @@ class TestPhaseConsolidate:
         ]
 
         with patch.object(worker, "_soft_delete", new_callable=AsyncMock):
-            merged = await worker._merge_cluster(cluster)
+            await worker._phase_consolidate([cluster])
 
-        # Tags should be merged
         call_kwargs = sink.update_experience.call_args[1]
         assert "tags" in call_kwargs
         assert "docker" in call_kwargs["tags"]
@@ -373,7 +383,17 @@ class TestPhaseConsolidate:
         """Secondary experiences are soft-deleted."""
         cfg = _make_config()
         sink = _make_sink()
-        worker = AutoDreamWorker(config=cfg, sink=sink)
+        llm = AsyncMock()
+        llm.chat_json = AsyncMock(
+            return_value={
+                "action": "MERGE",
+                "reason": "Duplicate",
+                "primary_id": "p1",
+                "secondary_ids": ["s1", "s2"],
+                "merged": {"title": "Merged", "problem": "P", "solution": "Rewritten solution", "tags": ["test"]},
+            }
+        )
+        worker = AutoDreamWorker(config=cfg, sink=sink, llm_client=llm)
 
         cluster = [
             _make_experience(exp_id="p1", quality_score=80.0),
@@ -382,19 +402,20 @@ class TestPhaseConsolidate:
         ]
 
         with patch.object(worker, "_soft_delete", new_callable=AsyncMock) as mock_delete:
-            merged = await worker._merge_cluster(cluster)
+            res = await worker._phase_consolidate([cluster])
+            assert res["merged"] == 2
             assert mock_delete.call_count == 2
 
     @pytest.mark.asyncio
     async def test_consolidate_no_secondary_no_delete(self):
-        """If cluster has only one member (somehow), nothing is deleted."""
+        """If cluster has only one member, nothing is deleted."""
         cfg = _make_config()
         sink = _make_sink()
         worker = AutoDreamWorker(config=cfg, sink=sink)
 
         cluster = [_make_experience(exp_id="p1", quality_score=80.0)]
-        merged = await worker._merge_cluster(cluster)
-        assert merged == 0
+        res = await worker._phase_consolidate([cluster])
+        assert res["merged"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -427,18 +448,30 @@ class TestDreamCycle:
 
     @pytest.mark.asyncio
     async def test_full_dream_cycle(self):
-        """End-to-end dream cycle with mocked DB and sink."""
-        cfg = _make_config()
+        """End-to-end dream cycle with mocked DB, LLM, and sink."""
+        cfg = _make_config(distill_enabled=False)
         sink = _make_sink()
-        worker = AutoDreamWorker(config=cfg, sink=sink)
+        llm = AsyncMock()
+        llm.chat_json = AsyncMock(
+            return_value={
+                "action": "MERGE",
+                "reason": "Duplicate docker timeout",
+                "primary_id": "c1",
+                "secondary_ids": ["c2"],
+                "merged": {
+                    "title": "Docker timeout",
+                    "problem": "Docker connection issue",
+                    "solution": "Unified solution",
+                    "tags": ["docker"],
+                },
+            }
+        )
+        worker = AutoDreamWorker(config=cfg, sink=sink, llm_client=llm)
 
-        # Mock orient to return candidates
         candidates = [
-            _make_experience(exp_id="c1", title="Docker timeout", quality_tier="Bronze"),
-            _make_experience(exp_id="c2", title="Docker connection issue", quality_tier="Bronze"),
+            _make_experience(exp_id="c1", title="Docker timeout", quality_tier="Silver"),
+            _make_experience(exp_id="c2", title="Docker connection issue", quality_tier="Silver"),
         ]
-
-        # Mock gather to return clusters
         clusters = [
             [
                 _make_experience(exp_id="c1", quality_score=80.0, title="Docker timeout"),
@@ -446,8 +479,7 @@ class TestDreamCycle:
             ]
         ]
 
-        # Mock consolidate
-        with patch.object(worker, "_phase_orient", return_value=candidates):
+        with patch.object(worker, "_phase_orient", return_value=(candidates, 0)):
             with patch.object(worker, "_phase_gather", return_value=clusters):
                 with patch.object(worker, "_phase_prune", return_value=3):
                     with patch.object(worker, "_soft_delete", new_callable=AsyncMock):
@@ -455,7 +487,7 @@ class TestDreamCycle:
 
         assert stats["candidates"] == 2
         assert stats["clusters"] == 1
-        assert stats["merged"] == 1  # c2 merged into c1
+        assert stats["merged"] == 1
         assert stats["pruned"] == 3
 
     @pytest.mark.asyncio
@@ -465,7 +497,7 @@ class TestDreamCycle:
         sink = _make_sink()
         worker = AutoDreamWorker(config=cfg, sink=sink)
 
-        with patch.object(worker, "_phase_orient", return_value=[]):
+        with patch.object(worker, "_phase_orient", return_value=([], 0)):
             with patch.object(worker, "_phase_prune", return_value=5):
                 stats = await worker._dream(None)
 
@@ -488,9 +520,10 @@ class TestAutoDreamConfig:
         assert cfg.auto_dream.enabled is True
         assert cfg.auto_dream.min_hours_since_last == 24
         assert cfg.auto_dream.min_new_experiences == 5
-        assert cfg.auto_dream.merge_similarity_threshold == 0.85
+        assert cfg.auto_dream.merge_similarity_threshold == 0.78
         assert cfg.auto_dream.prune_max_age_days == 30
         assert cfg.auto_dream.scan_interval_minutes == 60
+        assert cfg.auto_dream.max_clusters_per_run == 20
 
     def test_config_from_yaml_dict(self):
         """AutoDreamSettings can be loaded from YAML dict."""
@@ -506,4 +539,4 @@ class TestAutoDreamConfig:
         assert settings.min_hours_since_last == 12
         assert settings.min_new_experiences == 3
         # Unspecified fields keep defaults
-        assert settings.merge_similarity_threshold == 0.85
+        assert settings.merge_similarity_threshold == 0.78
