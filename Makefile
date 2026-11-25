@@ -87,6 +87,20 @@ web:            ## 仅启动 Web 管理界面（默认端口 9111）；自动释
 	@$(MAKE) -s release-9111 || true
 	uv run python -m team_memory.web.app
 
+web-build:      ## 构建 Web v2 前端静态产物至 src/team_memory/web/static/dist/
+	@if command -v pnpm >/dev/null 2>&1; then \
+	  cd web-ui && pnpm install --frozen-lockfile 2>/dev/null || pnpm install && pnpm build; \
+	else \
+	  cd web-ui && npm install && npm run build; \
+	fi
+
+web-dev:        ## 启动 Web v2 前端 Vite 开发服务器（代理 /api 到 :9111）
+	@if command -v pnpm >/dev/null 2>&1; then \
+	  cd web-ui && pnpm dev; \
+	else \
+	  cd web-ui && npm run dev; \
+	fi
+
 web-restart:    ## 后台非阻塞重启 Web 管理界面（供 watchdog 自动自愈调用）
 	@$(MAKE) -s release-9111 || true
 	@set -a && [ -f .env ] && source .env || true && set +a; \
@@ -129,8 +143,12 @@ lint:           ## Ruff 代码检查
 lint-fix:       ## Ruff 代码检查并自动修复
 	ruff check src/ --fix
 
-lint-js:        ## Web 前端 JS 检查：重复声明、语法类问题
-	python scripts/lint_js_duplicates.py
+lint-js:        ## Web v2 前端 TypeScript 类型检查
+	@if [ -d web-ui/node_modules ]; then \
+	  cd web-ui && ./node_modules/.bin/tsc --noEmit; \
+	else \
+	  echo "  ℹ web-ui/node_modules 未安装，跳过前端类型检查（运行 make web-build 安装并构建）"; \
+	fi
 
 doc-harness-config-check:  ## 校验 doc-harness.project.yaml 必填键与引用的文件存在
 	python scripts/check_doc_harness_config.py

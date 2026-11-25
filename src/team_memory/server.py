@@ -114,7 +114,7 @@ def track_usage(func):
 async def _get_current_user() -> str:
     """Resolve authenticated user: HTTP header (remote) → env API Key (stdio) → error."""
 
-    # Step 1: HTTP MCP — read user injected by MCPAuthMiddleware
+    # Step 1: HTTP MCP — read user & tenant injected by MCPAuthMiddleware
     try:
         from fastmcp.server.http import _current_http_request
 
@@ -122,6 +122,11 @@ async def _get_current_user() -> str:
         if request is not None:
             mcp_user = getattr(request.state, "mcp_user", None)
             if mcp_user:
+                mcp_tenant_id = getattr(request.state, "mcp_tenant_id", None)
+                if mcp_tenant_id:
+                    from team_memory.storage.tenant_context import set_current_tenant_id
+
+                    set_current_tenant_id(mcp_tenant_id)
                 return mcp_user
     except Exception:
         pass
@@ -134,6 +139,9 @@ async def _get_current_user() -> str:
             if ctx.auth:
                 user = await ctx.auth.authenticate({"api_key": api_key})
                 if user is not None:
+                    from team_memory.storage.tenant_context import set_current_tenant_id
+
+                    set_current_tenant_id(user.tenant_id)
                     return user.name
             logger.warning("MCP auth resolve failed for TEAM_MEMORY_API_KEY")
         except RuntimeError:
@@ -403,7 +411,9 @@ async def memory_save(
         "Provide 'problem' for focused solutions, 'query' for exploratory search, "
         "or just 'file_path' for context-based suggestions. "
         "With include_archives=True, results may include type=archive (previews only); "
-        "call memory_get_archive(archive_id) for full L2 text."
+        "call memory_get_archive(archive_id) for full L2 text. "
+        "Feedback contract: after applying a recalled experience, call "
+        "memory_feedback(experience_id, rating=5); if outdated/misleading, call rating=1."
     ),
 )
 @track_usage
@@ -417,7 +427,7 @@ async def memory_recall(
     max_results: int = 10,
     project: str | None = None,
     include_archives: bool | None = None,
-    include_user_profile: bool = True,
+    include_user_profile: bool = False,
     adaptive: bool = True,
 ) -> str:
     """Unified read: route to solve/search/suggest mode based on input."""
@@ -475,7 +485,9 @@ async def memory_recall(
         "Call this when: "
         "starting a new task or conversation; "
         "switching to a different part of the codebase; "
-        "wanting to understand team conventions for a file or module."
+        "wanting to understand team conventions for a file or module. "
+        "Feedback contract: if a returned experience helps or is outdated, "
+        "rate it via memory_feedback(experience_id, rating=5 or 1)."
     ),
 )
 @track_usage

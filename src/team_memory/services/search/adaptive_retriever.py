@@ -58,6 +58,8 @@ class AdaptiveResult:
     hop_log: list[dict] = field(default_factory=list)
     stage_metrics: dict | None = None
     stage_counts: dict | None = None
+    degraded: bool = False
+    degraded_reason: str | None = None
 
 
 class AdaptiveRetriever:

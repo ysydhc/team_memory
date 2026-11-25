@@ -80,6 +80,46 @@ def _resolve_dsn() -> str:
     raise RuntimeError(msg)
 
 
+async def _feedback_breakdown(dsn: str, days: int) -> dict[str, int]:
+    """Return explicit vs implicit feedback counts (total and within lookback window)."""
+    import asyncpg
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        row = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(*) FILTER (WHERE COALESCE(source, 'explicit_user') != 'implicit_judge') AS explicit_total,
+                COUNT(*) FILTER (WHERE source = 'implicit_judge') AS implicit_total,
+                COUNT(*) FILTER (
+                    WHERE COALESCE(source, 'explicit_user') != 'implicit_judge'
+                      AND created_at > NOW() - make_interval(days => $1)
+                ) AS explicit_window,
+                COUNT(*) FILTER (
+                    WHERE source = 'implicit_judge'
+                      AND created_at > NOW() - make_interval(days => $1)
+                ) AS implicit_window,
+                COUNT(*) FILTER (
+                    WHERE source = 'implicit_judge' AND rating >= 4
+                      AND created_at > NOW() - make_interval(days => $1)
+                ) AS implicit_pos_window,
+                COUNT(*) FILTER (
+                    WHERE source = 'implicit_judge' AND rating <= 2
+                      AND created_at > NOW() - make_interval(days => $1)
+                ) AS implicit_neg_window
+            FROM experience_feedbacks
+            """,
+            days,
+        )
+        if not row:
+            return {}
+        return {k: int(row[k] or 0) for k in row.keys()}
+    except Exception:
+        return {}
+    finally:
+        await conn.close()
+
+
 async def _faithfulness_breakdown(dsn: str, days: int, threshold: float = 0.7, above: bool = True) -> int:
     """Count faithfulness entries above/below threshold (excluding negative error sentinels)."""
     import asyncpg
@@ -578,6 +618,16 @@ async def run_stats(days: int, granularity: str) -> None:
                 proj_table.add_row(proj, str(proj_total), str(proj_judged), str(proj_used), proj_rate)
 
             console.print(proj_table)
+
+        # --- 9. Feedback Loop Breakdown (Explicit vs Implicit) ---
+        fb = await _feedback_breakdown(dsn, days)
+        if fb:
+            console.print(
+                f"[bold]Feedback Loop:[/bold] "
+                f"Explicit={fb.get('explicit_total', 0)} ({days}d: {fb.get('explicit_window', 0)}) | "
+                f"Implicit={fb.get('implicit_total', 0)} ({days}d: {fb.get('implicit_window', 0)}, "
+                f"+{fb.get('implicit_pos_window', 0)} / -{fb.get('implicit_neg_window', 0)})"
+            )
 
     finally:
         await writer.close()

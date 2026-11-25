@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 from urllib.parse import urlparse
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -15,6 +17,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from team_memory.storage.models import Base
+from team_memory.storage.tenant_context import get_active_tenant_id, parse_tenant_uuid
 
 logger = logging.getLogger("team_memory.database")
 
@@ -54,16 +57,36 @@ def get_session_factory(database_url: str) -> async_sessionmaker[AsyncSession]:
 
 
 @asynccontextmanager
-async def get_session(database_url: str) -> AsyncGenerator[AsyncSession, None]:
+async def get_session(
+    database_url: str,
+    *,
+    tenant_id: uuid.UUID | str | None = None,
+    bypass_rls: bool = False,
+) -> AsyncGenerator[AsyncSession, None]:
     """Provide a transactional async session scope.
+
+    When running against PostgreSQL with an active tenant context (either via
+    ``tenant_id`` argument or ``tenant_context`` ContextVar) and ``bypass_rls``
+    is False, switches the transaction to the non-superuser ``tm_app_user`` role
+    and sets ``app.current_tenant_id`` so PostgreSQL Row-Level Security (RLS)
+    is strictly enforced for the duration of the transaction.
 
     Usage:
         async with get_session(db_url) as session:
             result = await session.execute(...)
     """
     factory = get_session_factory(database_url)
+    effective_tid = None if bypass_rls else (parse_tenant_uuid(tenant_id) or get_active_tenant_id())
+    is_postgres = "sqlite" not in database_url
+
     async with factory() as session:
         try:
+            if is_postgres and effective_tid is not None:
+                await session.execute(text("SET LOCAL ROLE tm_app_user"))
+                await session.execute(
+                    text("SELECT set_config('app.current_tenant_id', :tid, true)"),
+                    {"tid": str(effective_tid)},
+                )
             yield session
             await session.commit()
         except Exception:

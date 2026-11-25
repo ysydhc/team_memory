@@ -353,6 +353,14 @@ async def get_observability_overview(
     graph_hits_7d = 0
     latencies_7d: list[float] = []
     tokens_7d: list[int] = []
+    feedback_stats: dict[str, int] = {
+        "explicit_total": 0,
+        "implicit_total": 0,
+        "explicit_7d": 0,
+        "implicit_7d": 0,
+        "implicit_positive_7d": 0,
+        "implicit_negative_7d": 0,
+    }
 
     try:
         async with get_session(db_url) as session:
@@ -460,6 +468,49 @@ async def get_observability_overview(
                         latencies_7d.append(lat)
                     if tok is not None:
                         tokens_7d.append(tok)
+
+            # 5. Feedback loop stats (explicit vs implicit)
+            try:
+                fb_row = (
+                    await session.execute(
+                        sa_text(
+                            """
+                            SELECT
+                                COUNT(*) FILTER (WHERE COALESCE(source, 'explicit_user') != 'implicit_judge') AS exp_tot,
+                                COUNT(*) FILTER (WHERE source = 'implicit_judge') AS imp_tot,
+                                COUNT(*) FILTER (
+                                    WHERE COALESCE(source, 'explicit_user') != 'implicit_judge'
+                                      AND created_at >= :seven_days_ago
+                                ) AS exp_7d,
+                                COUNT(*) FILTER (
+                                    WHERE source = 'implicit_judge'
+                                      AND created_at >= :seven_days_ago
+                                ) AS imp_7d,
+                                COUNT(*) FILTER (
+                                    WHERE source = 'implicit_judge' AND rating >= 4
+                                      AND created_at >= :seven_days_ago
+                                ) AS imp_pos_7d,
+                                COUNT(*) FILTER (
+                                    WHERE source = 'implicit_judge' AND rating <= 2
+                                      AND created_at >= :seven_days_ago
+                                ) AS imp_neg_7d
+                            FROM experience_feedbacks
+                            """
+                        ),
+                        {"seven_days_ago": seven_days_ago},
+                    )
+                ).fetchone()
+                if fb_row:
+                    feedback_stats = {
+                        "explicit_total": int(fb_row[0] or 0),
+                        "implicit_total": int(fb_row[1] or 0),
+                        "explicit_7d": int(fb_row[2] or 0),
+                        "implicit_7d": int(fb_row[3] or 0),
+                        "implicit_positive_7d": int(fb_row[4] or 0),
+                        "implicit_negative_7d": int(fb_row[5] or 0),
+                    }
+            except Exception as fb_exc:
+                logger.debug("Feedback stats query skipped: %s", fb_exc)
 
     except Exception as exc:
         logger.warning("Observability DB query failed: %s", exc)
@@ -573,6 +624,7 @@ async def get_observability_overview(
         "p95_ms_7d": round(compute_percentile(latencies_7d, 95), 1) if latencies_7d else 0.0,
         "avg_tokens_7d": round(sum(tokens_7d) / len(tokens_7d), 1) if tokens_7d else 0.0,
         "eval_recall_delta": eval_recall_delta,
+        "feedback": feedback_stats,
         "daily_series": retrieval_series,
         "latest_eval": latest_eval,
         "eval_history": eval_history,

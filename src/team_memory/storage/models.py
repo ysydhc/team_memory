@@ -20,6 +20,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from team_memory.storage.tenant_context import get_current_tenant_id
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -37,6 +39,70 @@ class Base(DeclarativeBase):
 
 
 # ============================================================
+# Multi-Tenant Core Models (Tenant & TenantMember)
+# ============================================================
+
+
+class Tenant(Base):
+    """Organization / workspace tenant for hard data isolation."""
+
+    __tablename__ = "tenants"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    slug: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    settings_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    members: Mapped[list["TenantMember"]] = relationship(
+        back_populates="tenant", cascade="all, delete-orphan"
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "slug": self.slug,
+            "name": self.name,
+            "settings_json": self.settings_json or {},
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class TenantMember(Base):
+    """User membership and role within a tenant."""
+
+    __tablename__ = "tenant_members"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="member", server_default="member"
+    )  # admin | member | viewer
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    tenant: Mapped[Tenant] = relationship(back_populates="members")
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "user_id", name="uq_tenant_members_tenant_user"),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "tenant_id": str(self.tenant_id),
+            "user_id": self.user_id,
+            "role": self.role,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+# ============================================================
 # Experience (core entity)
 # ============================================================
 
@@ -47,6 +113,13 @@ class Experience(Base):
     __tablename__ = "experiences"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        default=get_current_tenant_id,
+        index=True,
+    )
     # Parent-child hierarchy: NULL = root/standalone, UUID = child of parent
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
@@ -106,6 +179,9 @@ class Experience(Base):
     used_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
     # Negative feedback counter (incremented when rating <= 2)
     negative_feedback_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
+    # Implicit feedback counters (populated by background faithfulness/adoption judge, weighted 0.5x)
+    implicit_positive_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
+    implicit_negative_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
 
     # Bi-temporal validity & lifecycle
     valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=True)
@@ -161,6 +237,8 @@ class Experience(Base):
             "recall_count": self.recall_count,
             "used_count": self.used_count,
             "negative_feedback_count": self.negative_feedback_count or 0,
+            "implicit_positive_count": self.implicit_positive_count or 0,
+            "implicit_negative_count": self.implicit_negative_count or 0,
             "valid_from": self.valid_from.isoformat() if self.valid_from else None,
             "valid_until": self.valid_until.isoformat() if self.valid_until else None,
             "superseded_by_id": str(self.superseded_by_id) if self.superseded_by_id else None,
@@ -185,6 +263,13 @@ class ExperienceFeedback(Base):
     __tablename__ = "experience_feedbacks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        default=get_current_tenant_id,
+        index=True,
+    )
     experience_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("experiences.id", ondelete="CASCADE"),
@@ -194,6 +279,11 @@ class ExperienceFeedback(Base):
     fitness_score: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1-5 post-use fitness
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     feedback_by: Mapped[str] = mapped_column(String(100), nullable=False)
+    source: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="explicit_user", server_default="explicit_user"
+    )  # explicit_user | explicit_agent | implicit_judge
+    weight: Mapped[float] = mapped_column(Float, nullable=False, default=1.0, server_default="1.0")
+    search_log_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     experience: Mapped[Experience] = relationship(back_populates="feedbacks")
@@ -206,6 +296,9 @@ class ExperienceFeedback(Base):
             "fitness_score": self.fitness_score,
             "comment": self.comment,
             "feedback_by": self.feedback_by,
+            "source": self.source or "explicit_user",
+            "weight": float(self.weight if self.weight is not None else 1.0),
+            "search_log_id": str(self.search_log_id) if self.search_log_id else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -221,6 +314,13 @@ class Archive(Base):
     __tablename__ = "archives"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        default=get_current_tenant_id,
+        index=True,
+    )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     scope: Mapped[str] = mapped_column(String(20), nullable=False, server_default="session")
     scope_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -269,6 +369,13 @@ class ArchiveExperienceLink(Base):
 
     __tablename__ = "archive_experience_links"
 
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        default=get_current_tenant_id,
+        index=True,
+    )
     archive_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("archives.id", ondelete="CASCADE"),
@@ -300,6 +407,13 @@ class ArchiveAttachment(Base):
     __tablename__ = "archive_attachments"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        default=get_current_tenant_id,
+        index=True,
+    )
     archive_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("archives.id", ondelete="CASCADE"),
@@ -324,6 +438,13 @@ class ArchiveUploadFailure(Base):
     __tablename__ = "archive_upload_failures"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        default=get_current_tenant_id,
+        index=True,
+    )
     archive_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("archives.id", ondelete="CASCADE"),
@@ -352,6 +473,13 @@ class DocumentTreeNode(Base):
     __tablename__ = "document_tree_nodes"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        default=get_current_tenant_id,
+        index=True,
+    )
     archive_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("archives.id", ondelete="CASCADE"),
@@ -397,11 +525,19 @@ class PersonalMemory(Base):
     __tablename__ = "personal_memories"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        default=get_current_tenant_id,
+        index=True,
+    )
     user_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     scope: Mapped[str] = mapped_column(
-        String(20), default="generic", nullable=False, server_default="generic"
-    )  # generic | context (mirrors profile_kind for HTTP compat)
+        String(20), default="global", nullable=False, server_default="global"
+    )  # global | project (legacy generic/context normalized on write)
+    project: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     profile_kind: Mapped[str] = mapped_column(
         String(16), default="static", nullable=False, server_default="static"
     )  # static | dynamic
@@ -422,6 +558,7 @@ class PersonalMemory(Base):
             "user_id": self.user_id,
             "content": self.content,
             "scope": self.scope,
+            "project": self.project,
             "profile_kind": self.profile_kind,
             "persona": self.persona,
             "priority": self.priority,
@@ -442,13 +579,21 @@ class ApiKey(Base):
     __tablename__ = "api_keys"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        default=get_current_tenant_id,
+        index=True,
+    )
     key_hash: Mapped[str | None] = mapped_column(String(256), unique=True, nullable=True)
-    user_name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
-    role: Mapped[str] = mapped_column(String(50), default="editor")
+    user_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(50), default="member")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     password_hash: Mapped[str | None] = mapped_column(String(256), nullable=True)
     key_prefix: Mapped[str | None] = mapped_column(String(4), nullable=True)
     key_suffix: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    label: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
@@ -485,6 +630,13 @@ class SearchLog(Base):
     __tablename__ = "search_logs"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        default=get_current_tenant_id,
+        index=True,
+    )
     query: Mapped[str] = mapped_column(Text, nullable=False)
     intent_type: Mapped[str] = mapped_column(String(20), default="unknown")
     project: Mapped[str] = mapped_column(String(100), default="default")
@@ -512,6 +664,13 @@ class Entity(Base):
     __tablename__ = "entities"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        default=get_current_tenant_id,
+        index=True,
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     entity_type: Mapped[str] = mapped_column(
         String(50), nullable=False, server_default="concept"
@@ -542,7 +701,9 @@ class Entity(Base):
         cascade="all, delete-orphan",
     )
 
-    __table_args__ = (UniqueConstraint("name", "project", name="uq_entity_name_project"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", "project", name="uq_entity_tenant_name_project"),
+    )
 
     def to_dict(self) -> dict:
         return {
@@ -564,6 +725,13 @@ class Relationship(Base):
     __tablename__ = "relationships"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        default=get_current_tenant_id,
+        index=True,
+    )
     source_entity_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("entities.id", ondelete="CASCADE"),
@@ -617,6 +785,13 @@ class ExperienceEntity(Base):
 
     __tablename__ = "experience_entities"
 
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        default=get_current_tenant_id,
+        index=True,
+    )
     experience_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("experiences.id", ondelete="CASCADE"),

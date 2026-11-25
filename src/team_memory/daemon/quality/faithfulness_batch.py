@@ -165,6 +165,22 @@ async def run_batch(
                         entry_id,
                         faithfulness_score=score,
                     )
+                    if score >= 0.7:
+                        try:
+                            from team_memory.services.analysis.implicit_feedback import (
+                                record_implicit_positive_feedback,
+                            )
+
+                            await record_implicit_positive_feedback(
+                                db_url=async_dsn,
+                                result_ids=result_ids,
+                                faithfulness_score=score,
+                                was_used=True,
+                                used_indices=eval_result.used_indices,
+                                search_log_id=entry.get("search_log_id"),
+                            )
+                        except Exception as fb_err:
+                            logger.debug("Implicit positive feedback skipped: %s", fb_err)
 
             results.append(
                 {
@@ -175,6 +191,18 @@ async def run_batch(
                     "total": eval_result.total_claims,
                 }
             )
+
+        # Run periodic implicit negative feedback scan after batch evaluation
+        implicit_neg_summary: dict = {}
+        if not dry_run and results:
+            try:
+                from team_memory.services.analysis.implicit_feedback import (
+                    scan_and_record_implicit_negative_feedback,
+                )
+
+                implicit_neg_summary = await scan_and_record_implicit_negative_feedback(db_url=async_dsn)
+            except Exception as fb_err:
+                logger.debug("Implicit negative feedback scan skipped: %s", fb_err)
 
         # Summary
         scores = [r["score"] for r in results if r["score"] >= 0]
@@ -190,6 +218,7 @@ async def run_batch(
             "low_faithfulness": low,
             "errors": errors,
             "dry_run": dry_run,
+            "implicit_negative_recorded": implicit_neg_summary.get("recorded", 0),
         }
 
         # Print report

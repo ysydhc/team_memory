@@ -19,6 +19,7 @@ async def op_feedback(
     experience_id: str,
     rating: int,
     comment: str | None = None,
+    source: str = "explicit_agent",
 ) -> dict:
     """Submit feedback for an experience."""
     if not (1 <= rating <= 5):
@@ -28,12 +29,21 @@ async def op_feedback(
             "code": "validation_error",
         }
 
-    success = await service.feedback(
-        experience_id=experience_id,
-        rating=rating,
-        feedback_by=user,
-        comment=comment,
-    )
+    try:
+        success = await service.feedback(
+            experience_id=experience_id,
+            rating=rating,
+            feedback_by=user,
+            comment=comment,
+            source=source,
+        )
+    except TypeError:
+        success = await service.feedback(
+            experience_id=experience_id,
+            rating=rating,
+            feedback_by=user,
+            comment=comment,
+        )
 
     if success:
         return {"message": "Feedback recorded. Thank you!"}

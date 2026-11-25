@@ -773,6 +773,9 @@ class ExperienceRepository:
         feedback_by: str,
         comment: str | None = None,
         fitness_score: int | None = None,
+        source: str = "explicit_user",
+        weight: float = 1.0,
+        search_log_id: uuid.UUID | None = None,
     ) -> ExperienceFeedback:
         """Add feedback to an experience. rating: 1-5."""
         feedback = ExperienceFeedback(
@@ -781,6 +784,9 @@ class ExperienceRepository:
             fitness_score=fitness_score,
             comment=comment,
             feedback_by=feedback_by,
+            source=source,
+            weight=weight,
+            search_log_id=search_log_id,
         )
         self._session.add(feedback)
         await self._session.flush()
@@ -806,6 +812,22 @@ class ExperienceRepository:
             update(Experience)
             .where(Experience.id == experience_id)
             .values(negative_feedback_count=Experience.negative_feedback_count + 1)
+        )
+
+    async def increment_implicit_positive_count(self, experience_id: uuid.UUID) -> None:
+        """Increment implicit_positive_count (high-faithfulness judge adoption)."""
+        await self._session.execute(
+            update(Experience)
+            .where(Experience.id == experience_id)
+            .values(implicit_positive_count=Experience.implicit_positive_count + 1)
+        )
+
+    async def increment_implicit_negative_count(self, experience_id: uuid.UUID) -> None:
+        """Increment implicit_negative_count (repeated high-relevance non-adoption)."""
+        await self._session.execute(
+            update(Experience)
+            .where(Experience.id == experience_id)
+            .values(implicit_negative_count=Experience.implicit_negative_count + 1)
         )
 
     # ======================== PROJECT ========================

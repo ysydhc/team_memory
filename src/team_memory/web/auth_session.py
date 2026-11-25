@@ -21,7 +21,12 @@ from team_memory.auth.provider import (
     User,
 )
 from team_memory.storage.database import get_session
-from team_memory.storage.models import ApiKey
+from team_memory.storage.models import ApiKey, TenantMember
+from team_memory.storage.tenant_context import (
+    DEFAULT_TENANT_ID,
+    parse_tenant_uuid,
+    set_current_tenant_id,
+)
 
 logger = logging.getLogger("team_memory.web")
 
@@ -91,14 +96,27 @@ def _get_session_secret() -> str:
     )
 
 
-async def _get_user_role_from_db(user_name: str) -> str:
+async def _get_user_role_from_db(user_name: str, tenant_id: str | None = None) -> str:
     _auth = _get_auth()
     if not isinstance(_auth, DbApiKeyAuth):
         return "viewer"
     db_url = _get_db_url_lazy()
     try:
         async with get_session(db_url) as session:
-            result = await session.execute(select(ApiKey).where(ApiKey.user_name == user_name))
+            tid = parse_tenant_uuid(tenant_id)
+            if tid is not None:
+                tm = await session.execute(
+                    select(TenantMember.role).where(
+                        TenantMember.tenant_id == tid,
+                        TenantMember.user_id == user_name,
+                    )
+                )
+                m_role = tm.scalar_one_or_none()
+                if m_role:
+                    return m_role
+            result = await session.execute(
+                select(ApiKey).where(ApiKey.user_name == user_name).order_by(ApiKey.id.asc()).limit(1)
+            )
             row = result.scalar_one_or_none()
             if row:
                 return row.role
@@ -107,10 +125,69 @@ async def _get_user_role_from_db(user_name: str) -> str:
     return "viewer"
 
 
+async def _resolve_session_tenant(user_name: str, requested_tenant_header: str | None) -> tuple[str, str | None]:
+    """Resolve (tenant_id, role_override) for a session-cookie authenticated user.
+
+    If ``requested_tenant_header`` is provided, verifies membership in ``tenant_members``
+    and raises 403 if the user is not a member.
+    """
+    _auth = _get_auth()
+    if not isinstance(_auth, DbApiKeyAuth):
+        if requested_tenant_header:
+            try:
+                parsed = parse_tenant_uuid(requested_tenant_header)
+                if parsed is not None:
+                    return str(parsed), None
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Invalid X-Tenant-Id header") from exc
+        return str(DEFAULT_TENANT_ID), None
+
+    db_url = _get_db_url_lazy()
+    if requested_tenant_header:
+        try:
+            req_tid = parse_tenant_uuid(requested_tenant_header)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid X-Tenant-Id header") from exc
+        if req_tid is not None:
+            async with get_session(db_url) as session:
+                res = await session.execute(
+                    select(TenantMember).where(
+                        TenantMember.tenant_id == req_tid,
+                        TenantMember.user_id == user_name,
+                    )
+                )
+                member = res.scalar_one_or_none()
+                if member is None:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Not a member of the requested tenant",
+                    )
+                return str(member.tenant_id), member.role
+
+    # No explicit header: prefer DEFAULT_TENANT_ID if user is a member, else first membership
+    try:
+        async with get_session(db_url) as session:
+            res = await session.execute(
+                select(TenantMember)
+                .where(TenantMember.user_id == user_name)
+                .order_by(TenantMember.created_at.asc())
+            )
+            memberships = res.scalars().all()
+            for m in memberships:
+                if m.tenant_id == DEFAULT_TENANT_ID:
+                    return str(m.tenant_id), m.role
+            if memberships:
+                return str(memberships[0].tenant_id), memberships[0].role
+    except Exception:
+        pass
+    return str(DEFAULT_TENANT_ID), None
+
+
 async def get_current_user(request: Request) -> User:
-    """Extract and validate credentials from header or cookie."""
+    """Extract and validate credentials from header or cookie, and bind tenant context."""
     cached = getattr(request.state, "user", None)
     if cached is not None:
+        set_current_tenant_id(getattr(cached, "tenant_id", None) or DEFAULT_TENANT_ID)
         return cached
 
     _auth = _get_auth()
@@ -119,8 +196,10 @@ async def get_current_user(request: Request) -> User:
 
     auth_header = request.headers.get("Authorization", "")
     api_key = ""
+    from_bearer = False
     if auth_header.startswith("Bearer "):
         api_key = auth_header[7:]
+        from_bearer = True
 
     if not api_key:
         from team_memory.web.middleware import _decode_api_key_cookie
@@ -130,13 +209,18 @@ async def get_current_user(request: Request) -> User:
     if not api_key:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
+    requested_tenant = (request.headers.get("X-Tenant-Id") or "").strip() or None
+
     if api_key.startswith("sess:"):
         secret = _get_session_secret()
         user_str = _decode_session_token(api_key, secret)
         if user_str:
-            role = await _get_user_role_from_db(user_str)
-            user = User(name=user_str, role=role)
+            tid, member_role = await _resolve_session_tenant(user_str, requested_tenant)
+            role = member_role or await _get_user_role_from_db(user_str, tid)
+            user = User(name=user_str, role=role, tenant_id=tid)
             request.state.user = user
+            request.state.tenant_id = tid
+            set_current_tenant_id(tid)
             return user
         raise HTTPException(status_code=401, detail="Invalid or expired session")
 
@@ -152,5 +236,24 @@ async def get_current_user(request: Request) -> User:
     if user is None:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    # Bearer API keys are strictly bound to their tenant_id; browser cookies may
+    # switch to another tenant only after verifying membership in tenant_members.
+    if requested_tenant:
+        try:
+            req_tid = parse_tenant_uuid(requested_tenant)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid X-Tenant-Id header") from exc
+        if req_tid is not None and str(req_tid) != str(user.tenant_id):
+            if from_bearer:
+                raise HTTPException(
+                    status_code=403,
+                    detail="API key is not authorized for the requested tenant",
+                )
+            tid, member_role = await _resolve_session_tenant(user.name, str(req_tid))
+            role = member_role or user.role
+            user = User(name=user.name, role=role, tenant_id=tid)
+
     request.state.user = user
+    request.state.tenant_id = user.tenant_id
+    set_current_tenant_id(user.tenant_id)
     return user

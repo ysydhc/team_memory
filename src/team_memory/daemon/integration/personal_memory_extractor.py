@@ -73,11 +73,15 @@ _EXTRACT_PROMPT = """\
 严格过滤铁律（必须遵守）:
 - 【去业务化】：严禁提取单次任务、单个页面或特定业务场景下的临时要求
   （例如："修复某页面下拉菜单"、"坚持使用原始302跳转链接"、"同时支持高德与滴滴"、"解决卡片遮挡"等一律不得提取！）。
+- 【不与工程规范重叠】：严禁把属于团队 `AGENTS.md` / 项目编码规范 / 团队 Runbook 的公共约束写成个人画像。
 - 如果某条发言体现了通用工程态度，必须剥离具体业务名词，抽象为跨所有项目通用的准则
   （例如将"拒绝改302链接规避问题"抽象为"排查问题时坚持修复根因，拒绝通过修改测试输入规避问题"）。
 - 只提取明确表达或高置信度体现的持久习惯，如果没有可提取的持久跨项目信息，返回空数组 `"memories": []`。
 
 每条记忆必须标注:
+- `scope` 字段:
+  - `global`: 跨项目通用的个人偏好与协作习惯（绝大多数个人记忆应为 `global`）
+  - `project`: 仅在当前具体工程生效的个人特殊习惯/覆盖项（克制提取，非团队公共规范）
 - `persona` 字段:
   - coding: 编程/架构/部署/测试相关的偏好
   - writing: 写作/文档/图表/结构化表达相关的偏好
@@ -92,8 +96,8 @@ _EXTRACT_PROMPT = """\
 ```json
 {{
   "memories": [
-    {{"category": "preference", "persona": "coding", "priority": 75, "content": "具体跨项目偏好描述"}},
-    {{"category": "habit", "persona": "research", "priority": 80, "content": "具体跨项目习惯描述"}}
+    {{"category": "preference", "scope": "global", "persona": "coding", "priority": 75, "content": "具体跨项目偏好描述"}},
+    {{"category": "habit", "scope": "project", "persona": "debugging", "priority": 70, "content": "仅在当前工程适用的个人调试习惯"}}
   ]
 }}
 ```
@@ -119,12 +123,15 @@ class PersonalMemoryExtractor:
         self,
         session_id: str,
         user_messages: list[dict[str, Any]],
+        *,
+        project: str | None = None,
     ) -> int:
         """Extract personal memories from user messages and save them.
 
         Args:
             session_id: Conversation session identifier.
             user_messages: List of message dicts with 'content' field.
+            project: Optional active project name for project-scoped memories.
 
         Returns:
             Number of memories saved.
@@ -173,9 +180,21 @@ class PersonalMemoryExtractor:
             except (TypeError, ValueError):
                 priority = 60
 
+            raw_scope = str(mem.get("scope") or "").strip().lower()
+            mem_project = (project or "").strip() or None
+            if raw_scope == "project" and mem_project:
+                resolved_scope = "project"
+            else:
+                resolved_scope = "global"
+                mem_project = None
+
             try:
+                save_kwargs: dict[str, Any] = {"persona": persona, "priority": priority}
+                if resolved_scope == "project" and mem_project:
+                    save_kwargs["scope"] = resolved_scope
+                    save_kwargs["project"] = mem_project
                 try:
-                    await self._save_memory(category, content, persona=persona, priority=priority)
+                    await self._save_memory(category, content, **save_kwargs)
                 except TypeError:
                     await self._save_memory(category, content, persona=persona)
                 saved += 1
@@ -245,12 +264,14 @@ class PersonalMemoryExtractor:
         *,
         persona: str = "general",
         priority: int = 60,
+        scope: str = "global",
+        project: str | None = None,
     ) -> None:
         """Save a personal memory to the TM database.
 
-        Maps extractor category to TM scope/profile_kind:
-          preference/habit → scope=generic, profile_kind=static
-          context/project  → scope=context,  profile_kind=dynamic
+        Maps extractor category + scope to canonical TM (scope, project, profile_kind):
+          - scope='project' with project -> scope='project', project=<project>
+          - otherwise -> scope='global', project=None
         """
         from team_memory.bootstrap import get_context
         from team_memory.services.memory.personal_memory import PersonalMemoryService
@@ -261,16 +282,16 @@ class PersonalMemoryExtractor:
             db_url=ctx.db_url,
         )
 
-        # Map category to scope
-        if category in ("context", "project"):
-            scope = "context"
-        else:
-            scope = "generic"
+        profile_kind = "dynamic" if category == "context" else "static"
+        eff_scope = "project" if (scope == "project" and project) else "global"
+        eff_project = project if eff_scope == "project" else None
 
         await svc.write(
             user_id=self._user,
             content=content,
-            scope=scope,
+            scope=eff_scope,
+            project=eff_project,
+            profile_kind=profile_kind,
             context_hint=category,
             persona=persona,
             priority=priority,

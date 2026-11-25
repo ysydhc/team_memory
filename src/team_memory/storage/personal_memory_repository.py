@@ -4,19 +4,58 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import case, delete, desc, func, select
+from sqlalchemy import and_, case, delete, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from team_memory.storage.models import PersonalMemory
 
 PERSONAL_MEMORY_OVERWRITE_THRESHOLD = 0.82
 VALID_PERSONAS = ("coding", "debugging", "writing", "research", "general")
+VALID_SCOPES = ("global", "project")
+_GLOBAL_COMPAT_SCOPES = ("global", "generic", "context")
 
 __all__ = [
     "PERSONAL_MEMORY_OVERWRITE_THRESHOLD",
     "VALID_PERSONAS",
+    "VALID_SCOPES",
+    "normalize_scope",
     "PersonalMemoryRepository",
 ]
+
+
+def normalize_scope(
+    scope: str | None = None,
+    *,
+    project: str | None = None,
+    profile_kind: str | None = None,
+) -> tuple[str, str | None, str]:
+    """Normalize (scope, project, profile_kind) into canonical values.
+
+    Canonical scopes:
+      - ``global``: cross-project personal preference (project=None)
+      - ``project``: project-scoped personal override (project='<name>')
+
+    Legacy compatibility:
+      - ``scope='generic'`` -> ``scope='global'``, ``profile_kind='static'``
+      - ``scope='context'`` -> ``profile_kind='dynamic'`` (``scope='project'`` if
+        ``project`` is given, else ``scope='global'``)
+    """
+    raw_scope = (scope or "").strip().lower()
+    clean_project = (project or "").strip() or None
+
+    if profile_kind in ("static", "dynamic"):
+        pk = profile_kind
+    else:
+        pk = "dynamic" if raw_scope == "context" else "static"
+
+    if raw_scope == "project" and clean_project:
+        return "project", clean_project, pk
+    if raw_scope == "context" and clean_project:
+        return "project", clean_project, pk
+    if not raw_scope and clean_project:
+        return "project", clean_project, pk
+    # global / generic / context-without-project / project-without-name -> global
+    return "global", None, pk
 
 
 class PersonalMemoryRepository:
@@ -30,32 +69,71 @@ class PersonalMemoryRepository:
         user_id: str,
         scope: str | None = None,
         profile_kind: str | None = None,
+        project: str | None = None,
     ) -> list[PersonalMemory]:
         q = select(PersonalMemory).where(PersonalMemory.user_id == user_id)
         if scope:
-            q = q.where(PersonalMemory.scope == scope)
+            if scope == "global":
+                q = q.where(PersonalMemory.scope.in_(("global", "generic")))
+            else:
+                q = q.where(PersonalMemory.scope == scope)
+        if project:
+            q = q.where(PersonalMemory.project == project)
         if profile_kind:
             q = q.where(PersonalMemory.profile_kind == profile_kind)
-        q = q.order_by(desc(PersonalMemory.updated_at))
+        q = q.order_by(desc(PersonalMemory.priority), desc(PersonalMemory.updated_at))
         result = await self._session.execute(q)
         return list(result.scalars().all())
+
+    @staticmethod
+    def _scope_filter(project: str | None):
+        """Return SQLAlchemy filter matching global memories + matching project memories."""
+        clean_proj = (project or "").strip() or None
+        if clean_proj:
+            return or_(
+                PersonalMemory.scope.in_(_GLOBAL_COMPAT_SCOPES),
+                and_(
+                    PersonalMemory.scope == "project",
+                    PersonalMemory.project == clean_proj,
+                ),
+            )
+        return PersonalMemory.scope.in_(_GLOBAL_COMPAT_SCOPES)
 
     async def list_for_pull(
         self,
         user_id: str,
         context_embedding: list[float] | None = None,
         context_similarity_threshold: float = 0.5,
+        project: str | None = None,
     ) -> list[PersonalMemory]:
-        """Static rows all + dynamic rows (all if no embedding, else similarity-filtered)."""
+        """Pull global + matching-project memories (static + context-matched dynamic)."""
+        scope_cond = self._scope_filter(project)
         if not context_embedding:
-            static_rows = await self.list_by_user(user_id, profile_kind="static")
-            dynamic_rows = await self.list_by_user(user_id, profile_kind="dynamic")
+            q_static = (
+                select(PersonalMemory)
+                .where(PersonalMemory.user_id == user_id)
+                .where(scope_cond)
+                .where(PersonalMemory.profile_kind == "static")
+                .order_by(desc(PersonalMemory.priority), desc(PersonalMemory.updated_at))
+            )
+            q_dynamic = (
+                select(PersonalMemory)
+                .where(PersonalMemory.user_id == user_id)
+                .where(scope_cond)
+                .where(PersonalMemory.profile_kind == "dynamic")
+                .order_by(desc(PersonalMemory.priority), desc(PersonalMemory.updated_at))
+            )
+            static_rows = list((await self._session.execute(q_static)).scalars().all())
+            dynamic_rows = list((await self._session.execute(q_dynamic)).scalars().all())
             return static_rows + dynamic_rows
 
-        similarity_expr = (1 - PersonalMemory.embedding.cosine_distance(context_embedding)).label("similarity")
+        similarity_expr = (1 - PersonalMemory.embedding.cosine_distance(context_embedding)).label(
+            "similarity"
+        )
         q_static = (
             select(PersonalMemory, similarity_expr)
             .where(PersonalMemory.user_id == user_id)
+            .where(scope_cond)
             .where(PersonalMemory.profile_kind == "static")
             .order_by(desc(PersonalMemory.priority), desc(PersonalMemory.updated_at))
         )
@@ -68,6 +146,7 @@ class PersonalMemoryRepository:
         q_dynamic = (
             select(PersonalMemory, similarity_expr)
             .where(PersonalMemory.user_id == user_id)
+            .where(scope_cond)
             .where(PersonalMemory.profile_kind == "dynamic")
             .where(PersonalMemory.embedding.is_not(None))
             .where(similarity_expr >= context_similarity_threshold)
@@ -95,6 +174,9 @@ class PersonalMemoryRepository:
         embedding: list[float],
         threshold: float,
         profile_kind: str,
+        *,
+        scope: str | None = None,
+        project: str | None = None,
     ) -> PersonalMemory | None:
         if not embedding:
             return None
@@ -105,9 +187,12 @@ class PersonalMemoryRepository:
             .where(PersonalMemory.profile_kind == profile_kind)
             .where(PersonalMemory.embedding.is_not(None))
             .where(similarity_expr >= threshold)
-            .order_by(desc(similarity_expr))
-            .limit(1)
         )
+        if scope == "project" and project:
+            q = q.where(PersonalMemory.scope == "project", PersonalMemory.project == project)
+        elif scope == "global":
+            q = q.where(PersonalMemory.scope.in_(("global", "generic")))
+        q = q.order_by(desc(similarity_expr)).limit(1)
         result = await self._session.execute(q)
         row = result.first()
         if row:
@@ -118,18 +203,22 @@ class PersonalMemoryRepository:
         self,
         user_id: str,
         content: str,
-        scope: str = "generic",
+        scope: str = "global",
         context_hint: str | None = None,
         embedding: list[float] | None = None,
         profile_kind: str | None = None,
         persona: str = "general",
         priority: int = 50,
+        project: str | None = None,
     ) -> PersonalMemory:
-        pk = profile_kind or ("dynamic" if scope == "context" else "static")
+        scope_norm, proj_norm, pk = normalize_scope(
+            scope, project=project, profile_kind=profile_kind
+        )
         mem = PersonalMemory(
             user_id=user_id,
             content=content,
-            scope=scope,
+            scope=scope_norm,
+            project=proj_norm,
             profile_kind=pk,
             context_hint=context_hint,
             embedding=embedding,
@@ -151,15 +240,25 @@ class PersonalMemoryRepository:
         profile_kind: str | None = None,
         persona: str | None = None,
         priority: int | None = None,
+        project: str | None = None,
     ) -> PersonalMemory | None:
         mem = await self.get_by_id(memory_id, user_id)
         if mem is None:
             return None
         if content is not None:
             mem.content = content
-        if scope is not None:
-            mem.scope = scope
-        if profile_kind is not None:
+        if scope is not None or project is not None:
+            eff_scope = scope if scope is not None else mem.scope
+            eff_proj = project if project is not None else mem.project
+            eff_pk = profile_kind if profile_kind is not None else mem.profile_kind
+            scope_norm, proj_norm, pk_norm = normalize_scope(
+                eff_scope, project=eff_proj, profile_kind=eff_pk
+            )
+            mem.scope = scope_norm
+            mem.project = proj_norm
+            if profile_kind is not None:
+                mem.profile_kind = pk_norm
+        elif profile_kind is not None:
             mem.profile_kind = profile_kind
         if context_hint is not None:
             mem.context_hint = context_hint
@@ -186,16 +285,26 @@ class PersonalMemoryRepository:
         user_id: str,
         content: str,
         embedding: list[float],
-        scope: str = "generic",
+        scope: str = "global",
         context_hint: str | None = None,
         threshold: float = PERSONAL_MEMORY_OVERWRITE_THRESHOLD,
         profile_kind: str | None = None,
         persona: str = "general",
         priority: int = 50,
+        project: str | None = None,
     ) -> PersonalMemory:
-        """Insert or overwrite by semantic similarity within the same profile_kind."""
-        pk = profile_kind or ("dynamic" if scope == "context" else "static")
-        existing = await self.find_most_similar(user_id, embedding, threshold, pk)
+        """Insert or overwrite by semantic similarity within the same (scope, project, profile_kind)."""
+        scope_norm, proj_norm, pk = normalize_scope(
+            scope, project=project, profile_kind=profile_kind
+        )
+        existing = await self.find_most_similar(
+            user_id,
+            embedding,
+            threshold,
+            pk,
+            scope=scope_norm,
+            project=proj_norm,
+        )
         if existing:
             prev_pri = int(existing.priority or 50)
             in_pri = int(priority or 50)
@@ -204,7 +313,8 @@ class PersonalMemoryRepository:
                 existing.id,
                 user_id,
                 content=content,
-                scope=scope,
+                scope=scope_norm,
+                project=proj_norm,
                 context_hint=context_hint,
                 embedding=embedding,
                 profile_kind=pk,
@@ -216,7 +326,8 @@ class PersonalMemoryRepository:
         return await self.create(
             user_id=user_id,
             content=content,
-            scope=scope,
+            scope=scope_norm,
+            project=proj_norm,
             context_hint=context_hint,
             embedding=embedding,
             profile_kind=pk,
@@ -236,16 +347,44 @@ class PersonalMemoryRepository:
         return result.scalar_one()
 
     async def delete_oldest_by_persona(self, user_id: str, persona: str) -> bool:
-        """Delete the lowest-priority/oldest memory for a (user_id, persona) pair.
-
-        Evicts dynamic memories before static core preferences, then lowest
-        priority first, then oldest created_at first. Returns True if deleted.
-        """
-        # Evict dynamic before static, lower priority before higher, oldest first
+        """Delete the lowest-priority/oldest memory for a (user_id, persona) pair."""
         q = (
             select(PersonalMemory.id)
             .where(PersonalMemory.user_id == user_id)
             .where(PersonalMemory.persona == persona)
+            .order_by(
+                case((PersonalMemory.profile_kind == "dynamic", 0), else_=1).asc(),
+                PersonalMemory.priority.asc(),
+                PersonalMemory.created_at.asc(),
+            )
+            .limit(1)
+        )
+        result = await self._session.execute(q)
+        oldest_id = result.scalar_one_or_none()
+        if oldest_id is None:
+            return False
+        await self._session.execute(delete(PersonalMemory).where(PersonalMemory.id == oldest_id))
+        return True
+
+    async def count_by_project(self, user_id: str, project: str) -> int:
+        """Count project-scoped memories for a (user_id, project) pair."""
+        q = (
+            select(func.count())
+            .select_from(PersonalMemory)
+            .where(PersonalMemory.user_id == user_id)
+            .where(PersonalMemory.scope == "project")
+            .where(PersonalMemory.project == project)
+        )
+        result = await self._session.execute(q)
+        return result.scalar_one()
+
+    async def delete_oldest_by_project(self, user_id: str, project: str) -> bool:
+        """Delete the lowest-priority/oldest project-scoped memory for (user_id, project)."""
+        q = (
+            select(PersonalMemory.id)
+            .where(PersonalMemory.user_id == user_id)
+            .where(PersonalMemory.scope == "project")
+            .where(PersonalMemory.project == project)
             .order_by(
                 case((PersonalMemory.profile_kind == "dynamic", 0), else_=1).asc(),
                 PersonalMemory.priority.asc(),

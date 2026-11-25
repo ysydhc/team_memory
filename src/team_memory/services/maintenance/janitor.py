@@ -494,11 +494,16 @@ class MemoryJanitor:
                 if isinstance(getattr(m, "content", None), str) and isinstance(getattr(m, "user_id", None), str)
             ]
 
-            by_group: dict[str, list[PersonalMemory]] = {}
+            by_group: dict[tuple[str, str, str, str], list[PersonalMemory]] = {}
             local_aliases = {"default", "developer", "admin", "yeshouyou"}
             for m in static_memories:
+                tid_key = str(getattr(m, "tenant_id", "") or "default")
                 uid_key = "local_user" if m.user_id in local_aliases else m.user_id
-                by_group.setdefault(uid_key, []).append(m)
+                scope_key = str(getattr(m, "scope", "global") or "global")
+                if scope_key == "generic":
+                    scope_key = "global"
+                proj_key = str(getattr(m, "project", "") or "") if scope_key == "project" else ""
+                by_group.setdefault((tid_key, uid_key, scope_key, proj_key), []).append(m)
 
             deduped_static_count = 0
             for _uid, items in by_group.items():

@@ -19,20 +19,23 @@ from __future__ import annotations
 # ============================================================
 
 # Actions map to operation categories
+_MEMBER_PERMISSIONS: set[str] = {
+    "read",
+    "search",
+    "create",
+    "update",
+    "delete",
+    "review",
+    "publish",
+    "feedback",
+    "export",
+    "import",
+}
+
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "admin": {"*"},  # Wildcard: all operations
-    "editor": {
-        "read",
-        "search",
-        "create",
-        "update",
-        "delete",
-        "review",
-        "publish",
-        "feedback",
-        "export",
-        "import",
-    },
+    "member": _MEMBER_PERMISSIONS,
+    "editor": _MEMBER_PERMISSIONS,  # Backward-compatible alias for member
     "viewer": {"read", "search", "feedback"},
 }
 

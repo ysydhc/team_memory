@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -46,6 +46,7 @@ class FaithfulnessResult:
     claims_detail: list[dict[str, Any]]  # [{claim, supported, reason}]
     raw_response: str
     retries_used: int = 0  # how many retries were needed (0 = first attempt succeeded)
+    used_indices: list[int] = field(default_factory=list)  # 1-based indices into contexts that supported claims
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -54,6 +55,7 @@ class FaithfulnessResult:
             "supported_claims": self.supported_claims,
             "claims_detail": self.claims_detail,
             "retries_used": self.retries_used,
+            "used_indices": self.used_indices,
         }
 
 
@@ -83,8 +85,10 @@ JUDGE_PROMPT = """你是一个 RAG (Retrieval-Augmented Generation) 评估专家
   "claims": [
     {{"claim": "具体陈述内容", "supported": true/false, "reason": "简短理由"}}
   ],
+  "used_indices": [1],
   "score": 0.0到1.0的浮点数
-}}"""
+}}
+其中 `used_indices` 为实际支撑了上述 supported claims 的检索结果编号（从 1 开始，如 [1, 2]；若未引用任何检索结果则为 []）。"""
 
 
 def _is_retryable_error(exc: Exception) -> bool:
@@ -280,10 +284,22 @@ class FaithfulnessJudge:
         supported = sum(1 for c in claims if c.get("supported", False))
         score = data.get("score", supported / total if total > 0 else 1.0)
 
+        raw_indices = data.get("used_indices", [])
+        used_indices: list[int] = []
+        if isinstance(raw_indices, list):
+            for idx in raw_indices:
+                try:
+                    val = int(idx)
+                    if val >= 1 and val not in used_indices:
+                        used_indices.append(val)
+                except (TypeError, ValueError):
+                    continue
+
         return FaithfulnessResult(
             score=float(score),
             total_claims=total,
             supported_claims=supported,
             claims_detail=claims,
             raw_response=raw[:500],
+            used_indices=used_indices,
         )

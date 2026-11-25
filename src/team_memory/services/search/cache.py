@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from team_memory.embedding.base import EmbeddingProvider
 
 from team_memory import io_logger
+from team_memory.storage.tenant_context import get_current_tenant_id
 
 logger = logging.getLogger("team_memory.cache")
 
@@ -317,7 +318,7 @@ class SearchCache:
         cross-user cache pollution. include_archives differentiates archive-inclusive results.
         reranker_signature avoids serving un-reranked JSON when server-side rerank is enabled.
         """
-        parts = [query.strip().lower()]
+        parts = [f"tenant:{get_current_tenant_id()}", query.strip().lower()]
         if tags:
             parts.extend(sorted(tags))
         if project:
@@ -375,6 +376,8 @@ class SearchCache:
         self,
         text: str,
         embedding_provider: "EmbeddingProvider",
+        *,
+        timeout_seconds: float | None = None,
     ) -> list[float]:
         """Get embedding from cache or compute it.
 
@@ -385,6 +388,7 @@ class SearchCache:
         Args:
             text: Text to encode.
             embedding_provider: Provider to use if cache misses.
+            timeout_seconds: Optional hard timeout for the provider call.
 
         Returns:
             The embedding vector.
@@ -402,34 +406,40 @@ class SearchCache:
             logger.debug("Embedding cache miss for: %s", text_preview)
 
         # Slow path: acquire per-key lock to prevent stampede
-        async with self._locks[key]:
-            # Double-check after acquiring lock
-            if self.enabled:
-                cached = await self._embedding_cache.get(key)
-                if cached is not None:
-                    io_logger.log_internal("embedding", {"hit": True, "text_preview": text_preview})
-                    logger.debug("Embedding cache hit (after lock) for: %s", text_preview)
-                    # Clean up lock to prevent memory leak
-                    self._locks.pop(key, None)
-                    return cached
+        try:
+            async with self._locks[key]:
+                # Double-check after acquiring lock
+                if self.enabled:
+                    cached = await self._embedding_cache.get(key)
+                    if cached is not None:
+                        io_logger.log_internal("embedding", {"hit": True, "text_preview": text_preview})
+                        logger.debug("Embedding cache hit (after lock) for: %s", text_preview)
+                        return cached
 
-            # Compute embedding
-            t0 = time.monotonic()
-            embedding = await embedding_provider.encode_single(text)
-            duration_ms = int((time.monotonic() - t0) * 1000)
+                # Compute embedding with optional hard timeout
+                t0 = time.monotonic()
+                coro = embedding_provider.encode_single(text)
+                if timeout_seconds is not None and timeout_seconds > 0:
+                    embedding = await asyncio.wait_for(coro, timeout=timeout_seconds)
+                else:
+                    embedding = await coro
+                duration_ms = int((time.monotonic() - t0) * 1000)
 
-            if self.enabled:
-                await self._embedding_cache.put(key, embedding)
+                if self.enabled:
+                    await self._embedding_cache.put(key, embedding)
 
-            io_logger.log_internal(
-                "embedding",
-                {"hit": False, "text_preview": text_preview, "duration_ms": duration_ms},
-                duration_ms=float(duration_ms),
-            )
+                io_logger.log_internal(
+                    "embedding",
+                    {"hit": False, "text_preview": text_preview, "duration_ms": duration_ms},
+                    duration_ms=float(duration_ms),
+                )
 
-            # Clean up lock to prevent memory leak
-            self._locks.pop(key, None)
-            return embedding
+                return embedding
+        finally:
+            # Clean up lock to prevent memory leak (even on timeout/exception)
+            lock = self._locks.get(key)
+            if lock is not None and not lock.locked():
+                self._locks.pop(key, None)
 
     async def clear(self) -> None:
         """Clear all caches. Call after data mutations."""

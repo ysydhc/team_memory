@@ -1,3 +1,7 @@
+# Node / Web v2 frontend
+web-ui/node_modules/
+web-ui/.vite/
+
 # Python
 __pycache__/
 *.py[cod]

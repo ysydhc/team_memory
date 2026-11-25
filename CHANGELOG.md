@@ -6,6 +6,25 @@
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-11-25
+
+### Added
+
+- **Multi-Tenant Hard Isolation (PostgreSQL RLS)**：
+  - 新增 Alembic 迁移 `023_multitenant_rls`：建表 `tenants` / `tenant_members`，为 13 张核心表增加 `tenant_id NOT NULL` 并平滑回填至 `default` 租户（100% 向后兼容存量 API Key 与 MCP）。
+  - 创建受限角色 `tm_app_user`（`NOLOGIN NOBYPASSRLS`），在 `get_session()` 事务内通过 `SET LOCAL ROLE tm_app_user` + `set_config('app.current_tenant_id', ...)` 强制启用 12 张业务表 PostgreSQL `FORCE ROW LEVEL SECURITY`。
+  - 新增 `/api/v1/tenants/*` 租户切换、成员 RBAC 管理（`admin / member / viewer`）与每租户个人 API Key 管理接口；`SearchCache` 缓存键注入 `tenant_id` 防止跨租户缓存污染。
+- **Web v2 极简人类控制台 (`web-ui/`)**：
+  - 采用 Vite + React 19 + TypeScript + Tailwind CSS v4 重构前端，构建产物直出 `src/team_memory/web/static/dist/` 并由 FastAPI `:9111` 单进程静态托管（新增 `make web-build` / `make web-dev`）。
+  - 交付左上角多租户 Org Switcher、全局 `⌘K / Ctrl+K` 语义搜索弹窗、统一「记忆库」工作台（经验/待审草稿/会话归档/我的画像 + Debug 4 路召回得分 + 560px Markdown 右侧详情抽屉）、10 秒接入页（Antigravity / Claude Code / Cursor / `tm-cli` 一键复制 + 连通性测试 + Key 轮换 + Admin 成员/重置密码）、「驾驶舱」（5 大子系统健康灯 + 30d/180d 线性/平方根折线图 + Golden Eval 消融摘要）与 Admin 二级「系统运维」页。
+  - 新增 `POST /api/v1/experiences/{id}/supersede` 双时态废弃接口。
+
+### Removed
+
+- 下线旧版 4,300 行单文件前端（`src/team_memory/web/static/index.html` 与 `src/team_memory/web/static/js/*`）。
+
+---
+
 ## [0.1.3] — 2026-04-07
 
 ### Security

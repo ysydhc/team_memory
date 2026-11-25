@@ -160,6 +160,8 @@ class SearchPipelineResult:
     duration_ms: int = 0
     stage_metrics: dict[str, int] = field(default_factory=dict)
     stage_counts: dict[str, int] = field(default_factory=dict)
+    degraded: bool = False
+    degraded_reason: str | None = None
 
 
 def coerce_cached_search_pipeline_result(raw: SearchPipelineResult | Mapping[str, Any]) -> SearchPipelineResult:
@@ -188,6 +190,8 @@ def coerce_cached_search_pipeline_result(raw: SearchPipelineResult | Mapping[str
         duration_ms=int(raw.get("duration_ms", 0)),
         stage_metrics=stage_metrics,
         stage_counts=stage_counts,
+        degraded=bool(raw.get("degraded", False)),
+        degraded_reason=raw.get("degraded_reason"),
     )
 
 
@@ -817,7 +821,8 @@ class SearchPipeline:
             query_sql = f"""
                 SELECT id, title, description, solution, tags, project,
                        experience_type, exp_status, recall_count, used_count,
-                       negative_feedback_count, created_at
+                       negative_feedback_count, created_at,
+                       implicit_positive_count, implicit_negative_count
                 FROM experiences
                 WHERE id::text = ANY(:ids)
                   AND {status_clause}
@@ -856,6 +861,8 @@ class SearchPipeline:
                                     if len(row) > 11 and row[11]
                                     else None
                                 ),
+                                "implicit_positive_count": (row[12] or 0) if len(row) > 12 else 0,
+                                "implicit_negative_count": (row[13] or 0) if len(row) > 13 else 0,
                             }
                 except Exception:
                     if hasattr(active_session, "rollback"):
@@ -894,6 +901,8 @@ class SearchPipeline:
                                         if len(row) > 11 and row[11]
                                         else None
                                     ),
+                                    "implicit_positive_count": (row[12] or 0) if len(row) > 12 else 0,
+                                    "implicit_negative_count": (row[13] or 0) if len(row) > 13 else 0,
                                 }
                 except Exception:
                     pass
@@ -1275,7 +1284,8 @@ class SearchPipeline:
                     sql_text("""
                         SELECT id, title, description, solution, tags, project,
                                experience_type, exp_status, recall_count, used_count,
-                               negative_feedback_count, created_at
+                               negative_feedback_count, created_at,
+                               implicit_positive_count, implicit_negative_count
                         FROM experiences
                         WHERE id::text = ANY(:ids)
                           AND exp_status = ANY(:statuses)
@@ -1322,6 +1332,8 @@ class SearchPipeline:
                                 "used_count": row[9] or 0,
                                 "negative_feedback_count": row[10] or 0,
                                 "created_at": row[11].isoformat() if row[11] else None,
+                                "implicit_positive_count": (row[12] or 0) if len(row) > 12 else 0,
+                                "implicit_negative_count": (row[13] or 0) if len(row) > 13 else 0,
                             },
                             score=t_sim,
                             similarity=t_sim,

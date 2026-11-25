@@ -180,8 +180,10 @@ class TestEnsureDefaultAdmin:
         with patch("team_memory.storage.database.get_session", side_effect=mock_get_session):
             created = await ensure_default_admin("sqlite+aiosqlite:///:memory:", "secret123")
         assert created is True
-        mock_session.add.assert_called_once()
-        added = mock_session.add.call_args[0][0]
+        added_objs = [c[0][0] for c in mock_session.add.call_args_list]
+        api_keys = [o for o in added_objs if hasattr(o, "user_name")]
+        assert len(api_keys) == 1
+        added = api_keys[0]
         assert added.user_name == "admin"
         assert added.role == "admin"
         assert added.is_active is True
@@ -265,7 +267,10 @@ class TestEnsureDefaultAdmin:
         ):
             created = await ensure_default_admin("sqlite+aiosqlite:///:memory:", "secret123")
         assert created is True
-        added = mock_session.add.call_args[0][0]
+        added_objs = [c[0][0] for c in mock_session.add.call_args_list]
+        api_keys = [o for o in added_objs if hasattr(o, "user_name")]
+        assert len(api_keys) == 1
+        added = api_keys[0]
         assert added.user_name == "superadmin"
         assert added.role == "admin"
 

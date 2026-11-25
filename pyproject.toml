@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "team_memory"
-version = "0.2.2"
+version = "0.3.0"
 description = "Team experience database service based on MCP protocol"
 readme = "README.md"
 license = {text = "MIT"}
@@ -71,6 +71,9 @@ team-memory = "team_memory.server:main"
 team-memory-web = "team_memory.web.app:main"
 tm-cli = "team_memory.cli:main"
 tm-daemon = "team_memory.daemon.__main__:main"
+
+[tool.hatch.build]
+artifacts = ["src/team_memory/web/static/dist/**"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/team_memory"]

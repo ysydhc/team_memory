@@ -13,7 +13,7 @@ from team_memory.bootstrap import get_context
 from team_memory.config import RetrievalConfig, SearchConfig
 from team_memory.web import app as app_module
 from team_memory.web.auth_session import get_current_user
-from team_memory.web.dependencies import require_role
+from team_memory.web.dependencies import require_admin
 
 logger = logging.getLogger("team_memory.web")
 
@@ -58,7 +58,7 @@ async def get_retrieval_config(_user: User = Depends(get_current_user)) -> dict[
 @router.put("/config/retrieval")
 async def put_retrieval_config(
     body: dict[str, Any],
-    user: User = Depends(require_role("update")),
+    user: User = Depends(require_admin()),
 ) -> dict[str, Any]:
     try:
         new_cfg = _apply_merged(_settings().retrieval, RetrievalConfig, body)
@@ -80,7 +80,7 @@ async def get_search_config(_user: User = Depends(get_current_user)) -> dict[str
 @router.put("/config/search")
 async def put_search_config(
     body: dict[str, Any],
-    user: User = Depends(require_role("update")),
+    user: User = Depends(require_admin()),
 ) -> dict[str, Any]:
     try:
         new_cfg = _apply_merged(_settings().search, SearchConfig, body)

@@ -12,7 +12,8 @@ from sqlalchemy import select, update
 
 from team_memory.auth.provider import DbApiKeyAuth, User, _hash_password
 from team_memory.storage.database import get_session
-from team_memory.storage.models import ApiKey
+from team_memory.storage.models import ApiKey, Tenant, TenantMember
+from team_memory.storage.tenant_context import DEFAULT_TENANT_ID
 from team_memory.web import app as app_module
 from team_memory.web.app import _get_db_url
 from team_memory.web.auth_session import (
@@ -139,20 +140,54 @@ async def logout():
 
 @router.get("/auth/me")
 async def auth_me(user: User = Depends(get_current_user)):
-    """Current auth status and permissions."""
+    """Current auth status, permissions, active tenant, and user's tenant memberships."""
     from team_memory.auth.permissions import ROLE_PERMISSIONS
 
     perms = ROLE_PERMISSIONS.get(user.role, set())
-    out = {
+    out: dict = {
         "user": user.name,
         "role": user.role,
+        "tenant_id": str(user.tenant_id),
         "permissions": sorted(perms) if "*" not in perms else ["*"],
     }
     if isinstance(_auth := app_module._auth, DbApiKeyAuth):
-        masked = await _auth.get_masked_key_for_user(user.name)
+        masked = await _auth.get_masked_key_for_user(user.name, tenant_id=user.tenant_id)
         out["api_key_masked"] = masked if masked else "••••****••••"
+        try:
+            db_url = _get_db_url()
+            async with get_session(db_url) as session:
+                res = await session.execute(
+                    select(Tenant, TenantMember.role)
+                    .join(TenantMember, TenantMember.tenant_id == Tenant.id)
+                    .where(TenantMember.user_id == user.name)
+                    .order_by(Tenant.created_at.asc())
+                )
+                tenants_list = [
+                    {
+                        "id": str(t.id),
+                        "slug": t.slug,
+                        "name": t.name,
+                        "role": r,
+                    }
+                    for t, r in res.all()
+                ]
+                out["tenants"] = tenants_list
+                current_t = next((t for t in tenants_list if t["id"] == str(user.tenant_id)), None)
+                out["current_tenant"] = current_t
+        except Exception:
+            out["tenants"] = []
+            out["current_tenant"] = None
     else:
         out["api_key_masked"] = None
+        out["tenants"] = [
+            {
+                "id": str(user.tenant_id or DEFAULT_TENANT_ID),
+                "slug": "default",
+                "name": "Default Workspace",
+                "role": "member" if user.role == "editor" else user.role,
+            }
+        ]
+        out["current_tenant"] = out["tenants"][0]
     return out
 
 
@@ -212,7 +247,7 @@ async def rotate_own_key(user: User = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="Key rotation requires db_api_key auth mode")
 
     try:
-        result = await _auth.rotate_key_for_user_db(user.name)
+        result = await _auth.rotate_key_for_user_db(user.name, tenant_id=user.tenant_id)
         return {"success": True, "api_key": result["api_key"]}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -238,11 +273,17 @@ async def admin_reset_password(
     db_url = _get_db_url()
     async with get_session(db_url) as session:
         result = await session.execute(select(ApiKey).where(ApiKey.user_name == username))
-        db_key = result.scalar_one_or_none()
-        if not db_key:
+        rows = list(result.scalars().all())
+        if not rows:
+            single = result.scalar_one_or_none()
+            if single is not None:
+                rows = [single]
+        if not rows:
             raise HTTPException(status_code=404, detail="用户不存在")
 
-        db_key.password_hash = _hash_password(req.new_password)
+        new_hash = _hash_password(req.new_password)
+        for db_key in rows:
+            db_key.password_hash = new_hash
         await session.flush()
 
     return {"message": "密码已重置"}
@@ -283,6 +324,7 @@ async def create_api_key(
                 role=req.role,
                 password=req.password,
                 generate_api_key=req.generate_api_key,
+                tenant_id=user.tenant_id,
             )
             return {"item": result, "message": "Created successfully"}
     except ValueError as e:
@@ -365,8 +407,8 @@ async def update_api_key(
 
         values = {}
         if req.role is not None:
-            if req.role not in ("admin", "editor", "viewer"):
-                raise HTTPException(status_code=422, detail="role must be admin, editor, or viewer")
+            if req.role not in ("admin", "member", "editor", "viewer"):
+                raise HTTPException(status_code=422, detail="role must be admin, member, editor, or viewer")
             values["role"] = req.role
         if req.is_active is not None:
             values["is_active"] = req.is_active

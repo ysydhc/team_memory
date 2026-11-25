@@ -16,6 +16,7 @@ from team_memory.web.routes import (
     observability,
     personal_memory,
     search,
+    tenants,
 )
 
 
@@ -29,6 +30,7 @@ def mount_all(parent_router: APIRouter) -> None:
     parent_router.include_router(janitor.router)
     parent_router.include_router(observability.router)
     parent_router.include_router(auth.router)
+    parent_router.include_router(tenants.router)
     parent_router.include_router(config.router)
     parent_router.include_router(search.router)
     parent_router.include_router(personal_memory.router)

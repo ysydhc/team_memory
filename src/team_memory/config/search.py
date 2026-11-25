@@ -58,6 +58,22 @@ class SearchConfig(BaseModel):
     min_similarity_short: float = 0.45
     query_expansion_enabled: bool = False
     query_expansion_timeout_seconds: float = 3.0
+    query_expansion_mode: Literal["fallback", "always"] = Field(
+        default="fallback",
+        description="LLM query expansion mode: 'fallback' (only when 1st pass has low count/similarity) or 'always'.",
+    )
+    query_expansion_fallback_min_results: int = Field(
+        default=3,
+        description="Minimum 1st-pass candidates required to skip fallback LLM query expansion.",
+    )
+    query_expansion_fallback_min_similarity: float = Field(
+        default=0.65,
+        description="Minimum 1st-pass top-1 similarity required to skip fallback LLM query expansion.",
+    )
+    embedding_timeout_seconds: float = Field(
+        default=2.5,
+        description="Hard timeout in seconds for a single query embedding call before degrading to FTS+Graph.",
+    )
 
     # Popularity boost (反哺排序)
     popularity_enabled: bool = Field(

@@ -4,7 +4,7 @@ import asyncio
 import logging
 from pathlib import PurePosixPath
 
-from team_memory.services.memory.ops.recall import _infer_recall_project
+from team_memory.services.memory.ops.recall import _infer_recall_project, build_feedback_instruction
 from team_memory.utils.project import resolve_project as _resolve_project
 
 logger = logging.getLogger("team_memory")
@@ -28,7 +28,10 @@ async def op_context(
         file_path=file_paths[0] if file_paths else None,
         query_text=task_description,
     )
-    max_side = getattr(settings.mcp, "profile_max_strings_per_side", None) or 20
+    mcp_cfg = getattr(settings, "mcp", None)
+    max_side = getattr(mcp_cfg, "profile_max_strings_per_side", None) or 8
+    max_items = getattr(mcp_cfg, "profile_max_items", None) or max_side
+    max_tokens = getattr(mcp_cfg, "profile_max_tokens", None) or 400
     result: dict = {
         "user": user,
         "project": resolved_project,
@@ -57,6 +60,9 @@ async def op_context(
                 user_id=user,
                 current_context=context_text,
                 max_per_side=max_side,
+                max_items=max_items,
+                max_tokens=max_tokens,
+                project=resolved_project,
             )
         except Exception:
             logger.debug("Failed to build user profile", exc_info=True)
@@ -117,5 +123,8 @@ async def op_context(
     result["relevant_experiences"] = rel_exps
     if reranked is not None:
         result["search_reranked"] = reranked
+    fb_inst = build_feedback_instruction(rel_exps)
+    if fb_inst:
+        result["feedback_instruction"] = fb_inst
 
     return result

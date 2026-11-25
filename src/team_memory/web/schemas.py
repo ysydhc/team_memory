@@ -113,15 +113,15 @@ class SearchRequest(BaseModel):
 
 class ApiKeyCreateRequest(BaseModel):
     user_name: str
-    role: str = "editor"
+    role: str = "member"
     password: str | None = None
     generate_api_key: bool = False
 
     @field_validator("role")
     @classmethod
     def validate_role(cls, v: str) -> str:
-        if v not in ("admin", "editor", "viewer"):
-            raise ValueError("role must be admin, editor, or viewer")
+        if v not in ("admin", "member", "editor", "viewer"):
+            raise ValueError("role must be admin, member, editor, or viewer")
         return v
 
 

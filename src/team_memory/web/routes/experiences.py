@@ -236,6 +236,40 @@ async def revive_outdated_experience(
     return result
 
 
+@router.post("/experiences/{experience_id}/supersede")
+async def supersede_experience(
+    experience_id: str,
+    user: User = Depends(require_role("update")),
+):
+    """Mark an experience as bi-temporally superseded (sets valid_until = now)."""
+    import uuid as _uuid
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from team_memory.storage.database import get_session
+    from team_memory.storage.models import Experience
+    from team_memory.web.app import _get_db_url
+
+    try:
+        eid = _uuid.UUID(experience_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Experience not found") from exc
+
+    async with get_session(_get_db_url()) as session:
+        res = await session.execute(select(Experience).where(Experience.id == eid))
+        exp = res.scalar_one_or_none()
+        if exp is None:
+            raise HTTPException(status_code=404, detail="Experience not found")
+        now = datetime.now(timezone.utc)
+        exp.valid_until = now
+        history = list(exp.mutation_history or [])
+        history.append({"action": "supersede", "by": user.name, "at": now.isoformat()})
+        exp.mutation_history = history
+        await session.flush()
+        return {"message": "已标记为历史废弃 (Superseded)", "experience": exp.to_dict()}
+
+
 @router.patch("/experiences/{experience_id}/status")
 async def change_experience_status(
     experience_id: str,

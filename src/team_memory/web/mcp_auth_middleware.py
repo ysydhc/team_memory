@@ -85,6 +85,10 @@ class MCPAuthMiddleware:
             return
 
         # Store on scope state — shared with FastMCP's RequestContextMiddleware
+        from team_memory.storage.tenant_context import tenant_scope
+
         scope.setdefault("state", {})["mcp_user"] = user.name
-        logger.debug("MCP HTTP auth: user=%s", user.name)
-        await self.app(scope, receive, send)
+        scope["state"]["mcp_tenant_id"] = user.tenant_id
+        logger.debug("MCP HTTP auth: user=%s tenant=%s", user.name, user.tenant_id)
+        with tenant_scope(user.tenant_id):
+            await self.app(scope, receive, send)

@@ -599,6 +599,9 @@ class ExperienceService:
         feedback_by: str,
         comment: str | None = None,
         fitness_score: int | None = None,
+        source: str = "explicit_user",
+        weight: float = 1.0,
+        search_log_id: str | None = None,
         *,
         session=None,  # noqa: ANN001
         **kwargs: object,
@@ -614,26 +617,45 @@ class ExperienceService:
             if experience is None:
                 return False
 
-            await repo.add_feedback(
-                experience_id=exp_uuid,
-                rating=rating,
-                feedback_by=feedback_by,
-                comment=comment,
-                fitness_score=fitness_score,
-            )
+            add_kwargs: dict[str, object] = {
+                "experience_id": exp_uuid,
+                "rating": rating,
+                "feedback_by": feedback_by,
+                "comment": comment,
+                "fitness_score": fitness_score,
+            }
+            if source != "explicit_user" or weight != 1.0 or search_log_id is not None:
+                add_kwargs["source"] = source
+                add_kwargs["weight"] = weight
+                if search_log_id is not None:
+                    add_kwargs["search_log_id"] = uuid.UUID(search_log_id)
 
+            await repo.add_feedback(**add_kwargs)
+
+            is_implicit = source.startswith("implicit_")
             # Add quality score bonus for positive feedback (rating >= 4)
             # or penalty + negative_feedback_count increment for negative feedback (rating <= 2)
             if rating >= 4:
-                await repo.increment_quality_score(exp_uuid, 2.0 if rating == 5 else 1.0)
-                await repo.increment_used_count(exp_uuid)
+                delta = (2.0 if rating == 5 else 1.0) * float(weight)
+                await repo.increment_quality_score(exp_uuid, delta)
+                if is_implicit:
+                    if hasattr(repo, "increment_implicit_positive_count"):
+                        await repo.increment_implicit_positive_count(exp_uuid)
+                else:
+                    await repo.increment_used_count(exp_uuid)
             elif rating <= 2:
                 import inspect
 
-                res_q = repo.increment_quality_score(exp_uuid, -3.0)
+                delta = -3.0 * float(weight)
+                res_q = repo.increment_quality_score(exp_uuid, delta)
                 if inspect.isawaitable(res_q):
                     await res_q
-                if hasattr(repo, "increment_negative_feedback_count"):
+                if is_implicit:
+                    if hasattr(repo, "increment_implicit_negative_count"):
+                        res_n = repo.increment_implicit_negative_count(exp_uuid)
+                        if inspect.isawaitable(res_n):
+                            await res_n
+                elif hasattr(repo, "increment_negative_feedback_count"):
                     res_n = repo.increment_negative_feedback_count(exp_uuid)
                     if inspect.isawaitable(res_n):
                         await res_n
@@ -645,6 +667,8 @@ class ExperienceService:
                         "experience_id": experience_id,
                         "rating": rating,
                         "feedback_by": feedback_by,
+                        "source": source,
+                        "weight": weight,
                     },
                 )
             return True

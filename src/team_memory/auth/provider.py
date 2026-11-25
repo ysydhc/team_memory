@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 
 import bcrypt
 
+from team_memory.storage.tenant_context import DEFAULT_TENANT_ID, parse_tenant_uuid
+
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,7 +49,8 @@ class User:
     """Authenticated user information."""
 
     name: str
-    role: str  # "admin", "editor", or "viewer"
+    role: str  # "admin", "member" (compat "editor"), or "viewer"
+    tenant_id: str = str(DEFAULT_TENANT_ID)
 
 
 class AuthProvider(ABC):
@@ -102,9 +105,15 @@ class ApiKeyAuth(AuthProvider):
             return hashlib.sha256(api_key.encode()).hexdigest()
         return _hmac.new(secret.encode(), api_key.encode(), hashlib.sha256).hexdigest()
 
-    def register_key(self, api_key: str, user_name: str, role: str = "member") -> None:
+    def register_key(
+        self,
+        api_key: str,
+        user_name: str,
+        role: str = "member",
+        tenant_id: str = str(DEFAULT_TENANT_ID),
+    ) -> None:
         key_hash = self.hash_key(api_key)
-        self._keys[key_hash] = User(name=user_name, role=role)
+        self._keys[key_hash] = User(name=user_name, role=role, tenant_id=str(tenant_id))
 
     async def authenticate(self, credentials: dict) -> User | None:
         api_key = credentials.get("api_key", "")
@@ -165,7 +174,7 @@ class DbApiKeyAuth(ApiKeyAuth):
             from sqlalchemy import select
 
             from team_memory.storage.database import get_session
-            from team_memory.storage.models import ApiKey
+            from team_memory.storage.models import ApiKey, TenantMember
 
             async with get_session(self._db_url) as session:
                 result = await session.execute(
@@ -176,7 +185,21 @@ class DbApiKeyAuth(ApiKeyAuth):
                 )
                 db_key = result.scalar_one_or_none()
                 if db_key is not None:
-                    user = User(name=db_key.user_name, role=db_key.role)
+                    tid = db_key.tenant_id or DEFAULT_TENANT_ID
+                    # Resolve role: if key itself is viewer (read-only), keep viewer;
+                    # otherwise check tenant_members role (fallback to db_key.role).
+                    effective_role = db_key.role
+                    if effective_role != "viewer":
+                        tm_res = await session.execute(
+                            select(TenantMember.role).where(
+                                TenantMember.tenant_id == tid,
+                                TenantMember.user_id == db_key.user_name,
+                            )
+                        )
+                        member_role = tm_res.scalar_one_or_none()
+                        if member_role:
+                            effective_role = member_role
+                    user = User(name=db_key.user_name, role=effective_role, tenant_id=str(tid))
                     self._keys[key_hash] = user
                     return user
         except Exception:
@@ -189,19 +212,35 @@ class DbApiKeyAuth(ApiKeyAuth):
             from sqlalchemy import select
 
             from team_memory.storage.database import get_session
-            from team_memory.storage.models import ApiKey
+            from team_memory.storage.models import ApiKey, TenantMember
 
             async with get_session(self._db_url) as session:
-                result = await session.execute(select(ApiKey).where(ApiKey.user_name == username))
+                result = await session.execute(
+                    select(ApiKey)
+                    .where(
+                        ApiKey.user_name == username,
+                        ApiKey.is_active == True,  # noqa: E712
+                        ApiKey.password_hash.isnot(None),
+                    )
+                    .order_by(ApiKey.id.asc())
+                    .limit(1)
+                )
                 db_key = result.scalar_one_or_none()
-                if db_key is None:
-                    return None
-                if not db_key.is_active:
-                    return None
-                if not db_key.password_hash:
+                if db_key is None or not db_key.password_hash:
                     return None
                 if _verify_password(password, db_key.password_hash):
-                    return User(name=db_key.user_name, role=db_key.role)
+                    tid = db_key.tenant_id or DEFAULT_TENANT_ID
+                    effective_role = db_key.role
+                    tm_res = await session.execute(
+                        select(TenantMember.role).where(
+                            TenantMember.tenant_id == tid,
+                            TenantMember.user_id == db_key.user_name,
+                        )
+                    )
+                    member_role = tm_res.scalar_one_or_none()
+                    if member_role:
+                        effective_role = member_role
+                    return User(name=db_key.user_name, role=effective_role, tenant_id=str(tid))
         except Exception:
             logger.warning("DB password lookup failed", exc_info=True)
         return None
@@ -218,13 +257,15 @@ class DbApiKeyAuth(ApiKeyAuth):
             from team_memory.storage.models import ApiKey
 
             async with get_session(self._db_url) as session:
-                result = await session.execute(select(ApiKey).where(ApiKey.user_name == username))
-                db_key = result.scalar_one_or_none()
-                if db_key is None:
+                result = await session.execute(
+                    select(ApiKey).where(ApiKey.user_name == username).order_by(ApiKey.id.asc())
+                )
+                rows = result.scalars().all()
+                if not rows:
                     return "not_found"
-                if not db_key.is_active:
-                    return "pending"
-                return "active"
+                if any(r.is_active for r in rows):
+                    return "active"
+                return "pending"
         except Exception:
             logger.warning("check_user_status failed", exc_info=True)
             return "not_found"
@@ -237,27 +278,38 @@ class DbApiKeyAuth(ApiKeyAuth):
         from sqlalchemy import select
 
         from team_memory.storage.database import get_session
-        from team_memory.storage.models import ApiKey
+        from team_memory.storage.models import ApiKey, TenantMember
 
         async with get_session(self._db_url) as session:
-            existing = await session.execute(select(ApiKey).where(ApiKey.user_name == username))
+            existing = await session.execute(
+                select(ApiKey).where(ApiKey.user_name == username).limit(1)
+            )
             if existing.scalar_one_or_none() is not None:
                 raise ValueError(f"用户名 '{username}' 已存在")
 
             db_key = ApiKey(
+                tenant_id=DEFAULT_TENANT_ID,
                 key_hash=None,
                 user_name=username,
-                role="editor",
+                role="member",
                 is_active=False,
                 password_hash=_hash_password(password),
             )
             session.add(db_key)
+            session.add(
+                TenantMember(
+                    tenant_id=DEFAULT_TENANT_ID,
+                    user_id=username,
+                    role="member",
+                )
+            )
             await session.flush()
             return {
                 "id": db_key.id,
                 "user_name": db_key.user_name,
                 "role": db_key.role,
                 "is_active": db_key.is_active,
+                "tenant_id": str(db_key.tenant_id),
                 "created_at": db_key.created_at.isoformat() if db_key.created_at else None,
             }
 
@@ -303,19 +355,28 @@ class DbApiKeyAuth(ApiKeyAuth):
         self,
         session: "AsyncSession",
         user_name: str,
-        role: str = "editor",
+        role: str = "member",
         password: str | None = None,
         api_key: str | None = None,
         generate_api_key: bool = True,
+        tenant_id: str | None = None,
+        label: str | None = None,
+        allow_existing_user: bool = False,
     ) -> dict:
-        """Admin creates a user: active immediately; optionally generate API key."""
+        """Admin creates a user (or per-tenant key): active immediately; optionally generate API key."""
         from sqlalchemy import select
 
-        from team_memory.storage.models import ApiKey
+        from team_memory.storage.models import ApiKey, TenantMember
 
-        existing = await session.execute(select(ApiKey).where(ApiKey.user_name == user_name))
-        if existing.scalar_one_or_none() is not None:
-            raise ValueError(f"用户名 '{user_name}' 已存在")
+        tid = parse_tenant_uuid(tenant_id) or DEFAULT_TENANT_ID
+        if not allow_existing_user:
+            existing = await session.execute(
+                select(ApiKey)
+                .where(ApiKey.tenant_id == tid, ApiKey.user_name == user_name)
+                .limit(1)
+            )
+            if existing.scalar_one_or_none() is not None:
+                raise ValueError(f"用户名 '{user_name}' 已存在")
 
         raw_key: str | None = None
         key_hash: str | None = None
@@ -330,6 +391,7 @@ class DbApiKeyAuth(ApiKeyAuth):
 
         pwd_hash = _hash_password(password) if password else None
         db_key = ApiKey(
+            tenant_id=tid,
             key_hash=key_hash,
             user_name=user_name,
             role=role,
@@ -337,16 +399,31 @@ class DbApiKeyAuth(ApiKeyAuth):
             password_hash=pwd_hash,
             key_prefix=key_prefix,
             key_suffix=key_suffix,
+            label=label,
         )
         session.add(db_key)
+
+        # Ensure tenant membership exists
+        existing_member = await session.execute(
+            select(TenantMember).where(
+                TenantMember.tenant_id == tid,
+                TenantMember.user_id == user_name,
+            )
+        )
+        if existing_member.scalar_one_or_none() is None:
+            member_role = "member" if role == "editor" else role
+            session.add(TenantMember(tenant_id=tid, user_id=user_name, role=member_role))
+
         await session.flush()
 
         if key_hash:
-            self._keys[key_hash] = User(name=user_name, role=role)
+            self._keys[key_hash] = User(name=user_name, role=role, tenant_id=str(tid))
         return {
             "id": db_key.id,
             "user_name": db_key.user_name,
             "role": db_key.role,
+            "tenant_id": str(tid),
+            "label": db_key.label,
             "is_active": True,
             "api_key": raw_key,
             "created_at": db_key.created_at.isoformat() if db_key.created_at else None,
@@ -431,17 +508,24 @@ class DbApiKeyAuth(ApiKeyAuth):
         from team_memory.storage.models import ApiKey
 
         async with get_session(self._db_url) as session:
-            result = await session.execute(select(ApiKey).where(ApiKey.user_name == username))
-            db_key = result.scalar_one_or_none()
-            if db_key is None:
+            result = await session.execute(
+                select(ApiKey).where(ApiKey.user_name == username).order_by(ApiKey.id.asc())
+            )
+            rows = result.scalars().all()
+            if not rows:
                 return False
-            if db_key.password_hash and not _verify_password(old_password, db_key.password_hash):
+            primary = next((r for r in rows if r.password_hash), rows[0])
+            if primary.password_hash and not _verify_password(old_password, primary.password_hash):
                 return False
-            db_key.password_hash = _hash_password(new_password)
+            new_hash = _hash_password(new_password)
+            for row in rows:
+                row.password_hash = new_hash
             await session.flush()
             return True
 
-    async def get_masked_key_for_user(self, username: str) -> str | None:
+    async def get_masked_key_for_user(
+        self, username: str, tenant_id: str | None = None
+    ) -> str | None:
         """Return masked API key (prefix + '****' + suffix) for display; never full key."""
         from sqlalchemy import select
 
@@ -449,13 +533,16 @@ class DbApiKeyAuth(ApiKeyAuth):
         from team_memory.storage.models import ApiKey
 
         async with get_session(self._db_url) as session:
-            result = await session.execute(
-                select(ApiKey).where(
-                    ApiKey.user_name == username,
-                    ApiKey.key_hash.isnot(None),
-                    ApiKey.is_active == True,  # noqa: E712
-                )
+            stmt = select(ApiKey).where(
+                ApiKey.user_name == username,
+                ApiKey.key_hash.isnot(None),
+                ApiKey.is_active == True,  # noqa: E712
             )
+            tid = parse_tenant_uuid(tenant_id)
+            if tid is not None:
+                stmt = stmt.where(ApiKey.tenant_id == tid)
+            stmt = stmt.order_by(ApiKey.created_at.desc()).limit(1)
+            result = await session.execute(stmt)
             db_key = result.scalar_one_or_none()
             if db_key is None or not db_key.key_prefix or not db_key.key_suffix:
                 return None
@@ -475,18 +562,22 @@ class DbApiKeyAuth(ApiKeyAuth):
 
         async with get_session(self._db_url) as session:
             result = await session.execute(select(ApiKey).where(ApiKey.user_name == username))
-            db_key = result.scalar_one_or_none()
-            if db_key is None:
+            rows = result.scalars().all()
+            if not rows:
                 return False
-            db_key.password_hash = _hash_password(new_password)
+            new_hash = _hash_password(new_password)
+            for row in rows:
+                row.password_hash = new_hash
             await session.flush()
             return True
 
     # ------------------------------------------------------------------
     # Key rotation (self-service)
     # ------------------------------------------------------------------
-    async def rotate_key_for_user_db(self, username: str) -> dict:
-        """Regenerate the API key for *username*.
+    async def rotate_key_for_user_db(
+        self, username: str, tenant_id: str | None = None
+    ) -> dict:
+        """Regenerate the API key for *username* (scoped to tenant_id if provided).
 
         Invalidates the old key_hash in-memory cache and DB, generates a
         new random key, and returns the plaintext key (shown only once).
@@ -496,13 +587,16 @@ class DbApiKeyAuth(ApiKeyAuth):
         from team_memory.storage.database import get_session
         from team_memory.storage.models import ApiKey
 
+        tid = parse_tenant_uuid(tenant_id)
         async with get_session(self._db_url) as session:
-            result = await session.execute(
-                select(ApiKey).where(
-                    ApiKey.user_name == username,
-                    ApiKey.is_active == True,  # noqa: E712
-                )
+            stmt = select(ApiKey).where(
+                ApiKey.user_name == username,
+                ApiKey.is_active == True,  # noqa: E712
             )
+            if tid is not None:
+                stmt = stmt.where(ApiKey.tenant_id == tid)
+            stmt = stmt.order_by(ApiKey.created_at.desc()).limit(1)
+            result = await session.execute(stmt)
             db_key = result.scalar_one_or_none()
             if db_key is None:
                 raise ValueError("Active user not found")
@@ -519,7 +613,11 @@ class DbApiKeyAuth(ApiKeyAuth):
             db_key.key_suffix = raw_key[-min(4, n) :]
             await session.flush()
 
-            self._keys[new_hash] = User(name=db_key.user_name, role=db_key.role)
+            self._keys[new_hash] = User(
+                name=db_key.user_name,
+                role=db_key.role,
+                tenant_id=str(db_key.tenant_id or DEFAULT_TENANT_ID),
+            )
             return {"api_key": raw_key}
 
 

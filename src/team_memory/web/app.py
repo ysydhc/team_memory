@@ -190,7 +190,7 @@ mcp_app = mcp.http_app(
 app = FastAPI(
     title="TeamMemory",
     description="Team Experience Database Management",
-    version="0.2.2",
+    version="0.3.0",
     lifespan=lifespan,
 )
 app.mount("/mcp", mcp_app)
@@ -353,6 +353,18 @@ from team_memory.web.middleware import api_version_compat  # noqa: E402
 
 app.middleware("http")(api_version_compat)
 
+
+@app.middleware("http")
+async def tenant_context_cleanup(request: Request, call_next):
+    """Ensure the per-request tenant ContextVar is always reset after handling."""
+    from team_memory.storage.tenant_context import reset_current_tenant_id, set_current_tenant_id
+
+    token = set_current_tenant_id(None)
+    try:
+        return await call_next(request)
+    finally:
+        reset_current_tenant_id(token)
+
 # ---- Rate limiting (in-memory, per IP) ----
 _rate_limit_store: dict[str, list[float]] = defaultdict(list)
 
@@ -446,10 +458,13 @@ async def _global_exception_handler(request: Request, exc: Exception):
 
 
 # ============================================================
-# Static / SPA
+# Static / SPA (Web v2 + /legacy smooth rollout)
 # ============================================================
 STATIC_DIR = Path(__file__).parent / "static"
+DIST_DIR = STATIC_DIR / "dist"
 
+if (DIST_DIR / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=str(DIST_DIR / "assets")), name="assets")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
@@ -464,11 +479,25 @@ async def no_cache_static(request: Request, call_next):
     return response
 
 
+def _serve_spa_index() -> HTMLResponse:
+    v2_index = DIST_DIR / "index.html"
+    if v2_index.is_file():
+        return HTMLResponse(content=v2_index.read_text(encoding="utf-8"))
+    return HTMLResponse(
+        content="<!DOCTYPE html><html><body>TeamMemory Web v2 bundle not built. Run: make web-build</body></html>",
+        status_code=503,
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
+@app.get("/login", response_class=HTMLResponse)
+@app.get("/overview", response_class=HTMLResponse)
+@app.get("/memories", response_class=HTMLResponse)
+@app.get("/access", response_class=HTMLResponse)
+@app.get("/ops", response_class=HTMLResponse)
 async def serve_spa():
-    """Serve the single-page application."""
-    index_file = STATIC_DIR / "index.html"
-    return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
+    """Serve the Web v2 single-page application."""
+    return _serve_spa_index()
 
 
 # ============================================================

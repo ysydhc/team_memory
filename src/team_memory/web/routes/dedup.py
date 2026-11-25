@@ -11,7 +11,7 @@ from team_memory.auth.provider import User
 from team_memory.web import app as app_module
 from team_memory.web.app import _resolve_project
 from team_memory.web.auth_session import get_current_user
-from team_memory.web.dependencies import require_role
+from team_memory.web.dependencies import require_admin
 
 router = APIRouter(tags=["dedup"])
 
@@ -41,7 +41,7 @@ async def list_duplicate_pairs(
 @router.post("/dedup/reembed-group-vectors")
 async def reembed_group_vectors(
     project: str | None = None,
-    _user: User = Depends(require_role("update")),
+    _user: User = Depends(require_admin()),
 ):
     """Recompute parent embeddings from parent+children text for all groups."""
     svc = _svc()

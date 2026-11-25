@@ -129,6 +129,29 @@ def _infer_recall_project(
     return resolved_project
 
 
+def build_feedback_instruction(results: list[dict], *, max_ids: int = 3) -> dict | None:
+    """Build a compact structured feedback instruction for top recalled experiences."""
+    top_ids: list[str] = []
+    for r in results:
+        if not isinstance(r, dict) or r.get("type") == "archive":
+            continue
+        eid = str(r.get("group_id") or r.get("id") or "").strip()
+        if eid and eid not in top_ids:
+            top_ids.append(eid)
+        if len(top_ids) >= max_ids:
+            break
+    if not top_ids:
+        return None
+    return {
+        "action": "memory_feedback",
+        "top_experience_ids": top_ids,
+        "hint": (
+            f"Applied an experience? Call memory_feedback(experience_id='{top_ids[0]}', rating=5); "
+            "outdated/misleading? Call rating=1."
+        ),
+    }
+
+
 def _attach_stage_telemetry(payload: dict, search_obj: object) -> dict:
     """Attach transient stage metrics/counts to recall payload for SearchLog persistence."""
     stage_metrics = getattr(search_obj, "stage_metrics", None)
@@ -150,12 +173,16 @@ async def _append_user_profile_to_recall_json(
     settings: object,
     embedding_provider: object,
     db_url: str,
+    project: str | None = None,
 ) -> dict:
     data = {**payload}
     if not include_user_profile:
         data["profile"] = None
         return data
-    max_side = getattr(settings.mcp, "profile_max_strings_per_side", None) or 20
+    mcp_cfg = getattr(settings, "mcp", None)
+    max_side = getattr(mcp_cfg, "profile_max_strings_per_side", None) or 8
+    max_items = getattr(mcp_cfg, "profile_max_items", None) or max_side
+    max_tokens = getattr(mcp_cfg, "profile_max_tokens", None) or 400
     try:
         from team_memory.services.memory.personal_memory import PersonalMemoryService
 
@@ -164,6 +191,9 @@ async def _append_user_profile_to_recall_json(
             user_id=user,
             current_context=context_text,
             max_per_side=max_side,
+            max_items=max_items,
+            max_tokens=max_tokens,
+            project=project,
         )
     except Exception:
         logger.debug("recall: attach profile failed", exc_info=True)
@@ -239,6 +269,7 @@ async def _recall_solve(
         )
 
     best_id = results[0].get("group_id") or results[0].get("id", "")
+    fb_inst = build_feedback_instruction(results)
     results, pd_telemetry = apply_progressive_disclosure(
         results,
         detail_level=detail_level,
@@ -255,6 +286,8 @@ async def _recall_solve(
         "detail_level": detail_level,
         "feedback_hint": (f"If helpful, call memory_feedback(experience_id='{best_id}', rating=5)"),
     }
+    if fb_inst:
+        payload["feedback_instruction"] = fb_inst
     if "working_set_paged_out" in pd_telemetry:
         payload["working_set_paged_out"] = pd_telemetry["working_set_paged_out"]
         payload["working_set_size"] = pd_telemetry["working_set_size"]
@@ -308,6 +341,7 @@ async def _recall_search(
         )
 
     best_id = results[0].get("group_id") or results[0].get("id", "")
+    fb_inst = build_feedback_instruction(results)
     results, pd_telemetry = apply_progressive_disclosure(
         results,
         detail_level=detail_level,
@@ -324,6 +358,8 @@ async def _recall_search(
         "detail_level": detail_level,
         "feedback_hint": (f"If helpful, call memory_feedback(experience_id='{best_id}', rating=5)"),
     }
+    if fb_inst:
+        payload["feedback_instruction"] = fb_inst
     if "working_set_paged_out" in pd_telemetry:
         payload["working_set_paged_out"] = pd_telemetry["working_set_paged_out"]
         payload["working_set_size"] = pd_telemetry["working_set_size"]
@@ -371,6 +407,7 @@ async def _recall_adaptive(
         )
 
     best_id = result.results[0].get("group_id") or result.results[0].get("id", "")
+    fb_inst = build_feedback_instruction(result.results)
     results, pd_telemetry = apply_progressive_disclosure(
         result.results,
         detail_level=detail_level,
@@ -392,6 +429,8 @@ async def _recall_adaptive(
         },
         "feedback_hint": f"If helpful, call memory_feedback(experience_id='{best_id}', rating=5)",
     }
+    if fb_inst:
+        payload["feedback_instruction"] = fb_inst
     if "working_set_paged_out" in pd_telemetry:
         payload["working_set_paged_out"] = pd_telemetry["working_set_paged_out"]
         payload["working_set_size"] = pd_telemetry["working_set_size"]
@@ -483,12 +522,16 @@ async def _recall_suggest(
             }
         )
 
-    return {
+    payload = {
         "message": f"Found {len(suggestions)} suggestion(s) for your context.",
         "results": suggestions,
         "reranked": osearch.reranked,
         "intent_type": osearch.intent_type,
     }
+    fb_inst = build_feedback_instruction(suggestions)
+    if fb_inst:
+        payload["feedback_instruction"] = fb_inst
+    return payload
 
 
 async def _maybe_write_search_log(
@@ -583,7 +626,7 @@ async def op_recall(
     max_results: int = 10,
     project: str | None = None,
     include_archives: bool | None = None,
-    include_user_profile: bool = True,
+    include_user_profile: bool = False,
     adaptive: bool = False,
     adaptive_retriever: object | None = None,
     detail_level: str = "progressive",
@@ -638,6 +681,7 @@ async def op_recall(
             settings=settings,
             embedding_provider=embedding_provider,
             db_url=db_url,
+            project=resolved_project,
         )
         await _maybe_write_search_log(result, db_url, resolved_project, query=problem or "")
         result.pop("_stage_metrics", None)
@@ -680,6 +724,7 @@ async def op_recall(
             settings=settings,
             embedding_provider=embedding_provider,
             db_url=db_url,
+            project=resolved_project,
         )
         await _maybe_write_search_log(result, db_url, resolved_project, query=query or "")
         result.pop("_stage_metrics", None)
@@ -704,6 +749,7 @@ async def op_recall(
             settings=settings,
             embedding_provider=embedding_provider,
             db_url=db_url,
+            project=resolved_project,
         )
         await _maybe_write_search_log(result, db_url, resolved_project, query=ctx_hint or "")
         return result
@@ -721,4 +767,5 @@ async def op_recall(
         settings=settings,
         embedding_provider=embedding_provider,
         db_url=db_url,
+        project=resolved_project,
     )

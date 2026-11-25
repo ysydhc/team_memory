@@ -34,10 +34,11 @@ async def create_personal_memory(
     content = body.get("content")
     if not content or not str(content).strip():
         raise HTTPException(status_code=400, detail="content is required")
-    scope = body.get("scope") or "generic"
+    scope = body.get("scope") or "global"
+    project = body.get("project")
     context_hint = body.get("context_hint")
-    if scope not in ("generic", "context"):
-        scope = "generic"
+    if scope not in ("global", "project", "generic", "context"):
+        scope = "global"
     pk = body.get("profile_kind")
     if pk not in ("static", "dynamic"):
         pk = None
@@ -46,6 +47,7 @@ async def create_personal_memory(
         user.name,
         content=str(content).strip(),
         scope=scope,
+        project=str(project).strip() if project else None,
         context_hint=str(context_hint).strip() if context_hint else None,
         profile_kind=pk,
     )
@@ -56,17 +58,20 @@ async def create_personal_memory(
 async def list_personal_memory(
     scope: str | None = None,
     profile_kind: str | None = None,
+    project: str | None = None,
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user),
 ):
     """List current user's personal memories. Requires auth.
-    Supports scope and profile_kind filter."""
+    Supports scope, project, and profile_kind filter."""
     if profile_kind not in (None, "static", "dynamic"):
         profile_kind = None
     svc = _personal_memory_service()
     try:
-        all_items = await svc.list_by_user(user.name, scope=scope, profile_kind=profile_kind)
+        all_items = await svc.list_by_user(
+            user.name, scope=scope, profile_kind=profile_kind, project=project
+        )
     except ProgrammingError as e:
         orig = str(getattr(e, "orig", e) or e)
         logger.exception("personal_memory list query failed: %s", orig)
@@ -106,6 +111,7 @@ async def put_personal_memory(
     """Update one personal memory. Requires auth, must own."""
     content = body.get("content")
     scope = body.get("scope")
+    project = body.get("project")
     context_hint = body.get("context_hint")
     profile_kind = body.get("profile_kind")
     if profile_kind not in (None, "static", "dynamic"):
@@ -116,6 +122,7 @@ async def put_personal_memory(
         user.name,
         content=content,
         scope=scope,
+        project=str(project).strip() if project else None,
         context_hint=context_hint,
         profile_kind=profile_kind,
     )
@@ -140,17 +147,15 @@ async def delete_personal_memory(
 @router.get("/personal-memory")
 async def pull_personal_memory(
     current_context: str | None = None,
+    project: str | None = None,
     user: User = Depends(get_current_user),
 ):
-    """Pull personal memories for Agent: generic + context-matched.
-
-    Returns scope=generic all; if current_context given,
-    also scope=context items semantically matching current_context.
-    """
+    """Pull personal memories for Agent: global + matching project + context-matched."""
     user_id = user.name
     svc = _personal_memory_service()
     items = await svc.pull(
         user_id=user_id,
         current_context=current_context,
+        project=project,
     )
     return {"items": items}

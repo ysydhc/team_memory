@@ -650,7 +650,9 @@ async def process_before_prompt(
                     current_context=prompt,
                     persona=persona,
                     max_items=5,
+                    max_tokens=300,
                     query_hint=search_query,
+                    project=project,
                 )
             except TypeError:
                 profile = await pms.build_profile_for_user(

@@ -31,6 +31,8 @@ class OrchestratedSearchResult:
     intent_type: str = "general"
     stage_metrics: dict | None = None
     stage_counts: dict | None = None
+    degraded: bool = False
+    degraded_reason: str | None = None
 
 
 class SearchOrchestrator:

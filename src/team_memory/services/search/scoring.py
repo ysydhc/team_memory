@@ -449,17 +449,24 @@ def apply_exact_match_boost(
     return candidates
 
 
+IMPLICIT_FEEDBACK_WEIGHT = 0.5
+
+
 def compute_bayesian_utility_rate(
     recall_count: int,
-    used_count: int,
-    negative_feedback_count: int = 0,
+    used_count: int | float,
+    negative_feedback_count: int | float = 0,
     alpha0: float = 1.0,
     beta0: float = 4.0,
+    *,
+    implicit_positive_count: int = 0,
+    implicit_negative_count: int = 0,
+    implicit_weight: float = IMPLICIT_FEEDBACK_WEIGHT,
 ) -> float:
-    """Compute Bayesian-smoothed utility rate from recall, adoption, and negative feedback counts."""
-    return (alpha0 + max(0, used_count)) / (
-        alpha0 + beta0 + max(0, recall_count) + 3.0 * max(0, negative_feedback_count)
-    )
+    """Compute Bayesian-smoothed utility rate from recall, adoption, and explicit/implicit feedback."""
+    eff_used = max(0.0, float(used_count)) + implicit_weight * max(0, int(implicit_positive_count))
+    eff_neg = max(0.0, float(negative_feedback_count)) + implicit_weight * max(0, int(implicit_negative_count))
+    return (alpha0 + eff_used) / (alpha0 + beta0 + max(0, recall_count) + 3.0 * eff_neg)
 
 
 def apply_popularity_boost(
@@ -470,22 +477,14 @@ def apply_popularity_boost(
     popularity_decay_lambda: float = 0.05,
     popularity_age_floor_ratio: float = 0.3,
     popularity_scale: float = 0.3,
+    implicit_feedback_weight: float = IMPLICIT_FEEDBACK_WEIGHT,
 ) -> list[SearchResultItem]:
-    """Boost score based on recall_count and used_count with time decay.
+    """Boost score based on recall_count, explicit/implicit adoption & feedback with time decay.
 
-    Formula (multiplicative boost + log compression):
-        popularity = log(1 + alpha*recall_count + beta*used_count)
-        effective_age = max(days(updated_at), days(created_at) * floor_ratio)
-        decay = exp(-lambda * effective_age)
-        boost = 1 + popularity * decay * gamma
-        final_score = rrf_score * boost
-
-    This ensures:
-    - Experiences never recalled get no boost (boost=1.0).
-    - Popular experiences are amplified proportionally, but log prevents
-      recall_count=100 from dominating recall_count=10.
-    - Time decay reduces boost for stale experiences.
-    - Age floor prevents valid-but-unused experiences from decaying too fast.
+    Explicit feedback (used_count / negative_feedback_count) has weight 1.0;
+    implicit judge feedback (implicit_positive_count / implicit_negative_count)
+    has weight 0.5 by default so it smoothly guides ranking without overpowering
+    explicit human ratings.
     """
     alpha = popularity_recall_weight
     beta = popularity_used_weight
@@ -500,21 +499,26 @@ def apply_popularity_boost(
         recall_count = int(data.get("recall_count", 0) or 0)
         used_count = int(data.get("used_count", 0) or 0)
         neg_count = int(data.get("negative_feedback_count", 0) or 0)
+        imp_pos = int(data.get("implicit_positive_count", 0) or 0)
+        imp_neg = int(data.get("implicit_negative_count", 0) or 0)
 
-        if recall_count == 0 and used_count == 0 and neg_count == 0:
+        eff_used = float(used_count) + implicit_feedback_weight * float(imp_pos)
+        eff_neg = float(neg_count) + implicit_feedback_weight * float(imp_neg)
+
+        if recall_count == 0 and eff_used == 0.0 and eff_neg == 0.0:
             # No popularity signal — skip computation
             data["popularity_boost"] = 1.0
             data["utility_rate"] = round(compute_bayesian_utility_rate(0, 0, 0), 4)
             continue
 
-        utility_rate = compute_bayesian_utility_rate(recall_count, used_count, neg_count)
-        recall_dampener = min(1.0, utility_rate / 0.2) if used_count == 0 else 1.0
+        utility_rate = compute_bayesian_utility_rate(recall_count, eff_used, eff_neg)
+        recall_dampener = min(1.0, utility_rate / 0.2) if eff_used == 0.0 else 1.0
         effective_alpha = alpha * recall_dampener
         effective_beta = beta * (1.0 + 3.0 * utility_rate)
 
         # Popularity with log compression and negative feedback penalty
-        popularity = math.log(1.0 + effective_alpha * recall_count + effective_beta * used_count)
-        neg_penalty = math.log(1.0 + 0.4 * neg_count)
+        popularity = math.log(1.0 + effective_alpha * recall_count + effective_beta * eff_used)
+        neg_penalty = math.log(1.0 + 0.4 * eff_neg)
         net_signal = popularity - neg_penalty
 
         # Time decay with age floor
@@ -558,7 +562,7 @@ def apply_popularity_boost(
 
         decay = math.exp(-lam * effective_age)
         boost = max(0.5, 1.0 + net_signal * decay * gamma)
-        if 0.0 < float(item.score or 0.0) < 0.1 and used_count == 0 and neg_count == 0:
+        if 0.0 < float(item.score or 0.0) < 0.1 and eff_used == 0.0 and eff_neg == 0.0:
             # Passive recall without verified adoption acts only as a gentle tie-breaker in RRF scale
             boost = min(1.005, boost)
 
