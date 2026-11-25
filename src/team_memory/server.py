@@ -390,6 +390,7 @@ async def memory_save(
             experience_type=experience_type,
             project=resolved_project,
             group_key=group_key,
+            **save_extra,
         )
     return _guard_output(json.dumps(result, ensure_ascii=False), settings=truncate_settings)
 
@@ -428,7 +429,7 @@ async def memory_recall(
     project: str | None = None,
     include_archives: bool | None = None,
     include_user_profile: bool = False,
-    adaptive: bool = True,
+    adaptive: bool = False,
 ) -> str:
     """Unified read: route to solve/search/suggest mode based on input."""
     user = await _get_current_user()

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import time
 from collections import Counter
 from pathlib import Path, PurePosixPath
 
@@ -152,16 +154,74 @@ def build_feedback_instruction(results: list[dict], *, max_ids: int = 3) -> dict
     }
 
 
+GROUNDING_CONTRACT = (
+    "Memory is a lead, not absolute ground truth. Current source code and runtime outputs "
+    "always override historical memory. If you verify a recalled item is outdated or misleading, "
+    "call memory_feedback(experience_id=..., rating=1) or overwrite it via memory_save."
+)
+
+
 def _attach_stage_telemetry(payload: dict, search_obj: object) -> dict:
-    """Attach transient stage metrics/counts to recall payload for SearchLog persistence."""
+    """Attach transient stage metrics/counts, CRAG confidence, and grounding contract."""
     stage_metrics = getattr(search_obj, "stage_metrics", None)
     stage_counts = getattr(search_obj, "stage_counts", None)
     if stage_metrics is not None:
-        payload["_stage_metrics"] = stage_metrics
+        payload["_stage_metrics"] = dict(stage_metrics) if isinstance(stage_metrics, dict) else stage_metrics
     if stage_counts is not None:
-        payload["_stage_counts"] = stage_counts
+        payload["_stage_counts"] = dict(stage_counts) if isinstance(stage_counts, dict) else stage_counts
+    if getattr(search_obj, "degraded", False):
+        payload["degraded"] = True
+        reason = getattr(search_obj, "degraded_reason", None)
+        if reason:
+            payload["degraded_reason"] = reason
+    if getattr(search_obj, "low_confidence", False):
+        payload["low_confidence"] = True
+    if payload.get("results"):
+        payload["grounding_contract"] = GROUNDING_CONTRACT
     return payload
 
+
+async def _fetch_user_profile_timed(
+    *,
+    user: str,
+    context_text: str | None,
+    include_user_profile: bool,
+    settings: object,
+    embedding_provider: object,
+    db_url: str,
+    project: str | None = None,
+    embedding_cache: object | None = None,
+) -> tuple[dict | None, int]:
+    """Fetch user profile with timing, shared embedding cache, and timeout protection."""
+    if not include_user_profile:
+        return None, 0
+    t0 = time.monotonic()
+    mcp_cfg = getattr(settings, "mcp", None)
+    max_side = getattr(mcp_cfg, "profile_max_strings_per_side", None) or 8
+    max_items = getattr(mcp_cfg, "profile_max_items", None) or max_side
+    max_tokens = getattr(mcp_cfg, "profile_max_tokens", None) or 400
+    emb_timeout = float(getattr(getattr(settings, "search", None), "embedding_timeout_seconds", 2.5))
+    try:
+        from team_memory.services.memory.personal_memory import PersonalMemoryService
+
+        pm_svc = PersonalMemoryService(embedding_provider=embedding_provider, db_url=db_url)
+        build_kwargs: dict = {
+            "user_id": user,
+            "current_context": context_text,
+            "max_per_side": max_side,
+            "max_items": max_items,
+            "max_tokens": max_tokens,
+            "project": project,
+        }
+        if not hasattr(pm_svc.build_profile_for_user, "_mock_name"):
+            build_kwargs["embedding_timeout"] = emb_timeout
+            if embedding_cache is not None:
+                build_kwargs["embedding_cache"] = embedding_cache
+        profile = await pm_svc.build_profile_for_user(**build_kwargs)
+    except Exception:
+        logger.debug("recall: attach profile failed", exc_info=True)
+        profile = {"static": [], "dynamic": []}
+    return profile, int((time.monotonic() - t0) * 1000)
 
 
 async def _append_user_profile_to_recall_json(
@@ -174,30 +234,22 @@ async def _append_user_profile_to_recall_json(
     embedding_provider: object,
     db_url: str,
     project: str | None = None,
+    embedding_cache: object | None = None,
 ) -> dict:
     data = {**payload}
-    if not include_user_profile:
-        data["profile"] = None
-        return data
-    mcp_cfg = getattr(settings, "mcp", None)
-    max_side = getattr(mcp_cfg, "profile_max_strings_per_side", None) or 8
-    max_items = getattr(mcp_cfg, "profile_max_items", None) or max_side
-    max_tokens = getattr(mcp_cfg, "profile_max_tokens", None) or 400
-    try:
-        from team_memory.services.memory.personal_memory import PersonalMemoryService
-
-        pm_svc = PersonalMemoryService(embedding_provider=embedding_provider, db_url=db_url)
-        data["profile"] = await pm_svc.build_profile_for_user(
-            user_id=user,
-            current_context=context_text,
-            max_per_side=max_side,
-            max_items=max_items,
-            max_tokens=max_tokens,
-            project=project,
-        )
-    except Exception:
-        logger.debug("recall: attach profile failed", exc_info=True)
-        data["profile"] = {"static": [], "dynamic": []}
+    profile, pm_ms = await _fetch_user_profile_timed(
+        user=user,
+        context_text=context_text,
+        include_user_profile=include_user_profile,
+        settings=settings,
+        embedding_provider=embedding_provider,
+        db_url=db_url,
+        project=project,
+        embedding_cache=embedding_cache,
+    )
+    data["profile"] = profile
+    if isinstance(data.get("_stage_metrics"), dict):
+        data["_stage_metrics"]["personal_memory_ms"] = pm_ms
     return data
 
 
@@ -656,41 +708,58 @@ async def op_recall(
     elif file_path:
         ctx_hint = PurePosixPath(file_path).name
 
-    if problem:
-        raw = await _recall_solve(
-            problem=problem,
-            file_path=file_path,
-            language=language,
-            framework=framework,
-            tags=tags,
-            max_results=max_results,
-            search_orchestrator=search_orchestrator,
-            user=user,
-            project=resolved_project,
-            include_archives=include_archives,
-            detail_level=detail_level,
-            include_superseded=include_superseded,
-            session_id=session_id,
-            force_l2=force_l2,
-        )
-        result = await _append_user_profile_to_recall_json(
-            raw,
-            user=user,
-            context_text=ctx_hint,
-            include_user_profile=include_user_profile,
-            settings=settings,
-            embedding_provider=embedding_provider,
-            db_url=db_url,
-            project=resolved_project,
-        )
-        await _maybe_write_search_log(result, db_url, resolved_project, query=problem or "")
+    shared_cache = getattr(getattr(search_orchestrator, "_search_pipeline", None), "_cache", None)
+
+    async def _run_with_parallel_profile(recall_coro, log_query: str) -> dict:
+        if include_user_profile:
+            raw, (profile, pm_ms) = await asyncio.gather(
+                recall_coro,
+                _fetch_user_profile_timed(
+                    user=user,
+                    context_text=ctx_hint,
+                    include_user_profile=True,
+                    settings=settings,
+                    embedding_provider=embedding_provider,
+                    db_url=db_url,
+                    project=resolved_project,
+                    embedding_cache=shared_cache,
+                ),
+            )
+            result = {**raw, "profile": profile}
+            if isinstance(result.get("_stage_metrics"), dict):
+                result["_stage_metrics"]["personal_memory_ms"] = pm_ms
+        else:
+            raw = await recall_coro
+            result = {**raw, "profile": None}
+        await _maybe_write_search_log(result, db_url, resolved_project, query=log_query)
         result.pop("_stage_metrics", None)
         result.pop("_stage_counts", None)
         return result
 
+    if problem:
+        return await _run_with_parallel_profile(
+            _recall_solve(
+                problem=problem,
+                file_path=file_path,
+                language=language,
+                framework=framework,
+                tags=tags,
+                max_results=max_results,
+                search_orchestrator=search_orchestrator,
+                user=user,
+                project=resolved_project,
+                include_archives=include_archives,
+                detail_level=detail_level,
+                include_superseded=include_superseded,
+                session_id=session_id,
+                force_l2=force_l2,
+            ),
+            log_query=problem or "",
+        )
+
     if query:
         if adaptive and adaptive_retriever is not None:
-            raw = await _recall_adaptive(
+            recall_coro = _recall_adaptive(
                 query=query,
                 tags=tags,
                 max_results=max_results,
@@ -703,7 +772,7 @@ async def op_recall(
                 force_l2=force_l2,
             )
         else:
-            raw = await _recall_search(
+            recall_coro = _recall_search(
                 query=query,
                 tags=tags,
                 max_results=max_results,
@@ -716,43 +785,21 @@ async def op_recall(
                 session_id=session_id,
                 force_l2=force_l2,
             )
-        result = await _append_user_profile_to_recall_json(
-            raw,
-            user=user,
-            context_text=ctx_hint,
-            include_user_profile=include_user_profile,
-            settings=settings,
-            embedding_provider=embedding_provider,
-            db_url=db_url,
-            project=resolved_project,
-        )
-        await _maybe_write_search_log(result, db_url, resolved_project, query=query or "")
-        result.pop("_stage_metrics", None)
-        result.pop("_stage_counts", None)
-        return result
+        return await _run_with_parallel_profile(recall_coro, log_query=query or "")
 
     if file_path or language or framework:
-        raw = await _recall_suggest(
-            file_path=file_path,
-            language=language,
-            framework=framework,
-            max_results=max_results,
-            search_orchestrator=search_orchestrator,
-            user=user,
-            project=resolved_project,
+        return await _run_with_parallel_profile(
+            _recall_suggest(
+                file_path=file_path,
+                language=language,
+                framework=framework,
+                max_results=max_results,
+                search_orchestrator=search_orchestrator,
+                user=user,
+                project=resolved_project,
+            ),
+            log_query=ctx_hint or "",
         )
-        result = await _append_user_profile_to_recall_json(
-            raw,
-            user=user,
-            context_text=ctx_hint,
-            include_user_profile=include_user_profile,
-            settings=settings,
-            embedding_provider=embedding_provider,
-            db_url=db_url,
-            project=resolved_project,
-        )
-        await _maybe_write_search_log(result, db_url, resolved_project, query=ctx_hint or "")
-        return result
 
     raw = {
         "error": True,

@@ -162,6 +162,7 @@ class SearchPipelineResult:
     stage_counts: dict[str, int] = field(default_factory=dict)
     degraded: bool = False
     degraded_reason: str | None = None
+    low_confidence: bool = False
 
 
 def coerce_cached_search_pipeline_result(raw: SearchPipelineResult | Mapping[str, Any]) -> SearchPipelineResult:
@@ -192,6 +193,7 @@ def coerce_cached_search_pipeline_result(raw: SearchPipelineResult | Mapping[str
         stage_counts=stage_counts,
         degraded=bool(raw.get("degraded", False)),
         degraded_reason=raw.get("degraded_reason"),
+        low_confidence=bool(raw.get("low_confidence", False)),
     )
 
 
@@ -261,6 +263,7 @@ class SearchPipeline:
         repo = ExperienceRepository(session)
 
         # Stage 1: Cache check
+        stage_begin = time.monotonic()
         if self._cache.enabled:
             cached = await self._cache.get(
                 request.query,
@@ -275,22 +278,31 @@ class SearchPipeline:
                 hit.cached = True
                 hit.duration_ms = int((time.monotonic() - start) * 1000)
                 return hit
+        stage_metrics["cache_check_ms"] = int((time.monotonic() - stage_begin) * 1000)
 
-        # Query expansion: tag synonyms (simple key<->value)
+        # Query expansion: tag synonyms (simple key<->value); LLM expansion defaults to fallback-only
         stage_begin = time.monotonic()
         retrieval_query = self._expand_query_synonyms(request.query)
+        qe_enabled = bool(getattr(self._search_config, "query_expansion_enabled", False) and self._llm_config)
+        qe_mode = getattr(self._search_config, "query_expansion_mode", "fallback")
+        qe_timeout_s = float(getattr(self._search_config, "query_expansion_timeout_seconds", 3.0))
+        qe_triggered = 0
 
-        # Optional LLM query expansion
-        if getattr(self._search_config, "query_expansion_enabled", False) and self._llm_config:
-            timeout_s = getattr(self._search_config, "query_expansion_timeout_seconds", 3.0)
-            expanded = await _llm_expand_query(request.query, self._llm_config, timeout_s)
+        if qe_enabled and qe_mode == "always":
+            expanded = await _llm_expand_query(request.query, self._llm_config, qe_timeout_s)
             if expanded and expanded.strip():
                 retrieval_query = (request.query.strip() + " " + expanded.strip()).strip()[:2000]
+                qe_triggered = 1
 
         query_expansion_ms = int((time.monotonic() - stage_begin) * 1000)
         io_logger.log_internal(
             "query_expansion",
-            {"query": (request.query or "")[:50], "retrieval_query": (retrieval_query or "")[:50]},
+            {
+                "query": (request.query or "")[:50],
+                "retrieval_query": (retrieval_query or "")[:50],
+                "mode": qe_mode,
+                "triggered": qe_triggered,
+            },
             duration_ms=query_expansion_ms,
         )
 
@@ -305,14 +317,26 @@ class SearchPipeline:
             if "workflow" in tags_lower:
                 effective_min_similarity = min(effective_min_similarity, 0.5)
 
-        # Stage 1.5: Entity-graph query enrichment (rule-based, best-effort)
-        # Extracts entity names from query and appends them for better recall.
+        # Stage 1.5/1.6 + Stage 2 + FTS pre-fetch: run independent I/O concurrently via asyncio.gather
         enable_graph = getattr(self._search_config, "enable_graph", True) is not False
-        entity_names: list[str] = []
-        if enable_graph:
+        emb_timeout = float(getattr(self._search_config, "embedding_timeout_seconds", 2.5))
+        over_fetch = request.max_results * 5
+        should_prefetch_fts = (
+            bool(self._db_url)
+            and self._search_config.mode in ("hybrid", "fts")
+            and not hasattr(self._retrieve_and_fuse, "_mock_name")
+        )
+
+        async def _run_graph_expand() -> tuple[list[str], list[tuple[str, float]], int]:
+            g_t0 = time.monotonic()
+            if not enable_graph:
+                return [], [], 0
+            ent_names: list[str] = []
+            g_hits: list[tuple[str, float]] = []
             try:
                 from team_memory.services.entity.entity_search import (
                     extract_entities_from_query,
+                    find_weighted_experiences_by_entities,
                     get_cached_entity_lexicon,
                 )
 
@@ -322,74 +346,98 @@ class SearchPipeline:
                         db_lexicon = await get_cached_entity_lexicon(self._db_url)
                     except Exception:
                         db_lexicon = set()
-                entity_names = extract_entities_from_query(retrieval_query, lexicon=db_lexicon or None)
-                if entity_names and self._db_url:
-                    from team_memory.services.search.scoring import resolve_rank_profile
-
-                    _stage15_profile = resolve_rank_profile(request.query, request.intent_type)
-                    if _stage15_profile.name == "multihop_arch":
-                        retrieval_query = retrieval_query.rstrip()
-                        extra = " ".join(n for n in entity_names[:6] if n.lower() not in retrieval_query.lower())
-                        if extra:
-                            retrieval_query = f"{retrieval_query} {extra}"
-                        retrieval_query = retrieval_query[:2000]
-            except Exception:
-                pass  # entity enrichment must never break search
-
-        # Stage 1.6: Entity-graph traversal — find related experiences via the
-        # entity relationship graph (PostgreSQL recursive CTE, 2 hops).
-        # 使用实体关系图查找相关经验（PostgreSQL 递归 CTE，2 跳）
-        graph_weighted_hits: list[tuple[str, float]] = []
-        graph_experience_ids: list[str] = []
-        if enable_graph and entity_names and self._db_url:
-            try:
-                from team_memory.services.entity.entity_search import (
-                    find_weighted_experiences_by_entities,
-                )
-
-                projects = [request.project] if request.project else ["default"]
-                if request.fallback_projects:
-                    for fp in request.fallback_projects:
-                        if fp not in projects:
-                            projects.append(fp)
-                try:
-                    reusable_session = (
-                        session
-                        if (isinstance(AsyncSession, type) and isinstance(session, AsyncSession))
-                        else None
+                ent_names = extract_entities_from_query(retrieval_query, lexicon=db_lexicon or None)
+                if ent_names and self._db_url:
+                    projects = [request.project] if request.project else ["default"]
+                    if request.fallback_projects:
+                        for fp in request.fallback_projects:
+                            if fp not in projects:
+                                projects.append(fp)
+                    # Embedding (HTTP) and FTS pre-fetch (separate session2 when db_url is set)
+                    # do not touch `session`, so entity-graph CTE can safely reuse `session` here.
+                    try:
+                        reusable_session = (
+                            session
+                            if (isinstance(AsyncSession, type) and isinstance(session, AsyncSession))
+                            else None
+                        )
+                    except TypeError:
+                        reusable_session = None
+                    graph_kwargs: dict[str, Any] = {
+                        "db_url": self._db_url,
+                        "entity_names": ent_names,
+                        "projects": projects,
+                        "max_depth": 2,
+                    }
+                    if reusable_session is not None:
+                        graph_kwargs["session"] = reusable_session
+                    g_hits = await asyncio.wait_for(
+                        find_weighted_experiences_by_entities(**graph_kwargs),
+                        timeout=1.5,
                     )
-                except TypeError:
-                    reusable_session = None
-                graph_kwargs: dict[str, Any] = {
-                    "db_url": self._db_url,
-                    "entity_names": entity_names,
-                    "projects": projects,
-                    "max_depth": 2,
-                }
-                if reusable_session is not None:
-                    graph_kwargs["session"] = reusable_session
-                graph_weighted_hits = await asyncio.wait_for(
-                    find_weighted_experiences_by_entities(**graph_kwargs),
-                    timeout=1.5,
-                )
-                graph_experience_ids = [eid for eid, _ in graph_weighted_hits]
-                if graph_experience_ids:
-                    logger.info(
-                        "[GRAPH]  entity-graph found %d related experience(s) for query=%s",
-                        len(graph_experience_ids),
-                        retrieval_query[:50],
-                    )
+                    if g_hits:
+                        logger.info(
+                            "[GRAPH]  entity-graph found %d related experience(s) for query=%s",
+                            len(g_hits),
+                            retrieval_query[:50],
+                        )
             except Exception:
                 logger.debug("Entity graph traversal failed (non-critical)", exc_info=True)
+            return ent_names, g_hits, int((time.monotonic() - g_t0) * 1000)
 
-        # Stage 2: Embedding
-        stage_begin = time.monotonic()
-        query_embedding = None
-        try:
-            query_embedding = await self._cache.get_or_compute_embedding(retrieval_query, self._embedding)
-        except Exception as e:
-            logger.warning("Embedding failed, will use FTS only: %s", e, exc_info=True)
-        stage_metrics["embedding_ms"] = int((time.monotonic() - stage_begin) * 1000)
+        async def _run_embedding() -> tuple[list[float] | None, int, bool, str | None]:
+            if self._search_config.mode == "fts":
+                return None, 0, False, None
+            e_t0 = time.monotonic()
+            try:
+                vec = await self._cache.get_or_compute_embedding(
+                    retrieval_query,
+                    self._embedding,
+                    timeout_seconds=emb_timeout,
+                )
+                return vec, int((time.monotonic() - e_t0) * 1000), False, None
+            except asyncio.TimeoutError:
+                elapsed = int((time.monotonic() - e_t0) * 1000)
+                logger.warning(
+                    "Embedding timed out after %.1fs (%dms), degrading to FTS+Graph",
+                    emb_timeout,
+                    elapsed,
+                )
+                return None, elapsed, True, "embedding_timeout"
+            except Exception as e:
+                elapsed = int((time.monotonic() - e_t0) * 1000)
+                logger.warning("Embedding failed, degrading to FTS+Graph: %s", e, exc_info=True)
+                return None, elapsed, True, f"embedding_error:{type(e).__name__}"
+
+        async def _run_fts_prefetch() -> tuple[list[SearchResultItem] | None, int]:
+            if not should_prefetch_fts:
+                return None, 0
+            f_t0 = time.monotonic()
+            try:
+                fts_items = await self._fts_search(repo, retrieval_query.strip(), over_fetch, request)
+                return fts_items, int((time.monotonic() - f_t0) * 1000)
+            except Exception as e:
+                logger.warning("FTS pre-fetch failed (will retry in retrieve_and_fuse): %s", e)
+                return None, int((time.monotonic() - f_t0) * 1000)
+
+        parallel_begin = time.monotonic()
+        (
+            (entity_names, graph_weighted_hits, graph_expand_ms),
+            (query_embedding, embedding_ms, degraded, degraded_reason),
+            (prefetched_fts, fts_prefetch_ms),
+        ) = await asyncio.gather(
+            _run_graph_expand(),
+            _run_embedding(),
+            _run_fts_prefetch(),
+        )
+        parallel_fetch_wall_ms = int((time.monotonic() - parallel_begin) * 1000)
+
+        graph_experience_ids = [eid for eid, _ in graph_weighted_hits]
+        stage_metrics["graph_expand_ms"] = graph_expand_ms
+        stage_metrics["embedding_ms"] = embedding_ms
+        stage_metrics["parallel_fetch_wall_ms"] = parallel_fetch_wall_ms
+        if should_prefetch_fts:
+            stage_metrics["fts_ms"] = fts_prefetch_ms
 
         # Stage 3 & 4: Retrieval + RRF Fusion
         stage_begin = time.monotonic()
@@ -397,23 +445,68 @@ class SearchPipeline:
         if query_embedding is None:
             mode = "fts"
 
+        retrieve_kwargs: dict[str, Any] = {
+            "retrieval_query": retrieval_query,
+            "effective_min_similarity": effective_min_similarity,
+            "graph_weighted_hits": graph_weighted_hits,
+            "stage_counts": stage_counts,
+        }
+        if prefetched_fts is not None:
+            retrieve_kwargs["prefetched_fts"] = prefetched_fts
+
         candidates = await self._retrieve_and_fuse(
             repo,
             request,
             query_embedding,
             mode,
-            retrieval_query=retrieval_query,
-            effective_min_similarity=effective_min_similarity,
-            graph_weighted_hits=graph_weighted_hits,
-            stage_counts=stage_counts,
+            **retrieve_kwargs,
         )
         stage_metrics["retrieve_fuse_ms"] = int((time.monotonic() - stage_begin) * 1000)
+
+        # Stage 4.5: Fallback-only LLM query expansion (triggered only on low count / low confidence)
+        if qe_enabled and qe_mode == "fallback" and self._needs_fallback_expansion(candidates, mode):
+            qe_fb_begin = time.monotonic()
+            expanded = await _llm_expand_query(request.query, self._llm_config, qe_timeout_s)
+            query_expansion_ms += int((time.monotonic() - qe_fb_begin) * 1000)
+            if expanded and expanded.strip():
+                qe_triggered = 1
+                expanded_query = (request.query.strip() + " " + expanded.strip()).strip()[:2000]
+                fb_embedding = None
+                if self._search_config.mode != "fts":
+                    try:
+                        fb_embedding = await self._cache.get_or_compute_embedding(
+                            expanded_query,
+                            self._embedding,
+                            timeout_seconds=emb_timeout,
+                        )
+                    except Exception as e:
+                        logger.debug("Fallback expansion embedding failed, using FTS: %s", e)
+                fb_mode = self._search_config.mode if fb_embedding is not None else "fts"
+                fb_rf_begin = time.monotonic()
+                fb_candidates = await self._retrieve_and_fuse(
+                    repo,
+                    request,
+                    fb_embedding,
+                    fb_mode,
+                    retrieval_query=expanded_query,
+                    effective_min_similarity=effective_min_similarity,
+                    graph_weighted_hits=graph_weighted_hits,
+                    stage_counts=None,
+                )
+                stage_metrics["retrieve_fuse_ms"] += int((time.monotonic() - fb_rf_begin) * 1000)
+                candidates = self._merge_candidates(candidates, fb_candidates)
+
+        stage_metrics["query_expansion_ms"] = query_expansion_ms
+        stage_counts["query_expansion_triggered"] = qe_triggered
+        stage_counts["embedding_degraded"] = 1 if degraded else 0
+
         io_logger.log_internal(
             "retrieve_fuse",
             {
                 "query": (retrieval_query or request.query or "")[:50],
                 "mode": mode,
                 "candidates": len(candidates),
+                "degraded": degraded,
             },
             duration_ms=stage_metrics["retrieve_fuse_ms"],
         )
@@ -570,6 +663,7 @@ class SearchPipeline:
                 for d in result_dicts:
                     if d.get("type") != "archive":
                         d["archive_ids"] = archive_mapping.get(str(d.get("id", "")), [])
+        stage_metrics["post_process_ms"] = int((time.monotonic() - post_begin) * 1000)
 
         duration_ms = int((time.monotonic() - start) * 1000)
         stage_metrics["total_ms"] = duration_ms
@@ -584,6 +678,9 @@ class SearchPipeline:
             duration_ms=duration_ms,
             stage_metrics=stage_metrics,
             stage_counts=stage_counts,
+            degraded=degraded,
+            degraded_reason=degraded_reason,
+            low_confidence=low_confidence,
         )
 
         # Stage 8: Cache store
@@ -618,6 +715,36 @@ class SearchPipeline:
 
         return expand_query_synonyms(query, self._tag_synonyms)
 
+    def _needs_fallback_expansion(self, candidates: list[SearchResultItem], mode: str) -> bool:
+        """Determine whether first-pass retrieval was too weak and needs LLM query expansion."""
+        min_results = int(getattr(self._search_config, "query_expansion_fallback_min_results", 3))
+        if len(candidates) < min_results:
+            return True
+        if mode == "fts":
+            return float(candidates[0].score or 0.0) <= 0.0
+        min_sim = float(getattr(self._search_config, "query_expansion_fallback_min_similarity", 0.65))
+        top_sim = max((float(c.similarity or 0.0) for c in candidates), default=0.0)
+        return top_sim < min_sim
+
+    @staticmethod
+    def _merge_candidates(
+        primary: list[SearchResultItem],
+        secondary: list[SearchResultItem],
+    ) -> list[SearchResultItem]:
+        """Merge and deduplicate two candidate lists, retaining the highest score per experience ID."""
+        merged: dict[str, SearchResultItem] = {}
+        order: list[str] = []
+        for item in primary + secondary:
+            cid = str(item.data.get("id") or item.data.get("group_id") or id(item))
+            if cid not in merged:
+                merged[cid] = item
+                order.append(cid)
+            elif float(item.score or 0.0) > float(merged[cid].score or 0.0):
+                merged[cid] = item
+        out = [merged[cid] for cid in order]
+        out.sort(key=lambda x: float(x.score or 0.0), reverse=True)
+        return out
+
     async def _retrieve_and_fuse(
         self,
         repo: ExperienceRepository,
@@ -628,11 +755,13 @@ class SearchPipeline:
         effective_min_similarity: float | None = None,
         graph_weighted_hits: list[tuple[str, float]] | None = None,
         stage_counts: dict[str, int] | None = None,
+        prefetched_fts: list[SearchResultItem] | None = None,
     ) -> list[SearchResultItem]:
         """Execute retrieval and RRF fusion."""
         q = (retrieval_query or request.query).strip()
         over_fetch = request.max_results * 5
         min_sim = effective_min_similarity if effective_min_similarity is not None else request.min_similarity
+        enable_graph = getattr(self._search_config, "enable_graph", True) is not False
 
         if mode == "vector" and query_embedding:
             vec_res = await self._vector_search(repo, query_embedding, over_fetch, request, min_similarity=min_sim)
@@ -645,8 +774,66 @@ class SearchPipeline:
                 stage_counts["fused_count"] = len(vec_res)
             return vec_res
 
-        if mode == "fts":
-            fts_res = await self._fts_search(repo, q, over_fetch, request)
+        if mode == "fts" or query_embedding is None:
+            fts_res = (
+                prefetched_fts
+                if prefetched_fts is not None
+                else await self._fts_search(repo, q, over_fetch, request)
+            )
+            graph_results: list[SearchResultItem] = []
+            if enable_graph and graph_weighted_hits:
+                existing_by_id = {
+                    str(item.data.get("id")): item.data
+                    for item in fts_res
+                    if isinstance(item.data, dict) and item.data.get("id")
+                }
+                try:
+                    graph_results = await self._graph_search(
+                        repo,
+                        graph_weighted_hits,
+                        over_fetch,
+                        request,
+                        existing_by_id=existing_by_id,
+                    )
+                except Exception as e:
+                    logger.warning("Graph search failed in FTS/degraded mode: %s", e, exc_info=True)
+                    graph_results = []
+
+            if graph_results:
+                rank_profile = None
+                if getattr(self._search_config, "adaptive_ranking", True):
+                    from team_memory.services.search.scoring import resolve_rank_profile
+
+                    rank_profile = resolve_rank_profile(request.query, request.intent_type)
+                    if stage_counts is not None:
+                        stage_counts["rank_intent"] = rank_profile.name
+                fused_degraded = self._rrf_fuse4(
+                    [],
+                    fts_res,
+                    [],
+                    graph_results,
+                    over_fetch,
+                    rank_profile=rank_profile,
+                )
+                fts_ids = {
+                    item.data.get("id") or item.data.get("group_id")
+                    for item in fts_res
+                    if item.data.get("id") or item.data.get("group_id")
+                }
+                g_ids = {
+                    item.data.get("id") or item.data.get("group_id")
+                    for item in graph_results
+                    if item.data.get("id") or item.data.get("group_id")
+                }
+                if stage_counts is not None:
+                    stage_counts["vec_count"] = 0
+                    stage_counts["fts_count"] = len(fts_res)
+                    stage_counts["topic_count"] = 0
+                    stage_counts["graph_count"] = len(graph_results)
+                    stage_counts["graph_unique_added"] = len(g_ids - fts_ids)
+                    stage_counts["fused_count"] = len(fused_degraded)
+                return fused_degraded
+
             if stage_counts is not None:
                 stage_counts["vec_count"] = 0
                 stage_counts["fts_count"] = len(fts_res)
@@ -656,22 +843,14 @@ class SearchPipeline:
                 stage_counts["fused_count"] = len(fts_res)
             return fts_res
 
-        # Hybrid mode: parallel vector + FTS + topic + graph
-        if query_embedding is None:
-            fts_res = await self._fts_search(repo, q, over_fetch, request)
-            if stage_counts is not None:
-                stage_counts["vec_count"] = 0
-                stage_counts["fts_count"] = len(fts_res)
-                stage_counts["topic_count"] = 0
-                stage_counts["graph_count"] = 0
-                stage_counts["graph_unique_added"] = 0
-                stage_counts["fused_count"] = len(fts_res)
-            return fts_res
-
+        # Hybrid mode: parallel vector + FTS (or pre-fetched FTS) + topic + graph
         enable_topic = getattr(self._search_config, "enable_topic", True) is not False
-        enable_graph = getattr(self._search_config, "enable_graph", True) is not False
         vector_task = self._vector_search(repo, query_embedding, over_fetch, request, min_similarity=min_sim)
-        fts_task = self._fts_search(repo, q, over_fetch, request)
+        fts_task = (
+            asyncio.sleep(0, result=prefetched_fts)
+            if prefetched_fts is not None
+            else self._fts_search(repo, q, over_fetch, request)
+        )
         topic_task = (
             self._topic_search(query_embedding, over_fetch, request)
             if enable_topic
@@ -844,6 +1023,10 @@ class SearchPipeline:
                         db_query_succeeded = True
                         for row in rows:
                             rid = str(row[0])
+                            created_iso = row[11].isoformat() if len(row) > 11 and row[11] else None
+                            verified_iso = (
+                                row[16].isoformat() if len(row) > 16 and row[16] else created_iso
+                            )
                             fetched_map[rid] = {
                                 "id": rid,
                                 "title": row[1],
@@ -884,6 +1067,10 @@ class SearchPipeline:
                             db_query_succeeded = True
                             for row in rows:
                                 rid = str(row[0])
+                                created_iso = row[11].isoformat() if len(row) > 11 and row[11] else None
+                                verified_iso = (
+                                    row[16].isoformat() if len(row) > 16 and row[16] else created_iso
+                                )
                                 fetched_map[rid] = {
                                     "id": rid,
                                     "title": row[1],

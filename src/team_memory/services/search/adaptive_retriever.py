@@ -133,7 +133,10 @@ class AdaptiveRetriever:
         seen_ids: set[str] = set()
         collected: list[dict] = []
 
+        llm_ms = 0
+        t_intent = time.monotonic()
         intent = await self.evaluate_intent(query)
+        llm_ms += int((time.monotonic() - t_intent) * 1000)
         logger.info("[Adaptive] Query=%s is_complex=%s", query[:60], intent.is_complex)
 
         search_result = await self._orchestrator.search(
@@ -154,6 +157,8 @@ class AdaptiveRetriever:
         logger.info("[Hop 1] Query=%s -> %d new results", query[:60], len(new_items))
 
         if not intent.is_complex:
+            sm = dict(getattr(search_result, "stage_metrics", None) or {})
+            sm["adaptive_llm_ms"] = llm_ms
             return AdaptiveResult(
                 results=collected,
                 hops=1,
@@ -162,15 +167,19 @@ class AdaptiveRetriever:
                 cached=search_result.cached,
                 intent_type=search_result.intent_type,
                 hop_log=hop_log,
-                stage_metrics=getattr(search_result, "stage_metrics", None),
+                stage_metrics=sm,
                 stage_counts=getattr(search_result, "stage_counts", None),
+                degraded=bool(getattr(search_result, "degraded", False)),
+                degraded_reason=getattr(search_result, "degraded_reason", None),
             )
 
         loop_count = 1
         previous_queries: list[str] = [query]
 
         while loop_count < self._max_loops:
+            t_critic = time.monotonic()
             critic = await self.evaluate_critic(query, collected)
+            llm_ms += int((time.monotonic() - t_critic) * 1000)
             hop_log[-1]["critic_sufficient"] = critic.is_sufficient
             hop_log[-1]["missing"] = critic.missing_information
 
@@ -234,6 +243,8 @@ class AdaptiveRetriever:
             duration_ms,
         )
 
+        sm = dict(getattr(search_result, "stage_metrics", None) or {})
+        sm["adaptive_llm_ms"] = llm_ms
         return AdaptiveResult(
             results=collected,
             hops=loop_count,
@@ -241,8 +252,10 @@ class AdaptiveRetriever:
             reranked=search_result.reranked,
             intent_type=search_result.intent_type,
             hop_log=hop_log,
-            stage_metrics=getattr(search_result, "stage_metrics", None),
+            stage_metrics=sm,
             stage_counts=getattr(search_result, "stage_counts", None),
+            degraded=bool(getattr(search_result, "degraded", False)),
+            degraded_reason=getattr(search_result, "degraded_reason", None),
         )
 
     @staticmethod

@@ -7,7 +7,6 @@ Extracted from ExperienceService to separate read (search) from write
 from __future__ import annotations
 
 import logging
-import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -33,6 +32,7 @@ class OrchestratedSearchResult:
     stage_counts: dict | None = None
     degraded: bool = False
     degraded_reason: str | None = None
+    low_confidence: bool = False
 
 
 class SearchOrchestrator:
@@ -81,24 +81,10 @@ class SearchOrchestrator:
         from team_memory.storage.database import get_session
 
         # Classify query intent
+        intent_start = time.monotonic()
         intent = await self._intent_router.classify(query)
-
-        # Graph retrieval (legacy Kuzu/Graphiti PoC) — opt-in only via TEAM_MEMORY_GRAPHITI_ENABLED;
-        # production graph retrieval uses PostgreSQL 2-hop PPR inside SearchPipeline.
+        intent_route_ms = int((time.monotonic() - intent_start) * 1000)
         graph_summary = None
-        if os.environ.get("TEAM_MEMORY_GRAPHITI_ENABLED", "").lower() in ("1", "true", "yes"):
-            try:
-                from team_memory.services.graph.graphiti_client import get_graph_client
-
-                graph_client = get_graph_client()
-                subgraph = await graph_client.query_subgraph(query, max_depth=2, max_nodes=20)
-                graph_summary = subgraph.get("summary")
-                if graph_summary:
-                    logger.debug("Graphiti retrieval returned summary: %s", graph_summary[:100])
-            except ImportError:
-                pass
-            except Exception as e:
-                logger.debug("Graphiti retrieval skipped: %s", str(e))
 
         async with get_session(self._db_url) as session:
             search_start = time.monotonic()
@@ -121,6 +107,7 @@ class SearchOrchestrator:
                     include_archives=include_archives,
                     include_promoted=include_promoted,
                     include_superseded=include_superseded,
+                    intent_type=intent.intent_type,
                     fallback_projects=(
                         ["*"] if (source == "mcp" and project not in (None, "*", "all")) else None
                     ),
@@ -173,13 +160,20 @@ class SearchOrchestrator:
                         },
                     )
 
+                raw_sm = getattr(pipeline_result, "stage_metrics", None)
+                merged_sm = dict(raw_sm) if isinstance(raw_sm, dict) else {}
+                merged_sm["intent_route_ms"] = intent_route_ms
+
                 return OrchestratedSearchResult(
                     results=processed_results,
                     reranked=pipeline_result.reranked,
                     cached=pipeline_result.cached,
                     intent_type=intent.intent_type,
-                    stage_metrics=getattr(pipeline_result, "stage_metrics", None),
+                    stage_metrics=merged_sm,
                     stage_counts=getattr(pipeline_result, "stage_counts", None),
+                    degraded=bool(getattr(pipeline_result, "degraded", False)),
+                    degraded_reason=getattr(pipeline_result, "degraded_reason", None),
+                    low_confidence=bool(getattr(pipeline_result, "low_confidence", False)),
                 )
 
             # Legacy fallback: direct vector/FTS search

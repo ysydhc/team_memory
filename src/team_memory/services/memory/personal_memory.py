@@ -86,6 +86,8 @@ class PersonalMemoryService:
         query_hint: str = "",
         project: str | None = None,
         context_embedding: list[float] | None = None,
+        embedding_cache: Any = None,
+        embedding_timeout: float | None = 2.5,
     ) -> dict[str, list[str]]:
         """Assemble Supermemory-shaped profile: static/dynamic string lists.
 
@@ -122,7 +124,31 @@ class PersonalMemoryService:
         else:
             emb = context_embedding
             if emb is None and effective_context and effective_context.strip():
-                emb = await self._embedding.encode_single(effective_context.strip())
+                import asyncio as _asyncio
+
+                ctx_text = effective_context.strip()
+                try:
+                    if embedding_cache is not None and hasattr(
+                        embedding_cache, "get_or_compute_embedding"
+                    ):
+                        emb = await embedding_cache.get_or_compute_embedding(
+                            ctx_text,
+                            self._embedding,
+                            timeout_seconds=embedding_timeout,
+                        )
+                    elif embedding_timeout is not None and embedding_timeout > 0:
+                        emb = await _asyncio.wait_for(
+                            self._embedding.encode_single(ctx_text),
+                            timeout=embedding_timeout,
+                        )
+                    else:
+                        emb = await self._embedding.encode_single(ctx_text)
+                except Exception as exc:
+                    logger.debug(
+                        "Personal memory context embedding degraded (static profile only): %s",
+                        exc,
+                    )
+                    emb = None
             async with self._session() as session:
                 repo = PersonalMemoryRepository(session)
                 pull_kwargs: dict[str, Any] = {
