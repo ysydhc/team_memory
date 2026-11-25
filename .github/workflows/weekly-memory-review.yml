@@ -40,7 +40,7 @@ jobs:
               "- [ ] Confirm Chinese-only policy for dialogue/document outputs.",
               "- [ ] For high-impact changes (architecture/migration/permission/process/major tech choices), perform multi-role review.",
               "- [ ] Ensure closure gate was followed (`ruff`, `format`, `pytest`, migration check when needed, `make health`).",
-            ].join(\"\\n\");
+            ].join("\n");
 
             const { data: issue } = await github.rest.issues.create({
               owner: context.repo.owner,

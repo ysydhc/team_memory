@@ -300,7 +300,7 @@ daemon-stop:     ## Stop TM Daemon (launchd on macOS if plist exists, background
 		fi; \
 		rm -f /tmp/tm-daemon.pid; \
 	fi; \
-	pkill -f "team_memory.daemon" 2>/dev/null || true; \
+	pkill -f "[t]eam_memory.daemon" 2>/dev/null || true; \
 	echo "  ✔ TM Daemon stopped"
 
 watchdog-start:  ## Start TM Watchdog (launchd)
