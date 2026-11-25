@@ -248,9 +248,9 @@ class PersonalMemoryRepository:
         if content is not None:
             mem.content = content
         if scope is not None or project is not None:
-            eff_scope = scope if scope is not None else mem.scope
-            eff_proj = project if project is not None else mem.project
-            eff_pk = profile_kind if profile_kind is not None else mem.profile_kind
+            eff_scope = scope if scope is not None else getattr(mem, "scope", "global")
+            eff_proj = project if project is not None else getattr(mem, "project", None)
+            eff_pk = profile_kind if profile_kind is not None else getattr(mem, "profile_kind", "static")
             scope_norm, proj_norm, pk_norm = normalize_scope(
                 eff_scope, project=eff_proj, profile_kind=eff_pk
             )

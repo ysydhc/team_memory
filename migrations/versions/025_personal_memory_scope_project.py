@@ -1,7 +1,7 @@
 """Add project column and scope/project composite index to personal_memories.
 
-Revision ID: 024_personal_memory_scope_project
-Revises: 023_multitenant_rls
+Revision ID: 025_pm_scope_project
+Revises: 024_feedback_source_and_weight
 
 Keeps the strict single-tenant PostgreSQL RLS policy installed in 023_multitenant_rls
 (tenant_id = current_tenant_id) intact with zero cross-tenant leakage.
@@ -12,8 +12,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "024_personal_memory_scope_project"
-down_revision = "023_multitenant_rls"
+revision = "025_pm_scope_project"
+down_revision = "024_feedback_source_and_weight"
 branch_labels = None
 depends_on = None
 

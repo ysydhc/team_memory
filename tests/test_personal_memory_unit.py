@@ -141,8 +141,8 @@ class TestPersonalMemoryWrite:
 
     @pytest.mark.asyncio
     async def test_write_dynamic_scope_normalisation(self):
-        """When profile_kind='dynamic', scope is normalised to 'context'."""
-        mock_mem = _make_personal_memory(scope="context", profile_kind="dynamic")
+        """When profile_kind='dynamic' without project, scope normalises to 'global'."""
+        mock_mem = _make_personal_memory(scope="global", profile_kind="dynamic")
         embedding_provider = _make_embedding_provider()
 
         mock_repo = MagicMock()
@@ -163,7 +163,8 @@ class TestPersonalMemoryWrite:
             )
 
         call_kwargs = mock_repo.upsert_by_semantic.call_args.kwargs
-        assert call_kwargs["scope"] == "context"
+        assert call_kwargs["scope"] == "global"
+        assert call_kwargs["project"] is None
         assert call_kwargs["profile_kind"] == "dynamic"
 
 

@@ -96,8 +96,8 @@ _EXTRACT_PROMPT = """\
 ```json
 {{
   "memories": [
-    {{"category": "preference", "scope": "global", "persona": "coding", "priority": 75, "content": "具体跨项目偏好描述"}},
-    {{"category": "habit", "scope": "project", "persona": "debugging", "priority": 70, "content": "仅在当前工程适用的个人调试习惯"}}
+    {{"category": "preference", "scope": "global", "persona": "coding", "priority": 75, "content": "跨项目偏好"}},
+    {{"category": "habit", "scope": "project", "persona": "debugging", "priority": 70, "content": "当前工程习惯"}}
   ]
 }}
 ```
