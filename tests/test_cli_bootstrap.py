@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import team_memory
 from team_memory import cli, client_config
 
 
@@ -20,7 +21,7 @@ def test_resolve_alembic_paths_finds_repo_migrations() -> None:
 
 def test_daemon_plist_template_exists_and_handles_missing_dotenv() -> None:
     """Bundled com.teammemory.daemon.plist loads ~/.config/tm/.env and replaces placeholders."""
-    plist = Path(cli.__file__).resolve().parent / "daemon" / "com.teammemory.daemon.plist"
+    plist = Path(team_memory.__file__).resolve().parent / "daemon" / "com.teammemory.daemon.plist"
     assert plist.is_file()
     content = plist.read_text(encoding="utf-8")
     assert "__PYTHON_PATH__" in content
