@@ -24,10 +24,10 @@ class TestLifecycleAutoResolveMutations:
 
     def test_auto_resolve_mutations_default_and_override(self):
         cfg_default = LifecycleConfig()
-        assert cfg_default.auto_resolve_mutations is False
+        assert cfg_default.auto_resolve_mutations is True
 
-        cfg_enabled = LifecycleConfig(auto_resolve_mutations=True)
-        assert cfg_enabled.auto_resolve_mutations is True
+        cfg_disabled = LifecycleConfig(auto_resolve_mutations=False)
+        assert cfg_disabled.auto_resolve_mutations is False
 
     @pytest.mark.asyncio
     async def test_experience_service_save_triggers_mutation_resolver_via_config(self):

@@ -3086,6 +3086,33 @@ def main() -> None:
     )
     p_ops.set_defaults(func=cmd_ops_digest)
 
+    # ── verify-staleness ────────────────────────────────────────
+    p_stale = sub.add_parser(
+        "verify-staleness",
+        help="Verify code-grounded evidence_anchors against a repository and flag possibly_stale experiences",
+    )
+    p_stale.add_argument(
+        "--project",
+        default=None,
+        help="Target project slug (auto-inferred from --repo-path or CWD if omitted)",
+    )
+    p_stale.add_argument(
+        "--repo-path",
+        default=".",
+        help="Path to the Git repository root to verify anchors against (default: current directory)",
+    )
+    p_stale.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview staleness transitions without modifying the database",
+    )
+    p_stale.add_argument(
+        "--json",
+        action="store_true",
+        help="Output machine-readable JSON report",
+    )
+    p_stale.set_defaults(func=cmd_verify_staleness)
+
     args = parser.parse_args()
     args.func(args)
 
@@ -3163,6 +3190,66 @@ def cmd_ops_digest(args: argparse.Namespace) -> None:
         webhook_url = args.webhook or os.environ.get("TEAM_MEMORY_FEISHU_WEBHOOK", "")
         if webhook_url:
             asyncio.run(send_feishu_webhook(webhook_url, text))
+
+
+def cmd_verify_staleness(args: argparse.Namespace) -> None:
+    """Verify code-grounded anchors against local repository and flag possibly_stale memories."""
+    import asyncio
+    from pathlib import Path
+
+    from team_memory.config import load_settings
+    from team_memory.project_resolver import infer_project_name, normalize_project_name
+    from team_memory.services.maintenance.staleness_verifier import StalenessVerifier
+
+    try:
+        from dotenv import load_dotenv
+
+        env_file = Path(".env")
+        if env_file.exists():
+            load_dotenv(env_file)
+    except ImportError:
+        pass
+
+    from team_memory.bootstrap import _resolve_db_url
+
+    settings = load_settings()
+    db_url = _resolve_db_url(settings)
+    repo_root = str(Path(args.repo_path).expanduser().resolve())
+    project = args.project or normalize_project_name(infer_project_name(repo_root)) or "default"
+
+    async def _run() -> dict:
+        try:
+            verifier = StalenessVerifier(db_url)
+            return await verifier.verify_project(
+                project=project,
+                repo_path=repo_root,
+                dry_run=bool(args.dry_run),
+            )
+        finally:
+            from team_memory.storage.database import close_db
+
+            await close_db()
+
+    report = asyncio.run(_run())
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return
+
+    print(
+        f"[verify-staleness] project={report.get('project')} repo={report.get('repo_path', repo_root)} "
+        f"dry_run={report.get('dry_run', False)}"
+    )
+    print(
+        f"  checked={report.get('checked', 0)} "
+        f"marked_possibly_stale={report.get('marked_possibly_stale', 0)} "
+        f"reverified_fresh={report.get('reverified_fresh', 0)} "
+        f"skipped_no_anchors={report.get('skipped_no_anchors', 0)}"
+    )
+    for item in report.get("details") or []:
+        print(
+            f"  - {item['id'][:8]} {item['title']} "
+            f"({item['old_status']} -> {item['new_status']}: {', '.join(item.get('reasons') or [])})"
+        )
 
 
 if __name__ == "__main__":

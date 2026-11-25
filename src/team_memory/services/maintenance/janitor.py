@@ -18,7 +18,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, not_, or_, select
 
 from team_memory.project_resolver import normalize_project_name
 from team_memory.services.maintenance.promotion_compiler import PromotionCompiler
@@ -160,11 +160,20 @@ class MemoryJanitor:
             protection_days = self._get_config("protection_period_days", 10)
             protection_cutoff = now - timedelta(days=protection_days)
 
-            # Get experiences eligible for decay (not pinned, not deleted, past protection period)
+            # Get experiences eligible for decay:
+            # - not deleted, not pinned, not superseded
+            # - Defense 3: fresh verified experiences are exempt from blind score decay
+            # - past protection period with positive quality score
             query = select(Experience).where(
                 and_(
                     Experience.is_deleted == False,  # noqa: E712
                     Experience.is_pinned == False,  # noqa: E712
+                    not_(
+                        and_(
+                            Experience.epistemic_tier == "verified",
+                            Experience.staleness_status == "fresh",
+                        )
+                    ),
                     Experience.valid_until.is_(None),
                     Experience.created_at < protection_cutoff,
                     Experience.quality_score > 0,
@@ -184,6 +193,17 @@ class MemoryJanitor:
             decay_threshold = self._get_config("decay_low_threshold", 50.0)
 
             for exp in experiences:
+                # Defensive guard for mocked sessions / ORM objects in unit tests
+                if getattr(exp, "is_pinned", False) is True:
+                    continue
+                tier_val = getattr(exp, "epistemic_tier", "auto_extract")
+                stale_val = getattr(exp, "staleness_status", "fresh")
+                if (
+                    isinstance(tier_val, str)
+                    and tier_val == "verified"
+                    and (not isinstance(stale_val, str) or stale_val == "fresh")
+                ):
+                    continue
                 # Calculate days since last scoring
                 last_scored = exp.last_scored_at or exp.created_at
                 if last_scored is None:
@@ -263,6 +283,12 @@ class MemoryJanitor:
                 and_(
                     Experience.is_deleted == False,  # noqa: E712
                     Experience.is_pinned == False,  # noqa: E712
+                    not_(
+                        and_(
+                            Experience.epistemic_tier == "verified",
+                            Experience.staleness_status == "fresh",
+                        )
+                    ),
                     Experience.valid_until.is_(None),
                     or_(
                         and_(
@@ -1263,6 +1289,24 @@ class MemoryJanitor:
                 "older_than_days": retention_days,
                 "dry_run": dry_run,
             }
+
+    async def verify_staleness(
+        self,
+        project: str,
+        repo_path: str | None = None,
+        *,
+        dry_run: bool = False,
+    ) -> dict:
+        """Run Defense-2 code-grounded staleness verification for a project."""
+        from team_memory.services.maintenance.staleness_verifier import StalenessVerifier
+
+        repo_map = self._get_config("project_repo_map", {}) or {}
+        verifier = StalenessVerifier(self._db_url, project_repo_map=repo_map)
+        return await verifier.verify_project(
+            project=project,
+            repo_path=repo_path,
+            dry_run=dry_run,
+        )
 
     async def run_all(self, project: str | None = None) -> dict:
         """Run all janitor operations in sequence.

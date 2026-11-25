@@ -194,6 +194,17 @@ class Experience(Base):
     last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     mutation_history: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list)
 
+    # Accuracy 4-defenses: epistemic trust tier & code-grounded staleness tracking
+    epistemic_tier: Mapped[str] = mapped_column(
+        String(20), default="auto_extract", nullable=False, server_default="auto_extract"
+    )  # verified | tool_grounded | auto_extract
+    evidence_anchors: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+    staleness_status: Mapped[str] = mapped_column(
+        String(20), default="fresh", nullable=False, server_default="fresh"
+    )  # fresh | possibly_stale | stale
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
@@ -242,8 +253,15 @@ class Experience(Base):
             "valid_from": self.valid_from.isoformat() if self.valid_from else None,
             "valid_until": self.valid_until.isoformat() if self.valid_until else None,
             "superseded_by_id": str(self.superseded_by_id) if self.superseded_by_id else None,
-            "last_verified_at": self.last_verified_at.isoformat() if self.last_verified_at else None,
+            "last_verified_at": (
+                self.last_verified_at.isoformat()
+                if self.last_verified_at
+                else (self.created_at.isoformat() if self.created_at else None)
+            ),
             "mutation_history": self.mutation_history or [],
+            "epistemic_tier": self.epistemic_tier or "auto_extract",
+            "evidence_anchors": self.evidence_anchors if isinstance(self.evidence_anchors, dict) else {},
+            "staleness_status": self.staleness_status or "fresh",
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

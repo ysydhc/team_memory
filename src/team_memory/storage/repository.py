@@ -123,6 +123,9 @@ class ExperienceRepository:
         group_key: str | None = None,
         visibility: str = "project",
         exp_status: str = "published",
+        epistemic_tier: str = "auto_extract",
+        evidence_anchors: dict | None = None,
+        staleness_status: str = "fresh",
     ) -> Experience:
         """Create a new experience record."""
         experience = Experience(
@@ -140,6 +143,9 @@ class ExperienceRepository:
             group_key=group_key,
             visibility=visibility,
             exp_status=exp_status,
+            epistemic_tier=epistemic_tier or "auto_extract",
+            evidence_anchors=evidence_anchors if isinstance(evidence_anchors, dict) else {},
+            staleness_status=staleness_status or "fresh",
         )
         self._session.add(experience)
         await self._session.flush()
@@ -423,6 +429,10 @@ class ExperienceRepository:
                 "solution": (
                     (exp.solution[:300] + "...") if exp.solution and len(exp.solution) > 300 else exp.solution
                 ),
+                "is_pinned": bool(getattr(exp, "is_pinned", False)),
+                "epistemic_tier": getattr(exp, "epistemic_tier", "auto_extract") or "auto_extract",
+                "staleness_status": getattr(exp, "staleness_status", "fresh") or "fresh",
+                "evidence_anchors": getattr(exp, "evidence_anchors", None) or {},
             }
             for exp, sim in rows
         ]
@@ -633,6 +643,8 @@ class ExperienceRepository:
         merged_solution: str | None = None,
         merged_description: str | None = None,
         merged_tags: list[str] | None = None,
+        merged_evidence_anchors: dict | None = None,
+        merged_epistemic_tier: str | None = None,
         embedding: list[float] | None = None,
         reason: str = "",
         actor: str = "system",
@@ -653,12 +665,27 @@ class ExperienceRepository:
                 if t and t not in combined_tags:
                     combined_tags.append(t)
             exp.tags = combined_tags
+        if merged_evidence_anchors is not None:
+            from team_memory.services.memory.evidence_anchors import merge_evidence_anchors
+
+            exp.evidence_anchors = merge_evidence_anchors(
+                getattr(exp, "evidence_anchors", None),
+                merged_evidence_anchors,
+            )
+        if merged_epistemic_tier is not None:
+            from team_memory.services.memory.evidence_anchors import promote_epistemic_tier
+
+            exp.epistemic_tier = promote_epistemic_tier(
+                getattr(exp, "epistemic_tier", None),
+                merged_epistemic_tier,
+            )
         if embedding is not None:
             exp.embedding = embedding
 
         now = _utcnow()
         exp.updated_at = now
         exp.last_verified_at = now
+        exp.staleness_status = "fresh"
 
         history = list(exp.mutation_history) if isinstance(exp.mutation_history, list) else []
         history.append(
@@ -688,6 +715,7 @@ class ExperienceRepository:
 
         now = _utcnow()
         exp.last_verified_at = now
+        exp.staleness_status = "fresh"
 
         history = list(exp.mutation_history) if isinstance(exp.mutation_history, list) else []
         history.append(

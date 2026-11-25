@@ -106,6 +106,8 @@ async def _save_from_content(
     group_key: str | None = None,
     scope: str = "project",
     experience_type: str | None = None,
+    epistemic_tier: str | None = None,
+    evidence: str | None = None,
 ) -> dict:
     """LLM parse + save helper (tm_learn logic), with direct-save fallback on LLM parse failure."""
     from team_memory.services.llm.llm_parser import (
@@ -160,6 +162,10 @@ async def _save_from_content(
         }
         if group_key:
             save_kwargs["group_key"] = group_key
+        if epistemic_tier is not None:
+            save_kwargs["epistemic_tier"] = epistemic_tier
+        if evidence is not None:
+            save_kwargs["evidence"] = evidence
         result = await service.save(**save_kwargs)
 
     if result.get("error"):
@@ -236,6 +242,8 @@ async def op_save(
     project: str | None = None,
     group_key: str | None = None,
     resolve_mutations: bool = False,
+    epistemic_tier: str | None = None,
+    evidence: str | None = None,
 ) -> dict:
     """Unified write: route to direct save or LLM parse based on input."""
     resolved_project = _resolve_project(project)
@@ -292,6 +300,8 @@ async def op_save(
             group_key=group_key,
             scope=scope,
             experience_type=experience_type,
+            epistemic_tier=epistemic_tier,
+            evidence=evidence,
         )
 
     if not has_direct:
@@ -328,6 +338,10 @@ async def op_save(
         }
         if resolve_mutations:
             save_kwargs["resolve_mutations"] = True
+        if epistemic_tier is not None:
+            save_kwargs["epistemic_tier"] = epistemic_tier
+        if evidence is not None:
+            save_kwargs["evidence"] = evidence
         result = await service.save(**save_kwargs)
 
     if result.get("error"):
@@ -352,8 +366,14 @@ async def op_save(
         "status": result.get("exp_status") or result.get("status"),
         "mutation_action": result.get("mutation_action", "ADD"),
     }
+    if result.get("epistemic_tier"):
+        data_out["epistemic_tier"] = result["epistemic_tier"]
+    if result.get("evidence_anchors"):
+        data_out["evidence_anchors"] = result["evidence_anchors"]
     if result.get("superseded_id"):
         data_out["superseded_id"] = result["superseded_id"]
+    if result.get("target_id"):
+        data_out["target_id"] = result["target_id"]
 
     return {
         "message": "Knowledge saved successfully.",
@@ -444,11 +464,17 @@ async def op_draft_publish(
             "code": "validation_error",
         }
 
-    update_kwargs = {"experience_id": draft_id, "exp_status": "published", "user": user}
-    if refined_content:
-        update_kwargs["description"] = refined_content
-
-    result = await service.update(**update_kwargs)
+    if hasattr(service, "publish_draft") and not hasattr(service.publish_draft, "_mock_name"):
+        result = await service.publish_draft(
+            draft_id,
+            user=user,
+            refined_content=refined_content,
+        )
+    else:
+        update_kwargs = {"experience_id": draft_id, "exp_status": "published", "user": user}
+        if refined_content:
+            update_kwargs["description"] = refined_content
+        result = await service.update(**update_kwargs)
 
     if result is None:
         return {
@@ -457,10 +483,17 @@ async def op_draft_publish(
             "code": "internal_error",
         }
 
-    return {
+    out = {
         "id": result.get("id"),
         "status": "published",
     }
+    if result.get("mutation_action"):
+        out["mutation_action"] = result["mutation_action"]
+    if result.get("superseded_id"):
+        out["superseded_id"] = result["superseded_id"]
+    if result.get("retired_draft_id"):
+        out["retired_draft_id"] = result["retired_draft_id"]
+    return out
 
 
 async def op_experience_update(

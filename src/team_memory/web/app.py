@@ -190,7 +190,7 @@ mcp_app = mcp.http_app(
 app = FastAPI(
     title="TeamMemory",
     description="Team Experience Database Management",
-    version="0.3.5",
+    version="0.3.6",
     lifespan=lifespan,
 )
 app.mount("/mcp", mcp_app)

@@ -257,6 +257,13 @@ mcp = FastMCP(
         "   - User provided credentials, config, or access info (save as reference)\n\n"
         "**Optional:** `memory_recall(..., include_user_profile=True)` attaches the same "
         "`profile` object when you only use recall.\n\n"
+        "**Grounding contract (NEVER blindly trust memory):**\n"
+        "- Memory is a clue, NOT absolute ground truth. Current source code and runtime outputs "
+        "always take precedence over historical memory.\n"
+        "- Check `epistemic_tier`, `staleness_status`, and `stale_warning` on recalled items; "
+        "verify anchored files before acting.\n"
+        "- If you verify a recalled memory is outdated or wrong, call "
+        "`memory_feedback(experience_id, rating=1)` or overwrite it via `memory_save`.\n\n"
         "**Tools:**\n"
         "- `memory_context`: User profile `{static, dynamic}` + relevant team knowledge\n"
         "- `memory_recall`: Search team knowledge; optional user profile; "
@@ -354,6 +361,8 @@ async def memory_save(
     experience_type: str | None = None,
     project: str | None = None,
     group_key: str | None = None,
+    epistemic_tier: str | None = None,
+    evidence: str | None = None,
 ) -> str:
     """Unified write: route to direct save or LLM parse based on input."""
     user = await _get_current_user()
@@ -375,6 +384,11 @@ async def memory_save(
     else:
         ctx = _app_context()
         truncate_settings = ctx.settings
+        save_extra: dict = {}
+        if epistemic_tier is not None:
+            save_extra["epistemic_tier"] = epistemic_tier
+        if evidence is not None:
+            save_extra["evidence"] = evidence
         result = await memory_operations.op_save(
             user,
             service=ctx.service,
@@ -413,8 +427,10 @@ async def memory_save(
         "or just 'file_path' for context-based suggestions. "
         "With include_archives=True, results may include type=archive (previews only); "
         "call memory_get_archive(archive_id) for full L2 text. "
-        "Feedback contract: after applying a recalled experience, call "
-        "memory_feedback(experience_id, rating=5); if outdated/misleading, call rating=1."
+        "Grounding & feedback contract: memory is a lead, NOT absolute truth — current source code "
+        "and runtime outputs always override historical memory. Check epistemic_tier, staleness_status, "
+        "and stale_warning before acting. After applying a helpful experience, call "
+        "memory_feedback(experience_id, rating=5); if outdated/misleading, call rating=1 or overwrite via memory_save."
     ),
 )
 @track_usage
@@ -487,8 +503,9 @@ async def memory_recall(
         "starting a new task or conversation; "
         "switching to a different part of the codebase; "
         "wanting to understand team conventions for a file or module. "
-        "Feedback contract: if a returned experience helps or is outdated, "
-        "rate it via memory_feedback(experience_id, rating=5 or 1)."
+        "Grounding & feedback contract: current code and runtime outputs always override historical memory. "
+        "If a returned experience helps or is outdated, rate it via memory_feedback(experience_id, rating=5 or 1) "
+        "or overwrite it via memory_save."
     ),
 )
 @track_usage

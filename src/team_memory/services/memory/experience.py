@@ -123,23 +123,46 @@ class ExperienceService:
         group_key: str | None = None,
         *,
         resolve_mutations: bool = False,
+        epistemic_tier: str | None = None,
+        evidence: str | None = None,
+        evidence_anchors: dict | None = None,
         session=None,  # noqa: ANN001
     ) -> dict:
         """Save a new experience to the database.
 
         If group_key is provided, auto-groups under a shared parent.
-        If dedup_on_save is enabled, checks for similar experiences first.
+        If write-time mutation resolution is enabled (and exp_status != 'draft'),
+        adjudicates ADD / UPDATE / SUPERSEDE / NOOP against top-3 active neighbors.
 
         Returns:
             Experience dict. If dedup is triggered, returns a dict with
             "status": "duplicate_detected" and "candidates" list.
         """
+        from team_memory.services.memory.evidence_anchors import (
+            extract_evidence_anchors,
+            infer_epistemic_tier,
+        )
+
         async with self._session_or(session) as session:
             # Validate source/status constraint
             _validate_source_status(source, exp_status)
 
             prepare_start = time.monotonic()
             repo = ExperienceRepository(session)
+
+            # Defense 2: 0ms local evidence anchor extraction & Defense 1: epistemic tiering
+            computed_anchors = extract_evidence_anchors(
+                problem,
+                solution,
+                evidence,
+                existing=evidence_anchors,
+            )
+            resolved_epistemic_tier = infer_epistemic_tier(
+                explicit_tier=epistemic_tier,
+                source=source,
+                evidence=evidence,
+                text=f"{title}\n{problem}\n{solution or ''}",
+            )
 
             # Build text for embedding
             # Truncate to 4000 chars to stay within embedding model's
@@ -171,19 +194,33 @@ class ExperienceService:
                 )
 
             mutation_decision = None
-            use_mutation_resolver = resolve_mutations or (
-                getattr(self._lifecycle_config, "auto_resolve_mutations", False) is True
-            )
+            cfg = self._lifecycle_config
+            auto_resolve = getattr(cfg, "auto_resolve_mutations", False) is True
+            use_mutation_resolver = (resolve_mutations or auto_resolve) and exp_status != "draft"
             if not skip_dedup and embedding is not None and use_mutation_resolver:
                 from team_memory.services.memory.mutation_resolver import MutationResolver
 
-                candidates = await repo.check_similar(
+                sim_threshold = float(getattr(cfg, "mutation_similarity_threshold", 0.82))
+                top_k = int(getattr(cfg, "mutation_top_k", 3))
+                llm_timeout = float(getattr(cfg, "mutation_llm_timeout_seconds", 2.0))
+                llm_enabled = bool(getattr(cfg, "mutation_llm_enabled", True)) and (
+                    self._llm_config is not None
+                )
+
+                raw_candidates = await repo.check_similar(
                     embedding=embedding,
-                    threshold=0.85,
-                    limit=5,
+                    threshold=sim_threshold,
+                    limit=top_k,
                     project=project,
                 )
-                resolver = MutationResolver(llm_config=self._llm_config)
+                candidates = raw_candidates if isinstance(raw_candidates, list) else []
+                resolver = MutationResolver(
+                    llm_config=self._llm_config,
+                    mutation_threshold=sim_threshold,
+                    llm_timeout_seconds=llm_timeout,
+                    llm_enabled=llm_enabled,
+                    update_action_name="UPDATE",
+                )
                 mutation_decision = await resolver.resolve(
                     title=title,
                     problem=problem,
@@ -198,6 +235,15 @@ class ExperienceService:
                         reason=mutation_decision.reason,
                         actor=created_by,
                     )
+                    if self._event_bus:
+                        await self._event_bus.emit(
+                            Events.EXPERIENCE_UPDATED,
+                            {
+                                "experience_id": mutation_decision.target_id,
+                                "fields_updated": ["last_verified_at", "staleness_status"],
+                                "user": created_by,
+                            },
+                        )
                     base_dict = (
                         exp.to_dict()
                         if exp is not None
@@ -208,7 +254,7 @@ class ExperienceService:
                     base_dict["mutation_reason"] = mutation_decision.reason
                     return base_dict
 
-                if mutation_decision.action == "MERGE" and mutation_decision.target_id:
+                if mutation_decision.action in ("MERGE", "UPDATE") and mutation_decision.target_id:
                     target_uuid = uuid.UUID(mutation_decision.target_id)
                     merged_sol = mutation_decision.merged_solution or solution or ""
                     merged_embed_text = f"{title}\n{problem}\n{merged_sol}"[:4000]
@@ -217,25 +263,42 @@ class ExperienceService:
                         merged_embedding = await self._embedding.encode_single(merged_embed_text)
                     except Exception:
                         logger.warning("Failed to re-encode merged experience; reusing incoming embedding")
-                    exp = await repo.merge_experience(
-                        target_uuid,
-                        merged_solution=mutation_decision.merged_solution,
-                        merged_tags=tags,
-                        embedding=merged_embedding,
-                        reason=mutation_decision.reason,
-                        actor=created_by,
-                    )
+                    merge_kwargs: dict = {
+                        "merged_solution": mutation_decision.merged_solution,
+                        "merged_tags": tags,
+                        "merged_epistemic_tier": resolved_epistemic_tier,
+                        "embedding": merged_embedding,
+                        "reason": mutation_decision.reason,
+                        "actor": created_by,
+                    }
+                    if computed_anchors:
+                        merge_kwargs["merged_evidence_anchors"] = computed_anchors
+                    try:
+                        exp = await repo.merge_experience(target_uuid, **merge_kwargs)
+                    except TypeError:
+                        merge_kwargs.pop("merged_evidence_anchors", None)
+                        merge_kwargs.pop("merged_epistemic_tier", None)
+                        exp = await repo.merge_experience(target_uuid, **merge_kwargs)
+                    if self._event_bus:
+                        await self._event_bus.emit(
+                            Events.EXPERIENCE_UPDATED,
+                            {
+                                "experience_id": mutation_decision.target_id,
+                                "fields_updated": ["solution", "evidence_anchors", "staleness_status"],
+                                "user": created_by,
+                            },
+                        )
                     base_dict = (
                         exp.to_dict()
                         if exp is not None
                         else {"id": mutation_decision.target_id, "title": title}
                     )
-                    base_dict["mutation_action"] = "MERGE"
+                    base_dict["mutation_action"] = mutation_decision.action
                     base_dict["target_id"] = mutation_decision.target_id
                     base_dict["mutation_reason"] = mutation_decision.reason
                     return base_dict
 
-            # Dedup-on-save check
+            # Dedup-on-save check (fallback when mutation resolver is disabled or saving draft)
             elif (
                 not skip_dedup
                 and embedding is not None
@@ -249,7 +312,7 @@ class ExperienceService:
                         limit=5,
                         project=project,
                     )
-                    if candidates:
+                    if isinstance(candidates, list) and candidates:
                         return {
                             "status": "duplicate_detected",
                             "candidates": candidates,
@@ -277,21 +340,30 @@ class ExperienceService:
                 parent_id = parent.id
 
             persist_start = time.monotonic()
-            experience = await repo.create(
-                title=title,
-                description=problem,
-                solution=solution,
-                created_by=created_by,
-                tags=tags,
-                embedding=embedding,
-                source=source,
-                exp_status=exp_status,
-                visibility=visibility,
-                experience_type=experience_type,
-                project=project or "default",
-                group_key=group_key,
-                parent_id=parent_id,
-            )
+            create_kwargs: dict = {
+                "title": title,
+                "description": problem,
+                "solution": solution,
+                "created_by": created_by,
+                "tags": tags,
+                "embedding": embedding,
+                "source": source,
+                "exp_status": exp_status,
+                "visibility": visibility,
+                "experience_type": experience_type,
+                "project": project or "default",
+                "group_key": group_key,
+                "parent_id": parent_id,
+                "epistemic_tier": resolved_epistemic_tier,
+                "evidence_anchors": computed_anchors,
+                "staleness_status": "fresh",
+            }
+            try:
+                experience = await repo.create(**create_kwargs)
+            except TypeError:
+                for extra_k in ("epistemic_tier", "evidence_anchors", "staleness_status"):
+                    create_kwargs.pop(extra_k, None)
+                experience = await repo.create(**create_kwargs)
 
             if (
                 mutation_decision is not None
@@ -407,16 +479,32 @@ class ExperienceService:
                 updates["visibility"] = kwargs["visibility"]
             if "experience_type" in kwargs:
                 updates["experience_type"] = kwargs["experience_type"]
+            if "epistemic_tier" in kwargs:
+                updates["epistemic_tier"] = kwargs["epistemic_tier"]
+            if "staleness_status" in kwargs:
+                updates["staleness_status"] = kwargs["staleness_status"]
+            if "evidence_anchors" in kwargs:
+                updates["evidence_anchors"] = kwargs["evidence_anchors"]
+            if "last_verified_at" in kwargs:
+                updates["last_verified_at"] = kwargs["last_verified_at"]
 
             if not updates:
                 return experience.to_dict()
 
-            # Re-generate embedding if content fields changed
+            # Re-generate embedding & refresh evidence anchors if content fields changed
             if need_reembed:
+                from team_memory.services.memory.evidence_anchors import extract_evidence_anchors
+
                 final_title = updates.get("title", experience.title)
                 final_desc = updates.get("description", experience.description)
                 final_sol = updates.get("solution", experience.solution) or ""
                 final_tags = updates.get("tags", experience.tags)
+                if "evidence_anchors" not in updates:
+                    re_anchors = extract_evidence_anchors(final_desc, final_sol)
+                    if re_anchors:
+                        updates["evidence_anchors"] = re_anchors
+                if "staleness_status" not in updates:
+                    updates["staleness_status"] = "fresh"
                 children = await repo.get_children(exp_uuid)
                 embed_text = self._build_parent_embed_text(
                     final_title,
@@ -643,6 +731,18 @@ class ExperienceService:
                         await repo.increment_implicit_positive_count(exp_uuid)
                 else:
                     await repo.increment_used_count(exp_uuid)
+                    # Defense 4 feedback loop: explicit rating=5 re-verifies freshness
+                    if rating == 5 and hasattr(repo, "update"):
+                        import inspect
+                        from datetime import datetime, timezone
+
+                        res_u = repo.update(
+                            exp_uuid,
+                            staleness_status="fresh",
+                            last_verified_at=datetime.now(timezone.utc),
+                        )
+                        if inspect.isawaitable(res_u):
+                            await res_u
             elif rating <= 2:
                 import inspect
 
@@ -655,10 +755,16 @@ class ExperienceService:
                         res_n = repo.increment_implicit_negative_count(exp_uuid)
                         if inspect.isawaitable(res_n):
                             await res_n
-                elif hasattr(repo, "increment_negative_feedback_count"):
-                    res_n = repo.increment_negative_feedback_count(exp_uuid)
-                    if inspect.isawaitable(res_n):
-                        await res_n
+                else:
+                    if hasattr(repo, "increment_negative_feedback_count"):
+                        res_n = repo.increment_negative_feedback_count(exp_uuid)
+                        if inspect.isawaitable(res_n):
+                            await res_n
+                    # Defense 4 feedback loop: explicit negative rating flags possibly_stale
+                    if hasattr(repo, "update"):
+                        res_u = repo.update(exp_uuid, staleness_status="possibly_stale")
+                        if inspect.isawaitable(res_u):
+                            await res_u
 
             if self._event_bus:
                 await self._event_bus.emit(
@@ -767,6 +873,242 @@ class ExperienceService:
                     emb = getattr(exp, "embedding", None)
                     d["embedding"] = list(emb) if emb is not None else None
                 out.append(d)
+            return out
+
+    async def list_stale_candidates(
+        self,
+        *,
+        project: str | None = None,
+        limit: int = 50,
+        include_embedding: bool = True,
+    ) -> list[dict]:
+        """Sample active published/promoted experiences flagged as possibly_stale or stale."""
+        from team_memory.storage.models import Experience
+
+        async with self._session() as session:
+            stmt = select(Experience).where(
+                Experience.exp_status.in_(["published", "promoted"]),
+                Experience.is_deleted == False,  # noqa: E712
+                Experience.valid_until.is_(None),
+                Experience.staleness_status.in_(["possibly_stale", "stale"]),
+            )
+            if project is not None:
+                stmt = stmt.where(Experience.project == project)
+            stmt = stmt.order_by(Experience.updated_at.desc()).limit(limit)
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+            out: list[dict] = []
+            for exp in rows:
+                d = exp.to_dict()
+                if include_embedding:
+                    emb = getattr(exp, "embedding", None)
+                    d["embedding"] = list(emb) if emb is not None else None
+                out.append(d)
+            return out
+
+    async def publish_draft(
+        self,
+        draft_id: str,
+        *,
+        user: str = "system",
+        refined_content: str | None = None,
+        resolve_mutations: bool | None = None,
+        session=None,  # noqa: ANN001
+    ) -> dict | None:
+        """Promote a draft to published with write-time mutation adjudication and zombie-draft cleanup."""
+        from team_memory.services.memory.evidence_anchors import extract_evidence_anchors
+        from team_memory.services.memory.mutation_resolver import MutationResolver
+
+        async with self._session_or(session) as sess:
+            repo = ExperienceRepository(sess)
+            draft_uuid = uuid.UUID(draft_id)
+            draft = await repo.get_by_id(draft_uuid)
+            if draft is None:
+                return None
+
+            title = draft.title or ""
+            problem = refined_content if refined_content else (draft.description or "")
+            solution = draft.solution or problem
+            tags = list(draft.tags or [])
+            project = draft.project or "default"
+
+            anchors = extract_evidence_anchors(problem, solution, existing=getattr(draft, "evidence_anchors", None))
+
+            embed_text = f"{title}\n{problem}\n{solution or ''}"[:4000]
+            embedding = getattr(draft, "embedding", None)
+            if refined_content or embedding is None:
+                try:
+                    embedding = await self._embedding.encode_single(embed_text)
+                except Exception:
+                    logger.warning("publish_draft: failed to compute embedding for %s", draft_id)
+
+            cfg = self._lifecycle_config
+            should_resolve = (
+                resolve_mutations
+                if resolve_mutations is not None
+                else (getattr(cfg, "auto_resolve_mutations", True) is True)
+            )
+
+            if should_resolve and embedding is not None:
+                sim_threshold = float(getattr(cfg, "mutation_similarity_threshold", 0.82))
+                top_k = int(getattr(cfg, "mutation_top_k", 3))
+                llm_timeout = float(getattr(cfg, "mutation_llm_timeout_seconds", 2.0))
+                llm_enabled = bool(getattr(cfg, "mutation_llm_enabled", True)) and (
+                    self._llm_config is not None
+                )
+                raw_candidates = await repo.check_similar(
+                    embedding=list(embedding),
+                    threshold=sim_threshold,
+                    limit=top_k + 1,
+                    project=project,
+                )
+                candidates = [
+                    c
+                    for c in (raw_candidates if isinstance(raw_candidates, list) else [])
+                    if str(c.get("id", "")) != str(draft_uuid)
+                ][:top_k]
+
+                if candidates:
+                    resolver = MutationResolver(
+                        llm_config=self._llm_config,
+                        mutation_threshold=sim_threshold,
+                        llm_timeout_seconds=llm_timeout,
+                        llm_enabled=llm_enabled,
+                        update_action_name="UPDATE",
+                    )
+                    decision = await resolver.resolve(
+                        title=title,
+                        problem=problem,
+                        solution=solution,
+                        candidates=candidates,
+                    )
+
+                    if decision.action == "NOOP" and decision.target_id:
+                        target_uuid = uuid.UUID(decision.target_id)
+                        target_exp = await repo.touch_verified(
+                            target_uuid,
+                            reason=decision.reason,
+                            actor=user,
+                        )
+                        # Clean up zombie draft
+                        await repo.update(
+                            draft_uuid,
+                            is_deleted=True,
+                            superseded_by_id=target_uuid,
+                        )
+                        if self._event_bus:
+                            await self._event_bus.emit(
+                                Events.EXPERIENCE_UPDATED,
+                                {
+                                    "experience_id": decision.target_id,
+                                    "fields_updated": ["last_verified_at", "staleness_status"],
+                                    "user": user,
+                                },
+                            )
+                        out = target_exp.to_dict() if target_exp else {"id": decision.target_id}
+                        out["status"] = "published"
+                        out["mutation_action"] = "NOOP"
+                        out["target_id"] = decision.target_id
+                        out["retired_draft_id"] = draft_id
+                        return out
+
+                    if decision.action in ("UPDATE", "MERGE") and decision.target_id:
+                        target_uuid = uuid.UUID(decision.target_id)
+                        merged_sol = decision.merged_solution or solution
+                        merged_emb = list(embedding)
+                        try:
+                            merged_emb = await self._embedding.encode_single(
+                                f"{title}\n{problem}\n{merged_sol}"[:4000]
+                            )
+                        except Exception:
+                            pass
+                        draft_tier = getattr(draft, "epistemic_tier", None) or "auto_extract"
+                        target_exp = await repo.merge_experience(
+                            target_uuid,
+                            merged_solution=decision.merged_solution,
+                            merged_tags=tags,
+                            merged_evidence_anchors=anchors or None,
+                            merged_epistemic_tier=draft_tier,
+                            embedding=merged_emb,
+                            reason=decision.reason,
+                            actor=user,
+                        )
+                        # Clean up zombie draft
+                        await repo.update(
+                            draft_uuid,
+                            is_deleted=True,
+                            superseded_by_id=target_uuid,
+                        )
+                        if self._event_bus:
+                            await self._event_bus.emit(
+                                Events.EXPERIENCE_UPDATED,
+                                {
+                                    "experience_id": decision.target_id,
+                                    "fields_updated": ["solution", "evidence_anchors", "staleness_status"],
+                                    "user": user,
+                                },
+                            )
+                        out = target_exp.to_dict() if target_exp else {"id": decision.target_id}
+                        out["status"] = "published"
+                        out["mutation_action"] = decision.action
+                        out["target_id"] = decision.target_id
+                        out["retired_draft_id"] = draft_id
+                        return out
+
+                    if decision.action == "SUPERSEDE" and decision.target_id:
+                        updates: dict = {
+                            "exp_status": "published",
+                            "evidence_anchors": anchors,
+                            "staleness_status": "fresh",
+                        }
+                        if refined_content:
+                            updates["description"] = refined_content
+                        if embedding is not None:
+                            updates["embedding"] = list(embedding)
+                        updated = await repo.update(draft_uuid, **updates)
+                        await repo.supersede_experience(
+                            uuid.UUID(decision.target_id),
+                            draft_uuid,
+                            reason=decision.reason,
+                            actor=user,
+                        )
+                        if self._event_bus:
+                            await self._event_bus.emit(
+                                Events.EXPERIENCE_UPDATED,
+                                {
+                                    "experience_id": draft_id,
+                                    "fields_updated": list(updates.keys()),
+                                    "user": user,
+                                },
+                            )
+                        out = updated.to_dict() if updated else {"id": draft_id}
+                        out["mutation_action"] = "SUPERSEDE"
+                        out["superseded_id"] = decision.target_id
+                        return out
+
+            updates = {
+                "exp_status": "published",
+                "evidence_anchors": anchors,
+                "staleness_status": "fresh",
+            }
+            if refined_content:
+                updates["description"] = refined_content
+            if embedding is not None:
+                updates["embedding"] = list(embedding)
+            updated = await repo.update(draft_uuid, **updates)
+            if updated and self._event_bus:
+                await self._event_bus.emit(
+                    Events.EXPERIENCE_UPDATED,
+                    {
+                        "experience_id": draft_id,
+                        "fields_updated": list(updates.keys()),
+                        "user": user,
+                    },
+                )
+            if updated is None:
+                return None
+            out = updated.to_dict()
+            out["mutation_action"] = "ADD"
             return out
 
     async def find_similar_active(

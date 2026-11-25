@@ -116,6 +116,22 @@ class SearchConfig(BaseModel):
         default=True,
         description="Enable intent-adaptive RRF/graph/recency rank profiles based on query intent.",
     )
+    epistemic_staleness_ranking: bool = Field(
+        default=True,
+        description="Enable epistemic tier & staleness calibration after adaptive filtering.",
+    )
+    crag_low_confidence_threshold: float = Field(
+        default=0.58,
+        description="Top-1 similarity floor for multi-signal CRAG low_confidence tagging.",
+    )
+    crag_verifier_enabled: bool = Field(
+        default=False,
+        description="Enable optional lightweight LLM verifier for borderline low-confidence candidates.",
+    )
+    crag_verifier_timeout_seconds: float = Field(
+        default=1.5,
+        description="Strict timeout in seconds for optional CRAG lightweight verifier.",
+    )
 
 
 class CacheConfig(BaseModel):

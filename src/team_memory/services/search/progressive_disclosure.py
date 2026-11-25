@@ -43,6 +43,13 @@ _CORE_METADATA_KEYS: tuple[str, ...] = (
     "valid_until",
     "superseded_by_id",
     "cross_project",
+    "epistemic_tier",
+    "staleness_status",
+    "last_verified_at",
+    "created_at",
+    "evidence_anchors",
+    "stale_warning",
+    "low_confidence",
 )
 
 WORKING_SET_NOTE = "[已在当前会话加载 L2 / Already in Working Set]"
@@ -284,7 +291,12 @@ def _compact_to_l1_summary(
     card: dict[str, Any] = {}
     for key in _CORE_METADATA_KEYS:
         if key in item:
-            card[key] = copy.deepcopy(item[key])
+            if key == "evidence_anchors" and isinstance(item[key], dict):
+                # Trim L1 anchors to file_paths[:3] only to protect token budget
+                paths = item[key].get("file_paths") or []
+                card[key] = {"file_paths": list(paths[:3])} if paths else {}
+            else:
+                card[key] = copy.deepcopy(item[key])
 
     raw_sol = str(item.get("solution") or "")
     raw_desc = str(item.get("description") or "")

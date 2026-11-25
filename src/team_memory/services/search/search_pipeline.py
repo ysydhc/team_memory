@@ -597,8 +597,39 @@ class SearchPipeline:
             duration_ms=stage_metrics["adaptive_filter_ms"],
         )
 
-        # Confidence labels (after fusion / filter / optional rerank scores)
+        # Confidence labels BEFORE epistemic/staleness adjustment so possibly_stale
+        # down-weighting never pushes a medium-relevance item into 'low' and gets dropped by _guard_output.
         candidates = self._label_confidence(candidates)
+
+        # Stage 6b: Defense-4 epistemic & staleness calibration (post-filter/confidence re-rank)
+        if getattr(self._search_config, "epistemic_staleness_ranking", True) and candidates:
+            from team_memory.services.search.scoring import apply_epistemic_and_staleness_adjustment
+
+            candidates = apply_epistemic_and_staleness_adjustment(candidates)
+
+        # Stage 6c: Defense-4 CRAG multi-signal low-confidence detection (0ms default + optional 1.5s Verifier)
+        low_confidence = False
+        if candidates:
+            from team_memory.services.search.scoring import detect_low_confidence
+
+            crag_sim_thr = float(getattr(self._search_config, "crag_low_confidence_threshold", 0.58))
+            low_confidence = detect_low_confidence(candidates, sim_threshold=crag_sim_thr)
+            if low_confidence:
+                stage_counts["crag_low_confidence"] = 1
+                if (
+                    getattr(self._search_config, "crag_verifier_enabled", False)
+                    and self._llm_config is not None
+                ):
+                    crag_timeout = float(
+                        getattr(self._search_config, "crag_verifier_timeout_seconds", 1.5)
+                    )
+                    ver_t0 = time.monotonic()
+                    candidates = await self._crag_verify_candidates(
+                        request.query,
+                        candidates,
+                        timeout_seconds=crag_timeout,
+                    )
+                    stage_metrics["crag_verifier_ms"] = int((time.monotonic() - ver_t0) * 1000)
 
         # Stage 6.5: Grouping logic (US5)
         if request.grouped:
@@ -619,18 +650,36 @@ class SearchPipeline:
             # Limit final results
             candidates = candidates[: request.max_results]
 
-        # Build final result dicts
+        # Build final result dicts with Defense-4 epistemic/staleness metadata & warnings
+        from team_memory.services.memory.evidence_anchors import compact_evidence_anchors
+        from team_memory.services.search.scoring import STALE_WARNING_TEXT
+
         result_dicts = []
         for item in candidates:
             d = item.data.copy()
             d["score"] = round(float(item.score), 4)
             d["similarity"] = round(item.similarity, 4)
             d["confidence"] = item.confidence
+            d["epistemic_tier"] = d.get("epistemic_tier") or "auto_extract"
+            staleness = d.get("staleness_status") or "fresh"
+            d["staleness_status"] = staleness
+            if not d.get("last_verified_at"):
+                d["last_verified_at"] = d.get("created_at")
+            d["evidence_anchors"] = compact_evidence_anchors(
+                d.get("evidence_anchors"),
+                max_paths=8,
+                max_symbols=8,
+            )
+            if staleness in ("possibly_stale", "stale"):
+                d["stale_warning"] = STALE_WARNING_TEXT
+            if low_confidence:
+                d["low_confidence"] = True
             result_dicts.append(d)
 
         result_dicts = _apply_bi_temporal_annotations(result_dicts)
 
         # Stage 7: Include archives when requested
+        post_begin = time.monotonic()
         if request.include_archives and query_embedding is not None:
             archive_repo = ArchiveRepository(session)
             archive_limit = max(request.max_results * 2, 20)
@@ -1001,7 +1050,8 @@ class SearchPipeline:
                 SELECT id, title, description, solution, tags, project,
                        experience_type, exp_status, recall_count, used_count,
                        negative_feedback_count, created_at,
-                       implicit_positive_count, implicit_negative_count
+                       implicit_positive_count, implicit_negative_count,
+                       epistemic_tier, staleness_status, last_verified_at, evidence_anchors
                 FROM experiences
                 WHERE id::text = ANY(:ids)
                   AND {status_clause}
@@ -1039,13 +1089,17 @@ class SearchPipeline:
                                 "recall_count": row[8] or 0,
                                 "used_count": row[9] or 0,
                                 "negative_feedback_count": (row[10] or 0) if len(row) > 10 else 0,
-                                "created_at": (
-                                    row[11].isoformat()
-                                    if len(row) > 11 and row[11]
-                                    else None
-                                ),
+                                "created_at": created_iso,
                                 "implicit_positive_count": (row[12] or 0) if len(row) > 12 else 0,
                                 "implicit_negative_count": (row[13] or 0) if len(row) > 13 else 0,
+                                "epistemic_tier": (row[14] or "auto_extract") if len(row) > 14 else "auto_extract",
+                                "staleness_status": (row[15] or "fresh") if len(row) > 15 else "fresh",
+                                "last_verified_at": verified_iso,
+                                "evidence_anchors": (
+                                    (row[17] or {})
+                                    if len(row) > 17 and isinstance(row[17], dict)
+                                    else {}
+                                ),
                             }
                 except Exception:
                     if hasattr(active_session, "rollback"):
@@ -1083,13 +1137,17 @@ class SearchPipeline:
                                     "recall_count": row[8] or 0,
                                     "used_count": row[9] or 0,
                                     "negative_feedback_count": (row[10] or 0) if len(row) > 10 else 0,
-                                    "created_at": (
-                                        row[11].isoformat()
-                                        if len(row) > 11 and row[11]
-                                        else None
-                                    ),
+                                    "created_at": created_iso,
                                     "implicit_positive_count": (row[12] or 0) if len(row) > 12 else 0,
                                     "implicit_negative_count": (row[13] or 0) if len(row) > 13 else 0,
+                                    "epistemic_tier": (row[14] or "auto_extract") if len(row) > 14 else "auto_extract",
+                                    "staleness_status": (row[15] or "fresh") if len(row) > 15 else "fresh",
+                                    "last_verified_at": verified_iso,
+                                    "evidence_anchors": (
+                                        (row[17] or {})
+                                        if len(row) > 17 and isinstance(row[17], dict)
+                                        else {}
+                                    ),
                                 }
                 except Exception:
                     pass
@@ -1472,7 +1530,8 @@ class SearchPipeline:
                         SELECT id, title, description, solution, tags, project,
                                experience_type, exp_status, recall_count, used_count,
                                negative_feedback_count, created_at,
-                               implicit_positive_count, implicit_negative_count
+                               implicit_positive_count, implicit_negative_count,
+                               epistemic_tier, staleness_status, last_verified_at, evidence_anchors
                         FROM experiences
                         WHERE id::text = ANY(:ids)
                           AND exp_status = ANY(:statuses)
@@ -1521,6 +1580,18 @@ class SearchPipeline:
                                 "created_at": row[11].isoformat() if row[11] else None,
                                 "implicit_positive_count": (row[12] or 0) if len(row) > 12 else 0,
                                 "implicit_negative_count": (row[13] or 0) if len(row) > 13 else 0,
+                                "epistemic_tier": (row[14] or "auto_extract") if len(row) > 14 else "auto_extract",
+                                "staleness_status": (row[15] or "fresh") if len(row) > 15 else "fresh",
+                                "last_verified_at": (
+                                    row[16].isoformat()
+                                    if len(row) > 16 and row[16]
+                                    else (row[11].isoformat() if row[11] else None)
+                                ),
+                                "evidence_anchors": (
+                                    (row[17] or {})
+                                    if len(row) > 17 and isinstance(row[17], dict)
+                                    else {}
+                                ),
                             },
                             score=t_sim,
                             similarity=t_sim,
@@ -1562,6 +1633,84 @@ class SearchPipeline:
             score_gap_threshold=self._search_config.score_gap_threshold,
             adaptive_min_keep=getattr(self._search_config, "adaptive_min_keep", 3),
         )
+
+    async def _crag_verify_candidates(
+        self,
+        query: str,
+        candidates: list[SearchResultItem],
+        *,
+        timeout_seconds: float = 1.5,
+    ) -> list[SearchResultItem]:
+        """Optional lightweight CRAG verifier for borderline low-confidence hits.
+
+        Filters out clearly irrelevant candidates within a strict timeout; degrades
+        safely to returning the original candidates on timeout or any error.
+        """
+        if not candidates or self._llm_config is None:
+            return candidates
+
+        import json
+
+        import httpx
+
+        top_slice = candidates[:5]
+        base_url = getattr(self._llm_config, "base_url", "https://gw.gburouter.com/v1").rstrip("/")
+        if not base_url.endswith("/v1"):
+            base_url = f"{base_url}/v1"
+        model = getattr(self._llm_config, "model", "gbu-gemini-3.8-flash")
+        api_key_env = getattr(self._llm_config, "api_key_env", "GATEWAY_API_KEY")
+        api_key = os.environ.get(api_key_env, "") or getattr(self._llm_config, "api_key", "") or "none"
+
+        items_payload = [
+            {
+                "idx": idx,
+                "title": (c.data.get("title") or "")[:160],
+                "snippet": (c.data.get("solution") or c.data.get("description") or "")[:240],
+            }
+            for idx, c in enumerate(top_slice)
+        ]
+        prompt = (
+            "Given a search query and candidate memory snippets, return ONLY a JSON array "
+            "of integer indices `idx` that are genuinely relevant to the query (e.g. [0, 2])."
+        )
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": prompt},
+                {
+                    "role": "user",
+                    "content": json.dumps({"query": query[:300], "candidates": items_payload}, ensure_ascii=False),
+                },
+            ],
+            "temperature": 0.0,
+            "max_tokens": 128,
+        }
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+        async def _call() -> list[int]:
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+                resp = await client.post(f"{base_url}/chat/completions", json=payload, headers=headers)
+                resp.raise_for_status()
+                raw = resp.json()["choices"][0]["message"]["content"].strip()
+                if "```" in raw:
+                    raw = raw.split("```")[1]
+                    if raw.startswith("json"):
+                        raw = raw[4:]
+                    raw = raw.strip()
+                parsed = json.loads(raw)
+                if not isinstance(parsed, list):
+                    raise ValueError("CRAG verifier returned non-list")
+                return [int(i) for i in parsed if isinstance(i, int) and 0 <= i < len(top_slice)]
+
+        try:
+            keep_indices = await asyncio.wait_for(_call(), timeout=timeout_seconds)
+            keep_set = set(keep_indices)
+            filtered = [top_slice[i] for i in range(len(top_slice)) if i in keep_set]
+            # Never silently erase all results on a borderline query; keep top-1 tagged low_confidence
+            return filtered if filtered else candidates
+        except Exception as exc:
+            logger.debug("CRAG lightweight verifier skipped/timed out (%s); keeping candidates", exc)
+            return candidates
 
     def _build_rerank_document_text(self, item: SearchResultItem) -> str:
         """Concatenate title, problem (description), solution for reranker input."""

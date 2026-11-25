@@ -200,6 +200,39 @@ class GitWatcher:
             "add": add_results[0] if add_results else None,
         }
 
+    # -- code change staleness trigger ---------------------------------------
+
+    async def on_code_change(
+        self,
+        repo_path: str,
+        changed_files: list[str] | None = None,
+        deleted_files: list[str] | None = None,
+        *,
+        verifier: Any = None,
+        project: str | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Trigger Defense-2 code-grounded staleness verification after code changes.
+
+        Invokes ``StalenessVerifier.verify_project`` when a verifier is supplied so
+        deleted/refactored files immediately flag dependent experiences as
+        ``possibly_stale`` without touching anchor-free experiences.
+        """
+        if verifier is None:
+            return {
+                "skipped": True,
+                "reason": "no_verifier",
+                "changed_files": len(changed_files or []),
+                "deleted_files": len(deleted_files or []),
+            }
+        resolved_project = project or os.path.basename(os.path.abspath(repo_path))
+        return await verifier.verify_project(
+            project=resolved_project,
+            repo_path=repo_path,
+            deleted_files=deleted_files,
+            dry_run=dry_run,
+        )
+
     # -- git helpers ---------------------------------------------------------
 
     def get_staged_files(self, repo_path: str) -> list[str]:

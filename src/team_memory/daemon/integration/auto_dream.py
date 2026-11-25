@@ -40,18 +40,21 @@ _LOCK_FILE = _CACHE_DIR / "auto_dream.lock"
 _CONSOLIDATE_SYSTEM_PROMPT = """\
 You are AutoDream, an offline semantic memory consolidation engine for a software engineering knowledge base.
 Given a cluster of related technical experiences (each with id, title, problem, solution, tags, created_at,
-quality_tier, is_pinned, recall_count, used_count), choose ONE action:
+quality_tier, is_pinned, epistemic_tier, staleness_status, evidence_anchors, recall_count, used_count),
+choose ONE action:
 
 1. "MERGE": Experiences are near-duplicates or complementary facets of the SAME stable solution/fact.
    - Rewrite into ONE compact, high-signal experience (DO NOT concatenate with "---" or repeat boilerplate).
    - Temporal normalization: convert relative time phrases ("yesterday", "last week", "recently", "today",
      "昨天", "上周", "最近", "今天") into absolute dates (YYYY-MM-DD) anchored to each item's created_at.
-   - Choose `primary_id` (MUST prefer any item with is_pinned=true or quality_tier="Gold";
+   - Choose `primary_id` (MUST prefer is_pinned=true, quality_tier="Gold", or fresh epistemic_tier="verified";
      otherwise highest quality/adoption). Put remaining IDs in `secondary_ids`.
-2. "SUPERSEDE": Experiences conflict or a newer experience replaces/deprecates an older approach
-   (e.g., library migration, changed config, fixed misconception, updated API).
+2. "SUPERSEDE": Experiences conflict or a newer/fresh experience replaces an older or `possibly_stale` approach
+   (e.g., library migration, changed config, fixed misconception, updated API, deleted/refactored anchored files).
+   - Pay special attention to items marked `staleness_status="possibly_stale"`: prioritize verifying whether a newer
+     `fresh` experience in the cluster supersedes them.
    - Choose `winner_id` (the accurate/current experience) and `superseded_ids` (obsolete/contradicted ones;
-     NEVER supersede an item with is_pinned=true or quality_tier="Gold").
+     NEVER supersede an item with is_pinned=true, quality_tier="Gold", or fresh epistemic_tier="verified").
 3. "KEEP_BOTH": Experiences apply to different scopes, constraints, or distinct problems — keep untouched.
 
 Respond with ONLY valid JSON matching this schema:
@@ -139,7 +142,11 @@ def _is_protected(exp: dict[str, Any]) -> bool:
     if exp.get("is_pinned"):
         return True
     tier = str(exp.get("quality_tier") or "")
-    return tier == "Gold"
+    if tier == "Gold":
+        return True
+    epistemic = str(exp.get("epistemic_tier") or "auto_extract").lower()
+    staleness = str(exp.get("staleness_status") or "fresh").lower()
+    return epistemic == "verified" and staleness == "fresh"
 
 
 # ---------------------------------------------------------------------------
@@ -769,6 +776,12 @@ class AutoDreamWorker:
         except Exception:
             logger.debug("Low-adoption candidate sampling unavailable, continuing with recent", exc_info=True)
 
+        stale_items: list[dict] = []
+        try:
+            stale_items = await self._get_stale_candidates(project=project)
+        except Exception:
+            logger.debug("Stale candidate sampling unavailable, continuing with recent", exc_info=True)
+
         merged: list[dict] = []
         seen_ids: set[str] = set()
         low_count = 0
@@ -778,6 +791,21 @@ class AutoDreamWorker:
             if cid and cid not in seen_ids and item.get("valid_until") is None:
                 seen_ids.add(cid)
                 merged.append(item)
+
+        for item in stale_items:
+            cid = str(item.get("id") or "")
+            if not cid or item.get("valid_until") is not None:
+                continue
+            item_copy = dict(item)
+            item_copy["_signal"] = "possibly_stale"
+            if cid not in seen_ids:
+                seen_ids.add(cid)
+                merged.append(item_copy)
+            else:
+                for existing in merged:
+                    if str(existing.get("id") or "") == cid:
+                        existing["_signal"] = "possibly_stale"
+                        break
 
         for item in low_adoption:
             cid = str(item.get("id") or "")
@@ -790,10 +818,11 @@ class AutoDreamWorker:
                 merged.append(item_copy)
                 low_count += 1
             else:
-                # Tag existing entry as also having low-adoption signal
+                # Tag existing entry as also having low-adoption signal (preserve possibly_stale if already tagged)
                 for existing in merged:
                     if str(existing.get("id") or "") == cid:
-                        existing["_signal"] = "low_adoption"
+                        if existing.get("_signal") != "possibly_stale":
+                            existing["_signal"] = "low_adoption"
                         low_count += 1
                         break
 
@@ -838,6 +867,18 @@ class AutoDreamWorker:
         result = await ctx.service.list_low_adoption(
             min_recall_count=self._cfg.low_adoption_min_recall,
             max_used_count=0,
+            project=project,
+            limit=self._cfg.low_adoption_sample_limit,
+            include_embedding=True,
+        )
+        return result if isinstance(result, list) else []
+
+    async def _get_stale_candidates(self, *, project: str | None = None) -> list[dict]:
+        """Sample active experiences flagged as possibly_stale for Defense-3 AutoDream verification."""
+        ctx = _daemon_context()
+        if not hasattr(ctx.service, "list_stale_candidates"):
+            return []
+        result = await ctx.service.list_stale_candidates(
             project=project,
             limit=self._cfg.low_adoption_sample_limit,
             include_embedding=True,
@@ -951,8 +992,15 @@ class AutoDreamWorker:
                         max_sim = sim
 
             if len(cluster_members) >= 2:
+                has_stale = int(
+                    any(
+                        m.get("_signal") == "possibly_stale"
+                        or str(m.get("staleness_status") or "fresh") in ("possibly_stale", "stale")
+                        for m in cluster_members
+                    )
+                )
                 has_low_adopt = int(any(m.get("_signal") == "low_adoption" for m in cluster_members))
-                priority = (has_low_adopt, max_sim, len(cluster_members))
+                priority = (has_stale, has_low_adopt, max_sim, len(cluster_members))
                 scored_clusters.append((priority, cluster_members))
                 processed_ids.update(member_ids)
                 logger.debug(
@@ -995,6 +1043,9 @@ class AutoDreamWorker:
                     "quality_tier": exp.get("quality_tier", "Silver"),
                     "quality_score": exp.get("quality_score", 0),
                     "is_pinned": bool(exp.get("is_pinned", False)),
+                    "epistemic_tier": exp.get("epistemic_tier", "auto_extract"),
+                    "staleness_status": exp.get("staleness_status", "fresh"),
+                    "evidence_anchors": exp.get("evidence_anchors") or {},
                     "recall_count": int(exp.get("recall_count", 0) or 0),
                     "used_count": int(exp.get("used_count", 0) or 0),
                     "experience_type": exp.get("experience_type", "general"),
@@ -1501,6 +1552,36 @@ class AutoDreamWorker:
                 pruned += 1
         if pruned > 0:
             logger.info("%s %d outdated orphan experiences", "would prune" if dry_run else "pruned", pruned)
+
+        # Defense 3: Escalate orphaned possibly_stale experiences (>14d, 0 used, unpinned) to stale
+        if hasattr(ctx.service, "list_stale_candidates"):
+            try:
+                stale_cutoff = _utcnow() - timedelta(days=14)
+                stale_cands = await ctx.service.list_stale_candidates(
+                    project=project,
+                    limit=200,
+                    include_embedding=False,
+                )
+                escalated = 0
+                for exp in stale_cands or []:
+                    if str(exp.get("staleness_status") or "") != "possibly_stale":
+                        continue
+                    if exp.get("is_pinned") or int(exp.get("used_count", 0) or 0) > 0:
+                        continue
+                    upd_dt = _parse_dt(exp.get("updated_at") or exp.get("created_at"))
+                    if upd_dt is not None and upd_dt < stale_cutoff:
+                        if not dry_run and hasattr(ctx.service, "update"):
+                            await ctx.service.update(exp["id"], user="auto_dream", staleness_status="stale")
+                        escalated += 1
+                if escalated > 0:
+                    logger.info(
+                        "%s %d orphaned possibly_stale experiences to stale",
+                        "would escalate" if dry_run else "escalated",
+                        escalated,
+                    )
+            except Exception:
+                logger.debug("Orphan possibly_stale escalation skipped", exc_info=True)
+
         return pruned
 
     # ------------------------------------------------------------------

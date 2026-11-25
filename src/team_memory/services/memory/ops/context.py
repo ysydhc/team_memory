@@ -4,7 +4,11 @@ import asyncio
 import logging
 from pathlib import PurePosixPath
 
-from team_memory.services.memory.ops.recall import _infer_recall_project, build_feedback_instruction
+from team_memory.services.memory.ops.recall import (
+    GROUNDING_CONTRACT,
+    _infer_recall_project,
+    build_feedback_instruction,
+)
 from team_memory.utils.project import resolve_project as _resolve_project
 
 logger = logging.getLogger("team_memory")
@@ -101,15 +105,36 @@ async def op_context(
                     if len(cleaned_summary) > 160
                     else cleaned_summary
                 )
-                experiences.append(
-                    {
-                        "id": r.get("group_id") or parent.get("id", ""),
-                        "title": parent.get("title", "Untitled"),
-                        "tags": parent.get("tags", []),
-                        "confidence": r.get("confidence", "medium"),
-                        "summary": summary,
-                    }
+                anchors = parent.get("evidence_anchors") or r.get("evidence_anchors") or {}
+                compact_anchors = (
+                    {"file_paths": list(anchors.get("file_paths", [])[:3])}
+                    if isinstance(anchors, dict) and anchors.get("file_paths")
+                    else {}
                 )
+                staleness = parent.get("staleness_status") or r.get("staleness_status") or "fresh"
+                exp_entry: dict = {
+                    "id": r.get("group_id") or parent.get("id", ""),
+                    "title": parent.get("title", "Untitled"),
+                    "tags": parent.get("tags", []),
+                    "confidence": r.get("confidence", "medium"),
+                    "summary": summary,
+                    "epistemic_tier": parent.get("epistemic_tier") or r.get("epistemic_tier") or "auto_extract",
+                    "staleness_status": staleness,
+                    "last_verified_at": (
+                        parent.get("last_verified_at")
+                        or r.get("last_verified_at")
+                        or parent.get("created_at")
+                        or r.get("created_at")
+                    ),
+                    "evidence_anchors": compact_anchors,
+                }
+                if staleness in ("possibly_stale", "stale"):
+                    from team_memory.services.search.scoring import STALE_WARNING_TEXT
+
+                    exp_entry["stale_warning"] = (
+                        parent.get("stale_warning") or r.get("stale_warning") or STALE_WARNING_TEXT
+                    )
+                experiences.append(exp_entry)
             return osearch.reranked, experiences
         except Exception:
             logger.debug("Failed to search relevant experiences", exc_info=True)
@@ -126,5 +151,7 @@ async def op_context(
     fb_inst = build_feedback_instruction(rel_exps)
     if fb_inst:
         result["feedback_instruction"] = fb_inst
+    if rel_exps:
+        result["grounding_contract"] = GROUNDING_CONTRACT
 
     return result

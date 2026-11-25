@@ -671,3 +671,74 @@ def label_confidence(
             item.confidence = "low"
 
     return candidates
+
+
+EPISTEMIC_WEIGHTS: dict[str, float] = {
+    "verified": 1.04,
+    "tool_grounded": 1.02,
+    "auto_extract": 1.00,
+}
+
+STALENESS_WEIGHTS: dict[str, float] = {
+    "fresh": 1.00,
+    "possibly_stale": 0.90,
+    "stale": 0.78,
+}
+
+STALE_WARNING_TEXT = "关联代码文件已变动，采纳前请核实当前源码"
+
+
+def apply_epistemic_and_staleness_adjustment(
+    candidates: list[SearchResultItem],
+) -> list[SearchResultItem]:
+    """Calibrate ranking scores using epistemic_tier and staleness_status (0ms pure memory).
+
+    Applied AFTER adaptive filtering so gentle tie-breaking boosts/penalties never
+    trigger false truncation or drop stale items before their stale_warning is shown.
+    """
+    if not candidates:
+        return candidates
+
+    for item in candidates:
+        data = item.data
+        tier = str(data.get("epistemic_tier") or "auto_extract").lower()
+        staleness = str(data.get("staleness_status") or "fresh").lower()
+
+        w_ep = EPISTEMIC_WEIGHTS.get(tier, 1.00)
+        w_st = STALENESS_WEIGHTS.get(staleness, 1.00)
+        factor = w_ep * w_st
+
+        if factor != 1.0 and float(item.score or 0.0) > 0.0:
+            item.score = float(item.score) * factor
+        data["epistemic_staleness_factor"] = round(factor, 4)
+
+    candidates.sort(key=lambda x: x.score, reverse=True)
+    return candidates
+
+
+def detect_low_confidence(
+    candidates: list[SearchResultItem],
+    *,
+    sim_threshold: float = 0.58,
+    fts_threshold: float = 0.1,
+) -> bool:
+    """Multi-signal CRAG low-confidence gate (0ms).
+
+    Returns True only when top candidate lacks strong vector similarity,
+    lacks strong FTS rank, and has neither exact title nor identifier match.
+    """
+    if not candidates:
+        return False
+
+    top = candidates[0]
+    data = top.data if isinstance(top.data, dict) else {}
+    if data.get("exact_title_match") or float(data.get("identifier_match_score") or 0.0) > 0.0:
+        return False
+
+    top_sim = max(float(getattr(top, "similarity", 0.0) or 0.0), float(data.get("similarity", 0.0) or 0.0))
+    top_fts = max(float(getattr(top, "fts_rank", 0.0) or 0.0), float(data.get("fts_rank", 0.0) or 0.0))
+
+    if top_sim >= sim_threshold or top_fts >= fts_threshold:
+        return False
+
+    return True
