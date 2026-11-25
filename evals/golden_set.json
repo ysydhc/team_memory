@@ -1,0 +1,926 @@
+{
+  "version": 1,
+  "generated_at": "2026-11-25T09:04:17.711261+00:00",
+  "total_queries": 46,
+  "project_distribution": {
+    "phone_pilot": 4,
+    "adx_sdk_ios": 4,
+    "adx_sdk_android": 3,
+    "team_memory": 3,
+    "agent_common": 3,
+    "ios_qa_master_suite_c28ecb84cde6": 3,
+    "superagent": 2,
+    "android_llog_post_cr_ae0b35d25bd3": 1,
+    "chat_ios": 1,
+    "learning_more": 1,
+    "audit_worker_latency_0da5c385c1d6": 1,
+    "android_fixture_icafe_cr_6b2a31c2bb1e": 1,
+    "ios_demo_cloud_commits_10779dcc962d": 1,
+    "fix_android_fixture_path_76eb9e25bbfc": 1,
+    "emoji_page_map_3ceef5975028": 1,
+    "finish_ios_g2_acceptance_ce7e92979903": 1,
+    "ios_g2_cloud_acceptance_58450050e7d6": 1,
+    "install_onetool_top5_skills_982b617ee55f": 1,
+    "split_ios_three_commits_1063e7b3dbc0": 1,
+    "spec_copilot_icafe_commit_efd762d858bb": 1,
+    "fix_biz9_drawer_popup_18b5b79bfbfe": 1,
+    "fix_board_media_viewer_926365637159": 1,
+    "ios_endcard_guide_banner_b4d6a5535fd9": 1,
+    "inapp_all": 1,
+    "ad_learning": 1
+  },
+  "queries": [
+    {
+      "id": "gs_001",
+      "project": "phone_pilot",
+      "query": "phone_pilot 产品文档 架构 功能 web scene restore",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "0a4089c7-0ed7-4451-9368-9253f3f2f58d",
+        "73bcc4f4-f732-4502-b8c8-c8ef4ff8b4a3"
+      ],
+      "candidate_previews": [
+        {
+          "id": "0a4089c7-0ed7-4451-9368-9253f3f2f58d",
+          "score": 0.0303,
+          "title": "PhonePilot v0.12.0 极速人工验收视图 v4.0、可插拔 AcceptanceProfile 架构解耦与长录屏分段合并发布"
+        },
+        {
+          "id": "73bcc4f4-f732-4502-b8c8-c8ef4ff8b4a3",
+          "score": 0.0297,
+          "title": "phone_pilot 通用层次化状态图架构升级（灰盒路由内省 + 骨架Jaccard同构归并 + 滚屏视口拼接 + 等价触发器折叠）"
+        }
+      ],
+      "bucket": "multihop_arch"
+    },
+    {
+      "id": "gs_002",
+      "project": "adx_sdk_ios",
+      "query": "TopOn AnyThinkiOS Mediation 编译",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "c7061c4d-8553-4aec-9205-40d5b2d0b8a2"
+      ],
+      "candidate_previews": [
+        {
+          "id": "c7061c4d-8553-4aec-9205-40d5b2d0b8a2",
+          "score": 0.0332,
+          "title": "iOS TopOn (AnyThink) Mediation Adapter 完整实现与 GAD/MAX bid_floor 对齐及冷启动开屏自动化避坑"
+        }
+      ],
+      "bucket": "exact_identifier"
+    },
+    {
+      "id": "gs_003",
+      "project": "adx_sdk_android",
+      "query": "激励视频 缓存 isAdReady ANR CacheEngine LruDiskCache",
+      "freq": 1,
+      "used_hits": 1,
+      "expected_ids": [
+        "15b742e2-2182-4bb6-bb39-822ae8ef0f4c"
+      ],
+      "candidate_previews": [
+        {
+          "id": "15b742e2-2182-4bb6-bb39-822ae8ef0f4c",
+          "score": 0.0286,
+          "title": "Android 激励视频 SDK isAdReady 误报 no cache 与视频预缓存失效修复"
+        }
+      ],
+      "bucket": "exact_identifier"
+    },
+    {
+      "id": "gs_004",
+      "project": "team_memory",
+      "query": "2.0.40 发版 Release Gate 全量自动化验收",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "dda1c26d-848b-4329-884d-2426e835ca56"
+      ],
+      "candidate_previews": [
+        {
+          "id": "dda1c26d-848b-4329-884d-2426e835ca56",
+          "score": 0.0414,
+          "title": "2.0.40 发版 Release Gate 全量自动化验收"
+        }
+      ],
+      "bucket": "recency_release"
+    },
+    {
+      "id": "gs_005",
+      "project": "agent_common",
+      "query": "使用一下我们的agent，从头开始玩doll shooter，model使用gemini 3.8 Flash，需要进行录屏+评估Agent整体的效果 (a471012d-2fb6-49a2-8dd9-108a4d5901c7 session_id created_at)",
+      "freq": 1,
+      "used_hits": 1,
+      "expected_ids": [
+        "1c850837-ec9e-4e94-8bcf-98325bb6d277"
+      ],
+      "candidate_previews": [
+        {
+          "id": "1c850837-ec9e-4e94-8bcf-98325bb6d277",
+          "score": 0.0165,
+          "title": "Doll Shooter Unity 3D 游戏自动化游玩与高频广告自愈验收实践"
+        }
+      ],
+      "bucket": "exact_identifier"
+    },
+    {
+      "id": "gs_006",
+      "project": "ios_qa_master_suite_c28ecb84cde6",
+      "query": "adx-sdk-ios 全量验收 481 511 EndCard 云控",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "6080b8d8-4b2f-4ea9-b11c-1b780fe7fff0"
+      ],
+      "candidate_previews": [
+        {
+          "id": "6080b8d8-4b2f-4ea9-b11c-1b780fe7fff0",
+          "score": 3.3756,
+          "title": "iOS ADX SDK 聚合集成验证与典型上报缺陷修复"
+        }
+      ],
+      "bucket": "multihop_arch"
+    },
+    {
+      "id": "gs_007",
+      "project": "superagent",
+      "query": "adx-sdk-android release gate screenrecord",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "dda1c26d-848b-4329-884d-2426e835ca56"
+      ],
+      "candidate_previews": [
+        {
+          "id": "dda1c26d-848b-4329-884d-2426e835ca56",
+          "score": 0.0223,
+          "title": "2.0.40 发版 Release Gate 全量自动化验收"
+        }
+      ],
+      "bucket": "recency_release"
+    },
+    {
+      "id": "gs_008",
+      "project": "android_llog_post_cr_ae0b35d25bd3",
+      "query": "InAppDSP-4466 llog 启动日志 ReportManager",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "2b92e013-ac5b-413d-9cf0-bf1462927aee",
+        "c364df4b-899d-4b81-bdd0-3ef1dab00480"
+      ],
+      "candidate_previews": [
+        {
+          "id": "2b92e013-ac5b-413d-9cf0-bf1462927aee",
+          "score": 0.0321,
+          "title": "[Pre-CR-Gate Passed] . (346917ef1): InAppDSP-4466 [Feature] 启动日志接口升级为 POST 加密上报及扩展字段收集"
+        },
+        {
+          "id": "c364df4b-899d-4b81-bdd0-3ef1dab00480",
+          "score": 0.0307,
+          "title": "启动日志升级必须保留原有GET接口与新增POST加密接口双发兼容"
+        },
+        {
+          "id": "db014ea8-a8a6-4cd1-b899-841a235f34f6",
+          "score": 0.0277,
+          "title": "AdMaster SDK 启动日志接口升级为 POST 加密上报及扩展字段收集 (InAppDSP-4466)"
+        }
+      ],
+      "bucket": "exact_identifier"
+    },
+    {
+      "id": "gs_009",
+      "project": "chat_ios",
+      "query": "Xcode A build only device cannot be used to run this target simulator destination",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "0c1c1f05-2443-4227-9cdc-659aa10ef42c"
+      ],
+      "candidate_previews": [
+        {
+          "id": "0c1c1f05-2443-4227-9cdc-659aa10ef42c",
+          "score": 0.0105,
+          "title": "iOS模拟器simctl路径解析与WDA启动验证"
+        }
+      ],
+      "bucket": "semantic_qa"
+    },
+    {
+      "id": "gs_010",
+      "project": "learning_more",
+      "query": "dsh目前因为数据库被删除了，需要恢复，帮我操作一下",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "005a8e3e-a730-49cf-977a-82056339a31f"
+      ],
+      "candidate_previews": [
+        {
+          "id": "005a8e3e-a730-49cf-977a-82056339a31f",
+          "score": 0.0129,
+          "title": "DSH网关大body排查与256k安全压缩水位"
+        }
+      ],
+      "bucket": "semantic_qa"
+    },
+    {
+      "id": "gs_011",
+      "project": "audit_worker_latency_0da5c385c1d6",
+      "query": "DSH worker 执行耗时 模型重试 prepare",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "005a8e3e-a730-49cf-977a-82056339a31f",
+        "67bb1058-bb4d-4e9b-8afb-46373470d35d"
+      ],
+      "candidate_previews": [
+        {
+          "id": "005a8e3e-a730-49cf-977a-82056339a31f",
+          "score": 0.0181,
+          "title": "DSH网关大body排查与256k安全压缩水位"
+        },
+        {
+          "id": "67bb1058-bb4d-4e9b-8afb-46373470d35d",
+          "score": 0.0162,
+          "title": "GBU五模型生图CLI路由探测与单次实测"
+        }
+      ],
+      "bucket": "semantic_qa"
+    },
+    {
+      "id": "gs_012",
+      "project": "android_fixture_icafe_cr_6b2a31c2bb1e",
+      "query": "Android E2E atomic_ops fixture iCafe iCode",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "10c28ec8-9469-40ed-8b26-365e6eafe0af"
+      ],
+      "candidate_previews": [
+        {
+          "id": "10c28ec8-9469-40ed-8b26-365e6eafe0af",
+          "score": 0.0256,
+          "title": "Android E2E 样本 loader 隔离修复与离线验证（未提交）"
+        }
+      ],
+      "bucket": "semantic_qa"
+    },
+    {
+      "id": "gs_013",
+      "project": "ios_demo_cloud_commits_10779dcc962d",
+      "query": "iOS Houyi Funnel DEBUG localhost endpoint generation",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "1d7194b1-3c71-46e3-9455-cb80e625442e",
+        "5c0e41b1-a538-4b63-aebd-a3b7df88218b"
+      ],
+      "candidate_previews": [
+        {
+          "id": "1d7194b1-3c71-46e3-9455-cb80e625442e",
+          "score": 0.9263,
+          "title": "iOS G2 HTTP三维验收52子场景通过"
+        },
+        {
+          "id": "5c0e41b1-a538-4b63-aebd-a3b7df88218b",
+          "score": 0.6175,
+          "title": "iOS 广告 SDK 全生命周期漏斗监控常量与枚举实现"
+        }
+      ],
+      "bucket": "semantic_qa"
+    },
+    {
+      "id": "gs_014",
+      "project": "emoji_page_map_3ceef5975028",
+      "query": "Redmi Emoji Keyboard 拓扑",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "26fff63d-07c8-42d1-98ff-2c4c73b55b5c"
+      ],
+      "candidate_previews": [
+        {
+          "id": "26fff63d-07c8-42d1-98ff-2c4c73b55b5c",
+          "score": 0.0256,
+          "title": "Redmi Emoji Keyboard 授权续探与键盘弹窗视觉定位"
+        }
+      ],
+      "bucket": "multihop_arch"
+    },
+    {
+      "id": "gs_015",
+      "project": "finish_ios_g2_acceptance_ce7e92979903",
+      "query": "WDA iOS URL Scheme 打开 pixel point scale",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "7a5616eb-d50a-4e04-98fd-59d94aa28d06"
+      ],
+      "candidate_previews": [
+        {
+          "id": "7a5616eb-d50a-4e04-98fd-59d94aa28d06",
+          "score": 0.0217,
+          "title": "phone_pilot 对齐 iOS：四类平台差异的系统性适配方案"
+        }
+      ],
+      "bucket": "semantic_qa"
+    },
+    {
+      "id": "gs_016",
+      "project": "ios_g2_cloud_acceptance_58450050e7d6",
+      "query": "iOS AdMasterSDK.h file not found workspace build",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "8f937ca5-9cb6-418e-8b05-401f33f723a9"
+      ],
+      "candidate_previews": [
+        {
+          "id": "8f937ca5-9cb6-418e-8b05-401f33f723a9",
+          "score": 0.0291,
+          "title": "AdMasterSDK 跨版本升级 2.x 开屏广告接口不兼容报错排查与适配"
+        }
+      ],
+      "bucket": "exact_identifier"
+    },
+    {
+      "id": "gs_017",
+      "project": "install_onetool_top5_skills_982b617ee55f",
+      "query": "OneTool skills 渐进式披露 安装",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "186c4196-3681-46b6-a3e2-1587dcfd99e9"
+      ],
+      "candidate_previews": [
+        {
+          "id": "186c4196-3681-46b6-a3e2-1587dcfd99e9",
+          "score": 0.0216,
+          "title": "整机Skills体系治理与learning全局化及核心技能本土化激活"
+        }
+      ],
+      "bucket": "exact_identifier"
+    },
+    {
+      "id": "gs_018",
+      "project": "split_ios_three_commits_1063e7b3dbc0",
+      "query": "iCafeCodingAgent create_card_new adx-sdk 510 sdk_exp",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "23310a73-0d68-42d5-8dd9-5266fe3652a6"
+      ],
+      "candidate_previews": [
+        {
+          "id": "23310a73-0d68-42d5-8dd9-5266fe3652a6",
+          "score": 0.0227,
+          "title": "iOS全生命周期状态机跨轮控制器来源隔离、开屏流式CACHING呈现解耦与点击编码分离"
+        }
+      ],
+      "bucket": "exact_identifier"
+    },
+    {
+      "id": "gs_019",
+      "project": "spec_copilot_icafe_commit_efd762d858bb",
+      "query": "adx-sdk-ios P105 req_id WKNavigation cancellation XCTest runner",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "6080b8d8-4b2f-4ea9-b11c-1b780fe7fff0"
+      ],
+      "candidate_previews": [
+        {
+          "id": "6080b8d8-4b2f-4ea9-b11c-1b780fe7fff0",
+          "score": 0.0191,
+          "title": "iOS ADX SDK 聚合集成验证与典型上报缺陷修复"
+        }
+      ],
+      "bucket": "semantic_qa"
+    },
+    {
+      "id": "gs_020",
+      "project": "ios_endcard_guide_banner_b4d6a5535fd9",
+      "query": "adx-sdk-ios NSObject runAllTests XCTest EndCard guide banner",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "6080b8d8-4b2f-4ea9-b11c-1b780fe7fff0"
+      ],
+      "candidate_previews": [
+        {
+          "id": "6080b8d8-4b2f-4ea9-b11c-1b780fe7fff0",
+          "score": 0.02,
+          "title": "iOS ADX SDK 聚合集成验证与典型上报缺陷修复"
+        }
+      ],
+      "bucket": "semantic_qa"
+    },
+    {
+      "id": "gs_021",
+      "project": "inapp_all",
+      "query": "phone_pilot e2e release gate ios android",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "ad643626-1c98-4c2d-a110-65e8aec6940c"
+      ],
+      "candidate_previews": [
+        {
+          "id": "ad643626-1c98-4c2d-a110-65e8aec6940c",
+          "score": 0.0244,
+          "title": "phone_pilot 0.7.0：三端移动自动化能力对齐与 PyPI 发布"
+        }
+      ],
+      "bucket": "recency_release"
+    },
+    {
+      "id": "gs_022",
+      "project": "ad_learning",
+      "query": "跑一次 /release-gate , 作为2.0.40发布版本的检验",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "06320df7-4a8b-4a6f-8ec5-d2c007cc0e87"
+      ],
+      "candidate_previews": [
+        {
+          "id": "06320df7-4a8b-4a6f-8ec5-d2c007cc0e87",
+          "score": 0.0218,
+          "title": "Release Gate 发版门禁八大维度综合调优"
+        }
+      ],
+      "bucket": "recency_release"
+    },
+    {
+      "id": "gs_023",
+      "project": "team_memory",
+      "query": "TeamMemory 每日巡检 健康检查 自愈 make health",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "f946ec45-00c2-4c05-95c2-9eaf41b71218"
+      ],
+      "candidate_previews": [
+        {
+          "id": "f946ec45-00c2-4c05-95c2-9eaf41b71218",
+          "score": 0.0376,
+          "title": "TeamMemory 工作日巡检自动化与全栈稳定性运维矩阵（Automations Sidecar）"
+        }
+      ],
+      "bucket": "recency_release"
+    },
+    {
+      "id": "gs_024",
+      "project": "agent_common",
+      "query": "e2e_hub CANONICAL_RECIPES test_release_gate E2E coverage audit",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "61e5ed54-5760-4290-966f-bd387bb1b6da",
+        "604cb99c-3ba8-4a3e-bd0c-37297b8754f9"
+      ],
+      "candidate_previews": [
+        {
+          "id": "61e5ed54-5760-4290-966f-bd387bb1b6da",
+          "score": 0.0258,
+          "title": "双端 E2E 零脚本通用执行器、双端矩阵同步门禁、视觉防裁剪 2.0 与三档分级门禁体系"
+        },
+        {
+          "id": "604cb99c-3ba8-4a3e-bd0c-37297b8754f9",
+          "score": 0.0228,
+          "title": "跨端SDK自动化验收、极速审片台与真机一键现场复原五轮架构收敛与避坑指南"
+        },
+        {
+          "id": "dda1c26d-848b-4329-884d-2426e835ca56",
+          "score": 0.0147,
+          "title": "2.0.40 发版 Release Gate 全量自动化验收"
+        }
+      ],
+      "bucket": "recency_release"
+    },
+    {
+      "id": "gs_025",
+      "project": "ios_qa_master_suite_c28ecb84cde6",
+      "query": "iOS G2 fullscreen MockSession evidence WDA",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "6080b8d8-4b2f-4ea9-b11c-1b780fe7fff0",
+        "b7277e45-0cfb-4ef8-a457-4bf35f343b05"
+      ],
+      "candidate_previews": [
+        {
+          "id": "6080b8d8-4b2f-4ea9-b11c-1b780fe7fff0",
+          "score": 1.8765,
+          "title": "iOS ADX SDK 聚合集成验证与典型上报缺陷修复"
+        },
+        {
+          "id": "b7277e45-0cfb-4ef8-a457-4bf35f343b05",
+          "score": 1.9374,
+          "title": "adx-sdk-ios iCode 静态扫描规则（OC011/OC032/OC033/OC034/OC037）与聚合 Adapter 零二进制提交规范"
+        }
+      ],
+      "bucket": "semantic_qa"
+    },
+    {
+      "id": "gs_026",
+      "project": "superagent",
+      "query": "ios e2e automation release-gate phone-pilot xctest",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "dda1c26d-848b-4329-884d-2426e835ca56",
+        "7a5616eb-d50a-4e04-98fd-59d94aa28d06"
+      ],
+      "candidate_previews": [
+        {
+          "id": "dda1c26d-848b-4329-884d-2426e835ca56",
+          "score": 0.0181,
+          "title": "2.0.40 发版 Release Gate 全量自动化验收"
+        },
+        {
+          "id": "7a5616eb-d50a-4e04-98fd-59d94aa28d06",
+          "score": 0.0171,
+          "title": "phone_pilot 对齐 iOS：四类平台差异的系统性适配方案"
+        },
+        {
+          "id": "61096cd5-402f-487b-ba7a-aadd96df934a",
+          "score": 0.0169,
+          "title": "phone_pilot v0.9.0 发布：HarmonyOS/iOS 深度增强与验证"
+        }
+      ],
+      "bucket": "recency_release"
+    },
+    {
+      "id": "gs_027",
+      "project": "adx_sdk_ios",
+      "query": "e2e release gate coverage android ios自动化验收",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "dda1c26d-848b-4329-884d-2426e835ca56"
+      ],
+      "candidate_previews": [
+        {
+          "id": "dda1c26d-848b-4329-884d-2426e835ca56",
+          "score": 0.0263,
+          "title": "2.0.40 发版 Release Gate 全量自动化验收"
+        }
+      ],
+      "bucket": "recency_release"
+    },
+    {
+      "id": "gs_028",
+      "project": "team_memory",
+      "query": "release-gate phone_pilot 自动化验收 E2E 真机门禁 提效 adx-sdk-android",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "dda1c26d-848b-4329-884d-2426e835ca56"
+      ],
+      "candidate_previews": [
+        {
+          "id": "dda1c26d-848b-4329-884d-2426e835ca56",
+          "score": 0.0253,
+          "title": "2.0.40 发版 Release Gate 全量自动化验收"
+        }
+      ],
+      "bucket": "multihop_arch"
+    },
+    {
+      "id": "gs_029",
+      "project": "agent_common",
+      "query": "spec-copilot 技能模块化 自适应验收",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "12772735-b3f1-4853-8bb1-be860d79345a"
+      ],
+      "candidate_previews": [
+        {
+          "id": "12772735-b3f1-4853-8bb1-be860d79345a",
+          "score": 0.0209,
+          "title": "spec-copilot 跨端开发提速：看门狗、DAG 并行与轻量验证改造"
+        }
+      ],
+      "bucket": "multihop_arch"
+    },
+    {
+      "id": "gs_030",
+      "project": "ios_qa_master_suite_c28ecb84cde6",
+      "query": "iOS Simulator deployment target 12.0 15.0 Xcode",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "6080b8d8-4b2f-4ea9-b11c-1b780fe7fff0"
+      ],
+      "candidate_previews": [
+        {
+          "id": "6080b8d8-4b2f-4ea9-b11c-1b780fe7fff0",
+          "score": 0.0219,
+          "title": "iOS ADX SDK 聚合集成验证与典型上报缺陷修复"
+        }
+      ],
+      "bucket": "recency_release"
+    },
+    {
+      "id": "gs_031",
+      "project": "phone_pilot",
+      "query": "phone_pilot web 8686 ERR_CONNECTION_REFUSED scene_restore production_hardening report.html",
+      "freq": 1,
+      "used_hits": 0,
+      "expected_ids": [
+        "0a4089c7-0ed7-4451-9368-9253f3f2f58d"
+      ],
+      "candidate_previews": [
+        {
+          "id": "0a4089c7-0ed7-4451-9368-9253f3f2f58d",
+          "score": 0.0248,
+          "title": "PhonePilot v0.12.0 极速人工验收视图 v4.0、可插拔 AcceptanceProfile 架构解耦与长录屏分段合并发布"
+        }
+      ],
+      "bucket": "exact_identifier"
+    },
+    {
+      "id": "gs_032",
+      "project": "team_memory",
+      "bucket": "semantic_qa",
+      "query": "终端里按 Cmd+F 搜索框无法粘贴或复制怎么解决",
+      "freq": 1,
+      "used_hits": 1,
+      "expected_ids": [
+        "f9477ee4-1005-434e-bc7c-d44c7720f409"
+      ],
+      "candidate_previews": [
+        {
+          "id": "f9477ee4-1005-434e-bc7c-d44c7720f409",
+          "score": 1.0,
+          "title": "Ghostty 1.3.1 Cmd+F 搜索框内无法 Cmd+V 粘贴 / Cmd+C 复制的根因与修复"
+        }
+      ]
+    },
+    {
+      "id": "gs_033",
+      "project": "rime_squirrel_optimization",
+      "bucket": "semantic_qa",
+      "query": "Mac 上中文输入法打字卡顿掉字怎么调优",
+      "freq": 1,
+      "used_hits": 1,
+      "expected_ids": [
+        "80c132b2-6287-4867-ac7c-599751dc08e3"
+      ],
+      "candidate_previews": [
+        {
+          "id": "80c132b2-6287-4867-ac7c-599751dc08e3",
+          "score": 1.0,
+          "title": "macOS 鼠须管 (Squirrel) + 雾凇拼音 (Rime) 全链路性能调优与故障归档"
+        }
+      ]
+    },
+    {
+      "id": "gs_034",
+      "project": "adx_sdk_android",
+      "bucket": "semantic_qa",
+      "query": "怎么区分广告点击是直接拉起目标应用还是跳转应用商店",
+      "freq": 1,
+      "used_hits": 1,
+      "expected_ids": [
+        "2d506597-87bc-42a7-9d7d-c577b1e64b04"
+      ],
+      "candidate_previews": [
+        {
+          "id": "2d506597-87bc-42a7-9d7d-c577b1e64b04",
+          "score": 1.0,
+          "title": "Android广告SDK点击跳转去向（直开App与应用商店）埋点上报口径区分与识别"
+        }
+      ]
+    },
+    {
+      "id": "gs_035",
+      "project": "team_memory",
+      "bucket": "semantic_qa",
+      "query": "广告从请求到曝光各环节在哪里流失怎么排查",
+      "freq": 1,
+      "used_hits": 1,
+      "expected_ids": [
+        "9afb36ce-1ab7-4092-8ce0-cb804bf9e794"
+      ],
+      "candidate_previews": [
+        {
+          "id": "9afb36ce-1ab7-4092-8ce0-cb804bf9e794",
+          "score": 1.0,
+          "title": "广告SDK生命周期漏斗诊断：定位各类型与版本流失瓶颈"
+        }
+      ]
+    },
+    {
+      "id": "gs_036",
+      "project": "team_memory",
+      "bucket": "semantic_qa",
+      "query": "广告展示到关闭全流程交互怎么优化点击率和转化率",
+      "freq": 1,
+      "used_hits": 1,
+      "expected_ids": [
+        "f2b00514-04ec-4e6a-b39d-528729ac6984"
+      ],
+      "candidate_previews": [
+        {
+          "id": "f2b00514-04ec-4e6a-b39d-528729ac6984",
+          "score": 1.0,
+          "title": "广告SDK展示到关闭全流程交互规范与CTR/CVR优化"
+        }
+      ]
+    },
+    {
+      "id": "gs_037",
+      "project": "team_memory",
+      "bucket": "semantic_qa",
+      "query": "InApp 业务数据分析查 SQL 的标准操作流程是什么",
+      "freq": 1,
+      "used_hits": 1,
+      "expected_ids": [
+        "9a23f912-dbc3-4b3b-bf2a-a59dd4ddf7cd"
+      ],
+      "candidate_previews": [
+        {
+          "id": "9a23f912-dbc3-4b3b-bf2a-a59dd4ddf7cd",
+          "score": 1.0,
+          "title": "InApp 数据分析与 SQL 查询 SOP 归档"
+        }
+      ]
+    },
+    {
+      "id": "gs_038",
+      "project": "adx_sdk_ios",
+      "bucket": "exact_identifier",
+      "query": "AdMasterMaxDemo AppLovin MAX 接入",
+      "freq": 1,
+      "used_hits": 1,
+      "expected_ids": [
+        "5ff8b58e-a110-4e69-8d6a-fcd0eb2f4929"
+      ],
+      "candidate_previews": [
+        {
+          "id": "5ff8b58e-a110-4e69-8d6a-fcd0eb2f4929",
+          "score": 1.0,
+          "title": "iOS 独立 AppLovin MAX 真实接入 Demo (AdMasterMaxDemo / com.baidu.gravity) 工程搭建与 AppLovinSDK 13.0.1 避坑"
+        }
+      ]
+    },
+    {
+      "id": "gs_039",
+      "project": "go_simeji_msgdc",
+      "bucket": "exact_identifier",
+      "query": "msgdc uid bee 尾号正则匹配 Java Go 差异",
+      "freq": 1,
+      "used_hits": 1,
+      "expected_ids": [
+        "d9e0f3ab-16f5-4e40-b90b-78e5a01146e2"
+      ],
+      "candidate_previews": [
+        {
+          "id": "d9e0f3ab-16f5-4e40-b90b-78e5a01146e2",
+          "score": 1.0,
+          "title": "msgdc 弹窗配置 uid(bee) 尾号正则匹配写法与 Java/Go 实现差异"
+        }
+      ]
+    },
+    {
+      "id": "gs_040",
+      "project": "team_memory",
+      "bucket": "exact_identifier",
+      "query": "Embedding Provider 鉴权 工厂配置 TM Daemon 队列残留",
+      "freq": 1,
+      "used_hits": 1,
+      "expected_ids": [
+        "2ad2bc2f-e1a0-4ae2-b665-40250f8ef2ef"
+      ],
+      "candidate_previews": [
+        {
+          "id": "2ad2bc2f-e1a0-4ae2-b665-40250f8ef2ef",
+          "score": 1.0,
+          "title": "修复 Embedding Provider 鉴权/工厂配置 Bug 并清理 TM Daemon 历史队列残留"
+        }
+      ]
+    },
+    {
+      "id": "gs_041",
+      "project": "adx_sdk_android",
+      "bucket": "exact_identifier",
+      "query": "adx-sdk-518 样本加载修复 企业身份提审",
+      "freq": 1,
+      "used_hits": 1,
+      "expected_ids": [
+        "f2900b8b-df77-450c-9e03-cef715acf954"
+      ],
+      "candidate_previews": [
+        {
+          "id": "f2900b8b-df77-450c-9e03-cef715acf954",
+          "score": 1.0,
+          "title": "Android adx-sdk-518 样本加载修复企业身份提审"
+        }
+      ]
+    },
+    {
+      "id": "gs_042",
+      "project": "adx_sdk_ios",
+      "bucket": "multihop_arch",
+      "query": "iOS 广告 SDK 全生命周期状态机与监控漏斗体系",
+      "freq": 1,
+      "used_hits": 1,
+      "expected_ids": [
+        "30f63d63-4b02-483c-9e99-2fad9f386dc7"
+      ],
+      "candidate_previews": [
+        {
+          "id": "30f63d63-4b02-483c-9e99-2fad9f386dc7",
+          "score": 1.0,
+          "title": "iOS SDK落地全生命周期状态机与监控漏斗体系"
+        }
+      ]
+    },
+    {
+      "id": "gs_043",
+      "project": "adx_sdk_android",
+      "bucket": "multihop_arch",
+      "query": "MediaGo SDK AI 辅助接入三仓全链路协同架构",
+      "freq": 1,
+      "used_hits": 1,
+      "expected_ids": [
+        "0ef93c6e-5f35-442c-a038-b63865dae275"
+      ],
+      "candidate_previews": [
+        {
+          "id": "0ef93c6e-5f35-442c-a038-b63865dae275",
+          "score": 1.0,
+          "title": "MediaGo SDK AI 辅助接入四大方向落地与三仓全链路协同归档"
+        }
+      ]
+    },
+    {
+      "id": "gs_044",
+      "project": "team_memory",
+      "bucket": "multihop_arch",
+      "query": "phone_pilot 类人脑页面认知图谱与鸿蒙 iOS 跨端稳定性",
+      "freq": 1,
+      "used_hits": 1,
+      "expected_ids": [
+        "1f85d4db-709e-4638-a920-454440705afc"
+      ],
+      "candidate_previews": [
+        {
+          "id": "1f85d4db-709e-4638-a920-454440705afc",
+          "score": 1.0,
+          "title": "phone_pilot类人脑页面认知图谱提升移动端自动化稳定性"
+        }
+      ]
+    },
+    {
+      "id": "gs_045",
+      "project": "team_memory",
+      "bucket": "recency_release",
+      "query": "phone_pilot v0.9.0 HarmonyOS iOS 发布验证",
+      "freq": 1,
+      "used_hits": 1,
+      "expected_ids": [
+        "61096cd5-402f-487b-ba7a-aadd96df934a"
+      ],
+      "candidate_previews": [
+        {
+          "id": "61096cd5-402f-487b-ba7a-aadd96df934a",
+          "score": 1.0,
+          "title": "phone_pilot v0.9.0 发布：HarmonyOS/iOS 深度增强与验证"
+        }
+      ]
+    },
+    {
+      "id": "gs_046",
+      "project": "adx_sdk_android",
+      "bucket": "recency_release",
+      "query": "Demo UI 大改后 E2E 自动化验收用例稳定性重构",
+      "freq": 1,
+      "used_hits": 1,
+      "expected_ids": [
+        "745ada00-bf52-4faa-b7ad-de205540ddcc"
+      ],
+      "candidate_previews": [
+        {
+          "id": "745ada00-bf52-4faa-b7ad-de205540ddcc",
+          "score": 1.0,
+          "title": "Demo UI大改后的E2E自动化验收用例兼容性与稳定性重构"
+        }
+      ]
+    }
+  ],
+  "calibrated": true,
+  "bucket_distribution": {
+    "multihop_arch": 8,
+    "exact_identifier": 12,
+    "recency_release": 11,
+    "semantic_qa": 15
+  }
+}

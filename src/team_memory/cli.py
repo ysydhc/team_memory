@@ -3023,8 +3023,146 @@ def main() -> None:
     )
     p_dream.set_defaults(func=cmd_dream)
 
+    # ── eval ────────────────────────────────────────────────────
+    p_eval = sub.add_parser(
+        "eval",
+        help="Run Golden Eval 3-way ablation benchmark (Vector vs Hybrid vs Full+Graph)",
+    )
+    p_eval.add_argument(
+        "--golden-set",
+        type=Path,
+        default=None,
+        help="Path to golden_set.json (default: evals/golden_set.json)",
+    )
+    p_eval.add_argument(
+        "--history",
+        type=Path,
+        default=None,
+        help="Path to history.jsonl (default: evals/history.jsonl)",
+    )
+    p_eval.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Evaluate only the first N queries",
+    )
+    p_eval.add_argument(
+        "--no-save",
+        action="store_true",
+        help="Do not append result to evals/history.jsonl",
+    )
+    p_eval.add_argument(
+        "--json",
+        action="store_true",
+        help="Output machine-readable JSON result",
+    )
+    p_eval.set_defaults(func=cmd_eval)
+
+    # ── ops-digest ──────────────────────────────────────────────
+    p_ops = sub.add_parser(
+        "ops-digest",
+        help="Exception-driven 5-subsystem health check & weekly digest",
+    )
+    p_ops.add_argument("--days", type=int, default=30, help="Lookback window: 30 or 180 (default: 30)")
+    p_ops.add_argument(
+        "--alert-only",
+        action="store_true",
+        help="Silent when all green; output/push only on yellow/red alerts",
+    )
+    p_ops.add_argument(
+        "--weekly",
+        action="store_true",
+        help="Compact <= 10-line weekly health summary",
+    )
+    p_ops.add_argument(
+        "--webhook",
+        default="",
+        help="Optional Feishu webhook URL (or env TEAM_MEMORY_FEISHU_WEBHOOK)",
+    )
+    p_ops.add_argument(
+        "--json",
+        action="store_true",
+        help="Output raw observability JSON overview",
+    )
+    p_ops.set_defaults(func=cmd_ops_digest)
+
     args = parser.parse_args()
     args.func(args)
+
+
+def cmd_eval(args: argparse.Namespace) -> None:
+    """Run Golden Eval 3-way ablation benchmark."""
+    import asyncio
+
+    from team_memory.bootstrap import bootstrap
+    from team_memory.services.analysis.golden_eval import (
+        DEFAULT_GOLDEN_SET_PATH,
+        DEFAULT_HISTORY_PATH,
+        format_eval_report,
+        run_ablation_eval,
+    )
+
+    ctx = bootstrap(enable_background=False)
+    reranker = getattr(ctx.search_pipeline, "_reranker", None)
+    golden_path = args.golden_set or DEFAULT_GOLDEN_SET_PATH
+    history_path = None if args.no_save else (args.history or DEFAULT_HISTORY_PATH)
+
+    async def _run() -> dict:
+        try:
+            return await run_ablation_eval(
+                db_url=ctx.db_url,
+                embedding_provider=ctx.embedding,
+                settings=ctx.settings,
+                reranker_provider=reranker,
+                golden_set_path=golden_path,
+                history_path=history_path,
+                limit=args.limit,
+            )
+        finally:
+            from team_memory.storage.database import close_db
+
+            await close_db()
+
+    record = asyncio.run(_run())
+    if args.json:
+        print(json.dumps(record, ensure_ascii=False, indent=2))
+    else:
+        print(format_eval_report(record))
+
+
+def cmd_ops_digest(args: argparse.Namespace) -> None:
+    """Run exception-driven 5-subsystem health inspection."""
+    import asyncio
+
+    from team_memory.config import load_settings
+    from team_memory.services.analysis.observability import (
+        format_ops_digest,
+        get_observability_overview,
+        send_feishu_webhook,
+    )
+
+    settings = load_settings()
+    db_url = os.environ.get("TEAM_MEMORY_DB_URL") or settings.database.url
+
+    async def _run() -> dict:
+        try:
+            return await get_observability_overview(db_url, days=args.days)
+        finally:
+            from team_memory.storage.database import close_db
+
+            await close_db()
+
+    overview = asyncio.run(_run())
+    if args.json:
+        print(json.dumps(overview, ensure_ascii=False, indent=2))
+        return
+
+    text = format_ops_digest(overview, alert_only=args.alert_only, weekly=args.weekly)
+    if text:
+        print(text)
+        webhook_url = args.webhook or os.environ.get("TEAM_MEMORY_FEISHU_WEBHOOK", "")
+        if webhook_url:
+            asyncio.run(send_feishu_webhook(webhook_url, text))
 
 
 if __name__ == "__main__":

@@ -96,6 +96,10 @@ class SearchConfig(BaseModel):
         default=True,
         description="Enable exact token/tag match boost after RRF fusion.",
     )
+    adaptive_ranking: bool = Field(
+        default=True,
+        description="Enable intent-adaptive RRF/graph/recency rank profiles based on query intent.",
+    )
 
 
 class CacheConfig(BaseModel):

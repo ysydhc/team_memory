@@ -77,6 +77,7 @@ class SearchRequest:
     include_superseded: bool = False
     session_id: str | None = None
     fallback_projects: list[str] | None = None
+    intent_type: str | None = None
 
 
 SUPERSESSION_PENALTY: float = 0.3
@@ -319,12 +320,15 @@ class SearchPipeline:
                         db_lexicon = set()
                 entity_names = extract_entities_from_query(retrieval_query, lexicon=db_lexicon or None)
                 if entity_names and self._db_url:
-                    retrieval_query = retrieval_query.rstrip()
-                    # Append entity names as additional search terms (deduplicated)
-                    extra = " ".join(n for n in entity_names[:6] if n.lower() not in retrieval_query.lower())
-                    if extra:
-                        retrieval_query = f"{retrieval_query} {extra}"
-                    retrieval_query = retrieval_query[:2000]
+                    from team_memory.services.search.scoring import resolve_rank_profile
+
+                    _stage15_profile = resolve_rank_profile(request.query, request.intent_type)
+                    if _stage15_profile.name == "multihop_arch":
+                        retrieval_query = retrieval_query.rstrip()
+                        extra = " ".join(n for n in entity_names[:6] if n.lower() not in retrieval_query.lower())
+                        if extra:
+                            retrieval_query = f"{retrieval_query} {extra}"
+                        retrieval_query = retrieval_query[:2000]
             except Exception:
                 pass  # entity enrichment must never break search
 
@@ -360,7 +364,10 @@ class SearchPipeline:
                 }
                 if reusable_session is not None:
                     graph_kwargs["session"] = reusable_session
-                graph_weighted_hits = await find_weighted_experiences_by_entities(**graph_kwargs)
+                graph_weighted_hits = await asyncio.wait_for(
+                    find_weighted_experiences_by_entities(**graph_kwargs),
+                    timeout=1.5,
+                )
                 graph_experience_ids = [eid for eid, _ in graph_weighted_hits]
                 if graph_experience_ids:
                     logger.info(
@@ -452,6 +459,14 @@ class SearchPipeline:
         if self._search_config.popularity_enabled and candidates:
             candidates = self._apply_popularity_boost(candidates)
         stage_metrics["popularity_boost_ms"] = int((time.monotonic() - stage_begin) * 1000)
+
+        # Stage 5c: Intent-adaptive recency boost (for release/version/latest queries)
+        if getattr(self._search_config, "adaptive_ranking", True) and mode == "hybrid" and candidates:
+            from team_memory.services.search.scoring import apply_recency_boost, resolve_rank_profile
+
+            rank_profile = resolve_rank_profile(request.query, request.intent_type)
+            if rank_profile.recency_boost > 0.0:
+                candidates = apply_recency_boost(candidates, weight=rank_profile.recency_boost)
 
         total_candidates = len(candidates)
 
@@ -712,10 +727,31 @@ class SearchPipeline:
             stage_counts["graph_count"] = len(graph_results)
             stage_counts["graph_unique_added"] = len(graph_ids - non_graph_ids)
 
+        rank_profile = None
+        if getattr(self._search_config, "adaptive_ranking", True):
+            from team_memory.services.search.scoring import resolve_rank_profile
+
+            rank_profile = resolve_rank_profile(request.query, request.intent_type)
+            if stage_counts is not None:
+                stage_counts["rank_intent"] = rank_profile.name
+
         if graph_results:
-            fused = self._rrf_fuse4(vector_results, fts_results, topic_results, graph_results, over_fetch)
+            fused = self._rrf_fuse4(
+                vector_results,
+                fts_results,
+                topic_results,
+                graph_results,
+                over_fetch,
+                rank_profile=rank_profile,
+            )
         else:
-            fused = self._rrf_fuse3(vector_results, fts_results, topic_results, over_fetch)
+            fused = self._rrf_fuse3(
+                vector_results,
+                fts_results,
+                topic_results,
+                over_fetch,
+                rank_profile=rank_profile,
+            )
 
         if stage_counts is not None:
             stage_counts["fused_count"] = len(fused)
@@ -1100,18 +1136,22 @@ class SearchPipeline:
         fts_results: list[SearchResultItem],
         topic_results: list[SearchResultItem],
         limit: int,
+        *,
+        rank_profile: Any = None,
     ) -> list[SearchResultItem]:
         """Merge vector + FTS + topic results using 3-way RRF."""
         from team_memory.services.search.scoring import rrf_fuse3
 
+        vec_w = rank_profile.vector_weight if rank_profile is not None else self._search_config.vector_weight
+        fts_w = rank_profile.fts_weight if rank_profile is not None else self._search_config.fts_weight
         return rrf_fuse3(
             vector_results,
             fts_results,
             topic_results,
             limit,
             rrf_k=self._search_config.rrf_k,
-            vector_weight=self._search_config.vector_weight,
-            fts_weight=self._search_config.fts_weight,
+            vector_weight=vec_w,
+            fts_weight=fts_w,
         )
 
     def _rrf_fuse4(
@@ -1121,10 +1161,17 @@ class SearchPipeline:
         topic_results: list[SearchResultItem],
         graph_results: list[SearchResultItem],
         limit: int,
+        *,
+        rank_profile: Any = None,
     ) -> list[SearchResultItem]:
         """Merge vector + FTS + topic + graph results using 4-way RRF."""
         from team_memory.services.search.scoring import rrf_fuse4
 
+        vec_w = rank_profile.vector_weight if rank_profile is not None else self._search_config.vector_weight
+        fts_w = rank_profile.fts_weight if rank_profile is not None else self._search_config.fts_weight
+        g_w = rank_profile.graph_weight if rank_profile is not None else None
+        g_only = rank_profile.graph_only_factor if rank_profile is not None else 0.35
+        g_confirm = rank_profile.graph_confirm_factor if rank_profile is not None else 0.05
         return rrf_fuse4(
             vector_results,
             fts_results,
@@ -1132,8 +1179,11 @@ class SearchPipeline:
             graph_results,
             limit,
             rrf_k=self._search_config.rrf_k,
-            vector_weight=self._search_config.vector_weight,
-            fts_weight=self._search_config.fts_weight,
+            vector_weight=vec_w,
+            fts_weight=fts_w,
+            graph_weight=g_w,
+            graph_only_factor=g_only,
+            graph_confirm_factor=g_confirm,
         )
 
     async def _topic_search(

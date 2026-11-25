@@ -31,7 +31,7 @@ ALEMBIC ?= $(shell \
 	else echo alembic; fi)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp mcp-verify test test-acceptance lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-reload daemon-install daemon-uninstall verify-pipeline diagnose-pipeline e2e-verify logs watchdog-start test-regression watchdog-stop watchdog-status stats wiki-compile wiki-status entity-backfill entity-dedup embedding-backfill detect-contradictions search-eval solution-backfill faithfulness-eval test-llm janitor-run
+.PHONY: help setup dev web mcp mcp-verify test test-acceptance lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-reload daemon-install daemon-uninstall verify-pipeline diagnose-pipeline e2e-verify logs watchdog-start test-regression watchdog-stop watchdog-status stats wiki-compile wiki-status entity-backfill entity-dedup embedding-backfill detect-contradictions search-eval eval golden-set ops-digest solution-backfill faithfulness-eval test-llm janitor-run
 
 sync-agent-artifacts: ## 由 agents/shared + agents/manifest.yaml 生成 .claude/.cursor 下 agents、prompts、skills
 	python scripts/sync_agent_artifacts.py
@@ -200,6 +200,18 @@ detect-contradictions:\t## 检测矛盾经验对（含 LLM 验证）
 search-eval:		## 搜索质量评估（precision/recall）
 	@set -a && [ -f .env ] && source .env || true && set +a; \
 	$(PYTHON_BIN) -m team_memory.daemon.quality.search_eval $(OPTS)
+
+golden-set:		## 从 search_logs 自动抽样构建 evals/golden_set.json
+	@set -a && [ -f .env ] && source .env || true && set +a; \
+	$(PYTHON_BIN) scripts/build_golden_set.py $(OPTS)
+
+eval:			## 运行 Golden Eval 三组消融评测（Vector vs Hybrid vs Full+Graph）
+	@set -a && [ -f .env ] && source .env || true && set +a; \
+	PYTHONPATH=src $(PYTHON_BIN) -m team_memory.cli eval $(OPTS)
+
+ops-digest:		## 异常驱动 5 子系统健康巡检（支持 OPTS='--alert-only' / '--weekly'）
+	@set -a && [ -f .env ] && source .env || true && set +a; \
+	PYTHONPATH=src $(PYTHON_BIN) -m team_memory.cli ops-digest $(OPTS)
 
 faithfulness-eval:\t## Faithfulness 批量评估（RAGAS LLM Judge）
 	@set -a && [ -f .env ] && source .env || true && set +a; \

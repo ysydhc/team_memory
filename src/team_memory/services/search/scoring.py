@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -152,6 +153,108 @@ def rrf_fuse3(
     return fused[:limit]
 
 
+@dataclass(frozen=True)
+class RankProfile:
+    """Query-intent-specific ranking weights for the unified retrieval funnel."""
+
+    name: str
+    vector_weight: float = 0.70
+    fts_weight: float = 0.30
+    graph_weight: float = 0.35
+    graph_only_factor: float = 0.25
+    graph_confirm_factor: float = 0.08
+    recency_boost: float = 0.0
+
+
+RANK_PROFILES: dict[str, RankProfile] = {
+    "exact_identifier": RankProfile(
+        name="exact_identifier",
+        vector_weight=0.55,
+        fts_weight=0.45,
+        graph_weight=0.18,
+        graph_only_factor=0.12,
+        graph_confirm_factor=0.06,
+        recency_boost=0.0,
+    ),
+    "semantic_qa": RankProfile(
+        name="semantic_qa",
+        vector_weight=0.78,
+        fts_weight=0.22,
+        graph_weight=0.12,
+        graph_only_factor=0.10,
+        graph_confirm_factor=0.03,
+        recency_boost=0.0,
+    ),
+    "multihop_arch": RankProfile(
+        name="multihop_arch",
+        vector_weight=0.65,
+        fts_weight=0.25,
+        graph_weight=0.48,
+        graph_only_factor=0.35,
+        graph_confirm_factor=0.14,
+        recency_boost=0.0,
+    ),
+    "recency_release": RankProfile(
+        name="recency_release",
+        vector_weight=0.66,
+        fts_weight=0.34,
+        graph_weight=0.22,
+        graph_only_factor=0.16,
+        graph_confirm_factor=0.06,
+        recency_boost=0.12,
+    ),
+}
+
+
+def resolve_rank_profile(query: str, intent_type: str | None = None) -> RankProfile:
+    """Resolve the RankProfile for a query using explicit intent_type or rule classifier."""
+    if intent_type and intent_type in RANK_PROFILES:
+        return RANK_PROFILES[intent_type]
+    from team_memory.services.infra.intent_router import classify_rank_intent
+
+    resolved = classify_rank_intent(query)
+    return RANK_PROFILES.get(resolved, RANK_PROFILES["semantic_qa"])
+
+
+def _parse_ts(raw_ts: object) -> datetime | None:
+    if isinstance(raw_ts, datetime):
+        return raw_ts if raw_ts.tzinfo else raw_ts.replace(tzinfo=timezone.utc)
+    if isinstance(raw_ts, str) and raw_ts.strip():
+        try:
+            s = raw_ts.strip()
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
+            dt = datetime.fromisoformat(s)
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
+
+
+def apply_recency_boost(
+    candidates: list[SearchResultItem],
+    weight: float = 0.10,
+    half_life_days: float = 30.0,
+) -> list[SearchResultItem]:
+    """Gently boost fresher experiences for recency/release-oriented queries."""
+    if not candidates or weight <= 0.0:
+        return candidates
+    now = datetime.now(timezone.utc)
+    decay_lambda = math.log(2.0) / max(1.0, half_life_days)
+    for item in candidates:
+        raw_ts = item.data.get("updated_at") or item.data.get("created_at")
+        dt = _parse_ts(raw_ts)
+        if dt is None:
+            continue
+        age_days = max(0.0, (now - dt).total_seconds() / 86400.0)
+        freshness = math.exp(-decay_lambda * age_days)
+        cur = float(item.score or 0.0)
+        if cur > 0.0:
+            item.score = cur * (1.0 + weight * freshness)
+    candidates.sort(key=lambda x: x.score, reverse=True)
+    return candidates
+
+
 def rrf_fuse4(
     vector_results: list[SearchResultItem],
     fts_results: list[SearchResultItem],
@@ -163,6 +266,8 @@ def rrf_fuse4(
     vector_weight: float = 0.7,
     fts_weight: float = 0.3,
     graph_weight: float | None = None,
+    graph_only_factor: float = 0.35,
+    graph_confirm_factor: float = 0.05,
 ) -> list[SearchResultItem]:
     """Merge vector + FTS + topic + entity-graph results using 4-way RRF.
 
@@ -222,15 +327,18 @@ def rrf_fuse4(
         g_score = float(item.data.get("graph_score", 0.0) or 0.0)
         g_factor = min(1.0, max(0.0, g_score))
         if exp_id not in score_map:
-            rrf_contribution = (g_weight * g_factor) / (rank + rrf_k) + (0.85 / rrf_k) * g_factor
+            # Graph-only candidate: bounded exploratory contribution so it fills
+            # recall gaps without displacing high-confidence Vector/FTS top hits.
+            rrf_contribution = (graph_only_factor * g_weight * g_factor) / (rank + rrf_k)
             score_map[exp_id] = {
                 "rrf_score": 0.0,
                 "item": item,
                 "similarity": item.similarity,
             }
         else:
+            # Double-confirmed by Vector/FTS + Graph: gentle tie-breaker boost.
             score_map[exp_id]["item"].data["graph_score"] = round(g_score, 4)
-            rrf_contribution = (0.05 * g_weight * g_factor) / (rank + rrf_k)
+            rrf_contribution = (graph_confirm_factor * g_weight * g_factor) / (rank + rrf_k)
         score_map[exp_id]["rrf_score"] += rrf_contribution
         if item.similarity > score_map[exp_id]["similarity"]:
             score_map[exp_id]["similarity"] = item.similarity

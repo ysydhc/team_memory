@@ -463,7 +463,21 @@ JOIN experience_entities ee ON ee.entity_id = g.entity_id
 """)
 
 _WEIGHTED_GRAPH_CTE_SQL = text("""
-WITH RECURSIVE entity_deg AS (
+WITH rel_deg AS (
+    SELECT entity_id, COUNT(*) AS cnt
+    FROM (
+        SELECT source_entity_id AS entity_id FROM relationships WHERE valid_until IS NULL
+        UNION ALL
+        SELECT target_entity_id AS entity_id FROM relationships WHERE valid_until IS NULL
+    ) u
+    GROUP BY entity_id
+),
+exp_deg AS (
+    SELECT entity_id, COUNT(*) AS cnt
+    FROM experience_entities
+    GROUP BY entity_id
+),
+entity_deg AS (
     SELECT
         e.id,
         lower(e.name) AS norm_name,
@@ -471,38 +485,27 @@ WITH RECURSIVE entity_deg AS (
         GREATEST(
             1,
             COALESCE(e.source_count, 1),
-            (
-                COALESCE((SELECT COUNT(*) FROM experience_entities ee WHERE ee.entity_id = e.id), 0)
-                + COALESCE(
-                    (
-                        SELECT COUNT(*)
-                        FROM relationships r
-                        WHERE (r.source_entity_id = e.id OR r.target_entity_id = e.id)
-                          AND r.valid_until IS NULL
-                    ),
-                    0
-                )
-            )
+            COALESCE(ed.cnt, 0) + COALESCE(rd.cnt, 0)
         )::float8 AS deg
     FROM entities e
+    LEFT JOIN exp_deg ed ON ed.entity_id = e.id
+    LEFT JOIN rel_deg rd ON rd.entity_id = e.id
 ),
-entity_graph(anchor_id, entity_id, norm_name, entity_project, depth, score, path) AS (
+hop0 AS (
     -- anchor: entities matching any of the given names or aliases (case-insensitive),
     -- penalized by 1 / sqrt(deg); primary project gets 1.0x, cross-project seed gets 0.85x
     SELECT
         e.id AS anchor_id,
         e.id AS entity_id,
-        ed.norm_name AS norm_name,
-        e.project AS entity_project,
-        0 AS depth,
+        ed.norm_name,
+        ed.deg,
         (
             (1.0 / GREATEST(1.0, sqrt(ed.deg)))
             * CASE
                 WHEN (e.project = ANY(:projects) OR '*' = ANY(:projects)) THEN 1.0
                 ELSE 0.85
               END
-        )::float8 AS score,
-        ARRAY[e.id] AS path
+        )::float8 AS score
     FROM entities e
     JOIN entity_deg ed ON ed.id = e.id
     WHERE (
@@ -518,60 +521,110 @@ entity_graph(anchor_id, entity_id, norm_name, entity_project, depth, score, path
             WHERE lower(a) = ANY(:names)
         )
     )
-
-    UNION ALL
-
-    -- expansion: follow active edges up to :max_depth hops (including cross-project same-name bridge with 0.85x)
+),
+hop0_bridges AS (
+    -- cross-project same-name bridge at hop 0 (0.85x when crossing entity_id)
     SELECT
-        g.anchor_id,
-        tgt_ed.id AS entity_id,
-        tgt_ed.norm_name AS norm_name,
-        tgt_ed.project AS entity_project,
-        g.depth + 1,
+        h.anchor_id,
+        ed.id AS entity_id,
+        ed.deg,
+        (h.score * CASE WHEN ed.id = h.entity_id THEN 1.0 ELSE 0.85 END)::float8 AS score
+    FROM hop0 h
+    JOIN entity_deg ed ON ed.norm_name = h.norm_name
+),
+hop1_raw AS (
+    -- directional split uses ix_relationships_source & ix_relationships_target indexes
+    SELECT
+        h.anchor_id,
+        r.target_entity_id AS entity_id,
         (
-            g.score * (COALESCE(r.weight, 1.0) * 0.55)
-            / GREATEST(1.0, sqrt(src_ed.deg * tgt_ed.deg))
+            h.score * (COALESCE(r.weight, 1.0) * 0.55)
+            / GREATEST(1.0, sqrt(h.deg * tgt.deg))
             * CASE
-                WHEN (tgt_ed.project = ANY(:projects) OR '*' = ANY(:projects))
-                     AND src_ed.id = g.entity_id
-                THEN 1.0
+                WHEN (tgt.project = ANY(:projects) OR '*' = ANY(:projects)) THEN 1.0
                 ELSE 0.85
               END
-        )::float8,
-        g.path || tgt_ed.id
-    FROM entity_graph g
-    JOIN entity_deg src_ed ON (
-        src_ed.id = g.entity_id OR src_ed.norm_name = g.norm_name
-    )
-    JOIN relationships r ON (
-        r.source_entity_id = src_ed.id OR r.target_entity_id = src_ed.id
-    )
-    JOIN entity_deg tgt_ed ON tgt_ed.id = (
-        CASE
-            WHEN r.source_entity_id = src_ed.id THEN r.target_entity_id
-            ELSE r.source_entity_id
-        END
-    )
-    WHERE g.depth < :max_depth
-      AND r.valid_until IS NULL
-      AND NOT (tgt_ed.id = ANY(g.path))
+        )::float8 AS score
+    FROM hop0_bridges h
+    JOIN relationships r ON r.source_entity_id = h.entity_id AND r.valid_until IS NULL
+    JOIN entity_deg tgt ON tgt.id = r.target_entity_id
+    WHERE :max_depth >= 1 AND r.target_entity_id <> h.anchor_id
+    UNION ALL
+    SELECT
+        h.anchor_id,
+        r.source_entity_id AS entity_id,
+        (
+            h.score * (COALESCE(r.weight, 1.0) * 0.55)
+            / GREATEST(1.0, sqrt(h.deg * tgt.deg))
+            * CASE
+                WHEN (tgt.project = ANY(:projects) OR '*' = ANY(:projects)) THEN 1.0
+                ELSE 0.85
+              END
+        )::float8 AS score
+    FROM hop0_bridges h
+    JOIN relationships r ON r.target_entity_id = h.entity_id AND r.valid_until IS NULL
+    JOIN entity_deg tgt ON tgt.id = r.source_entity_id
+    WHERE :max_depth >= 1 AND r.source_entity_id <> h.anchor_id
+),
+hop1 AS (
+    -- collapse duplicate paths and bound fan-out before hop 2
+    SELECT anchor_id, entity_id, MAX(score) AS score
+    FROM hop1_raw
+    GROUP BY anchor_id, entity_id
+    ORDER BY score DESC
+    LIMIT 250
+),
+hop2_raw AS (
+    SELECT
+        h.anchor_id,
+        r.target_entity_id AS entity_id,
+        (
+            h.score * (COALESCE(r.weight, 1.0) * 0.55)
+            / GREATEST(1.0, sqrt(src.deg * tgt.deg))
+            * CASE
+                WHEN (tgt.project = ANY(:projects) OR '*' = ANY(:projects)) THEN 1.0
+                ELSE 0.85
+              END
+        )::float8 AS score
+    FROM hop1 h
+    JOIN entity_deg src ON src.id = h.entity_id
+    JOIN relationships r ON r.source_entity_id = h.entity_id AND r.valid_until IS NULL
+    JOIN entity_deg tgt ON tgt.id = r.target_entity_id
+    WHERE :max_depth >= 2 AND r.target_entity_id <> h.anchor_id
+    UNION ALL
+    SELECT
+        h.anchor_id,
+        r.source_entity_id AS entity_id,
+        (
+            h.score * (COALESCE(r.weight, 1.0) * 0.55)
+            / GREATEST(1.0, sqrt(src.deg * tgt.deg))
+            * CASE
+                WHEN (tgt.project = ANY(:projects) OR '*' = ANY(:projects)) THEN 1.0
+                ELSE 0.85
+              END
+        )::float8 AS score
+    FROM hop1 h
+    JOIN entity_deg src ON src.id = h.entity_id
+    JOIN relationships r ON r.target_entity_id = h.entity_id AND r.valid_until IS NULL
+    JOIN entity_deg tgt ON tgt.id = r.source_entity_id
+    WHERE :max_depth >= 2 AND r.source_entity_id <> h.anchor_id
+),
+all_nodes AS (
+    SELECT anchor_id, entity_id, MAX(score) AS score
+    FROM (
+        SELECT anchor_id, entity_id, score FROM hop0_bridges
+        UNION ALL
+        SELECT anchor_id, entity_id, score FROM hop1
+        UNION ALL
+        SELECT anchor_id, entity_id, score FROM hop2_raw
+    ) u
+    GROUP BY anchor_id, entity_id
 ),
 per_anchor AS (
-    SELECT
-        ee.experience_id,
-        g.anchor_id,
-        MAX(
-            g.score * CASE
-                WHEN (ed.project = ANY(:projects) OR '*' = ANY(:projects))
-                     AND ed.id = g.entity_id
-                THEN 1.0
-                ELSE 0.85
-            END
-        ) AS anchor_score
-    FROM entity_graph g
-    JOIN entity_deg ed ON (ed.id = g.entity_id OR ed.norm_name = g.norm_name)
-    JOIN experience_entities ee ON ee.entity_id = ed.id
-    GROUP BY ee.experience_id, g.anchor_id
+    SELECT ee.experience_id, n.anchor_id, MAX(n.score) AS anchor_score
+    FROM all_nodes n
+    JOIN experience_entities ee ON ee.entity_id = n.entity_id
+    GROUP BY ee.experience_id, n.anchor_id
 )
 SELECT experience_id, LEAST(1.0::float8, SUM(anchor_score))::float8 AS graph_score
 FROM per_anchor
