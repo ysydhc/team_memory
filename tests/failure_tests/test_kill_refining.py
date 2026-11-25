@@ -63,5 +63,14 @@ class TestKillRefining:
         db = sqlite3.connect(str(Path.home() / ".cache" / "tm-pipeline" / "drafts.db"))
         row = db.execute("SELECT status FROM sessions WHERE id = ?", (sid,)).fetchone()
         assert row is not None, f"Session {sid} disappeared after restart"
-        # Should be in a valid terminal state
-        assert row[0] in ("needs_refinement", "published", "publishing"), f"Unexpected status: {row[0]}"
+        # Valid post-recovery states per NoStrandedRefiningSession invariant:
+        # either transitioned out of 'refining', or re-entered 'refining' on the
+        # recovery tick with an active retry queued in pending_ops (e.g. no LLM in CI).
+        if row[0] == "refining":
+            queued = db.execute(
+                "SELECT id FROM pending_ops WHERE session_id = ? AND status != 'failed'",
+                (sid,),
+            ).fetchone()
+            assert queued is not None, "Session stranded in 'refining' without an active pending_ops entry"
+        else:
+            assert row[0] in ("needs_refinement", "published", "publishing"), f"Unexpected status: {row[0]}"
