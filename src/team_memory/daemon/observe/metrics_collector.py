@@ -27,7 +27,7 @@ _CREATE_INDEX = """CREATE INDEX IF NOT EXISTS idx_metrics_name ON metrics(name)"
 class MetricsCollector:
     """Collects and queries system metrics from SQLite."""
 
-    MAX_DAYS = 30
+    MAX_DAYS = 7
 
     def __init__(self, db_path: str, pg_url: str | None = None) -> None:
         self._db = sqlite3.connect(db_path, check_same_thread=False)
@@ -117,9 +117,10 @@ class MetricsCollector:
             result[name][label_key] = float(total)
         return result
 
-    def cleanup(self) -> int:
-        """Delete records older than MAX_DAYS. Returns count of deleted rows."""
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=self.MAX_DAYS)).isoformat()
+    def cleanup(self, retention_days: int | None = None) -> int:
+        """Delete records older than retention_days (default MAX_DAYS). Returns count of deleted rows."""
+        days = self.MAX_DAYS if retention_days is None else max(1, int(retention_days))
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         cursor = self._db.execute("DELETE FROM metrics WHERE recorded_at < ?", (cutoff,))
         self._db.commit()
         return cursor.rowcount

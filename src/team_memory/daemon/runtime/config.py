@@ -154,6 +154,23 @@ class ArenaSettings:
 
 
 @dataclass
+class SqliteMaintenanceSettings:
+    """本地 SQLite 自动 TTL 瘦身与 WAL/VACUUM 维护配置。"""
+
+    enabled: bool = True
+    interval_hours: int = 6
+    metrics_retention_days: int = 7
+    tool_observations_retention_days: int = 14
+    finished_sessions_retention_days: int = 30
+    failed_ops_retention_days: int = 7
+    capture_retention_days: int = 7
+    capture_max_rows_per_endpoint: int = 100
+    capture_max_str_len: int = 2000
+    vacuum_interval_days: int = 7
+    vacuum_freelist_ratio: float = 0.25
+
+
+@dataclass
 class ProjectMapping:
     """项目名 → 路径模式映射。"""
 
@@ -175,6 +192,7 @@ class DaemonConfig:
     auto_dream: AutoDreamSettings = field(default_factory=AutoDreamSettings)
     wiki: WikiSettings = field(default_factory=WikiSettings)
     arena: ArenaSettings = field(default_factory=ArenaSettings)
+    sqlite_maintenance: SqliteMaintenanceSettings = field(default_factory=SqliteMaintenanceSettings)
     projects: list[ProjectMapping] = field(default_factory=list)
 
 
@@ -195,6 +213,7 @@ _SUBCONFIG_KEYS = {
     "auto_dream": (AutoDreamSettings, None),
     "wiki": (WikiSettings, None),
     "arena": (ArenaSettings, None),
+    "sqlite_maintenance": (SqliteMaintenanceSettings, None),
 }
 
 

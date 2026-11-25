@@ -79,3 +79,15 @@ class JanitorConfig:
 
     promotion_output_dirs: dict[str, str] = field(default_factory=dict)
     """project → Obsidian output directory mapping for promoted Markdown files."""
+
+    response_buffer_retention_days: int = 14
+    """Hard TTL (days) for PostgreSQL response_buffer rows regardless of evaluation state."""
+
+    response_buffer_evaluated_retention_days: int = 7
+    """Retention days for already-evaluated PostgreSQL response_buffer rows."""
+
+    background_tasks_retention_days: int = 14
+    """Retention days for completed/failed PostgreSQL background_tasks rows."""
+
+    deprecated_background_task_types: list[str] = field(default_factory=lambda: ["graphiti_ingest"])
+    """Deprecated background_tasks.task_type values purged regardless of status."""

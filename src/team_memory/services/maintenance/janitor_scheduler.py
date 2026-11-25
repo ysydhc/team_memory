@@ -219,6 +219,14 @@ class JanitorScheduler:
                             f"promoted={arch.get('promoted_drafts_count', 0)}"
                         )
 
+                    if "response_buffer_pruning" in operations:
+                        rb_del = operations["response_buffer_pruning"].get("deleted_count", 0)
+                        summary_parts.append(f"response_buffer: {rb_del}")
+
+                    if "background_tasks_pruning" in operations:
+                        bt_del = operations["background_tasks_pruning"].get("deleted_count", 0)
+                        summary_parts.append(f"bg_tasks: {bt_del}")
+
                     summary = ", ".join(summary_parts) if summary_parts else "no changes"
                     logger.info("Scheduled janitor run completed: %s", summary)
 

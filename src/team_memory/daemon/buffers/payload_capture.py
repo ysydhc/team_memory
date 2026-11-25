@@ -30,22 +30,72 @@ CREATE INDEX IF NOT EXISTS idx_raw_payloads_endpoint ON raw_payloads(endpoint)
 """
 
 
+def truncate_payload_values(
+    value: Any,
+    *,
+    max_str_len: int = 2000,
+    max_list_items: int = 50,
+    max_depth: int = 6,
+) -> Any:
+    """Recursively truncate oversized string/list values while preserving JSON schema & types."""
+    if max_depth <= 0:
+        if isinstance(value, str) and len(value) > max_str_len:
+            return value[:max_str_len] + "...[truncated]"
+        return value
+    if isinstance(value, str):
+        if len(value) > max_str_len:
+            return value[:max_str_len] + "...[truncated]"
+        return value
+    if isinstance(value, dict):
+        return {
+            k: truncate_payload_values(
+                v,
+                max_str_len=max_str_len,
+                max_list_items=max_list_items,
+                max_depth=max_depth - 1,
+            )
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        trimmed = value[:max_list_items]
+        return [
+            truncate_payload_values(
+                item,
+                max_str_len=max_str_len,
+                max_list_items=max_list_items,
+                max_depth=max_depth - 1,
+            )
+            for item in trimmed
+        ]
+    return value
+
+
 class PayloadCapture:
     """Captures raw hook payloads to SQLite for contract analysis.
 
     记录原始 hook payload 到 SQLite，用于后续契约分析。
     """
 
-    MAX_ROWS_PER_ENDPOINT = 200
+    MAX_ROWS_PER_ENDPOINT = 100
+    MAX_STR_LEN = 2000
 
-    def __init__(self, db_path: str = ":memory:") -> None:
+    def __init__(
+        self,
+        db_path: str = ":memory:",
+        *,
+        max_rows_per_endpoint: int = MAX_ROWS_PER_ENDPOINT,
+        max_str_len: int = MAX_STR_LEN,
+    ) -> None:
         self._db_path = db_path
+        self._max_rows_per_endpoint = max(1, int(max_rows_per_endpoint))
+        self._max_str_len = max(128, int(max_str_len))
         self._conn: sqlite3.Connection | None = None
         self._write_count: int = 0
 
     async def start(self) -> None:
         """Initialize SQLite connection and create table."""
-        self._conn = sqlite3.connect(self._db_path)
+        self._conn = sqlite3.connect(self._db_path, timeout=10.0)
+        self._conn.execute("PRAGMA busy_timeout=10000")
         self._conn.execute(_CREATE_TABLE)
         self._conn.execute(_CREATE_INDEX)
         self._prune_old_rows()
@@ -53,7 +103,7 @@ class PayloadCapture:
         logger.info("PayloadCapture started (db=%s)", self._db_path)
 
     def _prune_old_rows(self) -> None:
-        """Keep at most MAX_ROWS_PER_ENDPOINT most recent payloads per endpoint."""
+        """Keep at most max_rows_per_endpoint most recent payloads per endpoint."""
         if self._conn is None:
             return
         try:
@@ -66,25 +116,23 @@ class PayloadCapture:
                     "DELETE FROM raw_payloads WHERE endpoint = ? AND id NOT IN ("
                     "SELECT id FROM raw_payloads WHERE endpoint = ? ORDER BY id DESC LIMIT ?"
                     ")",
-                    (ep, ep, self.MAX_ROWS_PER_ENDPOINT),
+                    (ep, ep, self._max_rows_per_endpoint),
                 )
         except Exception:
             logger.debug("Failed to prune old payloads", exc_info=True)
 
     async def capture(self, endpoint: str, payload: dict[str, Any], source: str = "unknown") -> None:
-        """Record a raw payload. Non-blocking, logs errors but does not raise.
-
-        记录原始 payload。非阻塞，记录错误但不抛出。
-        """
+        """Record a raw payload (with oversized string values truncated). Non-blocking."""
         if self._conn is None:
             return
         try:
+            sanitized = truncate_payload_values(payload, max_str_len=self._max_str_len)
             self._conn.execute(
                 "INSERT INTO raw_payloads (endpoint, source, payload_json, created_at) VALUES (?, ?, ?, ?)",
                 (
                     endpoint,
                     source,
-                    json.dumps(payload, ensure_ascii=False),
+                    json.dumps(sanitized, ensure_ascii=False),
                     datetime.now(timezone.utc).isoformat(),
                 ),
             )

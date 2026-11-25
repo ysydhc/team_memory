@@ -399,7 +399,12 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         capture_db = config.draft.db_path or ":memory:"
         if capture_db != ":memory:":
             capture_db = capture_db.replace(".db", "_capture.db")
-        payload_capture = PayloadCapture(db_path=capture_db)
+        sqlite_maint_cfg = getattr(config, "sqlite_maintenance", None)
+        payload_capture = PayloadCapture(
+            db_path=capture_db,
+            max_rows_per_endpoint=getattr(sqlite_maint_cfg, "capture_max_rows_per_endpoint", 100),
+            max_str_len=getattr(sqlite_maint_cfg, "capture_max_str_len", 2000),
+        )
         await payload_capture.start()
         application.state.payload_capture = payload_capture
 
@@ -434,7 +439,7 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         _tm_settings = _load_tm_settings()
         _pg_url_clean = str(_tm_settings.database.url).replace("+asyncpg", "")
         metrics = MetricsCollector(db_path=db_path, pg_url=_pg_url_clean)
-        metrics.cleanup()
+        metrics.cleanup(retention_days=getattr(sqlite_maint_cfg, "metrics_retention_days", 7))
         application.state.metrics = metrics
 
         # In-process health check / 进程内健康检查
@@ -476,6 +481,34 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         dream_task = dream_worker.start()
         application.state.dream_worker = dream_worker
         application.state.dream_task = dream_task
+
+        # Start SQLite periodic TTL pruning & WAL/VACUUM maintenance worker
+        from team_memory.daemon.buffers.sqlite_maintenance import (
+            SqliteMaintenancePolicy,
+            SqliteMaintenanceWorker,
+        )
+
+        sqlite_policy = SqliteMaintenancePolicy(
+            enabled=getattr(sqlite_maint_cfg, "enabled", True),
+            interval_hours=getattr(sqlite_maint_cfg, "interval_hours", 6),
+            metrics_retention_days=getattr(sqlite_maint_cfg, "metrics_retention_days", 7),
+            tool_observations_retention_days=getattr(sqlite_maint_cfg, "tool_observations_retention_days", 14),
+            finished_sessions_retention_days=getattr(sqlite_maint_cfg, "finished_sessions_retention_days", 30),
+            failed_ops_retention_days=getattr(sqlite_maint_cfg, "failed_ops_retention_days", 7),
+            capture_retention_days=getattr(sqlite_maint_cfg, "capture_retention_days", 7),
+            capture_max_rows_per_endpoint=getattr(sqlite_maint_cfg, "capture_max_rows_per_endpoint", 100),
+            capture_max_str_len=getattr(sqlite_maint_cfg, "capture_max_str_len", 2000),
+            vacuum_interval_days=getattr(sqlite_maint_cfg, "vacuum_interval_days", 7),
+            vacuum_freelist_ratio=getattr(sqlite_maint_cfg, "vacuum_freelist_ratio", 0.25),
+        )
+        sqlite_maint_worker = SqliteMaintenanceWorker(
+            db_path=db_path,
+            capture_db_path=capture_db,
+            policy=sqlite_policy,
+        )
+        sqlite_maint_task = sqlite_maint_worker.start()
+        application.state.sqlite_maintenance_worker = sqlite_maint_worker
+        application.state.sqlite_maintenance_task = sqlite_maint_task
 
         # Start JanitorScheduler inside persistent tm-daemon (with cross-restart timestamp file)
         try:
@@ -613,6 +646,18 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             refinement_task_obj.cancel()
             try:
                 await asyncio.wait_for(refinement_task_obj, timeout=5.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+
+        # Stop SQLite maintenance worker
+        sqlite_maint_obj = getattr(application.state, "sqlite_maintenance_worker", None)
+        if sqlite_maint_obj is not None:
+            sqlite_maint_obj.stop()
+        sqlite_maint_task_obj = getattr(application.state, "sqlite_maintenance_task", None)
+        if sqlite_maint_task_obj is not None:
+            sqlite_maint_task_obj.cancel()
+            try:
+                await asyncio.wait_for(sqlite_maint_task_obj, timeout=5.0)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 pass
 

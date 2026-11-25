@@ -51,23 +51,32 @@ async def get_status(request: Request) -> dict[str, Any]:
         }
     janitor_sched = getattr(app.state, "janitor_scheduler", None)
     dream_worker = getattr(app.state, "dream_worker", None)
+    sqlite_maint_worker = getattr(app.state, "sqlite_maintenance_worker", None)
     last_janitor_dt = (
         janitor_sched._read_last_run()
         if janitor_sched and hasattr(janitor_sched, "_read_last_run")
         else None
     )
+    from team_memory.daemon.buffers.sqlite_maintenance import read_last_sqlite_maintenance
     from team_memory.daemon.integration.auto_dream import _read_last_dream, read_last_dream_stats
 
     last_dream_dt = _read_last_dream()
     last_dream_stats = read_last_dream_stats()
+    last_sqlite_maint = read_last_sqlite_maintenance()
+    _jn_is_running = getattr(janitor_sched, "is_running", None)
+    janitor_running = bool(_jn_is_running() if callable(_jn_is_running) else _jn_is_running)
+    _sq_is_running = getattr(sqlite_maint_worker, "is_running", None)
+    sqlite_maint_running = bool(_sq_is_running() if callable(_sq_is_running) else _sq_is_running)
     result["maintenance"] = {
-        "janitor_running": bool(janitor_sched and getattr(janitor_sched, "is_running", False)),
+        "janitor_running": janitor_running,
         "last_janitor_at": last_janitor_dt.isoformat() if last_janitor_dt else None,
         "auto_dream_running": bool(
             dream_worker and getattr(dream_worker, "_task", None) and not dream_worker._task.done()
         ),
         "last_dream_at": last_dream_dt.isoformat() if last_dream_dt else None,
         "last_dream_stats": last_dream_stats,
+        "sqlite_maintenance_running": sqlite_maint_running,
+        "last_sqlite_maintenance_at": last_sqlite_maint.get("ran_at"),
     }
     return result
 

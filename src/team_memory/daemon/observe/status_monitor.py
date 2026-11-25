@@ -67,6 +67,7 @@ def _resolve_endpoints_and_paths(
     if not resolved_db:
         resolved_db = str(Path.home() / ".cache" / "tm-pipeline" / "drafts.db")
 
+    resolved_db = os.path.expanduser(resolved_db)
     p_db = Path(resolved_db)
     capture_db = str(p_db.with_name(p_db.stem + "_capture.db"))
     return (
@@ -138,38 +139,61 @@ async def _probe_daemon_status(daemon_url: str, timeout: float = 2.5) -> dict[st
         }
 
 
+def _sqlite_total_size_bytes(db_path: Path) -> tuple[int, int]:
+    """Return (main_bytes, wal_plus_shm_bytes) for a SQLite database."""
+    main_b = db_path.stat().st_size if db_path.exists() else 0
+    wal_p = Path(f"{db_path}-wal")
+    shm_p = Path(f"{db_path}-shm")
+    wal_b = (wal_p.stat().st_size if wal_p.exists() else 0) + (
+        shm_p.stat().st_size if shm_p.exists() else 0
+    )
+    return main_b, wal_b
+
+
 def _inspect_local_sqlite(drafts_db_path: str, capture_db_path: str) -> dict[str, Any]:
     """Inspect local SQLite ConversationBuffer, PendingQueue, and PayloadCapture."""
+    resolved_drafts = os.path.expanduser(drafts_db_path)
+    resolved_capture = os.path.expanduser(capture_db_path)
     result: dict[str, Any] = {
-        "db_path": drafts_db_path,
+        "db_path": resolved_drafts,
         "db_exists": False,
         "db_size_mb": 0.0,
+        "db_main_size_mb": 0.0,
+        "wal_size_mb": 0.0,
+        "capture_db_size_mb": 0.0,
+        "total_sqlite_size_mb": 0.0,
         "sessions_by_status": {},
         "total_sessions": 0,
         "ready_to_converge": 0,
         "stuck_no_assistant": 0,
         "total_messages": 0,
         "total_tool_observations": 0,
+        "total_metrics": 0,
+        "total_drafts": 0,
         "pending_queue": {"pending": 0, "retrying": 0, "failed": 0},
         "recent_sessions": [],
         "hooks_capture": {
             "db_exists": False,
+            "db_size_mb": 0.0,
             "total_payloads": 0,
             "by_endpoint": {},
             "latest_event": None,
         },
     }
 
-    p_drafts = Path(drafts_db_path)
+    p_drafts = Path(resolved_drafts)
     if p_drafts.exists():
         result["db_exists"] = True
         try:
-            result["db_size_mb"] = round(p_drafts.stat().st_size / (1024 * 1024), 2)
+            main_b, wal_b = _sqlite_total_size_bytes(p_drafts)
+            result["db_main_size_mb"] = round(main_b / (1024 * 1024), 2)
+            result["wal_size_mb"] = round(wal_b / (1024 * 1024), 2)
+            result["db_size_mb"] = round((main_b + wal_b) / (1024 * 1024), 2)
         except OSError:
             pass
 
         try:
-            conn = sqlite3.connect(f"file:{drafts_db_path}?mode=ro", uri=True, timeout=2.0)
+            conn = sqlite3.connect(f"file:{resolved_drafts}?mode=ro", uri=True, timeout=2.0)
             try:
                 tables = {
                     r[0]
@@ -270,16 +294,34 @@ def _inspect_local_sqlite(drafts_db_path: str, capture_db_path: str) -> dict[str
                     for st, cnt in pq_rows:
                         pq_map[str(st)] = int(cnt)
                     result["pending_queue"] = pq_map
+
+                if "metrics" in tables:
+                    result["total_metrics"] = int(
+                        conn.execute("SELECT COUNT(*) FROM metrics").fetchone()[0] or 0
+                    )
+                if "drafts" in tables:
+                    result["total_drafts"] = int(
+                        conn.execute("SELECT COUNT(*) FROM drafts").fetchone()[0] or 0
+                    )
             finally:
                 conn.close()
         except Exception as exc:
             result["error"] = str(exc)[:120]
+    else:
+        result["error"] = f"SQLite DB not found: {resolved_drafts}"
 
-    p_cap = Path(capture_db_path)
+    p_cap = Path(resolved_capture)
     if p_cap.exists():
         result["hooks_capture"]["db_exists"] = True
         try:
-            conn = sqlite3.connect(f"file:{capture_db_path}?mode=ro", uri=True, timeout=2.0)
+            cap_main_b, cap_wal_b = _sqlite_total_size_bytes(p_cap)
+            cap_mb = round((cap_main_b + cap_wal_b) / (1024 * 1024), 2)
+            result["capture_db_size_mb"] = cap_mb
+            result["hooks_capture"]["db_size_mb"] = cap_mb
+        except OSError:
+            pass
+        try:
+            conn = sqlite3.connect(f"file:{resolved_capture}?mode=ro", uri=True, timeout=2.0)
             try:
                 tables = {
                     r[0]
@@ -309,6 +351,10 @@ def _inspect_local_sqlite(drafts_db_path: str, capture_db_path: str) -> dict[str
         except Exception as exc:
             result["hooks_capture"]["error"] = str(exc)[:120]
 
+    result["total_sqlite_size_mb"] = round(
+        float(result["db_size_mb"]) + float(result["capture_db_size_mb"]),
+        2,
+    )
     return result
 
 
@@ -833,6 +879,11 @@ async def collect_status_snapshot(
         if rw and not rw.get("healthy", True):
             anomalies.append(f"RefinementWorker unhealthy (fails={rw.get('fail_count', 0)})")
 
+    if not sqlite_info.get("db_exists") or sqlite_info.get("error"):
+        anomalies.append(
+            f"Local SQLite unavailable: {sqlite_info.get('error') or sqlite_info.get('db_path')}"
+        )
+
     pq = sqlite_info.get("pending_queue") or {}
     if pq.get("failed", 0) > 0:
         anomalies.append(f"PendingQueue has {pq['failed']} failed ops")
@@ -996,14 +1047,20 @@ def render_status_plain(snapshot: dict[str, Any], watch_meta: dict[str, Any] | N
     pq = loc.get("pending_queue") or {}
 
     lines.append("┌─ 3. 本地精炼管线漏斗 (Refinement Pipeline Funnel — SQLite) ───────────────────")
+    if not loc.get("db_exists") or loc.get("error"):
+        warn_msg = loc.get("error") or f"DB not found ({loc.get('db_path', '?')})"
+        lines.append(f"│ ⚠ SQLite Warning: {warn_msg}")
     lines.append(
         f"│ Session Funnel:  🟢 Collecting={active_n} (Ready≥3 turns: {loc.get('ready_to_converge', 0)}) "
         f"→ 🟡 Queued={needs_n} → 🔄 Refining={refining_n} → ✅ Refined={done_n} (Skipped={skip_n})"
     )
+    wal_mb = loc.get("wal_size_mb", 0.0)
+    cap_mb = loc.get("capture_db_size_mb", 0.0)
     lines.append(
         f"│ Buffer Stats:    Messages={loc.get('total_messages', 0)} | "
         f"Tool Observations={loc.get('total_tool_observations', 0)} | "
-        f"SQLite Size={loc.get('db_size_mb', 0.0):.2f} MB"
+        f"Metrics={loc.get('total_metrics', 0)} | "
+        f"SQLite={loc.get('db_size_mb', 0.0):.2f} MB (wal={wal_mb:.2f} MB, capture={cap_mb:.2f} MB)"
     )
     pq_warn = pq.get("failed", 0) > 0 or pq.get("retrying", 0) > 0
     pq_retry_only = pq.get("retrying", 0) > 0 and pq.get("failed", 0) == 0
@@ -1275,16 +1332,24 @@ def build_rich_renderable(snapshot: dict[str, Any], watch_meta: dict[str, Any] |
     pq = loc.get("pending_queue") or {}
 
     funnel_summary = Text()
+    if not loc.get("db_exists") or loc.get("error"):
+        funnel_summary.append(
+            f"  ⚠ SQLite Unavailable: {loc.get('error') or loc.get('db_path', '?')}\n",
+            style="bold red",
+        )
     funnel_summary.append(f"  🟢 Collecting: {active_n} ", style="green")
     funnel_summary.append(f"(Ready≥3 turns: {loc.get('ready_to_converge', 0)})  →  ", style="dim")
     funnel_summary.append(f"🟡 Queued: {needs_n}  →  ", style="yellow")
     funnel_summary.append(f"🔄 Refining: {refining_n}  →  ", style="cyan")
     funnel_summary.append(f"✅ Refined: {done_n} ", style="bold green")
     funnel_summary.append(f"(Skipped: {skip_n})\n", style="dim")
+    wal_mb = loc.get("wal_size_mb", 0.0)
+    cap_mb = loc.get("capture_db_size_mb", 0.0)
     funnel_summary.append(
         f"  💬 Messages: {loc.get('total_messages', 0)}   "
-        f"🔧 Tool Observations: {loc.get('total_tool_observations', 0)}   "
-        f"💾 SQLite: {loc.get('db_size_mb', 0.0):.2f} MB   "
+        f"🔧 Tool Obs: {loc.get('total_tool_observations', 0)}   "
+        f"📊 Metrics: {loc.get('total_metrics', 0)}   "
+        f"💾 SQLite: {loc.get('db_size_mb', 0.0):.2f} MB (wal {wal_mb:.2f} / cap {cap_mb:.2f})   "
         f"⏳ PendingQueue: pending={pq.get('pending', 0)} retrying={pq.get('retrying', 0)} ",
     )
     failed_n = pq.get("failed", 0)

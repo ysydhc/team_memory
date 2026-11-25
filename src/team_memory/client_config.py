@@ -176,14 +176,16 @@ class ClientConfig:
 
         # --- [conversation] ---
         conv = toml_data.get("conversation", {})
-        config.conversation.db_path = os.environ.get("TM_CONVERSATION_DB") or conv.get(
-            "db_path", config.conversation.db_path
+        config.conversation.db_path = os.path.expanduser(
+            os.environ.get("TM_CONVERSATION_DB") or conv.get("db_path", config.conversation.db_path)
         )
 
         # --- [wiki] ---
         wiki = toml_data.get("wiki", {})
         config.wiki.enabled = wiki.get("enabled", config.wiki.enabled)
-        config.wiki.db_path = os.environ.get("TM_WIKI_DB") or wiki.get("db_path", config.wiki.db_path)
+        config.wiki.db_path = os.path.expanduser(
+            os.environ.get("TM_WIKI_DB") or wiki.get("db_path", config.wiki.db_path)
+        )
 
         # --- [daemon] ---
         dmn = toml_data.get("daemon", {})
@@ -318,12 +320,13 @@ class ClientConfig:
         # --- [conversation] ---
         conv = toml_data.get("conversation", {})
         if os.environ.get("TM_CONVERSATION_DB"):
-            config.conversation.db_path = os.environ["TM_CONVERSATION_DB"]
+            config.conversation.db_path = os.path.expanduser(os.environ["TM_CONVERSATION_DB"])
             sources["conversation.db_path"] = "env: TM_CONVERSATION_DB"
         elif conv.get("db_path"):
-            config.conversation.db_path = conv["db_path"]
+            config.conversation.db_path = os.path.expanduser(conv["db_path"])
             sources["conversation.db_path"] = "config.toml"
         else:
+            config.conversation.db_path = os.path.expanduser(config.conversation.db_path)
             sources["conversation.db_path"] = "default"
 
         # --- [wiki] ---
@@ -335,12 +338,13 @@ class ClientConfig:
             sources["wiki.enabled"] = "default"
 
         if os.environ.get("TM_WIKI_DB"):
-            config.wiki.db_path = os.environ["TM_WIKI_DB"]
+            config.wiki.db_path = os.path.expanduser(os.environ["TM_WIKI_DB"])
             sources["wiki.db_path"] = "env: TM_WIKI_DB"
         elif wiki.get("db_path"):
-            config.wiki.db_path = wiki["db_path"]
+            config.wiki.db_path = os.path.expanduser(wiki["db_path"])
             sources["wiki.db_path"] = "config.toml"
         else:
+            config.wiki.db_path = os.path.expanduser(config.wiki.db_path)
             sources["wiki.db_path"] = "default"
 
         # --- [daemon] ---
