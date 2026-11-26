@@ -6,6 +6,22 @@
 
 ## [Unreleased]
 
+## [0.3.10] — 2026-11-26
+
+### Added
+
+- **中英文技术标识符分词器升级 (`src/team_memory/utils/tokenizer.py`)**：
+  - 零外部依赖重构分词管线（`jieba` 与 `_tokenize_simple` 共用），对英文/混合技术标识符采用**「保留小写原词 + 追加拆分词元」**策略：支持标准驼峰（`AdLifecycleMonitor`）、缩写词+驼峰（`ADXManager` / `HTTPServer`）、蛇形与扩展名（`use_worktree.sh`）、连字符错误码（`adx-sdk-518`）、版本号（`v0.3.5 → v0.3.5 0.3.5`）、字母数字边界（`Android16`）与路径分段；过滤单字符符号并保序去重。
+  - 新增 `tests/test_tokenizer.py` 15 组技术标识符矩阵、中英混排、fallback 与 FTS 读写对齐单测。
+- **存量 FTS 回填脚本与触发器迁移**：
+  - 新增 Alembic 迁移 `027_fts_trigger_preserve_tokenized.py`，更新 PostgreSQL `experiences_fts_update()` 触发器以保留应用层分词后的 `NEW.fts`（直连 SQL 写入仍保留兜底逻辑）。
+  - 新增 `scripts/migrate_fts_jieba.py`（支持 `--dry-run`、`--batch-size`、`--active-only` 与 `bypass_rls=True` 全租户覆盖）并更新 `Makefile` `migrate-fts-jieba` 入口。
+
+### Fixed
+
+- **FTS 写入与查询分词一致性 (`src/team_memory/storage/repository.py`)**：
+  - `ExperienceRepository.create()` / `update()` 在 PostgreSQL 方言下通过 `_build_fts_tsvector_expr()` 使用统一 `tokenize()` 生成 A/B/C 加权 `tsvector`，并移除 `search_by_fts()` 中冗余的 `snake_tokens` 临时补丁，解决局部关键词（`Lifecycle` / `worktree` / `518` / `0.3.5`）FTS 召回盲区。
+
 ## [0.3.9] — 2026-11-26
 
 ### Fixed

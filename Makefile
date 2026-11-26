@@ -252,8 +252,9 @@ migrate:        ## 运行数据库迁移（默认 uv / .venv 内 python -m alemb
 migrate-fts:    ## 补齐经验表 FTS 字段（存量迁移）；可用 --dry-run 预览
 	python scripts/migrate_fts.py
 
-migrate-fts-jieba:  ## 回填 jieba 分词列（方案 C）；需先执行 alembic upgrade
-	python scripts/migrate_fts_jieba.py
+migrate-fts-jieba:  ## 回填技术分词 FTS 向量（支持 OPTS='--dry-run' 预览）；建议先执行 make migrate
+	@set -a && [ -f .env ] && source .env || true && set +a; \
+	PYTHONPATH=src $(PYTHON_BIN) scripts/migrate_fts_jieba.py $(OPTS)
 
 backup:         ## 备份数据库
 	./scripts/backup.sh

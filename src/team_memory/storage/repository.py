@@ -26,11 +26,38 @@ def _utcnow() -> datetime:
 
 
 def _fts_tokenized_text(title: str, description: str, solution: str | None) -> str:
-    """Return concatenated jieba-tokenized text for FTS trigger."""
+    """Return concatenated tokenized text for FTS."""
     from team_memory.utils.tokenizer import tokenize
 
     parts = [tokenize(title or ""), tokenize(description or ""), tokenize(solution or "")]
     return " ".join(p for p in parts if p)
+
+
+def _build_fts_tsvector_expr(
+    title: str | None,
+    description: str | None,
+    solution: str | None,
+    tags: list[str] | None = None,
+):
+    """Build weighted PostgreSQL tsvector expression using the unified tokenizer.
+
+    Weights match the DB trigger and backfill script:
+      - A: title
+      - B: description + tags
+      - C: solution
+    """
+    from team_memory.utils.tokenizer import tokenize
+
+    t_title = tokenize(title or "")
+    tags_str = " ".join(str(t) for t in (tags or []) if t)
+    desc_and_tags = f"{description or ''} {tags_str}".strip()
+    t_desc = tokenize(desc_and_tags)
+    t_sol = tokenize(solution or "")
+    return (
+        func.setweight(func.to_tsvector("simple", t_title), "A")
+        .op("||")(func.setweight(func.to_tsvector("simple", t_desc), "B"))
+        .op("||")(func.setweight(func.to_tsvector("simple", t_sol), "C"))
+    )
 
 
 # Dedup scan (Web UI): keep pair only if child-title Jaccard ≥ this (see test_find_duplicates_*).
@@ -75,6 +102,15 @@ class ExperienceRepository:
 
     def __init__(self, session: AsyncSession):
         self._session = session
+
+    def _is_postgres(self) -> bool:
+        """Return True when the session is bound to a PostgreSQL dialect."""
+        sync_sess = getattr(self._session, "sync_session", None)
+        bind = getattr(sync_sess, "bind", None) if sync_sess is not None else None
+        if bind is None:
+            bind = getattr(self._session, "bind", None)
+        dialect = getattr(bind, "dialect", None)
+        return getattr(dialect, "name", None) == "postgresql"
 
     # ====================== Filter helpers ======================
 
@@ -128,6 +164,11 @@ class ExperienceRepository:
         staleness_status: str = "fresh",
     ) -> Experience:
         """Create a new experience record."""
+        fts_expr = (
+            _build_fts_tsvector_expr(title, description, solution, tags)
+            if self._is_postgres()
+            else None
+        )
         experience = Experience(
             id=uuid.uuid4(),
             title=title,
@@ -136,6 +177,7 @@ class ExperienceRepository:
             created_by=created_by,
             tags=tags or [],
             embedding=embedding,
+            fts=fts_expr,
             source=source,
             parent_id=parent_id,
             experience_type=experience_type,
@@ -363,16 +405,11 @@ class ExperienceRepository:
         include_promoted: bool = False,
         include_superseded: bool = False,
     ) -> list[dict]:
-        """Full-text search using PostgreSQL tsvector/tsquery with jieba."""
-        import re
-
+        """Full-text search using PostgreSQL tsvector/tsquery with unified technical tokenizer."""
         from team_memory.storage.query_builders import build_fts_search
         from team_memory.utils.tokenizer import tokenize
 
-        snake_tokens = re.findall(r"[a-zA-Z0-9]+(?:_[a-zA-Z0-9]+)+", query_text or "")
         tokenized_query = tokenize(query_text)
-        if snake_tokens:
-            tokenized_query = " ".join(snake_tokens) + " " + tokenized_query
         stmt = build_fts_search(
             tokenized_query,
             project=project,
@@ -513,6 +550,14 @@ class ExperienceRepository:
         for key, value in kwargs.items():
             if hasattr(experience, key):
                 setattr(experience, key, value)
+
+        if self._is_postgres() and ({"title", "description", "solution", "tags"} & set(kwargs.keys())):
+            experience.fts = _build_fts_tsvector_expr(
+                experience.title,
+                experience.description,
+                experience.solution,
+                experience.tags,
+            )
 
         experience.updated_at = datetime.now(timezone.utc)
         await self._session.flush()
