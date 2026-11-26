@@ -63,6 +63,22 @@ class ExperienceCrudMixin:
             extract_evidence_anchors,
             infer_epistemic_tier,
         )
+        from team_memory.utils.secret_redactor import redact_fields
+
+        redacted_fields, _ = redact_fields(
+            {
+                "title": title,
+                "problem": problem,
+                "solution": solution,
+                "evidence": evidence,
+            },
+            context="experience.save",
+            actor=created_by,
+        )
+        title = redacted_fields["title"] or ""
+        problem = redacted_fields["problem"] or ""
+        solution = redacted_fields["solution"]
+        evidence = redacted_fields["evidence"]
 
         async with self._session_or(session) as session:
             # Validate source/status constraint
@@ -371,6 +387,21 @@ class ExperienceCrudMixin:
             experience = await repo.get_by_id(exp_uuid)
             if experience is None:
                 return None
+
+            from team_memory.utils.secret_redactor import redact_fields
+
+            redact_candidates = {
+                k: kwargs[k]
+                for k in ("title", "description", "solution", "solution_addendum")
+                if k in kwargs and isinstance(kwargs[k], str)
+            }
+            if redact_candidates:
+                cleaned_updates, _ = redact_fields(
+                    redact_candidates,
+                    context="experience.update",
+                    actor=user,
+                )
+                kwargs = {**kwargs, **cleaned_updates}
 
             updates: dict = {}
             need_reembed = False

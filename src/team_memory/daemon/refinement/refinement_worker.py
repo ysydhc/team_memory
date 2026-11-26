@@ -15,6 +15,16 @@ from typing import Any
 
 from team_memory.daemon.buffers.conversation_buffer import ConversationBuffer
 from team_memory.daemon.integration.tm_sink import TMSink
+from team_memory.daemon.refinement.draft_refiner import (
+    MAX_TITLE_LEN,
+    MIN_PROBLEM_LEN,
+    MIN_SOLUTION_LEN,
+    MIN_TAGS,
+    MIN_TITLE_LEN,
+    auto_repair_structured_draft,
+    classify_discard_category,
+    validate_structured_draft,
+)
 from team_memory.daemon.runtime.config import DaemonConfig, RefinementSettings
 from team_memory.services.llm.llm_parser import LLMParseError, _extract_json, call_llm_openai
 
@@ -28,10 +38,12 @@ class LLMUnavailableError(Exception):
 # Maximum refinement attempts before giving up on a draft
 _MAX_REFINE_ATTEMPTS = 3
 
-# Minimum character lengths for structural quality checks
-_MIN_TITLE_LEN = 5
-_MIN_PROBLEM_LEN = 50
-_MIN_SOLUTION_LEN = 50
+# Structural quality bounds (sourced from draft_refiner for single source of truth)
+_MIN_TITLE_LEN = MIN_TITLE_LEN
+_MAX_TITLE_LEN = MAX_TITLE_LEN
+_MIN_PROBLEM_LEN = MIN_PROBLEM_LEN
+_MIN_SOLUTION_LEN = MIN_SOLUTION_LEN
+_MIN_TAGS = MIN_TAGS
 
 # ---------------------------------------------------------------------------
 # Quality Evaluation Prompt — asks LLM to score a refined experience
@@ -82,12 +94,16 @@ _REFINEMENT_PROMPT = """\
 - 琐碎操作（如「执行了 npm install」「重启了服务」→ 无诊断或决策过程）
 - 重复或空泛内容
 
-**质量要求**:
-- title 必须具体，包含关键技术词，禁止使用泛泛的标题如「调试」「修复」「配置」等。\
+**质量要求（Quality Gate 硬性格式约束 — 不满足会被自动拒收）**:
+- title（必填）: 长度严格控制在 5~120 字符之间，必须具体包含关键技术词，\
+禁止使用泛泛的标题如「调试」「修复」「配置」「无标题」或「Draft xxx」。\
 好的标题示例：「Docker 容器内 PostgreSQL 连接 host.docker.internal 超时解决」
-- description 必须解释问题的上下文和具体表现，不少于 50 字
-- solution 必须是可执行的操作步骤或配置变更，不少于 50 字，保留关键命令、路径、参数
-- tags 提取 3-8 个技术关键词，小写英文，包含相关技术栈和问题域
+- description / problem（必填）: 必须解释问题的上下文、现象与影响范围，\
+严格不少于 50 字，禁止填「无」「暂无」「N/A」等占位词
+- solution（必填）: 必须是可执行的操作步骤或配置变更，严格不少于 50 字，保留关键命令、路径、参数，禁止空壳或占位词
+- tags（必填）: 必须为非空数组，提取 3-8 个技术关键词（至少 1 个），小写英文，包含相关技术栈和问题域
+- 禁止输出空壳草稿（例如仅有标题但 problem/solution 为空或过短）。\
+仅当整段对话确认属于纯噪音/无价值内容时，才返回下方全空 JSON。
 
 **输出格式** — 严格返回以下 JSON（不要用 markdown 代码块包裹）:
 {{
@@ -164,6 +180,7 @@ async def _refine_via_openai(
         api_key=api_key,
         timeout=timeout,
         temperature=0.2,
+        caller="refinement",
     )
 
     parsed = _extract_json(llm_text)
@@ -174,17 +191,17 @@ def _normalize_refinement_result(parsed: dict) -> dict:
     """Normalize the refinement prompt output to match update_experience fields.
 
     Maps:
-      - description → problem (for update_experience API)
+      - description / problem → problem & description (for update_experience API)
       - experience_type: problem_solution → bugfix, workaround → best_practice,
         configuration → feature, insight → learning
     """
     from team_memory.schemas import EXPERIENCE_TYPES
 
-    title = str(parsed.get("title", "")).strip()
-    description = str(parsed.get("description", "")).strip()
-    solution = str(parsed.get("solution", "")).strip() or None
+    title = str(parsed.get("title", "") or "").strip()
+    description = str(parsed.get("problem") or parsed.get("description") or "").strip()
+    solution = str(parsed.get("solution", "") or "").strip() or None
     tags = parsed.get("tags", [])
-    exp_type = str(parsed.get("experience_type", "")).strip()
+    exp_type = str(parsed.get("experience_type", "") or "").strip()
 
     # Map refinement-specific types to canonical EXPERIENCE_TYPES
     if exp_type in _REFINEMENT_TYPE_MAP:
@@ -256,11 +273,22 @@ class RefinementWorker:
         self._tick_fail_count = 0
         self._consecutive_tick_failures = 0
         self._last_tick_ok: str | None = None
+        # Quality gate discard & auto-repair breakdown stats
+        self._discard_stats: dict[str, int] = {
+            "true_noise": 0,
+            "format_error": 0,
+            "quality_score_low": 0,
+            "format_repaired": 0,
+        }
 
         # ------------------------------------------------------------------
         # Lifecycle
         self._running = False
         self._paused = False
+
+    def get_discard_stats(self) -> dict[str, int]:
+        """Return a snapshot of quality gate discard/repair counters."""
+        return dict(self._discard_stats)
 
     def start(self) -> asyncio.Task:
         """Start the background worker loop."""
@@ -662,17 +690,61 @@ class RefinementWorker:
         if self._cfg.quality_gate_enabled:
             passed, reason = self._structural_check(structured)
             if not passed:
+                # 1-pass lightweight auto-repair for high-value drafts with minor format defects
+                repaired, repaired_fields = auto_repair_structured_draft(
+                    structured,
+                    draft_title=title,
+                )
+                if repaired_fields:
+                    repaired_ok, repaired_reason = self._structural_check(repaired)
+                    if repaired_ok:
+                        structured = repaired
+                        passed = True
+                        reason = ""
+                        self._discard_stats["format_repaired"] += 1
+                        logger.info(
+                            "Quality gate auto-repaired draft %s (fields=%s, title=%s)",
+                            draft_id,
+                            ",".join(repaired_fields),
+                            structured.get("title", "")[:60],
+                        )
+                        if self._metrics:
+                            self._metrics.record(
+                                "quality_format_repaired",
+                                1,
+                                {"project": project, "fields": ",".join(repaired_fields)},
+                            )
+                        await self._buf.mark_publishing_in_progress(
+                            draft_id,
+                            {"experience_id": experience_id, "structured": structured},
+                        )
+                    else:
+                        reason = repaired_reason
+
+            if not passed:
+                discard_category = classify_discard_category(structured, reason)
+                self._discard_stats[discard_category] = self._discard_stats.get(discard_category, 0) + 1
                 logger.info(
-                    "Quality gate discarded draft %s (experience %s): %s",
+                    "Quality gate discarded draft %s (experience %s, category=%s): %s",
                     draft_id,
                     experience_id,
+                    discard_category,
                     reason,
                 )
                 if self._metrics:
                     self._metrics.record(
                         "quality_rejected",
                         1,
-                        {"project": project, "reason": "structure_failed"},
+                        {
+                            "project": project,
+                            "reason": "structure_failed",
+                            "discard_category": discard_category,
+                        },
+                    )
+                    self._metrics.record(
+                        f"quality_discard_{discard_category}",
+                        1,
+                        {"project": project},
                     )
                 await self._buf.mark_published(draft_id)
                 if self._queue and hasattr(self._queue, "dequeue_by_session"):
@@ -681,6 +753,7 @@ class RefinementWorker:
 
             score = await self._quality_score(structured)
             if score < self._cfg.quality_min_score:
+                self._discard_stats["quality_score_low"] += 1
                 logger.info(
                     "Quality gate discarded draft %s (experience %s): quality score %d < %d",
                     draft_id,
@@ -697,7 +770,7 @@ class RefinementWorker:
                     self._metrics.record(
                         "quality_rejected",
                         1,
-                        {"project": project, "reason": "below_threshold"},
+                        {"project": project, "reason": "below_threshold", "discard_category": "true_noise"},
                     )
                 await self._buf.mark_published(draft_id)
                 if self._queue and hasattr(self._queue, "dequeue_by_session"):
@@ -876,21 +949,7 @@ class RefinementWorker:
 
         Returns (passed, reason) where reason is empty on success.
         """
-        title = str(structured.get("title", "")).strip()
-        problem = str(structured.get("problem", "")).strip()
-        solution = str(structured.get("solution", "") or "").strip()
-        exp_type = str(structured.get("experience_type", "")).strip()
-
-        if not title or len(title) < _MIN_TITLE_LEN:
-            return False, "discarded: title too short"
-        if not problem or len(problem) < _MIN_PROBLEM_LEN:
-            return False, "discarded: problem too short"
-        if not solution or len(solution) < _MIN_SOLUTION_LEN:
-            return False, "discarded: solution too short"
-        if not exp_type:
-            return False, "discarded: experience_type empty"
-
-        return True, ""
+        return validate_structured_draft(structured)
 
     async def _quality_score(self, structured: dict[str, Any]) -> int:
         """Ask LLM to score a refined experience on 0-100.
@@ -916,6 +975,7 @@ class RefinementWorker:
                 api_key=os.environ.get(self._cfg.api_key_env, "") or None,
                 timeout=self._cfg.timeout,
                 temperature=0.1,
+                caller="refinement_quality_eval",
             )
             parsed = _extract_json(llm_text)
             score = int(parsed.get("score", 100))

@@ -6,7 +6,10 @@ Requires: pip install team_memory[local-embedding]
 
 from __future__ import annotations
 
+import time
+
 from team_memory.embedding.base import EmbeddingProvider
+from team_memory.services.analysis.usage_ledger import estimate_tokens, record_usage_async
 
 
 class LocalEmbedding(EmbeddingProvider):
@@ -51,11 +54,22 @@ class LocalEmbedding(EmbeddingProvider):
         """
         import asyncio
 
+        start = time.monotonic()
+        est_prompt = estimate_tokens(texts)
         self._load_model()
 
         loop = asyncio.get_event_loop()
         embeddings = await loop.run_in_executor(
             None,
             lambda: self._model.encode(texts, normalize_embeddings=True).tolist(),
+        )
+        record_usage_async(
+            caller="embedding",
+            provider="local",
+            model=self._model_name,
+            prompt_tokens=est_prompt,
+            completion_tokens=0,
+            latency_ms=int((time.monotonic() - start) * 1000),
+            success=True,
         )
         return embeddings

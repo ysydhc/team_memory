@@ -22,8 +22,16 @@ class RerankerCrossEncoderConfig(BaseModel):
     """Local cross-encoder (sentence-transformers)."""
 
     model_name: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
-    device: str = "cpu"
+    device: str = Field(
+        default="auto",
+        description="Device: 'auto' (prefers mps, then cuda, then cpu), 'mps', 'cuda', or 'cpu'.",
+    )
     top_k: int = 10
+    timeout_seconds: float = Field(
+        default=3.0,
+        gt=0.0,
+        description="Strict inference timeout (seconds) before graceful fallback to original order.",
+    )
 
 
 class RerankerJinaConfig(BaseModel):

@@ -132,6 +132,15 @@ class SearchConfig(BaseModel):
         default=1.5,
         description="Strict timeout in seconds for optional CRAG lightweight verifier.",
     )
+    binary_quantize_index: bool = Field(
+        default=True,
+        description="Use pgvector binary_quantize HNSW expression index with two-stage exact cosine reranking.",
+    )
+    binary_quantize_oversample: int = Field(
+        default=10,
+        ge=1,
+        description="Stage-1 candidate oversampling multiplier for binary-quantized HNSW search.",
+    )
 
 
 class CacheConfig(BaseModel):

@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import TYPE_CHECKING
 
 import httpx
+
+from team_memory.services.analysis.usage_ledger import estimate_tokens, record_usage_async
 
 if TYPE_CHECKING:
     from team_memory.config import LLMConfig
@@ -51,6 +54,7 @@ class LLMClient:
         *,
         temperature: float = 0.3,
         timeout: float = 120.0,
+        caller: str = "llm_client",
     ) -> str:
         """Send a chat request and return the assistant reply text.
 
@@ -62,6 +66,10 @@ class LLMClient:
             LLMError: On connection failure or HTTP error.
         """
         use_openai = self._provider != "ollama" or self._base_url.endswith(("/v1", "/openai"))
+        start = time.monotonic()
+        est_prompt = estimate_tokens([system, user])
+        prompt_tokens = est_prompt
+        completion_tokens = 0
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 if use_openai:
@@ -90,6 +98,12 @@ class LLMClient:
                     data = resp.json()
                     choices = data.get("choices", [])
                     text = choices[0].get("message", {}).get("content", "") if choices else ""
+                    usage = data.get("usage") if isinstance(data, dict) else None
+                    if isinstance(usage, dict):
+                        prompt_tokens = int(usage.get("prompt_tokens") or est_prompt)
+                        completion_tokens = int(usage.get("completion_tokens") or estimate_tokens(text))
+                    else:
+                        completion_tokens = estimate_tokens(text)
                 else:
                     resp = await client.post(
                         f"{self._base_url}/api/chat",
@@ -106,13 +120,56 @@ class LLMClient:
                     resp.raise_for_status()
                     data = resp.json()
                     text = data.get("message", {}).get("content", "")
+                    if isinstance(data, dict):
+                        prompt_tokens = int(data.get("prompt_eval_count") or est_prompt)
+                        completion_tokens = int(data.get("eval_count") or estimate_tokens(text))
+                    else:
+                        completion_tokens = estimate_tokens(text)
         except httpx.ConnectError:
+            record_usage_async(
+                caller=caller,
+                provider=self._provider,
+                model=self._model,
+                prompt_tokens=est_prompt,
+                completion_tokens=0,
+                latency_ms=int((time.monotonic() - start) * 1000),
+                success=False,
+            )
             raise LLMError(f"Cannot connect to LLM at {self._base_url}. Make sure the service is running.")
         except httpx.HTTPStatusError as e:
+            record_usage_async(
+                caller=caller,
+                provider=self._provider,
+                model=self._model,
+                prompt_tokens=est_prompt,
+                completion_tokens=0,
+                latency_ms=int((time.monotonic() - start) * 1000),
+                success=False,
+            )
             raise LLMError(f"LLM API error: {e.response.text[:200]}")
 
+        latency_ms = int((time.monotonic() - start) * 1000)
         if not text:
+            record_usage_async(
+                caller=caller,
+                provider=self._provider,
+                model=self._model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=0,
+                latency_ms=latency_ms,
+                success=False,
+            )
             raise LLMError("LLM returned empty response")
+
+        record_usage_async(
+            caller=caller,
+            provider=self._provider,
+            model=self._model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            latency_ms=latency_ms,
+            success=True,
+        )
         return text
 
     async def chat_json(
@@ -122,9 +179,10 @@ class LLMClient:
         *,
         temperature: float = 0.3,
         timeout: float = 120.0,
+        caller: str = "llm_client",
     ) -> dict:
         """``chat()`` followed by JSON extraction."""
-        text = await self.chat(system, user, temperature=temperature, timeout=timeout)
+        text = await self.chat(system, user, temperature=temperature, timeout=timeout, caller=caller)
         return extract_json(text)
 
 

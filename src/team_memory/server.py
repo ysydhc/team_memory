@@ -26,6 +26,7 @@ from team_memory.bootstrap import bootstrap
 from team_memory.bootstrap import get_context as _app_context
 from team_memory.config.mcp import MCPConfig
 from team_memory.services.memory import memory_operations
+from team_memory.utils.prompt_guard import guard_recall_payload
 
 if TYPE_CHECKING:
     from team_memory.remote_client import RemoteTMClient
@@ -493,6 +494,7 @@ async def memory_recall(
             adaptive=adaptive,
             adaptive_retriever=ctx.adaptive_retriever,
         )
+    result = guard_recall_payload(result, source="mcp.memory_recall")
     return _guard_output(json.dumps(result, ensure_ascii=False), settings=truncate_settings)
 
 
@@ -544,6 +546,7 @@ async def memory_context(
             task_description=task_description,
             project=resolved_project,
         )
+    result = guard_recall_payload(result, source="mcp.memory_context")
     return _guard_output(json.dumps(result, ensure_ascii=False), settings=truncate_settings)
 
 
@@ -571,6 +574,7 @@ async def memory_get_archive(archive_id: str, project: str | None = None) -> str
         archive_id=archive_id,
         project=_resolve_project(project),
     )
+    result = guard_recall_payload(result, source="mcp.memory_get_archive")
     return _guard_output(json.dumps(result, ensure_ascii=False), settings=ctx.settings)
 
 

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 
-from sqlalchemy import Select, desc, func, or_, select, text
+from sqlalchemy import Select, cast, desc, func, literal, or_, select, text
+from sqlalchemy.dialects.postgresql import BIT
+from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import TextClause
 
 from team_memory.storage.models import Experience
@@ -84,6 +86,74 @@ def apply_scope_filter(
 
 # ====================== Search query builders ======================
 
+MIN_BQ_STAGE1_CANDIDATES = 50
+
+
+def compute_bq_stage1_limit(limit: int, oversample: int = 10, offset: int = 0) -> int:
+    """Compute Stage-1 HNSW candidate pool size: max((limit + offset) * oversample, 50)."""
+    effective_limit = max(int(limit), 1) + max(int(offset), 0)
+    effective_oversample = max(int(oversample), 1)
+    return max(effective_limit * effective_oversample, MIN_BQ_STAGE1_CANDIDATES)
+
+
+def resolve_binary_quantize_settings(
+    binary_quantize: bool | None = None,
+    oversample: int | None = None,
+) -> tuple[bool, int]:
+    """Resolve binary-quantize HNSW toggle and oversample from SearchConfig when omitted."""
+    if binary_quantize is not None and oversample is not None:
+        return bool(binary_quantize), max(int(oversample), 1)
+    try:
+        from team_memory.config import get_settings
+
+        search_cfg = get_settings().search
+        cfg_enabled = bool(getattr(search_cfg, "binary_quantize_index", True))
+        cfg_oversample = max(int(getattr(search_cfg, "binary_quantize_oversample", 10)), 1)
+    except Exception:
+        cfg_enabled = True
+        cfg_oversample = 10
+    return (
+        cfg_enabled if binary_quantize is None else bool(binary_quantize),
+        cfg_oversample if oversample is None else max(int(oversample), 1),
+    )
+
+
+def session_is_postgres(session: object) -> bool:
+    """Return True when the given SQLAlchemy session is bound to PostgreSQL."""
+    sync_sess = getattr(session, "sync_session", None)
+    bind = getattr(sync_sess, "bind", None) if sync_sess is not None else None
+    if bind is None:
+        bind = getattr(session, "bind", None)
+    dialect = getattr(bind, "dialect", None)
+    return getattr(dialect, "name", None) == "postgresql"
+
+
+async def enable_hnsw_iterative_scan(session: object) -> bool:
+    """Enable pgvector 0.8+ HNSW iterative scan for the current transaction.
+
+    ``SET LOCAL hnsw.iterative_scan = relaxed_order`` prevents under-recall when
+    PostgreSQL RLS (tenant_id) or selective WHERE filters (project, tags, status)
+    filter out rows during HNSW index traversal.
+    """
+    if not session_is_postgres(session):
+        return False
+    await session.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
+    return True
+
+
+def binary_quantize_hamming_distance(embedding_col, query_embedding: list[float]):
+    """Build ``binary_quantize(col)::bit(N) <~> binary_quantize(:q)::bit(N)`` expression.
+
+    Matches the partial HNSW expression index created by migration 028.
+    """
+    col_dim = getattr(getattr(embedding_col, "type", None), "dim", None)
+    dim = int(col_dim) if col_dim else len(query_embedding)
+    bit_type = BIT(dim)
+    col_bits = cast(func.binary_quantize(embedding_col), bit_type)
+    query_vec = cast(literal(query_embedding, type_=embedding_col.type), embedding_col.type)
+    query_bits = cast(func.binary_quantize(query_vec), bit_type)
+    return col_bits.op("<~>")(query_bits)
+
 
 def build_vector_search(
     query_embedding: list[float],
@@ -96,8 +166,47 @@ def build_vector_search(
     offset: int = 0,
     include_promoted: bool = True,
     include_superseded: bool = False,
+    binary_quantize: bool = True,
+    oversample: int = 10,
 ) -> Select:
-    """Build vector similarity search statement. Returns SQLAlchemy Select."""
+    """Build vector similarity search statement. Returns SQLAlchemy Select.
+
+    When ``binary_quantize`` is True, builds a two-stage query:
+      - Stage 1 (CTE ``bq_candidates``): uses the pgvector binary-quantized HNSW
+        expression index (``binary_quantize(embedding)::bit(N) <~> ...``) to fetch
+        ``max((limit + offset) * oversample, 50)`` candidates.
+      - Stage 2 (outer SELECT): reranks Stage-1 candidates by exact cosine
+        similarity (``1 - (embedding <=> :q)``), applies ``min_similarity``,
+        and returns top ``limit`` rows (with optional ``offset``).
+    """
+    if binary_quantize and query_embedding:
+        stage1_limit = compute_bq_stage1_limit(limit=limit, oversample=oversample, offset=offset)
+        bq_distance = binary_quantize_hamming_distance(Experience.embedding, query_embedding)
+
+        stage1_q = select(Experience).where(Experience.embedding.is_not(None))
+        if project not in ("*", "all"):
+            stage1_q = stage1_q.where(Experience.project == project_value(project))
+        for f in active_filter(current_user, include_superseded=include_superseded):
+            stage1_q = stage1_q.where(f)
+        if tags:
+            stage1_q = stage1_q.where(Experience.tags.overlap(tags))
+
+        candidates_cte = stage1_q.order_by(bq_distance).limit(stage1_limit).cte("bq_candidates")
+        exp_alias = aliased(Experience, candidates_cte)
+        similarity_expr = (1 - exp_alias.embedding.cosine_distance(query_embedding)).label(
+            "similarity"
+        )
+
+        stmt = (
+            select(exp_alias, similarity_expr)
+            .where(similarity_expr >= min_similarity)
+            .order_by(desc(similarity_expr))
+            .limit(limit)
+        )
+        if offset > 0:
+            stmt = stmt.offset(offset)
+        return stmt
+
     similarity_expr = (1 - Experience.embedding.cosine_distance(query_embedding)).label("similarity")
 
     stmt = (

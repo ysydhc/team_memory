@@ -102,10 +102,11 @@ class MemoryJanitor(
             # 8. Maintain archives (normalize content_type/project, dedup, stale drafts, dangling links)
             results["archive_maintenance"] = await self.maintain_archives(project)
 
-            # 9. Prune PG buffer & deprecated background tasks (global operations)
+            # 9. Prune PG buffer, deprecated background tasks & expired LLM usage logs (global operations)
             if project is None:
                 results["response_buffer_pruning"] = await self.prune_response_buffer()
                 results["background_tasks_pruning"] = await self.prune_background_tasks()
+                results["llm_usage_logs_pruning"] = await self.prune_llm_usage_logs()
 
             logger.info("Full janitor run completed successfully for project '%s'", project or "all")
 

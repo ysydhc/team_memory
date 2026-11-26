@@ -43,6 +43,278 @@ _MAX_FACTS = 10
 # and newlines.
 _SENTENCE_RE = re.compile(r"[。！？.!?\n]+")
 
+# ---------------------------------------------------------------------------
+# Quality Gate hard format constraints (shared with RefinementWorker)
+# ---------------------------------------------------------------------------
+
+MIN_TITLE_LEN = 5
+MAX_TITLE_LEN = 120
+MIN_PROBLEM_LEN = 50
+MIN_SOLUTION_LEN = 50
+MIN_TAGS = 1
+
+_GENERIC_TITLES: frozenset[str] = frozenset(
+    {
+        "调试",
+        "修复",
+        "配置",
+        "优化",
+        "更新",
+        "修改",
+        "排查",
+        "总结",
+        "经验",
+        "问题",
+        "无标题",
+        "debug",
+        "fix",
+        "config",
+        "update",
+        "untitled",
+        "draft",
+    }
+)
+
+_PLACEHOLDER_VALUES: frozenset[str] = frozenset(
+    {
+        "",
+        "n/a",
+        "na",
+        "none",
+        "null",
+        "无",
+        "暂无",
+        "见上文",
+        "同上",
+        "略",
+        "-",
+        "todo",
+    }
+)
+
+_TECH_TOKEN_RE = re.compile(r"\b[a-zA-Z][a-zA-Z0-9_.-]{1,24}\b")
+_STOP_TAG_WORDS: frozenset[str] = frozenset(
+    {
+        "the",
+        "and",
+        "for",
+        "with",
+        "that",
+        "this",
+        "from",
+        "into",
+        "have",
+        "when",
+        "then",
+        "else",
+        "none",
+        "null",
+        "true",
+        "false",
+        "error",
+        "issue",
+        "problem",
+        "solution",
+        "check",
+        "after",
+        "before",
+        "using",
+        "should",
+        "could",
+        "would",
+        "about",
+        "there",
+        "where",
+        "which",
+    }
+)
+
+
+def _is_placeholder(text: str | None) -> bool:
+    return (text or "").strip().lower() in _PLACEHOLDER_VALUES
+
+
+def is_empty_shell_draft(structured: dict[str, Any]) -> bool:
+    """Return True if *structured* is an empty shell / pure-noise draft."""
+    title = str(structured.get("title", "") or "").strip()
+    problem = str(structured.get("problem") or structured.get("description") or "").strip()
+    solution = str(structured.get("solution", "") or "").strip()
+
+    if _is_placeholder(problem) and _is_placeholder(solution):
+        return True
+    if len(problem) < 20 and len(solution) < 20 and len(title) < MIN_TITLE_LEN:
+        return True
+    return False
+
+
+def validate_structured_draft(structured: dict[str, Any]) -> tuple[bool, str]:
+    """Validate hard Quality Gate format constraints on a structured draft.
+
+    Constraints:
+      - ``MIN_TITLE_LEN <= len(title) <= MAX_TITLE_LEN`` and not a generic placeholder
+      - ``problem`` required, non-placeholder, ``len >= MIN_PROBLEM_LEN``
+      - ``solution`` required, non-placeholder, ``len >= MIN_SOLUTION_LEN``
+      - ``tags`` required, at least ``MIN_TAGS`` non-empty tag
+      - ``experience_type`` required, non-empty
+    """
+    title = str(structured.get("title", "") or "").strip()
+    problem = str(structured.get("problem") or structured.get("description") or "").strip()
+    solution = str(structured.get("solution", "") or "").strip()
+    exp_type = str(structured.get("experience_type", "") or "").strip()
+    raw_tags = structured.get("tags")
+    tags = [str(t).strip().lower() for t in raw_tags if str(t).strip()] if isinstance(raw_tags, list) else []
+
+    if not title or len(title) < MIN_TITLE_LEN:
+        return False, "discarded: title too short"
+    if len(title) > MAX_TITLE_LEN:
+        return False, "discarded: title too long"
+    if title.lower() in _GENERIC_TITLES or title.startswith("Draft "):
+        return False, "discarded: title too generic"
+    if _is_placeholder(problem) or len(problem) < MIN_PROBLEM_LEN:
+        return False, "discarded: problem too short"
+    if _is_placeholder(solution) or len(solution) < MIN_SOLUTION_LEN:
+        return False, "discarded: solution too short"
+    if len(tags) < MIN_TAGS:
+        return False, "discarded: tags empty"
+    if not exp_type:
+        return False, "discarded: experience_type empty"
+
+    return True, ""
+
+
+def _synthesize_title(problem: str, solution: str, fallback_title: str = "") -> str:
+    """Derive a concise, valid title from problem/solution or non-generic draft title."""
+    fb = (fallback_title or "").strip()
+    if MIN_TITLE_LEN <= len(fb) <= MAX_TITLE_LEN and fb.lower() not in _GENERIC_TITLES and not fb.startswith("Draft "):
+        return fb
+
+    # Clean markdown / whitespace and take the first informative clause of problem
+    clean_prob = re.sub(r"[#*`>\[\]]+", " ", problem or "")
+    clean_prob = re.sub(r"\s+", " ", clean_prob).strip()
+    first_clause = _SENTENCE_RE.split(clean_prob)[0].strip(" ，,;；:：-—") if clean_prob else ""
+
+    if len(first_clause) < MIN_TITLE_LEN:
+        clean_sol = re.sub(r"[#*`>\[\]]+", " ", solution or "")
+        clean_sol = re.sub(r"\s+", " ", clean_sol).strip()
+        sol_clause = _SENTENCE_RE.split(clean_sol)[0].strip(" ，,;；:：-—") if clean_sol else ""
+        candidate = f"{first_clause} {sol_clause}".strip() if first_clause else sol_clause
+    else:
+        candidate = first_clause
+
+    candidate = re.sub(r"\s+", " ", candidate).strip()
+    if len(candidate) > MAX_TITLE_LEN:
+        candidate = candidate[: MAX_TITLE_LEN - 1].rstrip(" ，,;；:：-—") + "…"
+    return candidate
+
+
+def _extract_fallback_tags(title: str, problem: str, solution: str, exp_type: str = "") -> list[str]:
+    """Extract lightweight lowercase technical tags when LLM omitted tags."""
+    combined = f"{title} {problem} {solution}"
+    seen: list[str] = []
+    for match in _TECH_TOKEN_RE.findall(combined):
+        tok = match.strip("._-").lower()
+        if len(tok) < 2 or tok in _STOP_TAG_WORDS or tok.isdigit():
+            continue
+        if tok not in seen:
+            seen.append(tok)
+        if len(seen) >= 5:
+            break
+    if not seen:
+        seen.append((exp_type or "general").strip().lower() or "general")
+    return seen
+
+
+def auto_repair_structured_draft(
+    structured: dict[str, Any],
+    *,
+    draft_title: str = "",
+) -> tuple[dict[str, Any], list[str]]:
+    """Attempt a single lightweight format auto-repair on a high-value draft.
+
+    Only repairs drafts that already contain substantial ``problem`` and
+    ``solution`` content (never fabricates content for empty-shell / noise
+    drafts). Fixes:
+      - missing / too-short / generic / too-long ``title``
+      - empty ``tags``
+      - empty ``experience_type``
+
+    Returns:
+        ``(repaired_dict, repaired_fields)`` where ``repaired_fields`` is empty
+        if the draft is not eligible or no repair was applied.
+    """
+    problem = str(structured.get("problem") or structured.get("description") or "").strip()
+    solution = str(structured.get("solution", "") or "").strip()
+
+    # Do not fabricate content for empty shells or drafts lacking core substance
+    if (
+        is_empty_shell_draft(structured)
+        or _is_placeholder(problem)
+        or len(problem) < MIN_PROBLEM_LEN
+        or _is_placeholder(solution)
+        or len(solution) < MIN_SOLUTION_LEN
+    ):
+        return structured, []
+
+    repaired = dict(structured)
+    repaired["problem"] = problem
+    repaired["description"] = problem
+    repaired["solution"] = solution
+    repaired_fields: list[str] = []
+
+    title = str(repaired.get("title", "") or "").strip()
+    if (
+        not title
+        or len(title) < MIN_TITLE_LEN
+        or title.lower() in _GENERIC_TITLES
+        or title.startswith("Draft ")
+    ):
+        new_title = _synthesize_title(problem, solution, fallback_title=draft_title)
+        if MIN_TITLE_LEN <= len(new_title) <= MAX_TITLE_LEN:
+            repaired["title"] = new_title
+            repaired_fields.append("title")
+    elif len(title) > MAX_TITLE_LEN:
+        repaired["title"] = title[: MAX_TITLE_LEN - 1].rstrip(" ，,;；:：-—") + "…"
+        repaired_fields.append("title")
+
+    exp_type = str(repaired.get("experience_type", "") or "").strip()
+    if not exp_type:
+        lower_text = f"{problem} {solution}".lower()
+        bug_keywords = ("error", "fail", "bug", "fix", "报错", "异常", "修复")
+        repaired["experience_type"] = "bugfix" if any(k in lower_text for k in bug_keywords) else "general"
+        repaired_fields.append("experience_type")
+
+    raw_tags = repaired.get("tags")
+    tags = [str(t).strip().lower() for t in raw_tags if str(t).strip()] if isinstance(raw_tags, list) else []
+    if len(tags) < MIN_TAGS:
+        repaired["tags"] = _extract_fallback_tags(
+            str(repaired.get("title", "")),
+            problem,
+            solution,
+            str(repaired.get("experience_type", "")),
+        )
+        repaired_fields.append("tags")
+
+    return repaired, repaired_fields
+
+
+def classify_discard_category(structured: dict[str, Any], reason: str) -> str:
+    """Classify a structural rejection into ``true_noise`` vs ``format_error``.
+
+    - ``true_noise``: empty shell / LLM explicitly returned empty fields /
+      both problem and solution lack meaningful substance.
+    - ``format_error``: non-trivial content existed, but failed structural
+      format rules (e.g. short title/problem/solution or missing tags/type).
+    """
+    if is_empty_shell_draft(structured):
+        return "true_noise"
+
+    problem = str(structured.get("problem") or structured.get("description") or "").strip()
+    solution = str(structured.get("solution", "") or "").strip()
+    if len(problem) < 20 and len(solution) < 20:
+        return "true_noise"
+
+    return "format_error"
+
 
 class DraftRefiner:
     """Coordinates fact extraction and draft publishing via TMSink.

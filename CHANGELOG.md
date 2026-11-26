@@ -6,6 +6,22 @@
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-11-26
+
+### Added
+
+- **多租户安全 3 件套（P0）**：
+  - 新增 `src/team_memory/utils/secret_redactor.py`：在 `memory_save`、`draft_save`、`archive_upsert` 等写入入口提供 0ms 凭证脱敏（覆盖 17 类常见 AK/SK、Token、JWT、私钥、Basic Auth URL 等，含 9 类零误伤边界）。
+  - 新增 `src/team_memory/utils/prompt_guard.py`：在 MCP 召回返回体标注不可信参考数据边界并对 8 类 Prompt Injection 模式检出打标。
+  - 新增 `src/team_memory/web/rate_limiter.py` 并升级 `web/app.py` 限流器为 Redis 按 `tenant_id / api_key` 滑动窗口限流（含防泄漏内存降级与 `Retry-After`）。
+- **pgvector 4096 维二值量化 HNSW 索引与两阶段精排（P1）**：
+  - 新增迁移 `028_binary_quantize_hnsw_indexes.py`，为 `experiences`、`archives`、`personal_memories` 建立 `binary_quantize(embedding)::bit(4096)` HNSW 部分表达式索引，检索启用 `hnsw.iterative_scan = relaxed_order` + 原始 4096 维余弦精确重排（原生 PG 实测 `2.201 ms` vs `15.422 ms`，提速 7.0x）。
+- **精炼降损与多租户 LLM/Embedding 成本账本（P1）**：
+  - 强化 `draft_refiner` / `refinement_worker` 结构化格式校验与轻量自动补全修复，区分噪音丢弃与格式丢弃。
+  - 新增迁移 `029_llm_usage_logs.py`（带 `tenant_id` 强制 RLS）与 `src/team_memory/services/analysis/usage_ledger.py`，在统一 LLM/Embedding 层异步记录调用与 Token 估算，接入 `/api/observability/overview` 与 Janitor 90 天 TTL 清理。
+- **本地 Cross-Encoder Reranker 适配与 Golden Eval 四组消融（P2）**：
+  - `cross_encoder_provider.py` 支持 Apple Silicon `mps` 自动探测、进程单例懒加载与严格超时透传降级；`golden_eval.py` 新增第 4 组 `D (Full + Reranker)` 与 `Rerank Lift` 指标计算。
+
 ## [0.3.12] — 2026-11-26
 
 ### Added

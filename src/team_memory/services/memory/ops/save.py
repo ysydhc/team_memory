@@ -114,6 +114,14 @@ async def _save_from_content(
         LLMParseError,
         parse_content,
     )
+    from team_memory.utils.secret_redactor import redact_fields
+
+    cleaned_content, _ = redact_fields(
+        {"content": content},
+        context="experience.save_from_content",
+        actor=user,
+    )
+    content = cleaned_content["content"] or ""
 
     ext = getattr(settings, "extraction", None)
     quality_min = ext.quality_gate if ext is not None else 2
@@ -463,6 +471,16 @@ async def op_draft_publish(
             "message": f"Can only publish drafts, got status='{exp.get('status')}'",
             "code": "validation_error",
         }
+
+    if refined_content:
+        from team_memory.utils.secret_redactor import redact_fields
+
+        cleaned_refined, _ = redact_fields(
+            {"refined_content": refined_content},
+            context="experience.draft_publish",
+            actor=user,
+        )
+        refined_content = cleaned_refined["refined_content"]
 
     if hasattr(service, "publish_draft") and not hasattr(service.publish_draft, "_mock_name"):
         result = await service.publish_draft(

@@ -113,7 +113,26 @@ class ArchiveService:
         attachments: list[dict[str, Any]] | None = None,
     ) -> uuid.UUID:
         """Create archive with optional embedding; return archive_id."""
+        from team_memory.utils.secret_redactor import redact_fields
+
         start = time.monotonic()
+
+        cleaned_archive, _ = redact_fields(
+            {
+                "title": title,
+                "solution_doc": solution_doc,
+                "overview": overview,
+                "conversation_summary": conversation_summary,
+                "raw_conversation": raw_conversation,
+            },
+            context="archive.save",
+            actor=created_by,
+        )
+        title = cleaned_archive["title"] or ""
+        solution_doc = cleaned_archive["solution_doc"] or ""
+        overview = cleaned_archive["overview"]
+        conversation_summary = cleaned_archive["conversation_summary"]
+        raw_conversation = cleaned_archive["raw_conversation"]
 
         ov = (overview or "").strip() or None
         if not ov:
@@ -241,7 +260,28 @@ class ArchiveService:
         linked_experience_ids: list[uuid.UUID] | None = None,
     ) -> dict[str, Any]:
         """Upsert archive (title+project dedup) with embedding; return action + id."""
+        from team_memory.utils.secret_redactor import redact_fields
+
         start = time.monotonic()
+
+        cleaned_archive, _ = redact_fields(
+            {
+                "title": title,
+                "solution_doc": solution_doc,
+                "overview": overview,
+                "conversation_summary": conversation_summary,
+                "raw_conversation": raw_conversation,
+                "value_summary": value_summary,
+            },
+            context="archive.upsert",
+            actor=created_by,
+        )
+        title = cleaned_archive["title"] or ""
+        solution_doc = cleaned_archive["solution_doc"] or ""
+        overview = cleaned_archive["overview"]
+        conversation_summary = cleaned_archive["conversation_summary"]
+        raw_conversation = cleaned_archive["raw_conversation"]
+        value_summary = cleaned_archive["value_summary"]
 
         ov = (overview or "").strip() or None
         if not ov:

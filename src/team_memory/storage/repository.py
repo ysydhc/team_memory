@@ -369,9 +369,19 @@ class ExperienceRepository:
         offset: int = 0,
         include_promoted: bool = False,
         include_superseded: bool = False,
+        binary_quantize: bool | None = None,
+        oversample: int | None = None,
     ) -> list[dict]:
         """Search experiences by vector similarity using pgvector."""
-        from team_memory.storage.query_builders import build_vector_search
+        from team_memory.storage.query_builders import (
+            build_vector_search,
+            enable_hnsw_iterative_scan,
+            resolve_binary_quantize_settings,
+        )
+
+        use_bq, bq_oversample = resolve_binary_quantize_settings(binary_quantize, oversample)
+        if use_bq:
+            await enable_hnsw_iterative_scan(self._session)
 
         stmt = build_vector_search(
             query_embedding,
@@ -383,6 +393,8 @@ class ExperienceRepository:
             offset=offset,
             include_promoted=include_promoted,
             include_superseded=include_superseded,
+            binary_quantize=use_bq,
+            oversample=bq_oversample,
         )
         result = await self._session.execute(stmt)
         rows = result.all()
@@ -437,21 +449,55 @@ class ExperienceRepository:
         limit: int = 5,
         project: str | None = None,
         current_user: str | None = None,
+        binary_quantize: bool | None = None,
+        oversample: int | None = None,
     ) -> list[dict]:
         """Quick similarity check for dedup-on-save."""
-        similarity_expr = (1 - Experience.embedding.cosine_distance(embedding)).label("similarity")
+        from sqlalchemy.orm import aliased
 
-        query = (
-            select(Experience, similarity_expr)
-            .where(Experience.embedding.is_not(None))
-            .where(Experience.parent_id.is_(None))
-            .where(Experience.project == self._project_value(project))
-            .where(similarity_expr >= threshold)
-            .order_by(desc(similarity_expr))
-            .limit(limit)
+        from team_memory.storage.query_builders import (
+            binary_quantize_hamming_distance,
+            compute_bq_stage1_limit,
+            enable_hnsw_iterative_scan,
+            resolve_binary_quantize_settings,
         )
-        for f in self._active_filter(current_user):
-            query = query.where(f)
+
+        use_bq, bq_oversample = resolve_binary_quantize_settings(binary_quantize, oversample)
+        if use_bq and embedding:
+            await enable_hnsw_iterative_scan(self._session)
+            stage1_limit = compute_bq_stage1_limit(limit=limit, oversample=bq_oversample)
+            bq_distance = binary_quantize_hamming_distance(Experience.embedding, embedding)
+            stage1_q = (
+                select(Experience)
+                .where(Experience.embedding.is_not(None))
+                .where(Experience.parent_id.is_(None))
+                .where(Experience.project == self._project_value(project))
+            )
+            for f in self._active_filter(current_user):
+                stage1_q = stage1_q.where(f)
+            candidates_cte = stage1_q.order_by(bq_distance).limit(stage1_limit).cte("bq_candidates")
+            exp_alias = aliased(Experience, candidates_cte)
+            similarity_expr = (1 - exp_alias.embedding.cosine_distance(embedding)).label("similarity")
+            query = (
+                select(exp_alias, similarity_expr)
+                .where(similarity_expr >= threshold)
+                .order_by(desc(similarity_expr))
+                .limit(limit)
+            )
+        else:
+            similarity_expr = (1 - Experience.embedding.cosine_distance(embedding)).label("similarity")
+
+            query = (
+                select(Experience, similarity_expr)
+                .where(Experience.embedding.is_not(None))
+                .where(Experience.parent_id.is_(None))
+                .where(Experience.project == self._project_value(project))
+                .where(similarity_expr >= threshold)
+                .order_by(desc(similarity_expr))
+                .limit(limit)
+            )
+            for f in self._active_filter(current_user):
+                query = query.where(f)
 
         result = await self._session.execute(query)
         rows = result.all()

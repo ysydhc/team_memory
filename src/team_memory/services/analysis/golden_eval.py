@@ -1,13 +1,17 @@
-"""Golden Eval — automated ablation benchmark (Vector vs Hybrid vs Full+Graph).
+"""Golden Eval — automated ablation benchmark (Vector vs Hybrid vs Full vs Full+Reranker).
 
 Measures retrieval quality on a curated golden set (`evals/golden_set.json`)
-using three controlled SearchPipeline configurations:
+using controlled SearchPipeline configurations:
   - A (vector_only): mode="vector", enable_graph=False, enable_topic=False, rerank_enabled=False
-  - B (hybrid):      mode="hybrid", enable_graph=False, enable_topic=True,  rerank_enabled=<prod>
-  - C (full):        mode="hybrid", enable_graph=True,  enable_topic=True,  rerank_enabled=<prod>
+  - B (hybrid):      mode="hybrid", enable_graph=False, enable_topic=True,  rerank_enabled=<off or prod>
+  - C (full):        mode="hybrid", enable_graph=True,  enable_topic=True,  rerank_enabled=<off or prod>
+  - D (full_rerank): mode="hybrid", enable_graph=True,  enable_topic=True,  rerank_enabled=True (optional 4th arm)
 
 Keeping `rerank_enabled` aligned between B and C isolates the pure marginal
 contribution of the Knowledge Graph: `Graph Lift = MRR@5(C) - MRR@5(B)`.
+When the 4th arm D is enabled, B and C run with `rerank_enabled=False` so that
+`Rerank Lift = MRR@5(D) - MRR@5(C)` isolates the pure marginal contribution
+of server-side reranking on top of Full (Hybrid+Graph).
 """
 
 from __future__ import annotations
@@ -485,7 +489,7 @@ def _get_git_sha() -> str:
 
 
 # ============================================================
-# Ablation Runner (A: Vector-only, B: Hybrid, C: Full+Graph)
+# Ablation Runner (A: Vector-only, B: Hybrid, C: Full+Graph, D: Full+Reranker)
 # ============================================================
 
 
@@ -499,13 +503,23 @@ class AblationModeSpec:
     rerank_enabled: bool
 
 
-def build_ablation_specs(prod_rerank_enabled: bool) -> list[AblationModeSpec]:
-    """Return the 3 controlled ablation specs.
+def build_ablation_specs(
+    prod_rerank_enabled: bool,
+    *,
+    include_rerank_ablation: bool = False,
+) -> list[AblationModeSpec]:
+    """Return 3-way (A/B/C) or 4-way (A/B/C/D) controlled ablation specs.
 
-    B (hybrid) and C (full) share `prod_rerank_enabled` so that
-    `Graph Lift = MRR@5(C) - MRR@5(B)` isolates pure graph contribution.
+    - 3-way (`include_rerank_ablation=False`):
+      B (hybrid) and C (full) share `prod_rerank_enabled` so that
+      `Graph Lift = MRR@5(C) - MRR@5(B)` isolates pure graph contribution.
+    - 4-way (`include_rerank_ablation=True`):
+      B and C disable reranking while D (`full_rerank`) enables it on top of C,
+      isolating both `Graph Lift = MRR@5(C) - MRR@5(B)` and
+      `Rerank Lift = MRR@5(D) - MRR@5(C)`.
     """
-    return [
+    bc_rerank = False if include_rerank_ablation else prod_rerank_enabled
+    specs = [
         AblationModeSpec(
             name="vector_only",
             label="A: Vector-only",
@@ -520,7 +534,7 @@ def build_ablation_specs(prod_rerank_enabled: bool) -> list[AblationModeSpec]:
             mode="hybrid",
             enable_graph=False,
             enable_topic=True,
-            rerank_enabled=prod_rerank_enabled,
+            rerank_enabled=bc_rerank,
         ),
         AblationModeSpec(
             name="full",
@@ -528,9 +542,57 @@ def build_ablation_specs(prod_rerank_enabled: bool) -> list[AblationModeSpec]:
             mode="hybrid",
             enable_graph=True,
             enable_topic=True,
-            rerank_enabled=prod_rerank_enabled,
+            rerank_enabled=bc_rerank,
         ),
     ]
+    if include_rerank_ablation:
+        specs.append(
+            AblationModeSpec(
+                name="full_rerank",
+                label="D: Full + Reranker",
+                mode="hybrid",
+                enable_graph=True,
+                enable_topic=True,
+                rerank_enabled=True,
+            )
+        )
+    return specs
+
+
+def compute_ablation_lifts(modes_summary: dict[str, Any]) -> dict[str, Any]:
+    """Compute Graph Lift (C - B) and optional Rerank Lift + latency delta (D - C)."""
+    hybrid = modes_summary.get("hybrid") or {}
+    full = modes_summary.get("full") or {}
+    mrr_b = float(hybrid.get("mrr_at_5", 0.0))
+    mrr_c = float(full.get("mrr_at_5", 0.0))
+    recall_b = float(hybrid.get("recall_at_5", 0.0))
+    recall_c = float(full.get("recall_at_5", 0.0))
+
+    lifts: dict[str, Any] = {
+        "graph_lift": round(mrr_c - mrr_b, 4),
+        "graph_recall_lift": round(recall_c - recall_b, 4),
+    }
+
+    full_rerank = modes_summary.get("full_rerank")
+    if full_rerank is not None:
+        mrr_d = float(full_rerank.get("mrr_at_5", 0.0))
+        recall_d = float(full_rerank.get("recall_at_5", 0.0))
+        ndcg_c = float(full.get("ndcg_at_5", 0.0))
+        ndcg_d = float(full_rerank.get("ndcg_at_5", 0.0))
+        p50_c = float(full.get("p50_latency_ms", 0.0))
+        p50_d = float(full_rerank.get("p50_latency_ms", 0.0))
+        p95_c = float(full.get("p95_latency_ms", 0.0))
+        p95_d = float(full_rerank.get("p95_latency_ms", 0.0))
+        lifts.update(
+            {
+                "rerank_lift": round(mrr_d - mrr_c, 4),
+                "rerank_recall_lift": round(recall_d - recall_c, 4),
+                "rerank_ndcg_lift": round(ndcg_d - ndcg_c, 4),
+                "rerank_p50_delta_ms": round(p50_d - p50_c, 1),
+                "rerank_p95_delta_ms": round(p95_d - p95_c, 1),
+            }
+        )
+    return lifts
 
 
 async def run_ablation_eval(
@@ -539,12 +601,13 @@ async def run_ablation_eval(
     embedding_provider: Any,
     settings: Any,
     reranker_provider: Any = None,
+    include_rerank: bool | None = None,
     golden_set_path: Path = DEFAULT_GOLDEN_SET_PATH,
     history_path: Path | None = DEFAULT_HISTORY_PATH,
     limit: int | None = None,
     k: int = 5,
 ) -> dict[str, Any]:
-    """Execute 3-way ablation evaluation on golden_set.json and persist results."""
+    """Execute 3-way or 4-way ablation evaluation on golden_set.json and persist results."""
     from team_memory.services.search.search_pipeline import SearchPipeline, SearchRequest
 
     queries = load_golden_set(golden_set_path)
@@ -557,10 +620,33 @@ async def run_ablation_eval(
         queries = queries[:limit]
 
     rerank_cfg = getattr(settings, "reranker", None)
-    prod_rerank_enabled = bool(
-        reranker_provider is not None and rerank_cfg is not None and getattr(rerank_cfg, "provider", "none") != "none"
+    has_real_reranker = (
+        reranker_provider is not None
+        and getattr(reranker_provider, "provider_name", "noop") != "noop"
     )
-    specs = build_ablation_specs(prod_rerank_enabled)
+    prod_rerank_enabled = bool(
+        has_real_reranker and rerank_cfg is not None and getattr(rerank_cfg, "provider", "none") != "none"
+    )
+
+    eval_reranker = reranker_provider if has_real_reranker else None
+    if include_rerank is True:
+        use_4way = True
+        if eval_reranker is None:
+            from team_memory.reranker.cross_encoder_provider import CrossEncoderRerankerProvider
+
+            ce_cfg = getattr(rerank_cfg, "cross_encoder", None)
+            eval_reranker = CrossEncoderRerankerProvider(
+                model_name=getattr(ce_cfg, "model_name", "cross-encoder/ms-marco-MiniLM-L6-v2"),
+                device=getattr(ce_cfg, "device", "auto"),
+                top_k=getattr(ce_cfg, "top_k", 10),
+                timeout_seconds=getattr(ce_cfg, "timeout_seconds", 3.0),
+            )
+    elif include_rerank is False:
+        use_4way = False
+    else:
+        use_4way = has_real_reranker
+
+    specs = build_ablation_specs(prod_rerank_enabled, include_rerank_ablation=use_4way)
 
     # Pre-build pipelines with caching disabled to guarantee clean latency & recall
     disabled_cache = CacheConfig(enabled=False)
@@ -572,6 +658,7 @@ async def run_ablation_eval(
         cfg_data["enable_graph"] = spec.enable_graph
         cfg_data["enable_topic"] = spec.enable_topic
         mode_search_cfg = SearchConfig(**cfg_data)
+        active_reranker = eval_reranker if spec.rerank_enabled else None
         pipelines[spec.name] = SearchPipeline(
             embedding_provider=embedding_provider,
             search_config=mode_search_cfg,
@@ -580,8 +667,8 @@ async def run_ablation_eval(
             llm_config=settings.llm,
             tag_synonyms=getattr(settings, "tag_synonyms", None) or {},
             db_url=db_url,
-            reranker_provider=reranker_provider if spec.rerank_enabled else None,
-            rerank_enabled=spec.rerank_enabled,
+            reranker_provider=active_reranker,
+            rerank_enabled=bool(spec.rerank_enabled and active_reranker is not None),
             reranker_signature=(
                 rerank_cfg.cache_signature() if (spec.rerank_enabled and rerank_cfg is not None) else "none"
             ),
@@ -653,14 +740,9 @@ async def run_ablation_eval(
             }
         modes_summary[spec.name] = summary
 
-    mrr_b = float(modes_summary["hybrid"]["mrr_at_5"])
-    mrr_c = float(modes_summary["full"]["mrr_at_5"])
-    recall_b = float(modes_summary["hybrid"]["recall_at_5"])
-    recall_c = float(modes_summary["full"]["recall_at_5"])
-    graph_lift = round(mrr_c - mrr_b, 4)
-    graph_recall_lift = round(recall_c - recall_b, 4)
+    lifts = compute_ablation_lifts(modes_summary)
 
-    record = {
+    record: dict[str, Any] = {
         "run_id": f"eval-{uuid.uuid4().hex[:8]}",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "git_sha": _get_git_sha(),
@@ -668,10 +750,11 @@ async def run_ablation_eval(
         "golden_count": len(mode_records["full"]),
         "k": k,
         "prod_rerank_enabled": prod_rerank_enabled,
+        "rerank_ablation_enabled": use_4way,
+        "reranker_provider": getattr(eval_reranker, "provider_name", None) if use_4way else None,
         "duration_s": round(time.monotonic() - eval_start, 2),
         "modes": modes_summary,
-        "graph_lift": graph_lift,
-        "graph_recall_lift": graph_recall_lift,
+        **lifts,
     }
 
     if history_path is not None:
@@ -691,7 +774,7 @@ def format_eval_report(record: dict[str, Any]) -> str:
         f"{'Mode':<24} {'Recall@5':>9} {'MRR@5':>8} {'NDCG@5':>8} {'P50(ms)':>9} {'P95(ms)':>9} {'Tokens':>8}",
         "-" * 79,
     ]
-    for key in ("vector_only", "hybrid", "full"):
+    for key in ("vector_only", "hybrid", "full", "full_rerank"):
         m = modes.get(key)
         if not m:
             continue
@@ -710,18 +793,41 @@ def format_eval_report(record: dict[str, Any]) -> str:
     lines.append("-" * 79)
     lines.append(f"Graph Lift (MRR@5 C-B): {lift:+.4f} [{verdict}] | Recall@5 Lift: {r_lift:+.4f}")
 
+    if "rerank_lift" in record and record["rerank_lift"] is not None:
+        rr_lift = float(record["rerank_lift"])
+        rr_r_lift = float(record.get("rerank_recall_lift", 0.0))
+        p50_delta = float(record.get("rerank_p50_delta_ms", 0.0))
+        p95_delta = float(record.get("rerank_p95_delta_ms", 0.0))
+        rr_verdict = "正增益 (+)" if rr_lift > 0 else ("中性 (0)" if rr_lift == 0 else "负拖累 (-)")
+        lines.append(
+            f"Rerank Lift (MRR@5 D-C): {rr_lift:+.4f} [{rr_verdict}] | "
+            f"Recall@5 Lift: {rr_r_lift:+.4f} | "
+            f"Latency ΔP50: {p50_delta:+.1f}ms, ΔP95: {p95_delta:+.1f}ms"
+        )
+
     full_buckets = (modes.get("full") or {}).get("by_bucket") or {}
+    rr_buckets = (modes.get("full_rerank") or {}).get("by_bucket") or {}
     if full_buckets:
         lines.append("")
-        lines.append("Per-Bucket Breakdown (MRR@5: Vector -> Hybrid -> Full | Full Recall@5):")
+        header = (
+            "Per-Bucket Breakdown (MRR@5: Vector -> Hybrid -> Full -> Full+RR | Full Recall@5):"
+            if rr_buckets
+            else "Per-Bucket Breakdown (MRR@5: Vector -> Hybrid -> Full | Full Recall@5):"
+        )
+        lines.append(header)
         for b_name in sorted(full_buckets.keys()):
             vm = ((modes.get("vector_only") or {}).get("by_bucket") or {}).get(b_name, {})
             hm = ((modes.get("hybrid") or {}).get("by_bucket") or {}).get(b_name, {})
             fm = full_buckets[b_name]
             b_lift = float(fm.get("mrr_at_5", 0.0)) - float(hm.get("mrr_at_5", 0.0))
+            rr_part = ""
+            if b_name in rr_buckets:
+                dm = rr_buckets[b_name]
+                rr_b_lift = float(dm.get("mrr_at_5", 0.0)) - float(fm.get("mrr_at_5", 0.0))
+                rr_part = f" -> Full+RR={dm.get('mrr_at_5', 0):.3f} (RR {rr_b_lift:+.3f})"
             lines.append(
                 f"  {b_name:<18} (n={fm.get('query_count', 0):>2}) | "
                 f"Vec={vm.get('mrr_at_5', 0):.3f} -> Hyb={hm.get('mrr_at_5', 0):.3f} -> "
-                f"Full={fm.get('mrr_at_5', 0):.3f} (Lift {b_lift:+.3f}) | R@5={fm.get('recall_at_5', 0):.3f}"
+                f"Full={fm.get('mrr_at_5', 0):.3f} (Lift {b_lift:+.3f}){rr_part} | R@5={fm.get('recall_at_5', 0):.3f}"
             )
     return "\n".join(lines)

@@ -263,13 +263,61 @@ class ArchiveRepository:
         limit: int = 10,
         min_similarity: float = 0.0,
         current_user: str | None = None,
+        binary_quantize: bool | None = None,
+        oversample: int | None = None,
     ) -> list[dict[str, Any]]:
         """Vector search; filter by creator or published + project.
 
         Uses correlated subqueries for linked_experience_ids and attachment_count
-        to avoid N+1 queries.
+        to avoid N+1 queries. When binary_quantize_index is enabled, performs a
+        two-stage HNSW binary-quantized candidate scan + exact cosine rerank.
         """
-        similarity_expr = (1 - Archive.embedding.cosine_distance(query_embedding)).label("similarity")
+        from sqlalchemy.orm import aliased
+
+        from team_memory.storage.query_builders import (
+            binary_quantize_hamming_distance,
+            compute_bq_stage1_limit,
+            enable_hnsw_iterative_scan,
+            resolve_binary_quantize_settings,
+        )
+
+        proj = _project_value(project)
+        is_wildcard_project = project in ("*", "all")
+        if current_user:
+            pub_cond = (
+                Archive.status == "published"
+                if is_wildcard_project
+                else and_(
+                    Archive.status == "published",
+                    Archive.project == proj,
+                )
+            )
+            visibility_cond = or_(Archive.created_by == current_user, pub_cond)
+        elif is_wildcard_project:
+            visibility_cond = Archive.status == "published"
+        else:
+            visibility_cond = and_(Archive.status == "published", Archive.project == proj)
+
+        use_bq, bq_oversample = resolve_binary_quantize_settings(binary_quantize, oversample)
+        if use_bq and query_embedding:
+            await enable_hnsw_iterative_scan(self._session)
+            stage1_limit = compute_bq_stage1_limit(limit=limit, oversample=bq_oversample)
+            bq_distance = binary_quantize_hamming_distance(Archive.embedding, query_embedding)
+            candidates_cte = (
+                select(Archive)
+                .where(Archive.embedding.is_not(None))
+                .where(visibility_cond)
+                .order_by(bq_distance)
+                .limit(stage1_limit)
+                .cte("bq_archive_candidates")
+            )
+            archive_entity = aliased(Archive, candidates_cte)
+        else:
+            archive_entity = Archive
+
+        similarity_expr = (1 - archive_entity.embedding.cosine_distance(query_embedding)).label(
+            "similarity"
+        )
 
         # Correlated subquery: array of linked experience UUIDs (removes NULLs)
         # When no links exist, array_agg returns NULL → handled in Python as []
@@ -280,8 +328,8 @@ class ArchiveRepository:
                     None,
                 )
             )
-            .where(ArchiveExperienceLink.archive_id == Archive.id)
-            .correlate(Archive)
+            .where(ArchiveExperienceLink.archive_id == archive_entity.id)
+            .correlate(archive_entity)
             .scalar_subquery()
             .label("linked_ids")
         )
@@ -289,46 +337,20 @@ class ArchiveRepository:
         # Correlated subquery: attachment count
         att_count_sub = (
             select(func.count(ArchiveAttachment.id))
-            .where(ArchiveAttachment.archive_id == Archive.id)
-            .correlate(Archive)
+            .where(ArchiveAttachment.archive_id == archive_entity.id)
+            .correlate(archive_entity)
             .scalar_subquery()
             .label("attachment_count")
         )
 
-        proj = _project_value(project)
-        is_wildcard_project = project in ("*", "all")
         query = (
-            select(Archive, similarity_expr, linked_ids_sub, att_count_sub)
-            .where(Archive.embedding.is_not(None))
+            select(archive_entity, similarity_expr, linked_ids_sub, att_count_sub)
             .where(similarity_expr >= min_similarity)
             .order_by(desc(similarity_expr))
             .limit(limit)
         )
-        if current_user:
-            pub_cond = (
-                Archive.status == "published"
-                if is_wildcard_project
-                else and_(
-                    Archive.status == "published",
-                    Archive.project == proj,
-                )
-            )
-            query = query.where(
-                or_(
-                    Archive.created_by == current_user,
-                    pub_cond,
-                )
-            )
-        else:
-            if is_wildcard_project:
-                query = query.where(Archive.status == "published")
-            else:
-                query = query.where(
-                    and_(
-                        Archive.status == "published",
-                        Archive.project == proj,
-                    )
-                )
+        if not (use_bq and query_embedding):
+            query = query.where(Archive.embedding.is_not(None)).where(visibility_cond)
 
         result = await self._session.execute(query)
         rows = result.all()

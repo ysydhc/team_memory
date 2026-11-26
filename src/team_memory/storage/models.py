@@ -836,3 +836,27 @@ class ExperienceEntity(Base):
     )  # mentioned, subject, solution, tool
 
     entity: Mapped["Entity"] = relationship("Entity", back_populates="experience_links")
+
+
+class LLMUsageLog(Base):
+    """Multi-tenant LLM & Embedding invocation cost ledger (migration 029)."""
+
+    __tablename__ = "llm_usage_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        default=get_current_tenant_id,
+        index=True,
+    )
+    caller: Mapped[str] = mapped_column(String(100), nullable=False, default="unknown")
+    provider: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
+    model: Mapped[str] = mapped_column(String(128), nullable=False, default="unknown")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+

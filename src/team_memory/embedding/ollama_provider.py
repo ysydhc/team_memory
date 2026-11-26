@@ -8,9 +8,12 @@ Requires Ollama running locally: https://ollama.com
 
 from __future__ import annotations
 
+import time
+
 import httpx
 
 from team_memory.embedding.base import EmbeddingProvider
+from team_memory.services.analysis.usage_ledger import estimate_tokens, record_usage_async
 
 
 class OllamaEmbedding(EmbeddingProvider):
@@ -49,6 +52,8 @@ class OllamaEmbedding(EmbeddingProvider):
             httpx.HTTPStatusError: If the API request fails after retries.
             ConnectionError: If Ollama is not running.
         """
+        start = time.monotonic()
+        est_prompt = estimate_tokens(texts)
         last_error: Exception | None = None
         for attempt in range(3):
             try:
@@ -63,6 +68,20 @@ class OllamaEmbedding(EmbeddingProvider):
                     )
                     response.raise_for_status()
                     data = response.json()
+                prompt_tokens = (
+                    int(data.get("prompt_eval_count") or est_prompt)
+                    if isinstance(data, dict)
+                    else est_prompt
+                )
+                record_usage_async(
+                    caller="embedding",
+                    provider="ollama",
+                    model=self._model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=0,
+                    latency_ms=int((time.monotonic() - start) * 1000),
+                    success=True,
+                )
                 return data["embeddings"]
             except httpx.HTTPStatusError as e:
                 last_error = e
@@ -73,8 +92,26 @@ class OllamaEmbedding(EmbeddingProvider):
 
                     await asyncio.sleep(2**attempt)
                     continue
+                record_usage_async(
+                    caller="embedding",
+                    provider="ollama",
+                    model=self._model,
+                    prompt_tokens=est_prompt,
+                    completion_tokens=0,
+                    latency_ms=int((time.monotonic() - start) * 1000),
+                    success=False,
+                )
                 raise
             except httpx.ConnectError:
+                record_usage_async(
+                    caller="embedding",
+                    provider="ollama",
+                    model=self._model,
+                    prompt_tokens=est_prompt,
+                    completion_tokens=0,
+                    latency_ms=int((time.monotonic() - start) * 1000),
+                    success=False,
+                )
                 raise ConnectionError(
                     f"Cannot connect to Ollama at {self._base_url}. Make sure Ollama is running: https://ollama.com"
                 )

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import time
 
 import httpx
 
 from team_memory.embedding.base import EmbeddingProvider
+from team_memory.services.analysis.usage_ledger import estimate_tokens, record_usage_async
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +89,8 @@ class OpenAIEmbedding(EmbeddingProvider):
 
         import asyncio as _asyncio
 
+        start = time.monotonic()
+        est_prompt = estimate_tokens(texts)
         last_exc: Exception | None = None
         for attempt in range(self._max_retries + 1):
             try:
@@ -107,6 +111,22 @@ class OpenAIEmbedding(EmbeddingProvider):
                 response.raise_for_status()
                 data = response.json()
 
+                usage = data.get("usage") if isinstance(data, dict) else None
+                prompt_tokens = (
+                    int(usage.get("prompt_tokens") or usage.get("total_tokens") or est_prompt)
+                    if isinstance(usage, dict)
+                    else est_prompt
+                )
+                record_usage_async(
+                    caller="embedding",
+                    provider="openai",
+                    model=self._model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=0,
+                    latency_ms=int((time.monotonic() - start) * 1000),
+                    success=True,
+                )
+
                 # Sort by index to ensure order matches input
                 embeddings_data = sorted(data["data"], key=lambda x: x["index"])
                 return [item["embedding"] for item in embeddings_data]
@@ -121,8 +141,26 @@ class OpenAIEmbedding(EmbeddingProvider):
                     last_exc = e
                     await _asyncio.sleep(0.5 * (attempt + 1))
                     continue
+                record_usage_async(
+                    caller="embedding",
+                    provider="openai",
+                    model=self._model,
+                    prompt_tokens=est_prompt,
+                    completion_tokens=0,
+                    latency_ms=int((time.monotonic() - start) * 1000),
+                    success=False,
+                )
                 raise
 
+        record_usage_async(
+            caller="embedding",
+            provider="openai",
+            model=self._model,
+            prompt_tokens=est_prompt,
+            completion_tokens=0,
+            latency_ms=int((time.monotonic() - start) * 1000),
+            success=False,
+        )
         raise EmbeddingTimeoutError(
             f"Embedding API unreachable after {self._max_retries + 1} attempts: {last_exc}"
         ) from last_exc

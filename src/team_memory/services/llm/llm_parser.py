@@ -15,10 +15,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
+
+from team_memory.services.analysis.usage_ledger import estimate_tokens, record_usage_async
 
 if TYPE_CHECKING:
     from team_memory.config import LLMConfig
@@ -292,6 +295,7 @@ async def call_llm_openai(
     timeout: float = 30.0,
     temperature: float = 0.3,
     max_tokens: int = 8192,
+    caller: str = "llm_parser",
 ) -> str:
     """Call an OpenAI-compatible API (e.g. LiteLLM proxy) and return the text content.
 
@@ -304,6 +308,7 @@ async def call_llm_openai(
         temperature: Sampling temperature.
         max_tokens: Maximum tokens to generate. Reasoning models (GLM-5 etc.)
             need sufficient max_tokens to output both reasoning and content.
+        caller: Logical caller tag for usage ledger attribution.
 
     Returns:
         The generated text content.
@@ -323,6 +328,8 @@ async def call_llm_openai(
         headers["Authorization"] = f"Bearer {api_key}"
         headers["x-api-key"] = api_key
 
+    start = time.monotonic()
+    est_prompt = estimate_tokens(messages)
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
@@ -338,16 +345,70 @@ async def call_llm_openai(
             resp.raise_for_status()
             data = resp.json()
     except httpx.ConnectError as e:
+        record_usage_async(
+            caller=caller,
+            provider="openai",
+            model=model,
+            prompt_tokens=est_prompt,
+            completion_tokens=0,
+            latency_ms=int((time.monotonic() - start) * 1000),
+            success=False,
+        )
         raise LLMParseError(f"Cannot connect to LLM API at {base_url}: {e}")
     except httpx.TimeoutException:
+        record_usage_async(
+            caller=caller,
+            provider="openai",
+            model=model,
+            prompt_tokens=est_prompt,
+            completion_tokens=0,
+            latency_ms=int((time.monotonic() - start) * 1000),
+            success=False,
+        )
         raise LLMParseError("LLM API call timed out")
     except httpx.HTTPStatusError as e:
+        record_usage_async(
+            caller=caller,
+            provider="openai",
+            model=model,
+            prompt_tokens=est_prompt,
+            completion_tokens=0,
+            latency_ms=int((time.monotonic() - start) * 1000),
+            success=False,
+        )
         raise LLMParseError(f"LLM API error: {e.response.text[:300]}")
 
+    latency_ms = int((time.monotonic() - start) * 1000)
     choice = data.get("choices", [{}])[0]
     content = choice.get("message", {}).get("content", "")
+    usage = data.get("usage") if isinstance(data, dict) else None
+    prompt_tokens = int(usage.get("prompt_tokens") or est_prompt) if isinstance(usage, dict) else est_prompt
+    completion_tokens = (
+        int(usage.get("completion_tokens") or estimate_tokens(content))
+        if isinstance(usage, dict)
+        else estimate_tokens(content)
+    )
     if not content:
+        record_usage_async(
+            caller=caller,
+            provider="openai",
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=0,
+            latency_ms=latency_ms,
+            success=False,
+        )
         raise LLMParseError("LLM returned empty response")
+
+    record_usage_async(
+        caller=caller,
+        provider="openai",
+        model=model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        latency_ms=latency_ms,
+        success=True,
+    )
     return content
 
 

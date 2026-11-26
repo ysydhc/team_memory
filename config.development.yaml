@@ -208,8 +208,9 @@ reranker:
     batch_size: 5
   cross_encoder:
     model_name: cross-encoder/ms-marco-MiniLM-L6-v2
-    device: cpu
+    device: auto
     top_k: 10
+    timeout_seconds: 3.0
   jina:
     api_key: ""
     model: jina-reranker-v2-base-multilingual

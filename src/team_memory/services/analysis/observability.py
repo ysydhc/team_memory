@@ -26,6 +26,7 @@ from team_memory.services.analysis.golden_eval import (
     compute_percentile,
     load_eval_history,
 )
+from team_memory.services.analysis.usage_ledger import aggregate_usage_windows
 from team_memory.storage.database import get_session
 
 logger = logging.getLogger("team_memory.observability")
@@ -432,6 +433,28 @@ async def get_observability_overview(
         "implicit_positive_7d": 0,
         "implicit_negative_7d": 0,
     }
+    llm_usage_stats: dict[str, Any] = {
+        "window_7d": {
+            "window_days": 7,
+            "total_calls": 0,
+            "success_calls": 0,
+            "failed_calls": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "by_caller": [],
+        },
+        "window_30d": {
+            "window_days": 30,
+            "total_calls": 0,
+            "success_calls": 0,
+            "failed_calls": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "by_caller": [],
+        },
+    }
 
     try:
         async with get_session(db_url) as session:
@@ -585,6 +608,12 @@ async def get_observability_overview(
             except Exception as fb_exc:
                 logger.debug("Feedback stats query skipped: %s", fb_exc)
 
+            # 6. LLM & Embedding usage ledger aggregation (7d / 30d by caller)
+            try:
+                llm_usage_stats = await aggregate_usage_windows(session, now_utc=now_utc)
+            except Exception as usage_exc:
+                logger.debug("LLM usage ledger query skipped: %s", usage_exc)
+
     except Exception as exc:
         logger.warning("Observability DB query failed: %s", exc)
         pg_status = "down"
@@ -713,6 +742,7 @@ async def get_observability_overview(
         "pg_status": pg_status,
         "pg_latency_ms": pg_latency_ms,
         "daemon_status": "up" if daemon_up else "down",
+        "llm_usage": llm_usage_stats,
         **backup_info,
     }
 
@@ -729,6 +759,7 @@ async def get_observability_overview(
         "days": days,
         "overall_status": overall_status,
         "alerts": alerts,
+        "llm_usage": llm_usage_stats,
         "subsystems": {
             "ingestion": ingestion,
             "maintenance": maintenance,

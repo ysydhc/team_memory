@@ -177,22 +177,67 @@ class PersonalMemoryRepository:
         *,
         scope: str | None = None,
         project: str | None = None,
+        binary_quantize: bool | None = None,
+        oversample: int | None = None,
     ) -> PersonalMemory | None:
         if not embedding:
             return None
-        similarity_expr = (1 - PersonalMemory.embedding.cosine_distance(embedding)).label("similarity")
-        q = (
-            select(PersonalMemory, similarity_expr)
-            .where(PersonalMemory.user_id == user_id)
-            .where(PersonalMemory.profile_kind == profile_kind)
-            .where(PersonalMemory.embedding.is_not(None))
-            .where(similarity_expr >= threshold)
+        from sqlalchemy.orm import aliased
+
+        from team_memory.storage.query_builders import (
+            binary_quantize_hamming_distance,
+            compute_bq_stage1_limit,
+            enable_hnsw_iterative_scan,
+            resolve_binary_quantize_settings,
         )
-        if scope == "project" and project:
-            q = q.where(PersonalMemory.scope == "project", PersonalMemory.project == project)
-        elif scope == "global":
-            q = q.where(PersonalMemory.scope.in_(("global", "generic")))
-        q = q.order_by(desc(similarity_expr)).limit(1)
+
+        use_bq, bq_oversample = resolve_binary_quantize_settings(binary_quantize, oversample)
+        if use_bq:
+            await enable_hnsw_iterative_scan(self._session)
+            stage1_limit = compute_bq_stage1_limit(limit=1, oversample=bq_oversample)
+            bq_distance = binary_quantize_hamming_distance(PersonalMemory.embedding, embedding)
+            stage1_q = (
+                select(PersonalMemory)
+                .where(PersonalMemory.user_id == user_id)
+                .where(PersonalMemory.profile_kind == profile_kind)
+                .where(PersonalMemory.embedding.is_not(None))
+            )
+            if scope == "project" and project:
+                stage1_q = stage1_q.where(
+                    PersonalMemory.scope == "project", PersonalMemory.project == project
+                )
+            elif scope == "global":
+                stage1_q = stage1_q.where(PersonalMemory.scope.in_(("global", "generic")))
+            candidates_cte = (
+                stage1_q.order_by(bq_distance).limit(stage1_limit).cte("bq_pm_candidates")
+            )
+            pm_alias = aliased(PersonalMemory, candidates_cte)
+            similarity_expr = (1 - pm_alias.embedding.cosine_distance(embedding)).label(
+                "similarity"
+            )
+            q = (
+                select(pm_alias, similarity_expr)
+                .where(similarity_expr >= threshold)
+                .order_by(desc(similarity_expr))
+                .limit(1)
+            )
+        else:
+            similarity_expr = (1 - PersonalMemory.embedding.cosine_distance(embedding)).label(
+                "similarity"
+            )
+            q = (
+                select(PersonalMemory, similarity_expr)
+                .where(PersonalMemory.user_id == user_id)
+                .where(PersonalMemory.profile_kind == profile_kind)
+                .where(PersonalMemory.embedding.is_not(None))
+                .where(similarity_expr >= threshold)
+            )
+            if scope == "project" and project:
+                q = q.where(PersonalMemory.scope == "project", PersonalMemory.project == project)
+            elif scope == "global":
+                q = q.where(PersonalMemory.scope.in_(("global", "generic")))
+            q = q.order_by(desc(similarity_expr)).limit(1)
+
         result = await self._session.execute(q)
         row = result.first()
         if row:

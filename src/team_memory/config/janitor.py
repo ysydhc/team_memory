@@ -91,3 +91,6 @@ class JanitorConfig:
 
     deprecated_background_task_types: list[str] = field(default_factory=lambda: ["graphiti_ingest"])
     """Deprecated background_tasks.task_type values purged regardless of status."""
+
+    llm_usage_logs_retention_days: int = 90
+    """TTL (days) for llm_usage_logs rows before automatic janitor cleanup."""

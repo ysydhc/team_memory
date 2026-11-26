@@ -17,7 +17,6 @@ if sys.platform != "win32":
 import logging
 import os
 import time
-from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -385,32 +384,54 @@ async def tenant_context_cleanup(request: Request, call_next):
     finally:
         reset_current_tenant_id(token)
 
-# ---- Rate limiting (in-memory, per IP) ----
-_rate_limit_store: dict[str, list[float]] = defaultdict(list)
+# ---- Rate limiting (Redis sliding window per tenant/api_key with IP & memory fallback) ----
+from team_memory.web.rate_limiter import (  # noqa: E402
+    SlidingWindowRateLimiter,
+    extract_rate_limit_key,
+)
+
+_rate_limiter: SlidingWindowRateLimiter | None = None
+
+
+def _get_rate_limiter() -> SlidingWindowRateLimiter:
+    """Lazily initialize the shared Redis-backed sliding-window rate limiter."""
+    global _rate_limiter
+    if _rate_limiter is None:
+        redis_url = (
+            os.environ.get("TEAM_MEMORY_REDIS_URL")
+            or os.environ.get("TEAM_MEMORY_CACHE__REDIS_URL")
+            or getattr(getattr(_settings, "cache", None), "redis_url", None)
+            or "redis://localhost:6379/0"
+        )
+        _rate_limiter = SlidingWindowRateLimiter(redis_url=redis_url)
+    return _rate_limiter
 
 
 @app.middleware("http")
 async def rate_limit(request: Request, call_next):
-    """Reject requests that exceed the per-IP rate limit."""
+    """Enforce per-tenant / per-API-key sliding-window rate limit (IP fallback)."""
     if request.url.path in ("/health", "/ready"):
         return await call_next(request)
 
-    client_ip = request.client.host if request.client else "unknown"
     limit = getattr(getattr(_settings, "web", None), "rate_limit_per_minute", None) or 200
-    now = time.monotonic()
-    window = 60.0
+    scope_key = extract_rate_limit_key(request)
+    decision = await _get_rate_limiter().check(scope_key, limit=int(limit), window=60.0)
 
-    timestamps = _rate_limit_store[client_ip]
-    _rate_limit_store[client_ip] = [t for t in timestamps if now - t < window]
-
-    if len(_rate_limit_store[client_ip]) >= limit:
+    if not decision.allowed:
         return JSONResponse(
             status_code=429,
             content={"detail": "Rate limit exceeded"},
+            headers={
+                "Retry-After": str(decision.retry_after),
+                "X-RateLimit-Limit": str(decision.limit),
+                "X-RateLimit-Remaining": "0",
+            },
         )
 
-    _rate_limit_store[client_ip].append(now)
-    return await call_next(request)
+    response = await call_next(request)
+    response.headers.setdefault("X-RateLimit-Limit", str(decision.limit))
+    response.headers.setdefault("X-RateLimit-Remaining", str(decision.remaining))
+    return response
 
 
 # ---- Request body size limit ----

@@ -1,9 +1,16 @@
 """Cross-encoder reranker provider — uses sentence-transformers for scoring.
 
-This provider loads a cross-encoder model (e.g. ms-marco-MiniLM-L6-v2)
-locally and scores query-document pairs directly. Cross-encoders are
-more accurate than bi-encoders for ranking because they see both texts
-at once, but they are slower (can't pre-compute embeddings).
+This provider loads a cross-encoder model (e.g. ms-marco-MiniLM-L6-v2 or
+BAAI/bge-reranker-v2-m3) locally and scores query-document pairs directly.
+
+Features:
+  - Automatic Apple Silicon MPS detection with graceful CPU fallback.
+  - Process-wide singleton lazy loading (keyed by model_name + resolved_device)
+    to avoid repeated model initialization across pipelines/requests.
+  - Strict inference timeout protection & graceful degradation: if dependencies
+    are missing, model loading fails, or inference exceeds ``timeout_seconds``,
+    logs a warning and passes through the original document order without
+    blocking the main search pipeline.
 
 Requires: pip install sentence-transformers
 
@@ -15,49 +22,157 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
+import time
+from typing import Any
 
 from team_memory.reranker.base import RerankerProvider, RerankResult
 
 logger = logging.getLogger("team_memory.reranker.cross_encoder")
 
+_MODEL_CACHE: dict[tuple[str, str], Any] = {}
+_MODEL_CACHE_LOCK = threading.Lock()
+
+
+def clear_model_cache() -> None:
+    """Clear the process-wide cross-encoder model singleton cache (for testing)."""
+    with _MODEL_CACHE_LOCK:
+        _MODEL_CACHE.clear()
+
+
+def resolve_device(requested: str = "auto") -> str:
+    """Resolve inference device, preferring Apple Silicon MPS over CPU.
+
+    Args:
+        requested: ``"auto"``, ``"mps"``, ``"cuda"``, or ``"cpu"``.
+
+    Returns:
+        Resolved torch device string (``"mps"``, ``"cuda"``, or ``"cpu"``).
+    """
+    req = (requested or "auto").strip().lower()
+    if req == "cpu":
+        return "cpu"
+
+    try:
+        import torch
+    except Exception:
+        if req != "auto":
+            logger.warning(
+                "Requested cross-encoder device '%s' but torch is unavailable; falling back to cpu",
+                req,
+            )
+        return "cpu"
+
+    mps_backend = getattr(getattr(torch, "backends", None), "mps", None)
+    mps_available = bool(mps_backend is not None and mps_backend.is_available())
+    cuda_mod = getattr(torch, "cuda", None)
+    cuda_available = bool(cuda_mod is not None and cuda_mod.is_available())
+
+    if req == "auto":
+        if mps_available:
+            return "mps"
+        if cuda_available:
+            return "cuda"
+        return "cpu"
+
+    if req == "mps":
+        if mps_available:
+            return "mps"
+        logger.warning("Requested cross-encoder device 'mps' is unavailable; falling back to cpu")
+        return "cpu"
+
+    if req == "cuda" or req.startswith("cuda:"):
+        if cuda_available:
+            return req
+        logger.warning("Requested cross-encoder device '%s' is unavailable; falling back to cpu", req)
+        return "cpu"
+
+    logger.warning("Unknown cross-encoder device '%s'; falling back to cpu", req)
+    return "cpu"
+
 
 class CrossEncoderRerankerProvider(RerankerProvider):
     """Cross-encoder reranker using sentence-transformers.
 
-    Loads the model lazily on first use to avoid slow startup.
+    Uses process-wide singleton lazy loading, Apple Silicon MPS auto-detection,
+    and strict timeout protection with pass-through fallback.
     """
 
     def __init__(
         self,
         model_name: str = "cross-encoder/ms-marco-MiniLM-L6-v2",
-        device: str = "cpu",
+        device: str = "auto",
         top_k: int = 10,
+        timeout_seconds: float = 3.0,
     ):
         self._model_name = model_name
-        self._device = device
+        self._requested_device = device
+        self._device = resolve_device(device)
         self._top_k = top_k
-        self._model = None  # Lazy loading
+        self._timeout_seconds = max(0.01, float(timeout_seconds))
+        self._model: Any = None  # Lazy singleton handle
 
-    def _load_model(self):
-        """Lazy-load the cross-encoder model."""
+    @property
+    def device(self) -> str:
+        """Return the resolved inference device ('mps', 'cuda', or 'cpu')."""
+        return self._device
+
+    @property
+    def timeout_seconds(self) -> float:
+        """Return the inference timeout budget in seconds."""
+        return self._timeout_seconds
+
+    def _load_model(self) -> Any:
+        """Lazy-load the cross-encoder model using a process-wide singleton cache."""
         if self._model is not None:
-            return
+            return self._model
 
-        try:
-            from sentence_transformers import CrossEncoder
+        cache_key = (self._model_name, self._device)
+        cached = _MODEL_CACHE.get(cache_key)
+        if cached is not None:
+            self._model = cached
+            return self._model
+
+        with _MODEL_CACHE_LOCK:
+            cached = _MODEL_CACHE.get(cache_key)
+            if cached is not None:
+                self._model = cached
+                return self._model
+
+            try:
+                from sentence_transformers import CrossEncoder
+            except ImportError as exc:
+                raise ImportError(
+                    "sentence-transformers is required for cross-encoder reranker. "
+                    "Install it with: pip install sentence-transformers"
+                ) from exc
 
             logger.info(
-                "Loading cross-encoder model: %s (device=%s)",
+                "Loading cross-encoder model: %s (device=%s, requested=%s)",
                 self._model_name,
                 self._device,
+                self._requested_device,
             )
-            self._model = CrossEncoder(self._model_name, device=self._device)
-            logger.info("Cross-encoder model loaded successfully")
-        except ImportError:
-            raise RuntimeError(
-                "sentence-transformers is required for cross-encoder reranker. "
-                "Install it with: pip install sentence-transformers"
+            model = CrossEncoder(self._model_name, device=self._device)
+            _MODEL_CACHE[cache_key] = model
+            self._model = model
+            logger.info("Cross-encoder model loaded successfully (device=%s)", self._device)
+            return self._model
+
+    @staticmethod
+    def _fallback_results(
+        documents: list[str],
+        effective_top_k: int,
+    ) -> list[RerankResult]:
+        """Pass through documents in their original order with descending scores."""
+        return [
+            RerankResult(
+                index=i,
+                score=round(1.0 / (1.0 + i * 0.05), 4),
+                text=doc,
             )
+            for i, doc in enumerate(documents[:effective_top_k])
+        ]
 
     async def rank(
         self,
@@ -66,51 +181,75 @@ class CrossEncoderRerankerProvider(RerankerProvider):
         top_k: int | None = None,
         document_metadata: list[dict] | None = None,
     ) -> list[RerankResult]:
-        """Rerank documents using cross-encoder scoring."""
+        """Rerank documents using cross-encoder scoring with timeout & graceful fallback."""
         effective_top_k = top_k or self._top_k
         if not documents:
             return []
 
-        self._load_model()
-
-        # Create query-document pairs for cross-encoder
-        pairs = [(query, doc) for doc in documents]
+        deadline = time.monotonic() + self._timeout_seconds
 
         try:
-            # Cross-encoder predicts relevance scores for all pairs
-            scores = await asyncio.to_thread(self._model.predict, pairs)
+            model = self._model
+            if model is None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Cross-encoder budget exhausted before model load")
+                model = await asyncio.wait_for(
+                    asyncio.to_thread(self._load_model),
+                    timeout=remaining,
+                )
 
-            # Combine with original indices
-            scored = [(i, float(score), doc) for i, (score, doc) in enumerate(zip(scores, documents))]
+            pairs = [(query, doc) for doc in documents]
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Cross-encoder budget exhausted before inference")
 
-            # Sort by score descending
-            scored.sort(key=lambda x: x[1], reverse=True)
+            scores = await asyncio.wait_for(
+                asyncio.to_thread(model.predict, pairs),
+                timeout=remaining,
+            )
 
-            # Apply exact_title_match bonus
             meta = document_metadata or []
             exact_bonus = {"exact": 0.5, "contains": 0.2}
 
-            results = []
-            for idx, score, text in scored[:effective_top_k]:
-                em = meta[idx].get("exact_title_match", "") if idx < len(meta) else ""
-                score += exact_bonus.get(em, 0)
-                results.append(RerankResult(index=idx, score=score, text=text))
-            return results
-
-        except Exception as e:
-            logger.error("Cross-encoder scoring failed: %s", e)
-            # Fallback: return in original order with exact_match bonus
-            meta = document_metadata or []
-            exact_bonus = {"exact": 0.5, "contains": 0.2}
-            fallback_results = []
-            for i, doc in enumerate(documents[:effective_top_k]):
-                score = 1.0 - i * 0.1
+            scored: list[tuple[int, float, str]] = []
+            for i, (raw_score, doc) in enumerate(zip(scores, documents)):
+                score = float(raw_score)
                 if i < len(meta):
                     em = meta[i].get("exact_title_match", "")
-                    score += exact_bonus.get(em, 0)
-                fallback_results.append(RerankResult(index=i, score=score, text=doc))
-            return fallback_results
+                    score += exact_bonus.get(em, 0.0)
+                scored.append((i, score, doc))
+
+            scored.sort(key=lambda x: x[1], reverse=True)
+            return [
+                RerankResult(index=idx, score=score, text=text)
+                for idx, score, text in scored[:effective_top_k]
+            ]
+
+        except (TimeoutError, asyncio.TimeoutError):
+            logger.warning(
+                "Cross-encoder reranker timed out after %.2fs (model=%s, device=%s, docs=%d); "
+                "passing through original order",
+                self._timeout_seconds,
+                self._model_name,
+                self._device,
+                len(documents),
+            )
+            return self._fallback_results(documents, effective_top_k)
+        except ImportError as exc:
+            logger.warning(
+                "Cross-encoder reranker dependency missing (%s); passing through original order",
+                exc,
+            )
+            return self._fallback_results(documents, effective_top_k)
+        except Exception as exc:
+            logger.warning(
+                "Cross-encoder reranker failed (%s: %s); passing through original order",
+                type(exc).__name__,
+                exc,
+            )
+            return self._fallback_results(documents, effective_top_k)
 
     @property
     def provider_name(self) -> str:
-        return f"cross_encoder({self._model_name})"
+        return f"cross_encoder({self._model_name}, device={self._device})"

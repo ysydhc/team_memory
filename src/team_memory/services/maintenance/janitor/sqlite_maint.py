@@ -191,3 +191,47 @@ class JanitorStorageMaintMixin:
                 "older_than_days": retention_days,
                 "dry_run": dry_run,
             }
+
+    async def prune_llm_usage_logs(
+        self,
+        older_than_days: int | None = None,
+        dry_run: bool = False,
+    ) -> dict:
+        """Prune ``llm_usage_logs`` rows older than the configured TTL (default 90 days)."""
+        from sqlalchemy import text
+
+        retention_days = int(
+            older_than_days
+            if older_than_days is not None
+            else self._get_config("llm_usage_logs_retention_days", 90)
+        )
+        cutoff = _utcnow() - timedelta(days=max(1, retention_days))
+
+        async with self._session() as session:
+            if dry_run:
+                res = await session.execute(
+                    text("SELECT COUNT(*) FROM llm_usage_logs WHERE created_at < :cutoff"),
+                    {"cutoff": cutoff},
+                )
+                count = int(res.scalar() or 0)
+            else:
+                res = await session.execute(
+                    text("DELETE FROM llm_usage_logs WHERE created_at < :cutoff"),
+                    {"cutoff": cutoff},
+                )
+                count = int(res.rowcount or 0)
+                await session.commit()
+
+            logger.info(
+                "LLM usage logs pruning %s: %d rows (>%dd)",
+                "dry-run" if dry_run else "completed",
+                count,
+                retention_days,
+            )
+            return {
+                "deleted_count": 0 if dry_run else count,
+                "would_delete_count": count,
+                "dry_run": dry_run,
+                "older_than_days": retention_days,
+                "cutoff_date": cutoff.isoformat(),
+            }

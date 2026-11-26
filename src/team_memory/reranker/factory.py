@@ -65,14 +65,16 @@ def create_reranker(
 
         cfg = reranker_config.cross_encoder
         logger.info(
-            "Reranker: cross_encoder (model=%s, device=%s)",
+            "Reranker: cross_encoder (model=%s, device=%s, timeout=%.2fs)",
             cfg.model_name,
             cfg.device,
+            cfg.timeout_seconds,
         )
         return CrossEncoderRerankerProvider(
             model_name=cfg.model_name,
             device=cfg.device,
             top_k=cfg.top_k,
+            timeout_seconds=cfg.timeout_seconds,
         )
 
     if provider == "jina":

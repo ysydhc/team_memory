@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from team_memory.services.analysis.usage_ledger import estimate_tokens, record_usage_async
+
 if TYPE_CHECKING:
     from team_memory.config import LLMConfig
 
@@ -98,6 +100,15 @@ class OllamaLLMProvider(LLMProvider):
                         extra={"provider": "ollama", "model": model, "duration_ms": duration_ms},
                     )
                     _track_usage(0, len(content) // 4, 0)
+                    record_usage_async(
+                        caller="llm_provider",
+                        provider="ollama",
+                        model=model,
+                        prompt_tokens=int(data.get("prompt_eval_count") or estimate_tokens(messages)),
+                        completion_tokens=int(data.get("eval_count") or estimate_tokens(content)),
+                        latency_ms=duration_ms,
+                        success=True,
+                    )
                     return content
             except httpx.ConnectError:
                 raise ConnectionError(f"Cannot connect to Ollama at {self._base_url}. Make sure Ollama is running.")
@@ -179,6 +190,15 @@ class OpenAILLMProvider(LLMProvider):
                     extra={"provider": "openai", "model": model, "duration_ms": duration_ms},
                 )
                 _track_usage(in_tok, out_tok, cost_cents)
+                record_usage_async(
+                    caller="llm_provider",
+                    provider="openai",
+                    model=model,
+                    prompt_tokens=int(in_tok or estimate_tokens(messages)),
+                    completion_tokens=int(out_tok or estimate_tokens(content)),
+                    latency_ms=duration_ms,
+                    success=True,
+                )
                 return content
             except Exception as e:
                 if attempt == 0:
@@ -260,6 +280,15 @@ class GenericLLMProvider(LLMProvider):
                     extra={"provider": "generic", "model": model, "duration_ms": duration_ms},
                 )
                 _track_usage(in_tok, out_tok, cost_cents)
+                record_usage_async(
+                    caller="llm_provider",
+                    provider="generic",
+                    model=model,
+                    prompt_tokens=int(in_tok or estimate_tokens(messages)),
+                    completion_tokens=int(out_tok or estimate_tokens(content)),
+                    latency_ms=duration_ms,
+                    success=True,
+                )
                 return content
             except Exception as e:
                 if attempt == 0:

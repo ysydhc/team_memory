@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from team_memory.auth.provider import User
 from team_memory.bootstrap import get_context
 from team_memory.services.memory import memory_operations
+from team_memory.utils.prompt_guard import guard_recall_payload
 from team_memory.web.auth_session import get_current_user
 
 logger = logging.getLogger("team_memory.web")
@@ -165,6 +166,7 @@ async def mcp_recall(
             include_archives=body.include_archives,
             include_user_profile=body.include_user_profile,
         )
+        result = guard_recall_payload(result, source="http.mcp_recall")
         return _json_response(result, user=uid, tool_name="recall")
     except HTTPException:
         raise
@@ -217,6 +219,7 @@ async def mcp_context(
             task_description=body.task_description,
             project=body.project,
         )
+        result = guard_recall_payload(result, source="http.mcp_context")
         return _json_response(result, user=uid, tool_name="context")
     except HTTPException:
         raise
@@ -241,6 +244,7 @@ async def mcp_get_archive(
             archive_id=archive_id,
             project=project,
         )
+        result = guard_recall_payload(result, source="http.mcp_get_archive")
         return _json_response(result, user=uid, tool_name="get_archive")
     except HTTPException:
         raise
