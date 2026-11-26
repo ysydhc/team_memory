@@ -23,7 +23,7 @@ try:
 
     _env_file = Path(".env")
     if _env_file.exists():
-        load_dotenv(_env_file)
+        load_dotenv(_env_file, override=True)
 except ImportError:
     pass
 from typing import TYPE_CHECKING
@@ -257,7 +257,11 @@ def _configure_auth(settings: Settings) -> AuthProvider:
 
 
 def _resolve_db_url(settings: Settings) -> str:
-    return os.environ.get("TEAM_MEMORY_DB_URL") or settings.database.url
+    return (
+        os.environ.get("TEAM_MEMORY_DATABASE__URL")
+        or os.environ.get("TEAM_MEMORY_DB_URL")
+        or settings.database.url
+    )
 
 
 def bootstrap(

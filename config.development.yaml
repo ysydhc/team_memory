@@ -29,10 +29,10 @@
 # database — PostgreSQL + asyncpg + pgvector
 # -----------------------------------------------------------------------------
 # url: SQLAlchemy 异步连接串，必须使用 postgresql+asyncpg:// 前缀。
-#      开发常见：Docker Compose 将容器 5432 映射到主机 5433，故示例用 5433。
-#      覆盖示例：export TEAM_MEMORY_DATABASE__URL=postgresql+asyncpg://...
+#      本机默认使用 Homebrew 原生 PostgreSQL 16 (5432，免 Docker 省 3.6GB 内存)；
+#      若切换为 Docker 模式則为 5433（可通过 make mode-native / make mode-docker 或 tm-cli server up --mode 切换）。
 database:
-  url: "postgresql+asyncpg://developer:devpass@localhost:5433/team_memory"
+  url: "postgresql+asyncpg://developer:devpass@localhost:5432/team_memory"
 
 # -----------------------------------------------------------------------------
 # embedding — 向量嵌入服务（检索、保存经验/档案时编码）

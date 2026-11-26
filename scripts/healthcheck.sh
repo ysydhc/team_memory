@@ -42,14 +42,14 @@ EMB_PROVIDER=""
 EMB_BASE_URL=""
 EMB_MODEL=""
 EMB_API_KEY=""
-PG_PORT="5433"
+PG_PORT="5432"
 if [ -f "${ROOT_DIR}/config.development.yaml" ] || [ -f "${ROOT_DIR}/config.production.yaml" ]; then
     EMB_VALUES=$(cd "${ROOT_DIR}" && PYTHONPATH=src "${_TM_PYTHON}" -c "
 from urllib.parse import urlparse
 from team_memory.config import load_settings
 s = load_settings()
 e = s.embedding
-db_port = urlparse(s.database.url.replace('+asyncpg', '')).port or 5433
+db_port = urlparse(s.database.url.replace('+asyncpg', '')).port or 5432
 print(f'{e.provider}|{e.openai.base_url}|{e.openai.model}|{e.openai.dimension}|{e.openai.resolved_api_key}|{db_port}')
 " 2>/dev/null)
     if [ -n "$EMB_VALUES" ]; then
@@ -106,12 +106,17 @@ echo "===== team_memory Health Check ====="
 echo ""
 
 # 1. PostgreSQL
-printf "  %-22s" "PostgreSQL (:${PG_PORT:-5433}):"
-if command -v pg_isready >/dev/null 2>&1; then
-    if pg_isready -h localhost -p "${PG_PORT:-5433}" -U developer -q 2>/dev/null; then
-        echo "OK"
+printf "  %-22s" "PostgreSQL (:${PG_PORT:-5432}):"
+PG_ISREADY_BIN="$(command -v pg_isready 2>/dev/null || echo /opt/homebrew/opt/postgresql@16/bin/pg_isready)"
+if [ -x "$PG_ISREADY_BIN" ]; then
+    if "$PG_ISREADY_BIN" -h localhost -p "${PG_PORT:-5432}" -U developer -q 2>/dev/null; then
+        if [ "${PG_PORT:-5432}" = "5432" ]; then
+            echo "OK (native Homebrew PostgreSQL)"
+        else
+            echo "OK (docker PostgreSQL)"
+        fi
     else
-        echo "FAIL  (run: docker compose up -d postgres)"
+        echo "FAIL  (run: make mode-native  OR  make mode-docker)"
         FAILURES=$((FAILURES + 1))
     fi
 else
@@ -119,7 +124,7 @@ else
     if docker compose exec -T postgres pg_isready -U developer -q 2>/dev/null; then
         echo "OK (via docker)"
     else
-        echo "FAIL  (run: docker compose up -d postgres)"
+        echo "FAIL  (run: make mode-native  OR  make mode-docker)"
         FAILURES=$((FAILURES + 1))
     fi
 fi

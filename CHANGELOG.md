@@ -6,6 +6,20 @@
 
 ## [Unreleased]
 
+## [0.3.11] — 2026-11-26
+
+### Added
+
+- **本机原生 Homebrew PostgreSQL 16 (`:5432`) 免 Docker 双模式切换**：
+  - `Makefile` 新增 `mode-native`、`mode-docker`、`mode-status` 目标，`make dev` 默认自动拉起本机原生 PostgreSQL (`:5432`)，零 Docker 内存开销。
+  - `src/team_memory/storage/database.py` 新增 `_normalize_local_pg_port()`：当 `:5433`（Docker PG）未开启而 `:5432`（原生 PG）在线时自动路由，无缝切换。
+  - `src/team_memory/bootstrap.py` 支持 `.env` `override=True` 与 `TEAM_MEMORY_DATABASE__URL` 环境变量优先解析。
+  - `alembic.ini`、`config.development.yaml`、`scripts/healthcheck.sh` 默认对齐原生 PG `:5432` 并兼容 Homebrew `pg_isready`。
+
+### Changed
+
+- 更新 `evals/history.jsonl` 最新 Golden Eval 评测记录、`.cursor/hooks.json` Python 路径与 `uv.lock`。
+
 ## [0.3.10] — 2026-11-26
 
 ### Added

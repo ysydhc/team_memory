@@ -26,10 +26,30 @@ _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
+def _normalize_local_pg_port(database_url: str) -> str:
+    """Auto-fallback localhost:5433 <-> localhost:5432 when switching between Docker and Native PG."""
+    import socket
+
+    if "localhost:5433" not in database_url and "127.0.0.1:5433" not in database_url:
+        return database_url
+
+    def _is_open(port: int) -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.3)
+            return s.connect_ex(("127.0.0.1", port)) == 0
+
+    if not _is_open(5433) and _is_open(5432):
+        fallback = database_url.replace(":5433/", ":5432/")
+        logger.info("Port 5433 (Docker PG) closed; auto-routing to native PostgreSQL on :5432")
+        return fallback
+    return database_url
+
+
 def get_engine(database_url: str) -> AsyncEngine:
     """Create or return the async SQLAlchemy engine."""
     global _engine
     if _engine is None:
+        database_url = _normalize_local_pg_port(database_url)
         kwargs: dict = {"echo": False}
         if "sqlite" not in database_url:
             kwargs["pool_size"] = 5

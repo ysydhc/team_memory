@@ -31,7 +31,7 @@ ALEMBIC ?= $(shell \
 	else echo alembic; fi)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev web mcp mcp-verify test test-acceptance lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-reload daemon-install daemon-uninstall verify-pipeline diagnose-pipeline e2e-verify logs watchdog-start test-regression watchdog-stop watchdog-status stats entity-backfill entity-dedup embedding-backfill detect-contradictions search-eval eval golden-set ops-digest solution-backfill faithfulness-eval test-llm janitor-run
+.PHONY: help setup dev mode-native mode-docker mode-status web mcp mcp-verify test test-acceptance lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-reload daemon-install daemon-uninstall verify-pipeline diagnose-pipeline e2e-verify logs watchdog-start test-regression watchdog-stop watchdog-status stats entity-backfill entity-dedup embedding-backfill detect-contradictions search-eval eval golden-set ops-digest solution-backfill faithfulness-eval test-llm janitor-run
 
 sync-agent-artifacts: ## 由 agents/shared + agents/manifest.yaml 生成 .claude/.cursor 下 agents、prompts、skills
 	python scripts/sync_agent_artifacts.py
@@ -77,11 +77,28 @@ setup:          ## 首次安装：启动 Docker + 安装依赖 + 初始化数据
 	@echo "  If Ollama is unavailable, set embedding.provider to openai in config for embedding."
 	@echo ""
 
-dev:            ## 启动全部服务（Docker 基础设施 + 本机 Web）；自动释放 9111 后启动
+dev:            ## 启动全部服务（默认使用本机原生 PG :5432 免 Docker；若 TEAM_MEMORY_DB_MODE=docker 则拉起容器）
 	@$(MAKE) -s release-9111 || true
-	docker compose up -d postgres redis
-	@if ! lsof -i :11434 >/dev/null 2>&1; then docker compose --profile ollama up -d 2>/dev/null || true; fi
+	@DB_MODE=$$(grep -E '^TEAM_MEMORY_DB_MODE=' .env 2>/dev/null | cut -d= -f2 | tr -d '"' | tr -d "'" || echo "native"); \
+	if [ "$$DB_MODE" = "docker" ]; then \
+	  echo "  🐳 [mode=docker] Starting Docker postgres (:5433)..."; \
+	  docker compose up -d postgres; \
+	else \
+	  echo "  ⚡ [mode=native] Using native Homebrew PostgreSQL 16 (:5432, zero Docker overhead)..."; \
+	  /opt/homebrew/opt/postgresql@16/bin/pg_isready -h 127.0.0.1 -p 5432 -q 2>/dev/null || brew services start postgresql@16; \
+	fi
 	uv run python -m team_memory.web.app
+
+mode-native:    ## 切换至本机原生 PostgreSQL (:5432) 免 Docker 模式（并停止 Docker 容器释放内存）
+	@PYTHONPATH=src $(PYTHON_BIN) -m team_memory.cli server up --mode native
+	@$(MAKE) -s web-restart
+
+mode-docker:    ## 切换至 Docker 容器 PostgreSQL (:5433) 模式
+	@PYTHONPATH=src $(PYTHON_BIN) -m team_memory.cli server up --mode docker
+	@$(MAKE) -s web-restart
+
+mode-status:    ## 查看当前数据库部署模式 (native :5432 vs docker :5433)
+	@PYTHONPATH=src $(PYTHON_BIN) -c "from team_memory.config import load_settings; import os; s=load_settings(); print('TEAM_MEMORY_DB_MODE =', os.environ.get('TEAM_MEMORY_DB_MODE', 'native')); print('database.url        =', s.database.url)"
 
 web:            ## 仅启动 Web 管理界面（默认端口 9111）；自动释放 9111 后启动
 	@$(MAKE) -s release-9111 || true
