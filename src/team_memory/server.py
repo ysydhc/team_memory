@@ -124,9 +124,15 @@ async def _get_current_user() -> str:
             if mcp_user:
                 mcp_tenant_id = getattr(request.state, "mcp_tenant_id", None)
                 if mcp_tenant_id:
-                    from team_memory.storage.tenant_context import set_current_tenant_id
+                    import uuid as _uuid
 
-                    set_current_tenant_id(mcp_tenant_id)
+                    if isinstance(mcp_tenant_id, (str, _uuid.UUID)):
+                        try:
+                            from team_memory.storage.tenant_context import set_current_tenant_id
+
+                            set_current_tenant_id(mcp_tenant_id)
+                        except ValueError:
+                            pass
                 return mcp_user
     except Exception:
         pass

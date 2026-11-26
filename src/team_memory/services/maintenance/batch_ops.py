@@ -440,11 +440,11 @@ class BatchOpsService:
             )
             for r in arc_result.mappings().all():
                 parts = []
-                if r["title"]:
+                if r.get("title"):
                     parts.append(f"标题: {r['title']}")
-                if r["overview"]:
+                if r.get("overview"):
                     parts.append(f"概述: {r['overview'][:200]}")
-                if r["solution_doc"]:
+                if r.get("solution_doc"):
                     parts.append(f"内容: {r['solution_doc'][:300]}")
                 contexts.append(" | ".join(parts))
 

@@ -86,7 +86,10 @@ def _init_from_context(ctx: AppContext) -> None:
 
 def _get_db_url() -> str:
     if _settings is not None:
-        env_url = os.environ.get("TEAM_MEMORY_DB_URL")
+        env_url = (
+            os.environ.get("TEAM_MEMORY_DATABASE__URL")
+            or os.environ.get("TEAM_MEMORY_DB_URL")
+        )
         return env_url or _settings.database.url
     return get_context().db_url
 
@@ -125,6 +128,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Registered aliases: %s → %s", info["aliases"], info["name"])
     except Exception as e:
         logger.warning("Failed to register project aliases: %s", e)
+
+    # Preload per-tenant project_aliases from tenants.settings_json
+    try:
+        from sqlalchemy import select as _sa_select
+
+        from team_memory.project_resolver import register_tenant_aliases
+        from team_memory.storage.database import get_session as _get_db_session
+        from team_memory.storage.models import Tenant as _TenantModel
+
+        async with _get_db_session(ctx.db_url, bypass_rls=True) as _t_sess:
+            _t_rows = (await _t_sess.execute(_sa_select(_TenantModel))).scalars().all()
+            for _t in _t_rows:
+                _t_aliases = (_t.settings_json or {}).get("project_aliases")
+                if isinstance(_t_aliases, dict) and _t_aliases:
+                    register_tenant_aliases(_t.id, _t_aliases)
+    except Exception as e:
+        logger.debug("Skipped preloading tenant project_aliases: %s", e)
 
     # Ensure default admin when db_api_key auth and no users exist
     if ctx.settings.auth.type == "db_api_key":
@@ -190,7 +210,7 @@ mcp_app = mcp.http_app(
 app = FastAPI(
     title="TeamMemory",
     description="Team Experience Database Management",
-    version="0.3.6",
+    version="0.3.8",
     lifespan=lifespan,
 )
 app.mount("/mcp", mcp_app)

@@ -33,6 +33,8 @@ def _uninstall_platform(
             _uninstall_hermes()
         elif platform == "antigravity":
             _uninstall_antigravity(scope=scope, project_dir=project_dir)
+        elif platform == "codex":
+            _uninstall_codex(scope=scope, project_dir=project_dir)
 
 
 def _uninstall_claude_code(scope: str = "default", project_dir: Path | None = None) -> None:
@@ -213,6 +215,74 @@ def _check_platform(
             _check_hermes(hook_dir / "hermes", scope=scope, project_dir=project_dir)
         elif platform == "antigravity":
             _check_antigravity(scope=scope, project_dir=project_dir)
+        elif platform == "codex":
+            _check_codex(scope=scope, project_dir=project_dir)
+
+
+def _uninstall_codex(scope: str = "default", project_dir: Path | None = None) -> None:
+    """Remove TM hooks from Codex CLI hooks.json / 从 Codex CLI 配置移除 TM hooks。"""
+    proj_dir = (project_dir or Path.cwd()).resolve()
+    eff_scope = _resolve_effective_scope("codex", scope)
+    hooks_path = (
+        (Path.home() / ".codex" / "hooks.json") if eff_scope == "global" else (proj_dir / ".codex" / "hooks.json")
+    )
+    if not hooks_path.exists():
+        print("[codex] ⚠️  No hooks.json found, nothing to uninstall")
+        return
+
+    try:
+        with open(hooks_path, encoding="utf-8") as f:
+            hooks_data = json.load(f)
+        hooks_section = hooks_data.get("hooks", {})
+        if not isinstance(hooks_section, dict):
+            print("[codex] ⚠️  Unexpected hooks format, skipping")
+            return
+
+        removed = 0
+        for event in list(hooks_section.keys()):
+            entries = hooks_section[event]
+            if not isinstance(entries, list):
+                continue
+            new_entries = [e for e in entries if "team_memory" not in json.dumps(e)]
+            removed += len(entries) - len(new_entries)
+            if new_entries:
+                hooks_section[event] = new_entries
+            else:
+                del hooks_section[event]
+
+        if removed == 0:
+            print("[codex] ⚠️  No TM hooks found to remove")
+            return
+
+        with open(hooks_path, "w", encoding="utf-8") as f:
+            json.dump(hooks_data, f, indent=2)
+        print(f"[codex] ✅ Removed TM hooks from {hooks_path}")
+    except Exception as e:
+        print(f"[codex] ❌ Error: {e}")
+
+
+def _check_codex(scope: str = "default", project_dir: Path | None = None) -> None:
+    """Check Codex CLI hooks in hooks.json / 检查 Codex CLI 全部 hook。"""
+    proj_dir = (project_dir or Path.cwd()).resolve()
+    eff_scope = _resolve_effective_scope("codex", scope)
+    hooks_file = (
+        (Path.home() / ".codex" / "hooks.json") if eff_scope == "global" else (proj_dir / ".codex" / "hooks.json")
+    )
+    if not hooks_file.exists():
+        print(f"[codex] ❌ {hooks_file} not found")
+        return
+
+    try:
+        data = json.loads(hooks_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[codex] ❌ parse error: {e}")
+        return
+
+    hooks = data.get("hooks", {})
+    for event in ("SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"):
+        entries = hooks.get(event, [])
+        ok = any("team_memory.hooks.platforms.codex" in json.dumps(e) for e in entries)
+        print(f"[codex] {'✅' if ok else '❌'} {event}")
 
 
 def _check_antigravity(scope: str = "default", project_dir: Path | None = None) -> None:

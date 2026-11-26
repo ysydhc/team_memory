@@ -21,9 +21,10 @@ def normalize_project_name(project: str | None) -> str:
         return ""
     try:
         from team_memory.project_resolver import canonicalize_project_name, resolve_alias
+        from team_memory.storage.tenant_context import get_active_tenant_id
 
         canonical = canonicalize_project_name(project)
-        return resolve_alias(canonical)
+        return resolve_alias(canonical, tenant_id=get_active_tenant_id())
     except ImportError:
         # Fallback when project_resolver is unavailable: minimal canonicalization.
         value = project.strip().lower().replace("-", "_")

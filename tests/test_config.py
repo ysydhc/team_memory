@@ -71,7 +71,9 @@ def test_auth_config_has_default_admin_password_and_session_secret():
 class TestLoadSettings:
     """Test loading settings from YAML file."""
 
-    def test_load_from_yaml(self, tmp_path: Path):
+    def test_load_from_yaml(self, tmp_path: Path, monkeypatch):
+        monkeypatch.delenv("TEAM_MEMORY_DATABASE__URL", raising=False)
+        monkeypatch.setattr("team_memory.config.settings._load_dotenv_if_available", lambda: None)
         config = {
             "database": {"url": "postgresql+asyncpg://test:test@localhost/test_db"},
             "embedding": {"provider": "local"},

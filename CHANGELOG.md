@@ -6,6 +6,24 @@
 
 ## [Unreleased]
 
+## [0.3.8] — 2026-11-26
+
+### Added
+
+- **多租户项目别名隔离与去硬编码**：
+  - 清理 `project_resolver.py` 中 `_BUILTIN_SHORTHAND_ALIASES` 的个人/业务项目硬编码，仅保留 TeamMemory 自身必要别名。
+  - 支持从租户级配置 `tenants.settings_json["project_aliases"]`（服务端启动预加载 + `PUT /api/v1/tenants/current` 实时刷新）与客户端 `~/.config/tm/config.toml` `[project_aliases]`（`ClientConfig` 完整支持）加载别名，并按 `tenant_id` 严格隔离。
+- **OpenAI Codex CLI 平台采集与接入**：
+  - 新增 `hooks/core/transcript.py` 的 `parse_codex_transcript` / `resolve_codex_transcript_path` 解析 `~/.codex/sessions/**/rollout-*.jsonl`。
+  - 新增 `hooks/platforms/codex/`（`session_start`、`user_prompt_submit`、`post_tool_use`、`stop`）与 `daemon/observe/codex_transcript_watcher.py`（支持 `tm-cli import --source codex`）。
+  - 补齐 `tm-cli setup/check/uninstall --platform codex`（幂等读写 `~/.codex/hooks.json` 并保留第三方 Hook）与 Web v2「团队与接入」页 Codex CLI MCP 配置模板。
+
+### Fixed
+
+- 修复 `config/settings.py` 与 `client_config.py` 在受限目录下读取 `~/.config/tm/` 抛 `PermissionError` 以及 `.env` 错误使用 `override=True` 覆盖环境变量的问题。
+- 修复 SQLite 测试下 PostgreSQL `UUID` 列因 NUMERIC 亲和力将纯数字 `DEFAULT_TENANT_ID` 转为 `float` 的问题（`@compiles(UUID, "sqlite") -> CHAR(32)`）。
+- 修复 `server.py` HTTP MCP 上下文解析非 UUID `mcp_tenant_id` 导致阻断用户识别的问题，并补齐批量上下文加载、检索指标与重试单测。
+
 ## [0.3.0] — 2026-11-25
 
 ### Added

@@ -219,16 +219,16 @@ def register_core_subparsers(sub: argparse._SubParsersAction) -> None:
     p_setup.set_defaults(func=cmd_setup)
 
     # ── import ──────────────────────────────────────────────────
-    p_import = sub.add_parser("import", help="Import historical sessions (ChatGPT / Antigravity)")
+    p_import = sub.add_parser("import", help="Import historical sessions (ChatGPT / Antigravity / Codex)")
     p_import.add_argument(
         "--source",
         required=True,
-        choices=["chatgpt", "antigravity"],
+        choices=["chatgpt", "antigravity", "codex"],
         help="Session source platform",
     )
     p_import.add_argument(
         "--file",
-        help="Path to conversations.json/.zip (ChatGPT) or brain dir (Antigravity)",
+        help="Path to conversations.json/.zip (ChatGPT), brain dir (Antigravity), or sessions dir/file (Codex)",
     )
     p_import.add_argument(
         "--project",

@@ -623,7 +623,7 @@ class TestCallLLM:
 
     @pytest.mark.asyncio
     async def test_litellm_all_retries_exhausted(self):
-        cfg = _make_config(provider="litellm", max_retries=1)
+        cfg = _make_config(provider="litellm", max_retries=1, fallback_model="")
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
         with patch(
@@ -707,7 +707,7 @@ class TestCallLLM:
 
     @pytest.mark.asyncio
     async def test_zero_retries_single_attempt(self):
-        cfg = _make_config(provider="litellm", max_retries=0)
+        cfg = _make_config(provider="litellm", max_retries=0, fallback_model="")
         worker = RefinementWorker(cfg, MagicMock(), MagicMock())
 
         with patch(

@@ -182,6 +182,11 @@ async def create_tenant(
         session.add(member)
         await session.flush()
 
+        if isinstance((tenant.settings_json or {}).get("project_aliases"), dict):
+            from team_memory.project_resolver import register_tenant_aliases
+
+            register_tenant_aliases(tenant.id, tenant.settings_json["project_aliases"])
+
         return {
             "tenant": {
                 **tenant.to_dict(),
@@ -227,6 +232,10 @@ async def update_current_tenant(
             merged = dict(tenant.settings_json or {})
             merged.update(req.settings_json)
             tenant.settings_json = merged
+            if "project_aliases" in req.settings_json:
+                from team_memory.project_resolver import register_tenant_aliases
+
+                register_tenant_aliases(tenant.id, merged.get("project_aliases"))
         await session.flush()
         return {"tenant": {**tenant.to_dict(), "role": "admin"}}
 

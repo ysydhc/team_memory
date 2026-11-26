@@ -18,7 +18,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { cn, copyToClipboard, formatRelativeTime } from "@/lib/utils";
 import { Badge, Button, Card, Input } from "@/components/ui/primitives";
 
-type ClientPlatform = "antigravity" | "claude" | "cursor" | "cli";
+type ClientPlatform = "antigravity" | "claude" | "cursor" | "codex" | "cli";
 
 export function AccessPage() {
   const { user, isAdmin, currentTenant } = useAuth();
@@ -98,6 +98,7 @@ export function AccessPage() {
       null,
       2,
     ),
+    codex: `# ~/.codex/config.toml\n[mcp_servers.team_memory]\nurl = "${serverOrigin}/mcp/mcp"\nhttp_headers = { Authorization = "Bearer ${displayKey}" }\n\n# 可选：一键配置 Codex CLI Hooks + MCP（本地 Daemon 采集）\n# tm-cli setup --platform codex`,
     cli: `tm-cli config init --url ${serverOrigin} --api-key "${displayKey}"\ntm-cli status`,
   };
 
@@ -213,6 +214,7 @@ export function AccessPage() {
     { id: "antigravity", label: "Antigravity" },
     { id: "claude", label: "Claude Code" },
     { id: "cursor", label: "Cursor" },
+    { id: "codex", label: "Codex CLI" },
     { id: "cli", label: "CLI (tm-cli)" },
   ];
 

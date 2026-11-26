@@ -18,9 +18,16 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, UUID
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from team_memory.storage.tenant_context import get_current_tenant_id
+
+
+@compiles(UUID, "sqlite")
+def _compile_pg_uuid_for_sqlite(type_: UUID, compiler: object, **kw: object) -> str:
+    """Compile PostgreSQL UUID as CHAR(32) on SQLite to avoid NUMERIC affinity coercing all-digit UUIDs to float."""
+    return "CHAR(32)"
 
 
 def _utcnow() -> datetime:

@@ -334,16 +334,262 @@ def read_last_user_from_antigravity_transcript(transcript_path: str) -> str:
     return str(parsed.get("last_user_input") or "")
 
 
+# ---------------------------------------------------------------------------
+# OpenAI Codex CLI rollout JSONL parser (~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl)
+# ---------------------------------------------------------------------------
+
+
+def _extract_codex_message_text(content: Any) -> str:
+    """Extract plain text from Codex ``response_item`` message content."""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str) and item.strip():
+                parts.append(item.strip())
+            elif isinstance(item, dict):
+                t = item.get("text") or item.get("output_text") or item.get("input_text") or ""
+                if isinstance(t, str) and t.strip():
+                    parts.append(t.strip())
+        return "\n".join(parts).strip()
+    return ""
+
+
+def _extract_codex_tool_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a Codex ``function_call`` / ``custom_tool_call`` into a compact observation."""
+    name = str(payload.get("name") or "unknown")
+    raw_args = payload.get("arguments")
+    if raw_args is None:
+        raw_args = payload.get("input")
+
+    args: dict[str, Any] = {}
+    if isinstance(raw_args, dict):
+        args = raw_args
+    elif isinstance(raw_args, str) and raw_args.strip():
+        try:
+            loaded = json.loads(raw_args)
+            if isinstance(loaded, dict):
+                args = loaded
+            else:
+                args = {"raw": raw_args[:300]}
+        except Exception:
+            args = {"raw": raw_args[:300]}
+
+    cmd = ""
+    raw_cmd = args.get("cmd") or args.get("command") or args.get("CommandLine")
+    if isinstance(raw_cmd, list):
+        cmd = " ".join(str(x) for x in raw_cmd)
+    elif isinstance(raw_cmd, str):
+        cmd = raw_cmd
+    elif isinstance(args.get("raw"), str) and name in ("shell", "shell_command", "exec_command", "apply_patch"):
+        cmd = args["raw"]
+
+    target_files: list[str] = []
+    for key in (
+        "path",
+        "file_path",
+        "target_file",
+        "workdir",
+        "cwd",
+        "directory",
+    ):
+        val = args.get(key)
+        if isinstance(val, str) and val.strip():
+            target_files.append(val.strip())
+
+    return {
+        "tool": name,
+        "call_id": str(payload.get("call_id") or ""),
+        "cmd": cmd[:300],
+        "target_files": target_files,
+        "exit_code": None,
+    }
+
+
+def resolve_codex_transcript_path(
+    transcript_path: str = "",
+    session_id: str = "",
+    codex_home: str | Path | None = None,
+) -> str:
+    """Return existing Codex rollout transcript path or locate by session_id under ~/.codex/sessions/."""
+    if transcript_path and os.path.isfile(transcript_path):
+        return transcript_path
+    sid = (session_id or "").strip()
+    if sid.startswith("codex-"):
+        sid = sid[6:]
+    if not sid:
+        return transcript_path
+
+    base = Path(codex_home).expanduser() if codex_home else (Path.home() / ".codex")
+    for subdir in ("sessions", "archived_sessions"):
+        root = base / subdir
+        if not root.is_dir():
+            continue
+        matches = sorted(root.rglob(f"*{sid}*.jsonl"))
+        if matches:
+            return str(matches[-1])
+    return transcript_path
+
+
+def parse_codex_transcript(transcript_path: str, since_ordinal: int = -1) -> dict[str, Any]:
+    """Parse an OpenAI Codex CLI ``rollout-*.jsonl`` transcript into normalized turns & tool observations.
+
+    Supports Codex CLI rollout event types:
+      - ``session_meta``: session_id, cwd, runtime_workspace_roots, git
+      - ``turn_context``: cwd, workspace_roots
+      - ``response_item``:
+          - ``message`` (role=user|assistant)
+          - ``function_call`` / ``custom_tool_call`` + ``*_output``
+      - ``event_msg``: ``task_complete`` (``last_agent_message`` fallback)
+    """
+    empty_result: dict[str, Any] = {
+        "session_id": "",
+        "workspace_roots": [],
+        "turns": [],
+        "last_user_input": "",
+        "last_assistant_response": "",
+        "recent_tools": [],
+        "max_ordinal": since_ordinal,
+    }
+    if not transcript_path or not os.path.isfile(transcript_path):
+        return empty_result
+
+    session_id = ""
+    workspace_roots: list[str] = []
+    turns: list[dict[str, Any]] = []
+    recent_tools: list[dict[str, Any]] = []
+    tools_by_call_id: dict[str, dict[str, Any]] = {}
+    pending_turn_tools: list[dict[str, Any]] = []
+    last_user_input = ""
+    last_assistant = ""
+    last_task_complete_msg = ""
+    max_ordinal = since_ordinal
+
+    def _add_ws(ws: Any) -> None:
+        if isinstance(ws, str) and ws.strip() and ws.strip() not in workspace_roots:
+            workspace_roots.append(ws.strip())
+        elif isinstance(ws, list):
+            for item in ws:
+                if isinstance(item, str) and item.strip() and item.strip() not in workspace_roots:
+                    workspace_roots.append(item.strip())
+
+    try:
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            for line_idx, raw_line in enumerate(f):
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except Exception:
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+
+                ordinal = entry.get("ordinal")
+                if not isinstance(ordinal, int):
+                    ordinal = line_idx
+                if ordinal > max_ordinal:
+                    max_ordinal = ordinal
+
+                ev_type = entry.get("type", "")
+                payload = entry.get("payload")
+                if not isinstance(payload, dict):
+                    payload = {}
+
+                if ev_type == "session_meta":
+                    session_id = str(payload.get("session_id") or payload.get("id") or session_id)
+                    _add_ws(payload.get("cwd"))
+                    _add_ws(payload.get("runtime_workspace_roots"))
+                    continue
+
+                if ev_type == "turn_context":
+                    _add_ws(payload.get("cwd"))
+                    _add_ws(payload.get("workspace_roots"))
+                    continue
+
+                if ordinal <= since_ordinal:
+                    continue
+
+                if ev_type == "response_item":
+                    sub_type = payload.get("type", "")
+                    if sub_type == "message":
+                        role = str(payload.get("role") or "").lower()
+                        text = _extract_codex_message_text(payload.get("content"))
+                        if role == "user" and text:
+                            # Skip Codex injected system/developer boilerplate wrappers if empty after strip
+                            last_user_input = text
+                            turns.append({"ordinal": ordinal, "role": "user", "content": text})
+                        elif role == "assistant" and text:
+                            last_assistant = text
+                            turn_dict: dict[str, Any] = {
+                                "ordinal": ordinal,
+                                "role": "assistant",
+                                "content": text,
+                            }
+                            if pending_turn_tools:
+                                turn_dict["tool_calls"] = list(pending_turn_tools)
+                                pending_turn_tools.clear()
+                            turns.append(turn_dict)
+                    elif sub_type in ("function_call", "custom_tool_call"):
+                        summary = _extract_codex_tool_summary(payload)
+                        call_id = summary.get("call_id", "")
+                        if call_id:
+                            tools_by_call_id[call_id] = summary
+                        recent_tools.append(summary)
+                        pending_turn_tools.append(summary)
+                    elif sub_type in ("function_call_output", "custom_tool_call_output"):
+                        call_id = str(payload.get("call_id") or "")
+                        out_raw = str(payload.get("output") or "")
+                        if call_id and call_id in tools_by_call_id:
+                            m = re.search(r"Process exited with code (\d+)", out_raw)
+                            if m:
+                                tools_by_call_id[call_id]["exit_code"] = int(m.group(1))
+                            elif "exit code: 0" in out_raw.lower():
+                                tools_by_call_id[call_id]["exit_code"] = 0
+                elif ev_type == "event_msg":
+                    if payload.get("type") == "task_complete":
+                        msg = str(payload.get("last_agent_message") or "").strip()
+                        if msg:
+                            last_task_complete_msg = msg
+    except Exception:
+        return empty_result
+
+    if not last_assistant and last_task_complete_msg:
+        last_assistant = last_task_complete_msg
+        turn_dict = {"ordinal": max_ordinal, "role": "assistant", "content": last_task_complete_msg}
+        if pending_turn_tools:
+            turn_dict["tool_calls"] = list(pending_turn_tools)
+            pending_turn_tools.clear()
+        turns.append(turn_dict)
+    elif pending_turn_tools and turns and turns[-1].get("role") == "assistant":
+        turns[-1].setdefault("tool_calls", []).extend(pending_turn_tools)
+        pending_turn_tools.clear()
+
+    return {
+        "session_id": session_id,
+        "workspace_roots": workspace_roots,
+        "turns": turns,
+        "last_user_input": last_user_input,
+        "last_assistant_response": last_assistant,
+        "recent_tools": recent_tools,
+        "max_ordinal": max_ordinal,
+    }
+
+
 def read_last_assistant_from_transcript(transcript_path: str) -> str:
     """Read the last assistant message from a JSONL transcript file.
 
-    Supports both Cursor/Claude role-based JSONL and Antigravity step-based transcript.jsonl.
+    Supports Cursor/Claude role-based JSONL, Antigravity step-based transcript.jsonl,
+    and OpenAI Codex CLI rollout-*.jsonl.
     """
     if not transcript_path or not os.path.isfile(transcript_path):
         return ""
     try:
         last_assistant = ""
         has_agy_steps = False
+        has_codex_events = False
         with open(transcript_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
@@ -361,10 +607,14 @@ def read_last_assistant_from_transcript(transcript_path: str) -> str:
                         last_assistant = content_parts
                 elif entry.get("type") in ("USER_INPUT", "PLANNER_RESPONSE"):
                     has_agy_steps = True
+                elif entry.get("type") in ("session_meta", "response_item", "event_msg"):
+                    has_codex_events = True
         if last_assistant:
             return last_assistant
         if has_agy_steps:
             return str(parse_antigravity_transcript(transcript_path).get("last_assistant_response") or "")
+        if has_codex_events:
+            return str(parse_codex_transcript(transcript_path).get("last_assistant_response") or "")
         return ""
     except Exception:
         return ""

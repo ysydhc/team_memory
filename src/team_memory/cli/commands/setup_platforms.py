@@ -41,6 +41,8 @@ def _setup_platform(
             _setup_hermes(cfg, venv_python, scope=scope, project_dir=project_dir)
         elif platform == "antigravity":
             _setup_antigravity(cfg, venv_python, scope=scope, project_dir=project_dir)
+        elif platform == "codex":
+            _setup_codex(cfg, venv_python, scope=scope, project_dir=project_dir)
 
 
 def _setup_claude_code(
@@ -294,3 +296,57 @@ def _setup_antigravity(
     with open(hooks_path, "w") as f:
         json.dump(hooks_data, f, indent=2)
     print(f"[antigravity] ✅ 4 hooks written to {hooks_path}")
+
+
+def _setup_codex(
+    cfg: Any,
+    venv_python: str,
+    scope: str = "default",
+    project_dir: Path | None = None,
+) -> None:
+    """Configure OpenAI Codex CLI hooks in ~/.codex/hooks.json (global) or .codex/hooks.json (project)."""
+    proj_dir = (project_dir or Path.cwd()).resolve()
+    eff_scope = _resolve_effective_scope("codex", scope)
+    hooks_path = (
+        (Path.home() / ".codex" / "hooks.json") if eff_scope == "global" else (proj_dir / ".codex" / "hooks.json")
+    )
+    hooks_data: dict[str, Any] = {}
+    if hooks_path.exists():
+        try:
+            with open(hooks_path, encoding="utf-8") as f:
+                hooks_data = json.load(f)
+        except Exception:
+            hooks_data = {}
+
+    hooks_section = hooks_data.setdefault("hooks", {})
+    if not isinstance(hooks_section, dict):
+        hooks_section = {}
+        hooks_data["hooks"] = hooks_section
+
+    codex_hooks: list[tuple[str, str, str | None]] = [
+        ("SessionStart", "team_memory.hooks.platforms.codex.session_start", None),
+        ("UserPromptSubmit", "team_memory.hooks.platforms.codex.user_prompt_submit", None),
+        ("PostToolUse", "team_memory.hooks.platforms.codex.post_tool_use", "*"),
+        ("Stop", "team_memory.hooks.platforms.codex.stop", None),
+    ]
+    for event, module_path, matcher in codex_hooks:
+        existing = hooks_section.get(event, [])
+        if not isinstance(existing, list):
+            existing = []
+        # Remove previous TeamMemory hooks while preserving user/third-party hooks
+        existing = [e for e in existing if "team_memory" not in json.dumps(e)]
+        handler = {
+            "type": "command",
+            "command": f"{venv_python} -m {module_path}",
+            "timeout": 10,
+        }
+        entry: dict[str, Any] = {"hooks": [handler]}
+        if matcher is not None:
+            entry["matcher"] = matcher
+        existing.append(entry)
+        hooks_section[event] = existing
+
+    hooks_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(hooks_path, "w", encoding="utf-8") as f:
+        json.dump(hooks_data, f, indent=2)
+    print(f"[codex] ✅ 4 hooks written to {hooks_path}")

@@ -30,23 +30,149 @@ logger = logging.getLogger("team_memory.project_resolver")
 # Global alias registry (populated by .tm.toml at server startup)
 # ---------------------------------------------------------------------------
 
-# alias_name → canonical_name
+# alias_name → canonical_name (global, populated by .tm.toml / config.toml)
 _alias_registry: dict[str, str] = {}
 _aliases = _alias_registry
 
+# Per-tenant alias registries for strict multi-tenant isolation:
+#   tenant_id_str → {alias_lower_or_raw: canonical_name}
+_tenant_alias_registry: dict[str, dict[str, str]] = {}
+#   tenant_id_str → {canonical_name: [alias1, alias2, ...]}
+_tenant_shorthand_aliases: dict[str, dict[str, list[str]]] = {}
+
+# Client-local [project_aliases] loaded lazily from ~/.config/tm/config.toml
+_config_shorthand_aliases: dict[str, list[str]] | None = None
+_config_alias_map: dict[str, str] | None = None
+
+# Only TeamMemory's own self-aliases remain built-in; business/domain project
+# aliases belong in tenant settings_json["project_aliases"], ~/.config/tm/config.toml
+# [project_aliases], or per-repo .tm.toml.
 _BUILTIN_SHORTHAND_ALIASES: dict[str, list[str]] = {
     "team_doc": ["tm", "team_memory", "team-memory", "team_doc", "tm-cli", "tm-daemon"],
     "team_memory": ["tm", "team_memory", "team-memory", "team_doc", "tm-cli", "tm-daemon"],
-    "phone_pilot": ["pp", "phone_pilot", "phone-pilot"],
-    "adx-sdk-android": ["adx-sdk-android", "adx_sdk_android", "adx_android"],
-    "adx-sdk-ios": ["adx-sdk-ios", "adx_sdk_ios", "adx_ios"],
-    "inapp-dsp": ["inapp-dsp", "inapp_dsp"],
-    "adx-neo": ["adx-neo", "adx_neo"],
-    "inapp-adx": ["inapp-adx", "inapp_adx"],
-    "inapp-jump": ["inapp-jump", "inapp_jump"],
-    "agent-common": ["agent-common", "agent_common"],
-    "inapp-game-dollshooter": ["dollshooter", "doll_shooter"],
 }
+
+
+def _normalize_aliases_spec(raw: Any) -> dict[str, list[str]]:
+    """Normalize a project_aliases mapping into ``{canonical: [alias, ...]}``.
+
+    Accepts either:
+      - ``{"adx-sdk-android": ["adx_android", "adx-sdk-android"]}`` (canonical -> list[str])
+      - ``{"adx_android": "adx-sdk-android"}`` (alias -> canonical str)
+    """
+    if not isinstance(raw, dict):
+        return {}
+    result: dict[str, list[str]] = {}
+    for key, val in raw.items():
+        k = str(key).strip()
+        if not k:
+            continue
+        if isinstance(val, list):
+            cleaned = [str(a).strip() for a in val if str(a).strip()]
+            if cleaned:
+                result.setdefault(k, []).extend(cleaned)
+        elif isinstance(val, str):
+            target = val.strip()
+            if target:
+                result.setdefault(target, []).append(k)
+    # Deduplicate preserving order
+    return {canon: list(dict.fromkeys(aliases)) for canon, aliases in result.items()}
+
+
+def _build_flat_alias_map(shorthand: dict[str, list[str]]) -> dict[str, str]:
+    """Convert ``{canonical: [alias, ...]}`` into ``{alias_or_norm: canonical_norm}``."""
+    flat: dict[str, str] = {}
+    for canonical, aliases in shorthand.items():
+        canon_norm = canonicalize_project_name(canonical)
+        if not canon_norm:
+            continue
+        for alias in aliases:
+            a_raw = alias.strip()
+            a_norm = canonicalize_project_name(a_raw)
+            if a_raw:
+                flat[a_raw] = canon_norm
+                flat[a_raw.lower()] = canon_norm
+            if a_norm:
+                flat[a_norm] = canon_norm
+    return flat
+
+
+def _ensure_config_aliases_loaded() -> None:
+    """Lazily load ``[project_aliases]`` from ``~/.config/tm/config.toml``."""
+    global _config_shorthand_aliases, _config_alias_map
+    if _config_shorthand_aliases is not None and _config_alias_map is not None:
+        return
+    cfg = load_client_config()
+    parsed = _normalize_aliases_spec(cfg.get("project_aliases"))
+    _config_shorthand_aliases = parsed
+    _config_alias_map = _build_flat_alias_map(parsed)
+
+
+def reload_config_aliases(config_path: str | Path | None = None) -> dict[str, list[str]]:
+    """Reload local ``[project_aliases]`` from config.toml (or an explicit path)."""
+    global _config_shorthand_aliases, _config_alias_map
+    if config_path is not None:
+        path = Path(config_path)
+        data: dict[str, Any] = {}
+        if path.is_file():
+            try:
+                try:
+                    import tomllib
+                except ImportError:
+                    import tomli as tomllib  # type: ignore[no-redef]
+                with open(path, "rb") as f:
+                    data = tomllib.load(f)
+            except Exception as e:
+                logger.warning("Failed to parse %s: %s", path, e)
+        parsed = _normalize_aliases_spec(data.get("project_aliases"))
+    else:
+        cfg = load_client_config()
+        parsed = _normalize_aliases_spec(cfg.get("project_aliases"))
+    _config_shorthand_aliases = parsed
+    _config_alias_map = _build_flat_alias_map(parsed)
+    return dict(parsed)
+
+
+def register_tenant_aliases(tenant_id: Any, aliases_spec: dict[str, Any] | None) -> None:
+    """Register (replace) project aliases for a specific tenant.
+
+    Ensures strict tenant isolation: aliases registered for tenant A are never
+    visible when resolving for tenant B.
+    """
+    tid = str(tenant_id).strip()
+    if not tid:
+        return
+    normalized = _normalize_aliases_spec(aliases_spec or {})
+    if not normalized:
+        _tenant_shorthand_aliases.pop(tid, None)
+        _tenant_alias_registry.pop(tid, None)
+        return
+    _tenant_shorthand_aliases[tid] = normalized
+    _tenant_alias_registry[tid] = _build_flat_alias_map(normalized)
+
+
+def clear_tenant_aliases(tenant_id: Any | None = None) -> None:
+    """Clear cached aliases for one tenant, or all tenants when ``tenant_id`` is None."""
+    if tenant_id is None:
+        _tenant_shorthand_aliases.clear()
+        _tenant_alias_registry.clear()
+        return
+    tid = str(tenant_id).strip()
+    _tenant_shorthand_aliases.pop(tid, None)
+    _tenant_alias_registry.pop(tid, None)
+
+
+def get_effective_shorthand_aliases(tenant_id: Any | None = None) -> dict[str, list[str]]:
+    """Return merged shorthand aliases: built-in < local config.toml < tenant settings."""
+    _ensure_config_aliases_loaded()
+    merged: dict[str, list[str]] = {k: list(v) for k, v in _BUILTIN_SHORTHAND_ALIASES.items()}
+    for canonical, aliases in (_config_shorthand_aliases or {}).items():
+        merged[canonical] = list(dict.fromkeys([*merged.get(canonical, []), *aliases]))
+    if tenant_id is not None:
+        tid = str(tenant_id).strip()
+        for canonical, aliases in _tenant_shorthand_aliases.get(tid, {}).items():
+            merged[canonical] = list(dict.fromkeys([*merged.get(canonical, []), *aliases]))
+    return merged
 
 
 def register_aliases(canonical: str, aliases: list[str]) -> None:
@@ -55,13 +181,39 @@ def register_aliases(canonical: str, aliases: list[str]) -> None:
         _alias_registry[alias] = canonical
 
 
-def resolve_alias(project: str) -> str:
-    """Resolve a project name through the alias registry.
+def resolve_alias(project: str, tenant_id: Any | None = None) -> str:
+    """Resolve a project name through tenant > global (.tm.toml) > local config.toml registries.
 
-    If the name is a known alias, return the canonical name.
-    Otherwise return the name unchanged.
+    When ``tenant_id`` is provided, only that tenant's alias map is consulted
+    for tenant-scoped entries (never leaking aliases from other tenants).
     """
-    return _alias_registry.get(project, project)
+    if not project:
+        return project
+    proj_lower = project.lower()
+    proj_norm = canonicalize_project_name(project)
+
+    # 1. Tenant-scoped alias table (highest priority, strictly isolated)
+    if tenant_id is not None:
+        tid = str(tenant_id).strip()
+        tenant_map = _tenant_alias_registry.get(tid)
+        if tenant_map:
+            for key in (project, proj_lower, proj_norm):
+                if key in tenant_map:
+                    return tenant_map[key]
+
+    # 2. Global registry (.tm.toml via register_aliases)
+    for key in (project, proj_lower, proj_norm):
+        if key in _alias_registry:
+            return _alias_registry[key]
+
+    # 3. Client-local ~/.config/tm/config.toml [project_aliases]
+    _ensure_config_aliases_loaded()
+    if _config_alias_map:
+        for key in (project, proj_lower, proj_norm):
+            if key in _config_alias_map:
+                return _config_alias_map[key]
+
+    return project
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +383,7 @@ def resolve_multi_root_project(
     target_files: list[str] | None = None,
     sticky_project: str = "",
     config_project: str = "",
+    tenant_id: Any | None = None,
 ) -> tuple[str, bool]:
     """Resolve active project across multi-root workspaces.
 
@@ -276,6 +429,7 @@ def resolve_multi_root_project(
                 return (resolve_project(cwd=root), True)
 
         # 4b. Keyword/alias match for candidate roots
+        shorthand_aliases = get_effective_shorthand_aliases(tenant_id=tenant_id)
         for root in candidate_roots:
             proj = resolve_project(cwd=root)
             raw_basename = Path(root).name.lower()
@@ -291,7 +445,7 @@ def resolve_multi_root_project(
                 raw_basename,
             ]
             for lookup_key in (proj, basename, proj_hyphen, basename_hyphen, raw_basename):
-                keywords.extend(_BUILTIN_SHORTHAND_ALIASES.get(lookup_key, []))
+                keywords.extend(shorthand_aliases.get(lookup_key, []))
             keywords.extend(
                 alias
                 for alias, canonical in _aliases.items()
@@ -309,7 +463,7 @@ def resolve_multi_root_project(
                     return (proj, True)
 
         # 4c. Shorthand or registered alias match even when workspace_roots is empty / unmatched
-        for canonical, aliases in _BUILTIN_SHORTHAND_ALIASES.items():
+        for canonical, aliases in shorthand_aliases.items():
             for kw in [canonical, *aliases]:
                 if len(kw) >= 2 and _prompt_matches_keyword(prompt_lower, kw):
                     return (normalize_project_name(canonical), True)
@@ -361,13 +515,12 @@ _CLIENT_CONFIG_PATH = Path.home() / ".config" / "tm" / "config.toml"
 def load_client_config() -> dict[str, Any]:
     """Load client configuration from ~/.config/tm/config.toml.
 
-    Returns dict with sections: server, llm, conversation, wiki.
-    Returns empty dict if file does not exist.
+    Returns dict with sections: server, llm, conversation, wiki, project_aliases.
+    Returns empty dict if file does not exist or is unreadable.
     """
-    if not _CLIENT_CONFIG_PATH.is_file():
-        return {}
-
     try:
+        if not _CLIENT_CONFIG_PATH.is_file():
+            return {}
         try:
             import tomllib
         except ImportError:

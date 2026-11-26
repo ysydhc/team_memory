@@ -385,13 +385,13 @@ class TestLoadExperienceContexts:
         svc = _svc()
         result_ids = [{"id": str(uuid.uuid4())}]
         mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=_rows())
+        mock_session.execute = AsyncMock(side_effect=[_rows(), _rows()])
 
         with patch("team_memory.services.maintenance.batch_ops.get_session", _mock_session_cm(mock_session)):
             result = await svc.load_experience_contexts(result_ids)
 
         assert result == []
-        mock_session.execute.assert_awaited_once()
+        assert mock_session.execute.await_count == 2
 
     @pytest.mark.asyncio
     async def test_context_formatting_with_all_fields(self):
@@ -399,7 +399,7 @@ class TestLoadExperienceContexts:
         result_ids = [{"id": str(uuid.uuid4())}]
         row = {"title": "Test Title", "description": "Test Problem", "solution": "Test Solution"}
         mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=_rows(row))
+        mock_session.execute = AsyncMock(side_effect=[_rows(row), _rows()])
 
         with patch("team_memory.services.maintenance.batch_ops.get_session", _mock_session_cm(mock_session)):
             result = await svc.load_experience_contexts(result_ids)
@@ -415,7 +415,7 @@ class TestLoadExperienceContexts:
         result_ids = [{"id": str(uuid.uuid4())}]
         row = {"title": "Only Title", "description": None, "solution": None}
         mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=_rows(row))
+        mock_session.execute = AsyncMock(side_effect=[_rows(row), _rows()])
 
         with patch("team_memory.services.maintenance.batch_ops.get_session", _mock_session_cm(mock_session)):
             result = await svc.load_experience_contexts(result_ids)
@@ -429,7 +429,7 @@ class TestLoadExperienceContexts:
         long_problem = "x" * 300
         row = {"title": "T", "description": long_problem, "solution": None}
         mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=_rows(row))
+        mock_session.execute = AsyncMock(side_effect=[_rows(row), _rows()])
 
         with patch("team_memory.services.maintenance.batch_ops.get_session", _mock_session_cm(mock_session)):
             result = await svc.load_experience_contexts(result_ids)
@@ -445,7 +445,7 @@ class TestLoadExperienceContexts:
         long_solution = "y" * 400
         row = {"title": "T", "description": None, "solution": long_solution}
         mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=_rows(row))
+        mock_session.execute = AsyncMock(side_effect=[_rows(row), _rows()])
 
         with patch("team_memory.services.maintenance.batch_ops.get_session", _mock_session_cm(mock_session)):
             result = await svc.load_experience_contexts(result_ids)
@@ -460,7 +460,7 @@ class TestLoadExperienceContexts:
         result_ids = [{"id": str(uuid.uuid4())}]
         row = {"title": "", "description": "", "solution": ""}
         mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=_rows(row))
+        mock_session.execute = AsyncMock(side_effect=[_rows(row), _rows()])
 
         with patch("team_memory.services.maintenance.batch_ops.get_session", _mock_session_cm(mock_session)):
             result = await svc.load_experience_contexts(result_ids)
@@ -472,12 +472,12 @@ class TestLoadExperienceContexts:
         svc = _svc()
         ids = [{"id": str(uuid.uuid4())}, {"id": str(uuid.uuid4())}]
         mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=_rows())
+        mock_session.execute = AsyncMock(side_effect=[_rows(), _rows()])
 
         with patch("team_memory.services.maintenance.batch_ops.get_session", _mock_session_cm(mock_session)):
             await svc.load_experience_contexts(ids)
 
-        mock_session.execute.assert_awaited_once()
+        assert mock_session.execute.await_count == 2
 
     @pytest.mark.asyncio
     async def test_mixed_valid_invalid_uuids(self):
@@ -485,14 +485,14 @@ class TestLoadExperienceContexts:
         valid_id = str(uuid.uuid4())
         ids = [{"id": "bad"}, {"id": valid_id}, {"id": ""}]
         mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=_rows())
+        mock_session.execute = AsyncMock(side_effect=[_rows(), _rows()])
 
         with patch("team_memory.services.maintenance.batch_ops.get_session", _mock_session_cm(mock_session)):
             result = await svc.load_experience_contexts(ids)
 
-        # Only the one valid UUID survives; query still runs once.
+        # Only the one valid UUID survives; experiences + archives queries both run.
         assert result == []
-        mock_session.execute.assert_awaited_once()
+        assert mock_session.execute.await_count == 2
 
     @pytest.mark.asyncio
     async def test_multiple_rows_formatted(self):
@@ -503,7 +503,7 @@ class TestLoadExperienceContexts:
             {"title": "T2", "description": None, "solution": "S2"},
         ]
         mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=_rows(*rows))
+        mock_session.execute = AsyncMock(side_effect=[_rows(*rows), _rows()])
 
         with patch("team_memory.services.maintenance.batch_ops.get_session", _mock_session_cm(mock_session)):
             result = await svc.load_experience_contexts(ids)

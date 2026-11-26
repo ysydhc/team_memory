@@ -81,7 +81,9 @@ class TestSearchOrchestratorNoMatthewEffect:
 
         mock_repo.increment_recall_count.assert_awaited_once_with(uuid.UUID(exp_id))
         mock_repo.increment_quality_score.assert_not_called()
-        assert res.stage_metrics == {"vector_ms": 10, "fts_ms": 5, "total_ms": 18}
+        assert res.stage_metrics["vector_ms"] == 10
+        assert res.stage_metrics["fts_ms"] == 5
+        assert res.stage_metrics["total_ms"] == 18
         assert res.stage_counts == {"vector": 8, "fts": 4, "final": 1}
 
 

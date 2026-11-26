@@ -201,6 +201,37 @@ def cmd_import(args: argparse.Namespace) -> None:
 
         asyncio.run(_run_agy())
 
+    elif source == "codex":
+        from team_memory.daemon.observe.codex_transcript_watcher import import_codex_sessions
+
+        async def _run_codex() -> None:
+            from team_memory.daemon.buffers.conversation_buffer import ConversationBuffer
+
+            if dry_run:
+                res = await import_codex_sessions(
+                    file_path=getattr(args, "file", None),
+                    project=project,
+                    since_ts=since_ts,
+                    dry_run=True,
+                )
+            else:
+                async with ConversationBuffer(db_path=_get_queue_db_path()) as buf:
+                    res = await import_codex_sessions(
+                        buf=buf,
+                        file_path=getattr(args, "file", None),
+                        project=project,
+                        since_ts=since_ts,
+                        dry_run=False,
+                    )
+            print(
+                f"[codex {'dry-run' if dry_run else 'import'}] "
+                f"Discovered: {res['discovered']} | Imported: {res['imported']} | Skipped: {res['skipped']}"
+            )
+            for s in res.get("sessions", [])[:10]:
+                print(f"  - [{s['project']}] {s['session_id']} ({s['turns_count']} turns, {s['tools_count']} tools)")
+
+        asyncio.run(_run_codex())
+
 
 def cmd_archive(args: argparse.Namespace) -> None:
     """Create or update an archive via POST /api/v1/archives."""

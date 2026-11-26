@@ -91,9 +91,9 @@ def _resolve_project_with_meta(
     from pathlib import Path
 
     from team_memory.project_resolver import (
-        _BUILTIN_SHORTHAND_ALIASES,
         _aliases,
         _prompt_matches_keyword,
+        get_effective_shorthand_aliases,
         normalize_project_name,
     )
 
@@ -142,7 +142,7 @@ def _resolve_project_with_meta(
             bname = Path(r).name.lower()
             if bname:
                 proj_keywords.setdefault(proj, set()).add(bname)
-        for canonical_key, alias_list in _BUILTIN_SHORTHAND_ALIASES.items():
+        for canonical_key, alias_list in get_effective_shorthand_aliases().items():
             all_names = {
                 canonical_key.lower(),
                 normalize_project_name(canonical_key).lower(),

@@ -60,18 +60,21 @@ def _load_dotenv() -> None:
     # Also try CWD
     load_dotenv(override=False)
     # Also try user global ~/.config/tm/.env (for source-free installs)
-    global_env = _CONFIG_DIR / ".env"
-    if global_env.exists():
-        load_dotenv(global_env, override=False)
+    try:
+        global_env = _CONFIG_DIR / ".env"
+        if global_env.exists():
+            load_dotenv(global_env, override=False)
+    except OSError:
+        pass
 
 
 def _read_config_toml() -> dict[str, Any]:
     """Read ~/.config/tm/config.toml."""
     if tomllib is None:
         return {}
-    if not _CONFIG_FILE.exists():
-        return {}
     try:
+        if not _CONFIG_FILE.exists():
+            return {}
         with open(_CONFIG_FILE, "rb") as f:
             return tomllib.load(f)
     except Exception as e:
@@ -150,6 +153,7 @@ class ClientConfig:
     conversation: ConversationConfig = field(default_factory=ConversationConfig)
     wiki: WikiConfig = field(default_factory=WikiConfig)
     daemon: DaemonConfig = field(default_factory=DaemonConfig)
+    project_aliases: dict[str, list[str]] = field(default_factory=dict)
 
     @classmethod
     def load(cls) -> ClientConfig:
@@ -194,6 +198,22 @@ class ClientConfig:
         config.daemon.log_level = os.environ.get("TEAM_MEMORY_LOG_LEVEL") or dmn.get(
             "log_level", config.daemon.log_level
         )
+
+        # --- [project_aliases] ---
+        raw_aliases = toml_data.get("project_aliases", {})
+        if isinstance(raw_aliases, dict):
+            parsed_aliases: dict[str, list[str]] = {}
+            for k, v in raw_aliases.items():
+                key = str(k).strip()
+                if not key:
+                    continue
+                if isinstance(v, list):
+                    cleaned = [str(item).strip() for item in v if str(item).strip()]
+                    if cleaned:
+                        parsed_aliases[key] = cleaned
+                elif isinstance(v, str) and v.strip():
+                    parsed_aliases.setdefault(v.strip(), []).append(key)
+            config.project_aliases = parsed_aliases
 
         return config
 
@@ -377,6 +397,25 @@ class ClientConfig:
         else:
             sources["daemon.log_level"] = "default"
 
+        # --- [project_aliases] ---
+        raw_aliases = toml_data.get("project_aliases", {})
+        if isinstance(raw_aliases, dict) and raw_aliases:
+            parsed_aliases: dict[str, list[str]] = {}
+            for k, v in raw_aliases.items():
+                key = str(k).strip()
+                if not key:
+                    continue
+                if isinstance(v, list):
+                    cleaned = [str(item).strip() for item in v if str(item).strip()]
+                    if cleaned:
+                        parsed_aliases[key] = cleaned
+                elif isinstance(v, str) and v.strip():
+                    parsed_aliases.setdefault(v.strip(), []).append(key)
+            config.project_aliases = parsed_aliases
+            sources["project_aliases"] = "config.toml"
+        else:
+            sources["project_aliases"] = "default"
+
         return config, sources
 
     def to_dict(self) -> dict[str, Any]:
@@ -406,6 +445,7 @@ class ClientConfig:
                 "port": self.daemon.port,
                 "log_level": self.daemon.log_level,
             },
+            "project_aliases": dict(self.project_aliases),
         }
 
 

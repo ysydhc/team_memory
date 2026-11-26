@@ -137,8 +137,11 @@ def _load_dotenv_if_available() -> None:
         Path(__file__).resolve().parent.parent.parent.parent / ".env",
         Path.home() / ".config" / "tm" / ".env",
     ):
-        if candidate.exists():
-            load_dotenv(candidate, override=False)
+        try:
+            if candidate.exists():
+                load_dotenv(candidate, override=False)
+        except OSError:
+            continue
     _hydrate_env_from_user_toml()
 
 
