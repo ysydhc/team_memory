@@ -46,6 +46,8 @@ def _build_fts_tsvector_expr(
       - B: description + tags
       - C: solution
     """
+    from sqlalchemy import literal_column
+
     from team_memory.utils.tokenizer import tokenize
 
     t_title = tokenize(title or "")
@@ -54,9 +56,9 @@ def _build_fts_tsvector_expr(
     t_desc = tokenize(desc_and_tags)
     t_sol = tokenize(solution or "")
     return (
-        func.setweight(func.to_tsvector("simple", t_title), "A")
-        .op("||")(func.setweight(func.to_tsvector("simple", t_desc), "B"))
-        .op("||")(func.setweight(func.to_tsvector("simple", t_sol), "C"))
+        func.setweight(func.to_tsvector("simple", t_title), literal_column("'A'"))
+        .op("||")(func.setweight(func.to_tsvector("simple", t_desc), literal_column("'B'")))
+        .op("||")(func.setweight(func.to_tsvector("simple", t_sol), literal_column("'C'")))
     )
 
 

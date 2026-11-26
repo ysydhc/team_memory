@@ -55,4 +55,4 @@ class _StderrFilter:
 if not isinstance(sys.stderr, _StderrFilter):
     sys.stderr = _StderrFilter(sys.stderr)
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"

@@ -6,6 +6,13 @@
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-11-26
+
+### Fixed
+
+- **PostgreSQL + asyncpg `setweight(tsvector, varchar)` 类型不匹配热修 (`src/team_memory/storage/repository.py`)**：
+  - 将 `_build_fts_tsvector_expr()` 中的权重参数由绑定参数改为 `literal_column("'A'")` / `"'B'"` / `"'C'"`，修复 `asyncpg` 下写入经验时报 `function setweight(tsvector, character varying) does not exist` 的 P0 缺陷。
+
 ## [0.4.0] — 2026-11-26
 
 ### Added
