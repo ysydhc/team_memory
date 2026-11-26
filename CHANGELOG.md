@@ -6,6 +6,21 @@
 
 ## [Unreleased]
 
+## [0.3.9] — 2026-11-26
+
+### Fixed
+
+- **Git Worktree 项目名误识别孤岛修复 (`project_resolver.py`)**：
+  - 重构 `_git_repo_name(cwd)`：优先解析 `git rev-parse --path-format=absolute --git-common-dir`（兼容旧版 Git 自动回退 `--git-common-dir` + 绝对路径解析），当末级为 `.git` 时取主仓库目录名，避免 Worktree 临时目录名被误识别为独立 `project`。
+  - 增加 bare repo / submodule 场景下的 `git remote get-url origin` 与 bare 目录名回退，最终兜底 `--show-toplevel`，保持 `.tm.toml` > Git 主仓名 > 目录名优先级不变。
+  - 新增 `tests/test_project_resolver_worktree.py` 真实 `git init` + `git worktree add` 回归单测。
+
+### Added
+
+- **历史 Worktree 孤岛项目治理脚本 (`scripts/merge_worktree_projects.py`)**：
+  - 支持 `--dry-run` 预览与 `--apply` 单事务安全归并，覆盖 `experiences`、`archives`、`entities`、`search_logs`、`personal_memories` 五张表。
+  - 自动处理 `entities` 表 `(tenant_id, name, project)` 唯一约束冲突，合并重复实体的 `experience_entities`、`relationships` 出入边与 `evidence` 并消除自环边。
+
 ## [0.3.8] — 2026-11-26
 
 ### Added

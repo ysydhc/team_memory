@@ -269,20 +269,93 @@ def read_tm_toml(directory: str | Path) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 
-def _git_repo_name(cwd: str) -> str | None:
-    """Get git repo basename from cwd. Returns None if not a git repo."""
+def _run_git(args: list[str], cwd: str) -> str | None:
+    """Run a git subcommand and return stripped stdout on success, else None."""
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            ["git", *args],
             capture_output=True,
             text=True,
             cwd=cwd,
             timeout=3,
         )
-        if result.returncode == 0 and result.stdout.strip():
-            return os.path.basename(result.stdout.strip())
+        if result.returncode == 0:
+            out = result.stdout.strip()
+            if out:
+                return out
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         pass
+    return None
+
+
+def _repo_name_from_remote_url(url: str) -> str | None:
+    """Extract repository basename from a git remote URL or path.
+
+    Examples:
+      "https://github.com/org/my-repo.git"                -> "my-repo"
+      "git@icode.baidu.com:baidu/mobile/adx-sdk-ios.git"  -> "adx-sdk-ios"
+      "ssh://git@host:2222/org/repo/"                     -> "repo"
+    """
+    cleaned = (url or "").strip().rstrip("/\\")
+    if not cleaned:
+        return None
+    # Handle SCP-style syntax (git@host:org/repo.git) by splitting on both / and :
+    last_sep = max(cleaned.rfind("/"), cleaned.rfind("\\"), cleaned.rfind(":"))
+    name = cleaned[last_sep + 1 :] if last_sep >= 0 else cleaned
+    if name.endswith(".git"):
+        name = name[:-4]
+    return name or None
+
+
+def _resolve_git_common_dir(cwd: str) -> Path | None:
+    """Return resolved absolute path to git common dir (compatible with older git)."""
+    out = _run_git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd)
+    if out and not out.startswith("--"):
+        return Path(out).resolve()
+
+    # Fallback for older git (< 2.31) without --path-format=absolute
+    rel = _run_git(["rev-parse", "--git-common-dir"], cwd)
+    if not rel:
+        return None
+    p = Path(rel)
+    if not p.is_absolute():
+        p = Path(cwd) / p
+    return p.resolve()
+
+
+def _git_repo_name(cwd: str) -> str | None:
+    """Get canonical git main repository basename from cwd.
+
+    Resolution order:
+      1. ``git rev-parse --path-format=absolute --git-common-dir`` (with fallback
+         for older git): when common dir ends with ``.git``, return its parent
+         directory name so Git Worktrees resolve to the main repository name.
+      2. ``git remote get-url origin`` (for bare repos, submodules, or custom
+         gitdir layouts), falling back to bare ``<repo>.git`` dir basename.
+      3. ``git rev-parse --show-toplevel`` basename as final fallback.
+
+    Returns None if *cwd* is not inside a git repository.
+    """
+    common_dir = _resolve_git_common_dir(cwd)
+    if common_dir is not None:
+        if common_dir.name == ".git" and common_dir.parent.name:
+            return common_dir.parent.name
+
+        # Bare repo / submodule / non-standard gitdir: try origin remote URL first
+        remote_url = _run_git(["remote", "get-url", "origin"], cwd)
+        if remote_url:
+            remote_name = _repo_name_from_remote_url(remote_url)
+            if remote_name:
+                return remote_name
+
+        # Bare repo without origin remote (e.g. /path/to/my-repo.git)
+        if common_dir.name.endswith(".git") and len(common_dir.name) > 4:
+            return common_dir.name[:-4]
+
+    # Final fallback: --show-toplevel
+    toplevel = _run_git(["rev-parse", "--show-toplevel"], cwd)
+    if toplevel:
+        return os.path.basename(toplevel)
     return None
 
 
