@@ -31,7 +31,7 @@ ALEMBIC ?= $(shell \
 	else echo alembic; fi)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup dev mode-native mode-docker mode-status web mcp mcp-verify test test-acceptance lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-reload daemon-install daemon-uninstall verify-pipeline diagnose-pipeline e2e-verify logs watchdog-start test-regression watchdog-stop watchdog-status stats entity-backfill entity-dedup embedding-backfill detect-contradictions search-eval eval golden-set ops-digest solution-backfill faithfulness-eval test-llm janitor-run
+.PHONY: help setup dev mode-native mode-docker mode-status web mcp mcp-verify test test-acceptance lint lint-fix lint-js harness-check doc-harness-config-check verify verify-web verify-entities backup backup-verify backup-install backup-uninstall health clean migrate migrate-fts hooks-install sync-agent-artifacts daemon-start daemon-stop daemon-run daemon-reload daemon-install daemon-uninstall verify-pipeline diagnose-pipeline e2e-verify logs watchdog-start test-regression watchdog-stop watchdog-status stats entity-backfill entity-dedup embedding-backfill detect-contradictions search-eval eval golden-set ops-digest solution-backfill faithfulness-eval test-llm janitor-run
 
 sync-agent-artifacts: ## 由 agents/shared + agents/manifest.yaml 生成 .claude/.cursor 下 agents、prompts、skills
 	python scripts/sync_agent_artifacts.py
@@ -273,8 +273,26 @@ migrate-fts-jieba:  ## 回填技术分词 FTS 向量（支持 OPTS='--dry-run' �
 	@set -a && [ -f .env ] && source .env || true && set +a; \
 	PYTHONPATH=src $(PYTHON_BIN) scripts/migrate_fts_jieba.py $(OPTS)
 
-backup:         ## 备份数据库
+backup:         ## 备份本机 PostgreSQL + SQLite（含 SHA256 校验与分层保留清理）
 	./scripts/backup.sh
+
+backup-verify:  ## 恢复演练：创建临时库导入最新备份并校验核心表非零后自动清理
+	./scripts/restore.sh --verify-only
+
+backup-install: ## 安装 macOS launchd 每日 03:30 自动定时备份任务
+	@PLIST_SRC=scripts/com.teammemory.backup.plist; \
+	PLIST_DST=$(HOME)/Library/LaunchAgents/com.teammemory.backup.plist; \
+	REPO_ABS=$$(pwd); \
+	mkdir -p "$(HOME)/Library/LaunchAgents"; \
+	launchctl unload "$$PLIST_DST" 2>/dev/null || true; \
+	sed -e "s|__REPO_ROOT__|$$REPO_ABS|g" "$$PLIST_SRC" > "$$PLIST_DST"; \
+	launchctl load "$$PLIST_DST"; \
+	echo "  ✔ Scheduled daily backup installed (03:30 via launchd: $$PLIST_DST)"
+
+backup-uninstall: ## 卸载 macOS launchd 自动定时备份任务
+	@launchctl unload "$(HOME)/Library/LaunchAgents/com.teammemory.backup.plist" 2>/dev/null || true
+	@rm -f "$(HOME)/Library/LaunchAgents/com.teammemory.backup.plist"
+	@echo "  ✔ Scheduled daily backup uninstalled from launchd"
 
 health:         ## 一键健康检查（检测所有组件状态）
 	./scripts/healthcheck.sh

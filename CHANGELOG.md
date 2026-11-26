@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+## [0.3.12] — 2026-11-26
+
+### Added
+
+- **本机原生定时自动灾备与可验证恢复体系（零 Docker 依赖）**：
+  - 升级 `scripts/backup.sh`：自动读取 `.env` 与 `team_memory.config.load_settings()` 解析原生 PostgreSQL 连接参数，调用本机 `pg_dump --format=custom --compress=6` 备份完整数据库（含 schema、RLS 策略、pgvector 数据），并通过 `sqlite3 -init /dev/null -batch ... ".backup"` 热备 `~/.cache/tm-pipeline/drafts.db` 及 `PRAGMA integrity_check` 校验；生成 `manifest_<TS>.json`、`SHA256SUMS_<TS>.txt` 与 `backups/LATEST` 指针，支持 14 天日备（`backups/daily/`）+ 4 周周备（`backups/weekly/`）分层自动清理。
+  - 升级 `scripts/restore.sh`：支持 `.dump`（`pg_restore`）并兼容 `.sql.gz`，恢复前自动验证 `SHA256SUMS`；新增 `--verify-only [backup_file]` 恢复演练模式（自动创建临时库导入 → 校验 `experiences` / `archives` / `entities` / `tenants` 核心表非零与 `pgvector`/RLS → 自动清理临时库），并使用 `psql -X` 屏蔽 `~/.psqlrc` 干扰。
+  - 新增 `scripts/com.teammemory.backup.plist` 与 `Makefile` `backup-install` / `backup-uninstall` / `backup-verify` 目标（macOS `launchd` 每日 `03:30` 自动执行）。
+  - 将「最近备份时间是否超过 48h」纳入 `scripts/healthcheck.sh` 与 `src/team_memory/services/analysis/observability.py`（`ops-digest` `infra` 子系统巡检与告警），补充 `tests/test_observability_and_eval.py` 单测，并在 `.gitignore` 忽略 `backups/`。
+
 ## [0.3.11] — 2026-11-26
 
 ### Added

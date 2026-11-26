@@ -36,8 +36,68 @@ DEFAULT_DAEMON_STATUS_URL = "http://127.0.0.1:3901/status"
 # Redline thresholds (shared by Web Dashboard and `tm-cli ops-digest`)
 ZERO_WRITE_WORKDAYS_WARN = 2
 MAINTENANCE_STALE_HOURS = 48.0
+BACKUP_STALE_HOURS = 48.0
 P95_LATENCY_RED_MS = 8000.0
 EVAL_RECALL_DROP_WARN = 0.05
+
+
+def _resolve_default_backup_dir() -> Path:
+    env_dir = (os.environ.get("TEAM_MEMORY_BACKUP_DIR") or "").strip()
+    if env_dir:
+        return Path(env_dir).expanduser()
+    repo_root = Path(__file__).resolve().parents[4]
+    if (repo_root / "scripts" / "backup.sh").exists():
+        return repo_root / "backups"
+    return Path.cwd() / "backups"
+
+
+def inspect_latest_backup(
+    backup_dir: Path | None = None,
+    *,
+    now_utc: datetime | None = None,
+) -> dict[str, Any]:
+    """Inspect latest local backup age & metadata (zero DB dependency)."""
+    ref_now = now_utc or datetime.now(timezone.utc)
+    bdir = backup_dir if backup_dir is not None else _resolve_default_backup_dir()
+    latest_file = bdir / "LATEST"
+
+    backup_dt: datetime | None = None
+    dump_path: Path | None = None
+
+    if latest_file.is_file():
+        meta = _read_json_file(latest_file)
+        backup_dt = _parse_iso_datetime(meta.get("created_at_utc"))
+        rel = meta.get("pg_dump")
+        if isinstance(rel, str) and rel:
+            cand = bdir / rel
+            if cand.is_file():
+                dump_path = cand
+
+    if dump_path is None and bdir.is_dir():
+        candidates = sorted(
+            list((bdir / "daily").glob("team_memory_*.dump"))
+            + list(bdir.glob("team_memory_*.dump"))
+            + list(bdir.glob("team_memory_*.sql.gz")),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if candidates:
+            dump_path = candidates[0]
+            backup_dt = datetime.fromtimestamp(dump_path.stat().st_mtime, tz=timezone.utc)
+
+    if dump_path is None or backup_dt is None:
+        return {
+            "backup_status": "missing",
+            "backup_age_hours": None,
+            "latest_backup": None,
+        }
+
+    age_hours = round(max(0.0, (ref_now - backup_dt).total_seconds() / 3600.0), 1)
+    return {
+        "backup_status": "stale" if age_hours > BACKUP_STALE_HOURS else "ok",
+        "backup_age_hours": age_hours,
+        "latest_backup": dump_path.name,
+    }
 
 
 def _parse_iso_datetime(raw: str | None) -> datetime | None:
@@ -279,6 +339,17 @@ def evaluate_subsystem_statuses(
         msg = "tm-daemon (:3901) 未响应"
         infra_reasons.append(msg)
         alerts.append({"subsystem": "infra", "level": "yellow", "message": msg})
+    if "backup_age_hours" in infra or "backup_status" in infra:
+        backup_age = infra.get("backup_age_hours")
+        if backup_age is None or float(backup_age) > BACKUP_STALE_HOURS:
+            infra_status = _worst_status(infra_status, "yellow")
+            msg = (
+                "本机数据库从未备份（请运行 make backup）"
+                if backup_age is None
+                else f"最近备份已超 {float(backup_age):.1f}h (>48h，请检查定时备份)"
+            )
+            infra_reasons.append(msg)
+            alerts.append({"subsystem": "infra", "level": "yellow", "message": msg})
 
     infra["status"] = infra_status
     if infra_reasons:
@@ -634,6 +705,7 @@ async def get_observability_overview(
 
     # Assemble Infra
     embedding_coverage = round(embedded_exps / total_exps, 4) if total_exps > 0 else 1.0
+    backup_info = inspect_latest_backup(now_utc=now_utc)
     infra = {
         "total_experiences": total_exps,
         "embedded_experiences": embedded_exps,
@@ -641,6 +713,7 @@ async def get_observability_overview(
         "pg_status": pg_status,
         "pg_latency_ms": pg_latency_ms,
         "daemon_status": "up" if daemon_up else "down",
+        **backup_info,
     }
 
     overall_status, alerts = evaluate_subsystem_statuses(
@@ -735,6 +808,11 @@ def format_ops_digest(
     p50_ms = float(ret.get("p50_ms_7d", 0))
     p95_ms = float(ret.get("p95_ms_7d", 0))
 
+    backup_suffix = ""
+    if "backup_age_hours" in inf or "backup_status" in inf:
+        b_age = inf.get("backup_age_hours")
+        backup_suffix = f" · 备份 {float(b_age):.1f}h前" if b_age is not None else " · 备份 缺失"
+
     lines = [
         f"TeamMemory 健康周报 | 总状态 {_LAMP_ICON.get(overall, '⚪')} {overall.upper()}",
         f"状态灯: {lamp_bar}",
@@ -755,7 +833,7 @@ def format_ops_digest(
         (
             f"底座: 向量覆盖 {cov_pct:.2f}% ({inf.get('embedded_experiences', 0)}/"
             f"{inf.get('total_experiences', 0)}) · PG {inf.get('pg_latency_ms', 0)}ms · "
-            f"Daemon {inf.get('daemon_status', 'down')}"
+            f"Daemon {inf.get('daemon_status', 'down')}{backup_suffix}"
         ),
     ]
     if alerts:

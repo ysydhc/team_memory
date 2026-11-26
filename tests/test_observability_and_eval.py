@@ -175,6 +175,60 @@ class TestObservabilityRedlinesAndDigest:
         ]
         assert count_consecutive_zero_write_workdays(series, today=monday) == 2
 
+    def test_backup_freshness_redline_and_inspect(self, tmp_path):
+        from datetime import datetime, timezone
+
+        from team_memory.services.analysis.observability import inspect_latest_backup
+
+        # 1. Missing backup directory -> missing + yellow alert
+        missing = inspect_latest_backup(tmp_path / "no_such_dir")
+        assert missing["backup_status"] == "missing"
+        assert missing["backup_age_hours"] is None
+
+        ing, maint, kg, ret, inf = self._base_subsystems()
+        inf.update(missing)
+        overall, alerts = evaluate_subsystem_statuses(
+            ingestion=ing, maintenance=maint, knowledge_graph=kg, retrieval=ret, infra=inf
+        )
+        assert overall == "yellow"
+        assert any(a["subsystem"] == "infra" and "从未备份" in a["message"] for a in alerts)
+
+        # 2. Fresh backup via LATEST -> ok + green
+        daily = tmp_path / "daily"
+        daily.mkdir()
+        dump = daily / "team_memory_20261126_033000.dump"
+        dump.write_bytes(b"PGDMP_TEST")
+        (tmp_path / "LATEST").write_text(
+            '{"created_at_utc":"2026-11-26T03:30:00Z","pg_dump":"daily/team_memory_20261126_033000.dump"}',
+            encoding="utf-8",
+        )
+        now_fresh = datetime(2026, 11, 26, 15, 30, tzinfo=timezone.utc)
+        fresh = inspect_latest_backup(tmp_path, now_utc=now_fresh)
+        assert fresh["backup_status"] == "ok"
+        assert fresh["backup_age_hours"] == 12.0
+
+        ing, maint, kg, ret, inf = self._base_subsystems()
+        inf.update(fresh)
+        overall, alerts = evaluate_subsystem_statuses(
+            ingestion=ing, maintenance=maint, knowledge_graph=kg, retrieval=ret, infra=inf
+        )
+        assert overall == "green"
+        assert alerts == []
+
+        # 3. Stale backup (>48h) -> stale + yellow alert
+        now_stale = datetime(2026, 11, 28, 10, 0, tzinfo=timezone.utc)
+        stale = inspect_latest_backup(tmp_path, now_utc=now_stale)
+        assert stale["backup_status"] == "stale"
+        assert stale["backup_age_hours"] > 48.0
+
+        ing, maint, kg, ret, inf = self._base_subsystems()
+        inf.update(stale)
+        overall, alerts = evaluate_subsystem_statuses(
+            ingestion=ing, maintenance=maint, knowledge_graph=kg, retrieval=ret, infra=inf
+        )
+        assert overall == "yellow"
+        assert any(a["subsystem"] == "infra" and ">48h" in a["message"] for a in alerts)
+
 
 class TestObservabilityAPI:
     def test_overview_route_v1_and_compat_path(self):

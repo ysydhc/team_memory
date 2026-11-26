@@ -288,6 +288,63 @@ except Exception:
     fi
 fi
 
+# 7. Backup Freshness (<=48h)
+printf "  %-22s" "Backup (<=48h):"
+BACKUP_DIR="${TEAM_MEMORY_BACKUP_DIR:-${ROOT_DIR}/backups}"
+BACKUP_STATUS=$("${_TM_PYTHON}" - "$BACKUP_DIR" <<'PY' 2>/dev/null || echo "WARN  (unable to inspect backup directory)"
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+backup_dir = Path(sys.argv[1])
+latest_file = backup_dir / "LATEST"
+now = datetime.now(timezone.utc)
+
+dt = None
+dump_path = None
+
+if latest_file.is_file():
+    try:
+        meta = json.loads(latest_file.read_text(encoding="utf-8"))
+        raw_ts = meta.get("created_at_utc")
+        if raw_ts:
+            s = raw_ts[:-1] + "+00:00" if raw_ts.endswith("Z") else raw_ts
+            dt = datetime.fromisoformat(s).astimezone(timezone.utc)
+        rel = meta.get("pg_dump")
+        if rel:
+            cand = backup_dir / rel
+            if cand.is_file():
+                dump_path = cand
+    except Exception:
+        pass
+
+if dump_path is None and backup_dir.is_dir():
+    candidates = sorted(
+        list((backup_dir / "daily").glob("team_memory_*.dump"))
+        + list(backup_dir.glob("team_memory_*.dump"))
+        + list(backup_dir.glob("team_memory_*.sql.gz")),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if candidates:
+        dump_path = candidates[0]
+        dt = datetime.fromtimestamp(dump_path.stat().st_mtime, tz=timezone.utc)
+
+if dump_path is None or dt is None:
+    print("WARN  (no backup found; run: make backup)")
+    sys.exit(0)
+
+age_h = max(0.0, (now - dt).total_seconds() / 3600.0)
+size_mb = dump_path.stat().st_size / (1024 * 1024)
+if age_h > 48.0:
+    print(f"WARN  (latest backup is {age_h:.1f}h old > 48h: {dump_path.name}; run: make backup)")
+else:
+    print(f"OK ({age_h:.1f}h ago, {size_mb:.1f}MB, {dump_path.name})")
+PY
+)
+echo "$BACKUP_STATUS"
+
 echo ""
 echo "================================="
 if [ "$FAILURES" -gt 0 ]; then
