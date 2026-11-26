@@ -1,28 +1,39 @@
-"""Automatic implicit feedback generation from faithfulness/adoption signals.
+"""Automatic implicit feedback generation from attribution/adoption signals.
 
 Generates weighted implicit feedback (weight=0.5, source='implicit_judge') so
 retrieval ranking improves continuously without relying on manual user/agent
-ratings, while preserving strict multi-tenant isolation and anti-spam guards:
+ratings, while preserving strict multi-tenant RLS isolation and anti-pollution
+guardrails:
 
 1. Implicit positive feedback:
    - Triggered when was_used=True and faithfulness_score >= 0.7 (and
      relevance_score >= 0.5 when available).
-   - Attributed strictly to `used_indices` returned by FaithfulnessJudge
-     (1-based indices into contexts); if empty, conservatively attributed
-     only to Top-1 (never blind-broadcast to Top-3).
+   - Attributed strictly to ``adopted_ids`` (from AttributionJudge) or
+     ``used_indices`` (1-based indices into contexts); if empty, conservatively
+     attributed only to Top-1 (never blind-broadcast to Top-3).
    - Idempotent per (tenant_id, experience_id, search_log_id, source).
+   - Daily cap: at most +2 implicit positive feedbacks per experience per 24h.
 
 2. Implicit negative feedback:
    - Triggered when an experience appears in Top-3 >= 5 times within 7 days
-     (non-noise, judged) with ALL `was_used == False` AND high relevance
+     (non-noise, judged) with ALL ``was_used == False`` AND high relevance
      (avg relevance_score >= 0.5, or avg retrieval score >= 0.5 when
      relevance_score is unavailable) — distinguishing genuinely stale/unhelpful
      entries from retriever false-positives.
-   - Anti-false-kill guards:
-     * Skips pinned or deleted experiences.
+   - Anti-pollution guards:
+     * Skips pinned (``is_pinned=true``), gold-verified
+       (``epistemic_tier='verified'``), or deleted experiences.
      * Skips experiences with explicit positive feedback (rating >= 4) in the
        lookback window.
-     * Rate-limited to <= 1 per 24h and <= 2 per 7d per experience per tenant.
+     * Rate-limited to <= 2 per 24h (configurable) and <= 2 per 7d per
+       experience per tenant.
+
+3. Contradiction handling:
+   - When AttributionJudge flags ``contradicted=True`` for an experience,
+     automatically marks non-pinned/non-verified experiences as
+     ``staleness_status = 'possibly_stale'``.
+   - Protected (``is_pinned`` or ``epistemic_tier='verified'``) experiences are
+     never auto-downgraded; a warning is logged instead.
 """
 
 from __future__ import annotations
@@ -37,7 +48,7 @@ from typing import Any
 from sqlalchemy import text as sa_text
 
 from team_memory.storage.database import get_session
-from team_memory.storage.tenant_context import get_current_tenant_id
+from team_memory.storage.tenant_context import get_current_tenant_id, parse_tenant_uuid
 
 logger = logging.getLogger("team_memory.implicit_feedback")
 
@@ -47,7 +58,8 @@ POSITIVE_FAITHFULNESS_THRESHOLD = 0.7
 HIGH_RELEVANCE_THRESHOLD = 0.5
 NEGATIVE_MIN_RECALLS = 5
 NEGATIVE_LOOKBACK_DAYS = 7
-NEGATIVE_DAILY_CAP = 1
+POSITIVE_DAILY_CAP = 2
+NEGATIVE_DAILY_CAP = 2
 NEGATIVE_WEEKLY_CAP = 2
 
 
@@ -73,12 +85,24 @@ def _extract_result_score(entry: Any) -> float | None:
 def resolve_positive_target_ids(
     result_ids: list[Any] | None,
     used_indices: list[int] | None = None,
+    adopted_ids: list[str] | None = None,
 ) -> list[str]:
     """Resolve which experience IDs should receive implicit positive feedback.
 
-    Uses 1-based `used_indices` from FaithfulnessJudge when provided; otherwise
-    conservatively attributes only to Top-1 to prevent free-riding on rank 2/3.
+    Priority:
+    1. Explicit ``adopted_ids`` from AttributionJudge (validated UUIDs).
+    2. 1-based ``used_indices`` into ``result_ids``.
+    3. Conservative fallback to Top-1 only (never broadcasts to Top-3).
     """
+    if adopted_ids:
+        explicit_targets: list[str] = []
+        for raw_id in adopted_ids:
+            eid = _extract_result_id(raw_id)
+            if eid and eid not in explicit_targets:
+                explicit_targets.append(eid)
+        if explicit_targets:
+            return explicit_targets
+
     if not result_ids:
         return []
 
@@ -111,17 +135,19 @@ async def record_implicit_positive_feedback(
     faithfulness_score: float,
     was_used: bool = True,
     used_indices: list[int] | None = None,
+    adopted_ids: list[str] | None = None,
     relevance_score: float | None = None,
     search_log_id: str | None = None,
     tenant_id: str | None = None,
+    daily_cap: int = POSITIVE_DAILY_CAP,
 ) -> dict[str, Any]:
-    """Record idempotent implicit positive feedback (weight=0.5) for adopted experiences."""
+    """Record idempotent, daily-capped implicit positive feedback (weight=0.5)."""
     if not was_used or faithfulness_score < POSITIVE_FAITHFULNESS_THRESHOLD:
         return {"recorded": 0, "skipped_reason": "below_threshold"}
     if relevance_score is not None and relevance_score < HIGH_RELEVANCE_THRESHOLD:
         return {"recorded": 0, "skipped_reason": "low_relevance"}
 
-    target_ids = resolve_positive_target_ids(result_ids, used_indices)
+    target_ids = resolve_positive_target_ids(result_ids, used_indices, adopted_ids=adopted_ids)
     if not target_ids:
         return {"recorded": 0, "skipped_reason": "no_valid_targets"}
 
@@ -132,13 +158,14 @@ async def record_implicit_positive_feedback(
         except (ValueError, TypeError):
             sl_uuid = None
 
+    eff_tenant_id = parse_tenant_uuid(tenant_id) or get_current_tenant_id()
+    day_ago = datetime.now(timezone.utc) - timedelta(days=1)
+
     recorded = 0
+    skipped_capped = 0
     try:
-        async with get_session(db_url) as session:
-            eff_tenant_id: uuid_mod.UUID | None = None
-            if tenant_id:
-                eff_tenant_id = uuid_mod.UUID(str(tenant_id))
-            elif sl_uuid is not None:
+        async with get_session(db_url, tenant_id=eff_tenant_id) as session:
+            if not tenant_id and sl_uuid is not None:
                 row = (
                     await session.execute(
                         sa_text("SELECT tenant_id FROM search_logs WHERE id = :sl_id"),
@@ -146,12 +173,18 @@ async def record_implicit_positive_feedback(
                     )
                 ).fetchone()
                 if row and row[0]:
-                    eff_tenant_id = row[0] if isinstance(row[0], uuid_mod.UUID) else uuid_mod.UUID(str(row[0]))
+                    resolved_tid = row[0] if isinstance(row[0], uuid_mod.UUID) else uuid_mod.UUID(str(row[0]))
+                    if resolved_tid != eff_tenant_id:
+                        eff_tenant_id = resolved_tid
+                        await session.execute(
+                            sa_text("SELECT set_config('app.current_tenant_id', :tid, true)"),
+                            {"tid": str(eff_tenant_id)},
+                        )
 
-            if eff_tenant_id is None:
-                eff_tenant_id = get_current_tenant_id()
+            comment = f"implicit_positive: score={faithfulness_score:.2f}"
+            if relevance_score is not None:
+                comment += f", relevance={relevance_score:.2f}"
 
-            comment = f"implicit_positive: faithfulness={faithfulness_score:.2f}"
             for eid_str in target_ids:
                 exp_uuid = uuid_mod.UUID(eid_str)
                 # Ensure experience belongs to the same tenant and is active
@@ -165,6 +198,33 @@ async def record_implicit_positive_feedback(
                     )
                 ).fetchone()
                 if not exp_row:
+                    continue
+
+                # Daily cap guard: at most +daily_cap implicit positives per experience per 24h
+                cap_row = (
+                    await session.execute(
+                        sa_text(
+                            """
+                            SELECT COUNT(*)
+                            FROM experience_feedbacks
+                            WHERE tenant_id = :tid
+                              AND experience_id = :eid
+                              AND source = :source
+                              AND rating >= 4
+                              AND created_at >= :day_ago
+                            """
+                        ),
+                        {
+                            "tid": eff_tenant_id,
+                            "eid": exp_uuid,
+                            "source": IMPLICIT_FEEDBACK_SOURCE,
+                            "day_ago": day_ago,
+                        },
+                    )
+                ).fetchone()
+                cnt_24h = int(cap_row[0] or 0) if cap_row else 0
+                if cnt_24h >= daily_cap:
+                    skipped_capped += 1
                     continue
 
                 if sl_uuid is not None:
@@ -232,9 +292,9 @@ async def record_implicit_positive_feedback(
             await session.commit()
     except Exception as exc:
         logger.warning("record_implicit_positive_feedback failed: %s", exc)
-        return {"recorded": recorded, "error": str(exc)}
+        return {"recorded": recorded, "skipped_capped": skipped_capped, "error": str(exc)}
 
-    return {"recorded": recorded, "target_ids": target_ids}
+    return {"recorded": recorded, "skipped_capped": skipped_capped, "target_ids": target_ids}
 
 
 def evaluate_negative_candidates(
@@ -326,16 +386,18 @@ async def scan_and_record_implicit_negative_feedback(
     since_ts = now - timedelta(days=lookback_days)
     day_ago = now - timedelta(days=1)
 
+    eff_tenant_id = parse_tenant_uuid(tenant_id) or get_current_tenant_id()
+
     recorded = 0
     skipped_capped = 0
     skipped_protected = 0
 
     try:
-        async with get_session(db_url) as session:
+        async with get_session(db_url, tenant_id=eff_tenant_id) as session:
             tenant_filter = "AND tenant_id = :tid" if tenant_id else ""
             params: dict[str, Any] = {"since_ts": since_ts}
             if tenant_id:
-                params["tid"] = uuid_mod.UUID(str(tenant_id))
+                params["tid"] = eff_tenant_id
 
             rows = (
                 await session.execute(
@@ -370,17 +432,22 @@ async def scan_and_record_implicit_negative_feedback(
                 tid_uuid = uuid_mod.UUID(tid_str)
                 exp_uuid = uuid_mod.UUID(eid_str)
 
-                # Guard 1: experience exists in same tenant, active, not pinned
+                # Guard 1: experience exists in same tenant, active, not pinned, not gold-verified
                 exp_row = (
                     await session.execute(
                         sa_text(
-                            "SELECT is_pinned FROM experiences "
+                            "SELECT is_pinned, epistemic_tier FROM experiences "
                             "WHERE id = :eid AND tenant_id = :tid AND is_deleted = false"
                         ),
                         {"eid": exp_uuid, "tid": tid_uuid},
                     )
                 ).fetchone()
-                if not exp_row or bool(exp_row[0]):
+                if not exp_row:
+                    skipped_protected += 1
+                    continue
+                is_pinned = bool(exp_row[0])
+                epistemic_tier = str(exp_row[1]) if len(exp_row) > 1 and exp_row[1] is not None else ""
+                if is_pinned or epistemic_tier == "verified":
                     skipped_protected += 1
                     continue
 
@@ -481,4 +548,93 @@ async def scan_and_record_implicit_negative_feedback(
         "recorded": recorded,
         "skipped_capped": skipped_capped,
         "skipped_protected": skipped_protected,
+    }
+
+
+async def handle_contradicted_experiences(
+    *,
+    db_url: str,
+    contradicted_ids: list[str] | None,
+    search_log_id: str | None = None,
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    """Mark contradicted experiences as ``possibly_stale``, respecting gold/pinned guards.
+
+    - Non-pinned and non-verified experiences: sets ``staleness_status = 'possibly_stale'``.
+    - Pinned (``is_pinned=true``) or verified (``epistemic_tier='verified'``):
+      never downgraded; logs a structured warning for human review.
+    """
+    if not contradicted_ids:
+        return {"marked_stale": 0, "warned_protected": 0, "contradicted_ids": []}
+
+    valid_ids: list[str] = []
+    for raw_id in contradicted_ids:
+        eid = _extract_result_id(raw_id)
+        if eid and eid not in valid_ids:
+            valid_ids.append(eid)
+
+    if not valid_ids:
+        return {"marked_stale": 0, "warned_protected": 0, "contradicted_ids": []}
+
+    eff_tenant_id = parse_tenant_uuid(tenant_id) or get_current_tenant_id()
+    marked_stale = 0
+    warned_protected = 0
+
+    try:
+        async with get_session(db_url, tenant_id=eff_tenant_id) as session:
+            for eid_str in valid_ids:
+                exp_uuid = uuid_mod.UUID(eid_str)
+                exp_row = (
+                    await session.execute(
+                        sa_text(
+                            "SELECT is_pinned, epistemic_tier, staleness_status FROM experiences "
+                            "WHERE id = :eid AND tenant_id = :tid AND is_deleted = false"
+                        ),
+                        {"eid": exp_uuid, "tid": eff_tenant_id},
+                    )
+                ).fetchone()
+                if not exp_row:
+                    continue
+
+                is_pinned = bool(exp_row[0])
+                epistemic_tier = str(exp_row[1]) if len(exp_row) > 1 and exp_row[1] is not None else ""
+                if is_pinned or epistemic_tier == "verified":
+                    logger.warning(
+                        "[CONTRADICTION] Protected experience %s contradicted (is_pinned=%s, "
+                        "epistemic_tier=%s, search_log_id=%s) — skipping auto-downgrade",
+                        eid_str,
+                        is_pinned,
+                        epistemic_tier,
+                        search_log_id or "-",
+                    )
+                    warned_protected += 1
+                    continue
+
+                await session.execute(
+                    sa_text(
+                        """
+                        UPDATE experiences
+                        SET staleness_status = 'possibly_stale',
+                            updated_at = NOW()
+                        WHERE id = :eid AND tenant_id = :tid AND is_deleted = false
+                        """
+                    ),
+                    {"eid": exp_uuid, "tid": eff_tenant_id},
+                )
+                marked_stale += 1
+
+            await session.commit()
+    except Exception as exc:
+        logger.warning("handle_contradicted_experiences failed: %s", exc)
+        return {
+            "marked_stale": marked_stale,
+            "warned_protected": warned_protected,
+            "contradicted_ids": valid_ids,
+            "error": str(exc),
+        }
+
+    return {
+        "marked_stale": marked_stale,
+        "warned_protected": warned_protected,
+        "contradicted_ids": valid_ids,
     }

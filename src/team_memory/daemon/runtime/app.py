@@ -306,12 +306,16 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             # 1. Pause workers to avoid cascading failures
             _rw = getattr(application.state, "refinement_worker", None)
             _dw = getattr(application.state, "dream_worker", None)
+            _ew = getattr(application.state, "evaluation_worker", None)
             if _rw and hasattr(_rw, "pause"):
                 _rw.pause()
                 logger.info("[WAKE]  RefinementWorker paused")
             if _dw and hasattr(_dw, "pause"):
                 _dw.pause()
                 logger.info("[WAKE]  AutoDreamWorker paused")
+            if _ew and hasattr(_ew, "pause"):
+                _ew.pause()
+                logger.info("[WAKE]  AttributionEvalWorker paused")
 
             # 2. Close PG pool so next access rebuilds it
             try:
@@ -340,6 +344,9 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
             if _dw and hasattr(_dw, "resume"):
                 _dw.resume()
                 logger.info("[WAKE]  AutoDreamWorker resumed")
+            if _ew and hasattr(_ew, "resume"):
+                _ew.resume()
+                logger.info("[WAKE]  AttributionEvalWorker resumed")
 
             import json as _json2
             import time as _time2
@@ -535,8 +542,9 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         # Recent searches cache for before_prompt → after_response correlation
         application.state.recent_searches = {}
 
-        # Response buffer for faithfulness evaluation
+        # Response buffer for faithfulness/attribution evaluation
         from team_memory.daemon.buffers.response_buffer import ResponseBuffer
+        from team_memory.daemon.quality.faithfulness_batch import AttributionEvalWorker
 
         eval_config = config.evaluation
         response_buffer = ResponseBuffer(
@@ -545,6 +553,16 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         )
         application.state.response_buffer = response_buffer
         logger.info("[INIT] response_buffer initialized (threshold=%d)", response_buffer._batch_threshold)
+
+        # Persistent async attribution evaluation worker (replaces DEVNULL subprocess)
+        evaluation_worker = AttributionEvalWorker(
+            dsn=_db_url,
+            daily_limit=getattr(eval_config, "attribution_daily_limit", None),
+        )
+        evaluation_task = evaluation_worker.start()
+        application.state.evaluation_worker = evaluation_worker
+        application.state.evaluation_task = evaluation_task
+        logger.info("[INIT] AttributionEvalWorker started")
 
         # Arena evaluation worker
         from team_memory.daemon.runtime.config import ArenaSettings
@@ -631,6 +649,18 @@ def create_app(config: DaemonConfig | None = None) -> FastAPI:
         search_log_obj: SearchLogWriter | None = getattr(application.state, "search_log", None)
         if search_log_obj is not None:
             await search_log_obj.close()
+
+        # Stop attribution evaluation worker
+        eval_worker_obj = getattr(application.state, "evaluation_worker", None)
+        if eval_worker_obj is not None:
+            eval_worker_obj.stop()
+        eval_task_obj = getattr(application.state, "evaluation_task", None)
+        if eval_task_obj is not None:
+            eval_task_obj.cancel()
+            try:
+                await asyncio.wait_for(eval_task_obj, timeout=5.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
 
         # Shutdown response buffer
         response_buffer_obj = getattr(application.state, "response_buffer", None)

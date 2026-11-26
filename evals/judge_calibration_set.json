@@ -1,0 +1,500 @@
+{
+  "version": 1,
+  "description": "20-sample Coding Agent Judge Calibration Set covering adopted, relevant_only, irrelevant, and contradicted labels.",
+  "labels": [
+    "adopted",
+    "relevant_only",
+    "irrelevant",
+    "contradicted"
+  ],
+  "thresholds": {
+    "min_adopted_precision": 0.85
+  },
+  "cases": [
+    {
+      "id": "cal_001",
+      "label": "adopted",
+      "domain": "postgres_rls",
+      "query": "独立 worker 进程查询 PostgreSQL search_logs 和 experiences 返回 0 行，怎么修复 FORCE ROW LEVEL SECURITY 拦截？",
+      "contexts": [
+        {
+          "id": "exp-cal-001",
+          "title": "PostgreSQL FORCE RLS 下独立脚本/Worker 必须显式设置 app.current_tenant_id",
+          "problem": "开启 FORCE ROW LEVEL SECURITY 后，脱离 Web 请求上下文的后台 Worker 或 CLI 调用 get_session() 未设置 tenant_id，导致所有 SELECT/UPDATE 静默返回 0 行。",
+          "solution": "调用 get_session(db_url, tenant_id=DEFAULT_TENANT_ID) 或在事务开头执行 SET LOCAL app.current_tenant_id = '<tenant_uuid>'，确保同连接事务内通过 RLS 策略校验。"
+        }
+      ],
+      "response": "已定位原因：独立 worker 没有进入 HTTP 中间件，导致 ContextVar 中的 tenant_id 为空，被 PostgreSQL FORCE RLS 静默过滤。我已修改 worker 的数据库会话入口，显式传入 `get_session(db_url, tenant_id=DEFAULT_TENANT_ID)`，并在原生 asyncpg 连接的事务开头补上了 `SET LOCAL app.current_tenant_id` 设置。复测后 `search_logs` 写回与 `experiences` 查询均正常命中。",
+      "target_experience_id": "exp-cal-001",
+      "expected": {
+        "adopted": true,
+        "contradicted": false,
+        "relevance": 0.95,
+        "evidence_keywords": [
+          "get_session(db_url, tenant_id=DEFAULT_TENANT_ID)",
+          "SET LOCAL app.current_tenant_id"
+        ]
+      },
+      "notes": "Agent explicitly adopted both get_session(tenant_id=...) and SET LOCAL app.current_tenant_id from the recalled experience."
+    },
+    {
+      "id": "cal_002",
+      "label": "adopted",
+      "domain": "python_tooling",
+      "query": "运行 pytest 报错 ImportError: cannot import name 'DeclarativeBase' from 'sqlalchemy.orm'",
+      "contexts": [
+        {
+          "id": "exp-cal-002",
+          "title": "勿用裸 pytest 或 conda 环境跑单测，统一使用 uv run --extra dev python -m pytest",
+          "problem": "本机 PATH 上的全局 conda pytest 绑定了旧版 SQLAlchemy 1.4，执行测试时会报 DeclarativeBase 导入失败。",
+          "solution": "统一使用 `uv run --extra dev python -m pytest tests/ -q` 运行测试，确保加载项目 .venv 下的 SQLAlchemy 2.x 依赖。"
+        }
+      ],
+      "response": "这是 PATH 上命中了全局 conda 的旧版 pytest（SQLAlchemy 1.4）导致的。我改用项目虚拟环境命令 `uv run --extra dev python -m pytest tests/ -q` 重新执行，SQLAlchemy 2.x 正常加载，全部 42 条用例通过。",
+      "target_experience_id": "exp-cal-002",
+      "expected": {
+        "adopted": true,
+        "contradicted": false,
+        "relevance": 0.95,
+        "evidence_keywords": [
+          "uv run --extra dev python -m pytest"
+        ]
+      },
+      "notes": "Agent directly ran the exact uv pytest command from the recalled experience."
+    },
+    {
+      "id": "cal_003",
+      "label": "adopted",
+      "domain": "android_ui",
+      "query": "Android 激励视频竖屏页底部按钮与系统导航栏重叠，getBottomInset 返回 0 怎么解决？",
+      "contexts": [
+        {
+          "id": "exp-cal-003",
+          "title": "Application context 的 Configuration.orientation 不可靠导致导航栏避让失效",
+          "problem": "激励视频页用 Application context 调用 getBottomInset 时，内部通过 Configuration.orientation 判断方向可能错判为横屏，导致底部导航栏高度避让为 0。",
+          "solution": "新增显式方向重载 `getBottomInset(Context, boolean isPortrait)`；方向已知时（例如已在竖屏布局分支内）显式传入 `isPortrait=true`，不要依赖 Application context 的 orientation。"
+        },
+        {
+          "id": "exp-cal-003-distractor",
+          "title": "Android Proguard 混淆保留规则配置说明",
+          "problem": "发版 AAR 开启 R8 后对外回调类被裁剪。",
+          "solution": "在 consumer-rules.pro 中添加 -keep 规则保护公开回调接口。"
+        }
+      ],
+      "response": "根因是激励视频页传入了 Application context，导致内部读取 `Configuration.orientation` 不可靠。按照避坑方案，我在 `InsetUtils` 中新增了显式重载 `getBottomInset(Context, boolean isPortrait)`，并在竖屏布局分支中直接调用 `getBottomInset(context, true)` 叠加底部导航栏高度，验证后底部 CTA 按钮不再与导航栏重叠。",
+      "target_experience_id": "exp-cal-003",
+      "expected": {
+        "adopted": true,
+        "contradicted": false,
+        "relevance": 0.95,
+        "evidence_keywords": [
+          "getBottomInset(Context, boolean isPortrait)",
+          "getBottomInset(context, true)"
+        ]
+      },
+      "notes": "Multi-context case: Agent adopted exp-cal-003 and ignored unrelated distractor."
+    },
+    {
+      "id": "cal_004",
+      "label": "adopted",
+      "domain": "ios_build",
+      "query": "iOS SDK 单文件语法检查 clang -fsyntax-only 报找不到 <MyAdSDK/MyAdSDK.h> 怎么处理？",
+      "contexts": [
+        {
+          "id": "exp-cal-004",
+          "title": "iOS 单文件 clang -fsyntax-only 构造临时 Framework Header Shim",
+          "problem": "脱离完整 Xcode build 时，Objective-C 源码中的 `#import <MyAdSDK/MyAdSDK.h>` 会因缺少 framework 目录结构而报错。",
+          "solution": "在临时目录创建 `MyAdSDK.framework/Headers` 软链接指向源码头目录，配合 `-F <shim_dir> -isysroot $(xcrun --sdk iphonesimulator --show-sdk-path) -fobjc-arc` 运行 `clang -fsyntax-only`。"
+        }
+      ],
+      "response": "已在脚本中按方案在 `/tmp/sdk_shim` 下创建了 `MyAdSDK.framework/Headers` 软链接，并拼接 `-F /tmp/sdk_shim -isysroot $(xcrun --sdk iphonesimulator --show-sdk-path) -fobjc-arc` 参数执行 `clang -fsyntax-only`，单文件语法校验 1.1 秒通过。",
+      "target_experience_id": "exp-cal-004",
+      "expected": {
+        "adopted": true,
+        "contradicted": false,
+        "relevance": 0.95,
+        "evidence_keywords": [
+          "MyAdSDK.framework/Headers",
+          "iphonesimulator"
+        ]
+      },
+      "notes": "Agent adopted the framework header shim and clang flags verbatim."
+    },
+    {
+      "id": "cal_005",
+      "label": "adopted",
+      "domain": "postgres_fts",
+      "query": "asyncpg 下 SQLAlchemy func.setweight(tsvector, 'A') 报参数类型不兼容如何修复？",
+      "contexts": [
+        {
+          "id": "exp-cal-005",
+          "title": "asyncpg 兼容的 PostgreSQL setweight() 需使用 literal_column char 权重",
+          "problem": "SQLAlchemy 生成 `setweight(to_tsvector(...), $1)` 时，asyncpg 将字符串参数绑定为 text 而非 \"char\"，导致 PostgreSQL 报 function setweight(tsvector, text) does not exist。",
+          "solution": "将权重参数替换为 `literal_column(\"'A'::\\\"char\\\"\")`（以及 B/C 对应写法），避免 asyncpg 参数绑定类型冲突。"
+        },
+        {
+          "id": "exp-cal-005-distractor",
+          "title": "HNSW 索引构建内存参数 maintenance_work_mem 调优",
+          "problem": "pgvector HNSW 建索引速度慢。",
+          "solution": "建索引前设置 SET maintenance_work_mem = '1GB'。"
+        }
+      ],
+      "response": "已修复 `fts_builder.py` 中的权重构造逻辑：把原来的字符串字面量替换为 `literal_column(\"'A'::\\\"char\\\"\")` 和 `literal_column(\"'B'::\\\"char\\\"\")`，绕开了 asyncpg 将绑定参数识别为 `text` 的问题。运行 FTS 写入与检索回归测试全部通过。",
+      "target_experience_id": "exp-cal-005",
+      "expected": {
+        "adopted": true,
+        "contradicted": false,
+        "relevance": 0.95,
+        "evidence_keywords": [
+          "literal_column"
+        ]
+      },
+      "notes": "Agent explicitly adopted the literal_column char cast workaround."
+    },
+    {
+      "id": "cal_006",
+      "label": "relevant_only",
+      "domain": "postgres_pool",
+      "query": "FastAPI 高并发下报 PostgreSQL QueuePool limit reached 连接池耗尽怎么排查？",
+      "contexts": [
+        {
+          "id": "exp-cal-006",
+          "title": "调大 SQLAlchemy QueuePool pool_size 与 max_overflow 参数缓解连接池打满",
+          "problem": "高并发接口请求时 SQLAlchemy 默认 pool_size=5 容易出现 TimeoutError: QueuePool limit of size 5 overflow 10 reached。",
+          "solution": "在 create_async_engine 中配置 `pool_size=20, max_overflow=10, pool_pre_ping=True, pool_recycle=1800`。"
+        }
+      ],
+      "response": "我排查了堆栈日志，发现真正的原因并不是连接池容量不够，而是后台导出任务 `export_worker.py` 在异常分支里漏掉了 `conn.close()` 导致连接泄漏。我已把该处改为 `async with engine.begin() as conn:` 上下文管理器自动归还连接，未改动 `pool_size` 等默认连接池配置，压测 500 并发下连接数稳定在 4 个以内。",
+      "target_experience_id": "exp-cal-006",
+      "expected": {
+        "adopted": false,
+        "contradicted": false,
+        "relevance": 0.78,
+        "evidence_keywords": []
+      },
+      "notes": "Same topic (PG pool exhaustion), but agent fixed a connection leak instead of tuning pool_size/max_overflow."
+    },
+    {
+      "id": "cal_007",
+      "label": "relevant_only",
+      "domain": "android_ui",
+      "query": "Android Banner 广告加载成功回调触发了，但界面上看不到广告视图，可能是什么原因？",
+      "contexts": [
+        {
+          "id": "exp-cal-007",
+          "title": "Android Banner 创建时 detachFromParent 导致容器不可见",
+          "problem": "调用 createBannerView() 后广告一闪而过或不在视图树上，因为方法末尾误调用了 detachFromParent(bannerAdContainer)。",
+          "solution": "移除 createBannerView() 末尾的 detachFromParent 调用，只在父容器挂载阶段由调用方控制添加。"
+        }
+      ],
+      "response": "经检查布局文件 `activity_banner_demo.xml`，宿主容器 `FrameLayout` 默认写了 `android:visibility=\"gone\"`，而 `onAdLoaded` 回调里忘记把它切换为 `View.VISIBLE`。我在回调中补上了 `bannerContainer.setVisibility(View.VISIBLE)`，广告已正常展示，SDK 内部代码无需改动。",
+      "target_experience_id": "exp-cal-007",
+      "expected": {
+        "adopted": false,
+        "contradicted": false,
+        "relevance": 0.75,
+        "evidence_keywords": []
+      },
+      "notes": "Relevant to Banner invisibility, but root cause was host XML visibility=gone rather than detachFromParent."
+    },
+    {
+      "id": "cal_008",
+      "label": "relevant_only",
+      "domain": "web_cors",
+      "query": "前端调用 /api/v1/stats 出现 CORS 预检失败和 401，应该怎么排查？",
+      "contexts": [
+        {
+          "id": "exp-cal-008",
+          "title": "FastAPI CORSMiddleware 放行自定义认证头 X-API-Key",
+          "problem": "浏览器发起带 X-API-Key 请求头的跨域请求时，OPTIONS 预检被 FastAPI 拒绝。",
+          "solution": "在 FastAPI `CORSMiddleware` 中显式配置 `allow_headers=[\"X-API-Key\", \"Authorization\", \"Content-Type\"]`。"
+        }
+      ],
+      "response": "跨域 401/预检失败通常和网关代理配置或鉴权中间件顺序有关。建议你先贴一下浏览器 DevTools Network 面板里 OPTIONS 请求的响应头，以及 Nginx 反向代理配置，我再帮你定位具体是哪一层拦截了请求。",
+      "target_experience_id": "exp-cal-008",
+      "expected": {
+        "adopted": false,
+        "contradicted": false,
+        "relevance": 0.72,
+        "evidence_keywords": []
+      },
+      "notes": "Topic is relevant, but agent only gave a generic diagnostic question without adopting CORSMiddleware allow_headers."
+    },
+    {
+      "id": "cal_009",
+      "label": "relevant_only",
+      "domain": "go_backend",
+      "query": "Go 批量上报接口偶尔返回 504 Gateway Timeout，如何优化？",
+      "contexts": [
+        {
+          "id": "exp-cal-009",
+          "title": "Go 批量上报服务调优 WriteTimeout 与 io.LimitReader 防大包超时",
+          "problem": "客户端批量上报数据量较大时，Go http.Server 默认超时偏短或未限制单包体积导致超时。",
+          "solution": "将 `http.Server.WriteTimeout` 调高至 30s，并用 `io.LimitReader(r.Body, 4<<20)` 限制请求体大小，对超长切片截断处理。"
+        }
+      ],
+      "response": "用 pprof 抓取火焰图后发现，超时根因是 handler 里对每条明细循环执行了单条 SQL INSERT（N+1 写库）。我已重构为单条批量 `INSERT INTO events VALUES ...` 语句，接口 P99 延迟从 11.4s 降到 65ms，彻底消除了 504，无需调整 HTTP 超时阈值。",
+      "target_experience_id": "exp-cal-009",
+      "expected": {
+        "adopted": false,
+        "contradicted": false,
+        "relevance": 0.72,
+        "evidence_keywords": []
+      },
+      "notes": "Relevant Go batch timeout topic, but agent solved N+1 SQL instead of changing WriteTimeout/LimitReader."
+    },
+    {
+      "id": "cal_010",
+      "label": "relevant_only",
+      "domain": "python_lint",
+      "query": "ruff check 报 scripts/ 目录下存在 E402 module level import not at top of file 怎么修复？",
+      "contexts": [
+        {
+          "id": "exp-cal-010",
+          "title": "在 pyproject.toml 中为 scripts 目录豁免 Ruff E402 规则",
+          "problem": "独立脚本在 import 项目模块前需要修改 sys.path，触发 Ruff E402 报错。",
+          "solution": "在 `pyproject.toml` 的 `[tool.ruff.lint.per-file-ignores]` 中添加 `\"scripts/*.py\" = [\"E402\"]`。"
+        }
+      ],
+      "response": "我直接移除了脚本里的 `sys.path.insert` 黑魔法，把入口改为通过 `PYTHONPATH=src` 或已安装的可编辑包直接导入，并将所有 `import` 语句移回文件顶部。这样 `ruff check` 直接通过，不需要额外放宽 lint 配置。",
+      "target_experience_id": "exp-cal-010",
+      "expected": {
+        "adopted": false,
+        "contradicted": false,
+        "relevance": 0.80,
+        "evidence_keywords": []
+      },
+      "notes": "Relevant Ruff E402 issue, but agent fixed the imports directly rather than adding per-file-ignores in pyproject.toml."
+    },
+    {
+      "id": "cal_011",
+      "label": "irrelevant",
+      "domain": "frontend_css",
+      "query": "React 侧边栏里的 Tailwind 表格横向溢出把父容器撑宽了，怎么修复？",
+      "contexts": [
+        {
+          "id": "exp-cal-011",
+          "title": "macOS launchd 每日 03:30 自动执行 PostgreSQL 备份配置",
+          "problem": "本机数据库缺少定期自动备份，误删表后难以恢复。",
+          "solution": "将 backup.plist 复制到 ~/Library/LaunchAgents 并执行 launchctl load，每日 03:30 调用 scripts/backup.sh 执行 pg_dump。"
+        }
+      ],
+      "response": "Flex 子项默认的 `min-width: auto` 会阻止容器收缩。给侧边栏主内容区加上 `min-w-0 flex-1`，并在表格外层包裹 `overflow-x-auto`，横向滚动就会局限在表格容器内部，不再撑爆布局。",
+      "target_experience_id": "exp-cal-011",
+      "expected": {
+        "adopted": false,
+        "contradicted": false,
+        "relevance": 0.05,
+        "evidence_keywords": []
+      },
+      "notes": "Completely unrelated: React/CSS flexbox vs macOS launchd PostgreSQL backup."
+    },
+    {
+      "id": "cal_012",
+      "label": "irrelevant",
+      "domain": "git_workflow",
+      "query": "git cherry-pick 解完冲突后怎么保证提交信息里保留 Gerrit Change-Id 且没有冲突注释？",
+      "contexts": [
+        {
+          "id": "exp-cal-012",
+          "title": "Android AAR 发版配置 Proguard 保留规则防止反射类被裁剪",
+          "problem": "Release 构建开启 minifyEnabled 后，JSON 反序列化模型字段丢失。",
+          "solution": "在 proguard-rules.pro 中增加 `-keep class com.example.sdk.model.** { *; }`。"
+        }
+      ],
+      "response": "解完冲突执行 `git add` 后运行 `git cherry-pick --continue`，在打开的 commit message 编辑器中删除自动生成的 `# Conflicts:` 段落，同时保留底部的 `Change-Id: I...` 行不动，保存退出即可。",
+      "target_experience_id": "exp-cal-012",
+      "expected": {
+        "adopted": false,
+        "contradicted": false,
+        "relevance": 0.05,
+        "evidence_keywords": []
+      },
+      "notes": "Completely unrelated: Git cherry-pick Change-Id vs Android Proguard."
+    },
+    {
+      "id": "cal_013",
+      "label": "irrelevant",
+      "domain": "python_testing",
+      "query": "pytest-asyncio 中异步 fixture 报 Event loop is closed 怎么修复？",
+      "contexts": [
+        {
+          "id": "exp-cal-013",
+          "title": "iOS SDK 提交 App Store 必须配置 PrivacyInfo.xcprivacy 隐私清单",
+          "problem": "Apple 审核要求调用 NSUserDefaults 与文件时间戳 API 的 SDK 声明隐私原因。",
+          "solution": "在 PrivacyInfo.xcprivacy 中补充 NSPrivacyAccessedAPITypeUserDefaults (CA92.1) 与 FileTimestamp (C617.1)。"
+        }
+      ],
+      "response": "这是 session 级异步 fixture 与 function 级事件循环生命周期不匹配导致的。将 fixture 的 `scope` 改为 `function`（或在 `pyproject.toml` 中统一设置 `asyncio_default_fixture_loop_scope = \"function\"`），并在 `finally` 中显式 `await client.aclose()` 即可消除报错。",
+      "target_experience_id": "exp-cal-013",
+      "expected": {
+        "adopted": false,
+        "contradicted": false,
+        "relevance": 0.05,
+        "evidence_keywords": []
+      },
+      "notes": "Completely unrelated: pytest-asyncio event loop vs iOS PrivacyInfo.xcprivacy."
+    },
+    {
+      "id": "cal_014",
+      "label": "irrelevant",
+      "domain": "python_cli",
+      "query": "Python argparse 如何给子命令添加一个 --json 输出开关？",
+      "contexts": [
+        {
+          "id": "exp-cal-014",
+          "title": "PostgreSQL 中文技术词 FTS 回填脚本 migrate_fts_jieba.py 使用说明",
+          "problem": "默认 simple 分词无法拆分中文连续词组导致召回率偏低。",
+          "solution": "执行 `make migrate-fts-jieba` 对存量 experiences 表的 fts_vector 字段重新分词回填。"
+        }
+      ],
+      "response": "在 `parser.add_subparsers(dest=\"command\")` 创建的子命令 parser 上调用 `sub.add_argument(\"--json\", action=\"store_true\", help=\"Output as JSON\")`，然后在处理函数里根据 `args.json` 决定用 `json.dumps(result, ensure_ascii=False)` 还是表格格式打印。",
+      "target_experience_id": "exp-cal-014",
+      "expected": {
+        "adopted": false,
+        "contradicted": false,
+        "relevance": 0.05,
+        "evidence_keywords": []
+      },
+      "notes": "Completely unrelated: Python argparse CLI vs PG jieba FTS backfill."
+    },
+    {
+      "id": "cal_015",
+      "label": "irrelevant",
+      "domain": "observability",
+      "query": "Prometheus 内存暴涨排查发现指标基数过高，如何治理？",
+      "contexts": [
+        {
+          "id": "exp-cal-015",
+          "title": "CocoaPods Swift/OC 混编 Podfile 静态链接配置",
+          "problem": "Pod 安装时动态框架冲突导致符号重复定义。",
+          "solution": "在 Podfile 中配置 `use_frameworks! :linkage => :static` 并重新运行 `pod install`。"
+        }
+      ],
+      "response": "检查指标定义发现 `http_requests_total` 把高基数字段 `request_id` 和 `user_ip` 放进了 Label。我已移除这两个 Label，只保留 `method`、`route_template` 和 `status_class` 三个低基数维度，TSDB active series 从 180 万降到 420。",
+      "target_experience_id": "exp-cal-015",
+      "expected": {
+        "adopted": false,
+        "contradicted": false,
+        "relevance": 0.05,
+        "evidence_keywords": []
+      },
+      "notes": "Completely unrelated: Prometheus label cardinality vs iOS CocoaPods linkage."
+    },
+    {
+      "id": "cal_016",
+      "label": "contradicted",
+      "domain": "local_postgres",
+      "query": "本机运行集成测试连不上 PostgreSQL，应该用哪个端口和启动方式？",
+      "contexts": [
+        {
+          "id": "exp-cal-016",
+          "title": "使用 Docker Compose 启动本地 PostgreSQL 并连接 5433 端口",
+          "problem": "本地开发测试需要连接 PostgreSQL 实例。",
+          "solution": "执行 `docker compose up -d postgres`，测试连接串统一使用 `postgresql://developer@localhost:5433/team_memory`。"
+        }
+      ],
+      "response": "注意：召回的 Docker 5433 端口经验已经过时。实测本机未安装 Docker，`localhost:5433` 直接 Connection Refused；当前环境已切换为原生 Homebrew PostgreSQL 16，监听在默认 `5432` 端口（`postgresql://developer@localhost:5432/team_memory`），请改用 `brew services start postgresql@16` 和 5432 端口。",
+      "target_experience_id": "exp-cal-016",
+      "expected": {
+        "adopted": false,
+        "contradicted": true,
+        "relevance": 0.85,
+        "evidence_keywords": []
+      },
+      "notes": "Agent explicitly refutes the outdated Docker :5433 guidance with empirical native PG :5432 evidence."
+    },
+    {
+      "id": "cal_017",
+      "label": "contradicted",
+      "domain": "llm_gateway",
+      "query": "FaithfulnessJudge 调用 LLM 报 404 Model Not Found 和连接拒绝，网关配置是什么？",
+      "contexts": [
+        {
+          "id": "exp-cal-017",
+          "title": "FaithfulnessJudge 连接本地 LiteLLM 4000 端口与 legacy-gpt-35-turbo",
+          "problem": "评估脚本需要配置默认 LLM 接口地址与模型名。",
+          "solution": "在 .env 中设置 `FAITHFULNESS_LLM_BASE_URL=http://localhost:4000/v1` 与 `FAITHFULNESS_LLM_MODEL=legacy-gpt-35-turbo`。"
+        }
+      ],
+      "response": "经实测校验，召回的旧配置已经失效且不可用：`http://localhost:4000/v1` 本地代理已下线，且 `legacy-gpt-35-turbo` 模型返回 HTTP 404。目前实际可用的统一网关是 `https://gw.gburouter.com/v1`，默认评估模型已升级为 `gbu-gemini-3.8-flash`，修改后连通性测试通过。",
+      "target_experience_id": "exp-cal-017",
+      "expected": {
+        "adopted": false,
+        "contradicted": true,
+        "relevance": 0.90,
+        "evidence_keywords": []
+      },
+      "notes": "Agent empirically disproves localhost:4000 and legacy-gpt-35-turbo and replaces them with the new gateway/model."
+    },
+    {
+      "id": "cal_018",
+      "label": "contradicted",
+      "domain": "daemon_hooks",
+      "query": "hooks.py 收到回调后如何异步触发后台归因评估任务？",
+      "contexts": [
+        {
+          "id": "exp-cal-018",
+          "title": "在 hooks.py 中通过 subprocess.Popen + DEVNULL 异步拉起评估脚本",
+          "problem": "Hook 接口不能阻塞等待 LLM 评估完成。",
+          "solution": "在 `hooks.py` 中直接调用 `subprocess.Popen([sys.executable, '-m', 'team_memory.daemon.quality.faithfulness_batch'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)` 后台执行。"
+        }
+      ],
+      "response": "召回的 `subprocess.Popen` + `DEVNULL` 方案已被废弃，不能再采用。查看 `hooks.py` 源码和 `tests/test_attribution_scoring.py` 确认：`subprocess.Popen` 会静默吞掉异常且单测已明令禁止出现 `DEVNULL` 和 `subprocess.Popen`。现在必须通过常驻异步 `AttributionEvalWorker`（`evaluation_worker`）队列触发评估，内置指数退避重试与错误日志记录。",
+      "target_experience_id": "exp-cal-018",
+      "expected": {
+        "adopted": false,
+        "contradicted": true,
+        "relevance": 0.92,
+        "evidence_keywords": []
+      },
+      "notes": "Agent explicitly rejects subprocess.Popen + DEVNULL as deprecated and forbidden by current tests."
+    },
+    {
+      "id": "cal_019",
+      "label": "contradicted",
+      "domain": "sqlalchemy_upgrade",
+      "query": "执行一次性 SQL 脚本时报 AttributeError: 'Engine' object has no attribute 'execute'",
+      "contexts": [
+        {
+          "id": "exp-cal-019",
+          "title": "SQLAlchemy 直接通过 engine.execute() 执行原生 SQL",
+          "problem": "脚本需要快速执行一条 DDL 或查询语句。",
+          "solution": "直接调用 `engine.execute(\"SELECT count(*) FROM experiences\")` 即可，无需手动创建 connection。"
+        }
+      ],
+      "response": "该历史经验仅适用于旧版 SQLAlchemy 1.x，在当前项目使用的 SQLAlchemy 2.0 中已经完全失效（`Engine.execute()` 已被移除，调用就会抛出 `AttributeError`）。正确写法必须改为 `with engine.connect() as conn: conn.execute(text(\"SELECT count(*) FROM experiences\"))`。",
+      "target_experience_id": "exp-cal-019",
+      "expected": {
+        "adopted": false,
+        "contradicted": true,
+        "relevance": 0.88,
+        "evidence_keywords": []
+      },
+      "notes": "Agent proves engine.execute() was removed in SQLAlchemy 2.0 and contradicts the recalled 1.x snippet."
+    },
+    {
+      "id": "cal_020",
+      "label": "contradicted",
+      "domain": "mcp_contract",
+      "query": "调用 MCP memory_save 频繁报 llm_parse_failed 和 group_key 参数异常怎么解决？",
+      "contexts": [
+        {
+          "id": "exp-cal-020",
+          "title": "调用 memory_save 时统一传 content 长文本与 group_key 参数",
+          "problem": "希望一次性把完整对话记录存入团队记忆。",
+          "solution": "调用 `memory_save(content=full_markdown, group_key='my-group')`，由服务端自动拆解标题和方案。"
+        }
+      ],
+      "response": "实测复现表明，召回经验里推荐传 `content` 和 `group_key` 的做法正是报错根源，结论完全错误且已过时：传入长文本 `content` 会触发服务端小模型 JSON 截断报 `llm_parse_failed`，而传 `group_key` 会触发服务端 `find_or_create_group_parent()` 参数异常。必须改用 Direct Mode，显式传入 `title`、`problem`、`solution`、`tags`、`project`，严禁再传 `content` 或 `group_key`。",
+      "target_experience_id": "exp-cal-020",
+      "expected": {
+        "adopted": false,
+        "contradicted": true,
+        "relevance": 0.95,
+        "evidence_keywords": []
+      },
+      "notes": "Agent empirically refutes the recalled content/group_key usage and mandates Direct Mode."
+    }
+  ]
+}

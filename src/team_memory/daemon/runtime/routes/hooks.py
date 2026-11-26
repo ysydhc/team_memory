@@ -27,7 +27,6 @@ from team_memory.daemon.refinement.pipeline import (
 )
 from team_memory.daemon.runtime.app import _detect_source, send_daemon_alert
 from team_memory.daemon.runtime.models import HookPayload, MCPCallbackPayload
-from team_memory.project_resolver import find_project_root
 from team_memory.services.search.search_log_writer import (
     SearchLogWriter,
     evaluate_rule_based_adoption,
@@ -258,32 +257,16 @@ async def hook_after_response(request: Request) -> dict[str, Any]:
                         mcp["search_log_id"][:8],
                     )
 
-                # Check if batch threshold reached
+                # Check if batch threshold reached — wake persistent async worker
                 if await response_buffer.should_batch():
-                    logger.info("[EVAL]  faithfulness batch threshold reached, triggering evaluation")
-                    import subprocess
-                    import sys as _sys
-
-                    # Get DB URL from config (same as how response_buffer connects)
-                    from team_memory.config import load_settings as _load_tm2
-
-                    _tm_settings2 = _load_tm2()
-                    _db_url_val = str(_tm_settings2.database.url).replace("+asyncpg", "")
-                    subprocess.Popen(
-                        [
-                            _sys.executable,
-                            "-m",
-                            "team_memory.daemon.quality.faithfulness_batch",
-                            "--force",
-                            "--db-url",
-                            _db_url_val,
-                            "--checkpoint",
-                            "/tmp/tm-faithfulness-checkpoint.txt",
-                        ],
-                        cwd=find_project_root(),
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
+                    eval_worker = getattr(app.state, "evaluation_worker", None)
+                    if eval_worker is not None:
+                        logger.info("[EVAL]  attribution batch threshold reached, waking async eval worker")
+                        eval_worker.trigger()
+                    else:
+                        logger.warning(
+                            "[EVAL]  attribution batch threshold reached, but evaluation_worker is not initialized"
+                        )
         except Exception as e:
             logger.info("Faithfulness buffer capture failed: %s", e, exc_info=True)
             await send_daemon_alert(

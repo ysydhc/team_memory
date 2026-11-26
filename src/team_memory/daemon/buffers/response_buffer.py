@@ -16,24 +16,33 @@ from typing import Any
 
 import asyncpg
 
+from team_memory.storage.tenant_context import get_current_tenant_id
+
 logger = logging.getLogger("daemon.response_buffer")
 
 
 class ResponseBuffer:
-    """Async buffer for pending faithfulness evaluations."""
+    """Async buffer for pending faithfulness/attribution evaluations."""
 
     def __init__(
         self,
         dsn: str,
         batch_threshold: int = 5,
+        tenant_id: str | None = None,
     ) -> None:
         self._dsn = dsn
         self._pool: asyncpg.Pool | None = None
         self._batch_threshold = batch_threshold
+        self._tenant_id = str(tenant_id) if tenant_id else str(get_current_tenant_id())
 
     async def _ensure_pool(self) -> asyncpg.Pool:
         if self._pool is None or self._pool._closed:
-            self._pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=3)
+            self._pool = await asyncpg.create_pool(
+                self._dsn,
+                min_size=1,
+                max_size=3,
+                server_settings={"app.current_tenant_id": self._tenant_id},
+            )
         return self._pool
 
     async def add(
@@ -214,15 +223,15 @@ class ResponseBuffer:
         entry_id: str,
         *,
         faithfulness_score: float,
+        relevance_score: float | None = None,
+        was_used: bool | None = None,
+        judgment_source: str = "attribution",
     ) -> None:
-        """Copy faithfulness_score to the linked search_log (if any).
+        """Write attribution/faithfulness verdict back to the linked search_log.
 
-        Once an entry is judged it is no longer "unjudged": we record the
-        verdict in BOTH directions — was_used=TRUE when the response actually
-        used the recalled context (score >= 0.5), was_used=FALSE otherwise.
-        Previously only positive verdicts were written, leaving negative ones
-        as NULL and indistinguishable from genuinely unjudged rows, which
-        inflated the "unjudged" count and made use-rate uninterpretable.
+        Records ``faithfulness_score``, ``relevance_score``, ``was_used``, and
+        ``judgment_source`` in BOTH directions so negative verdicts are never
+        left as NULL.
         """
         if faithfulness_score < 0:
             logger.debug(
@@ -240,23 +249,26 @@ class ResponseBuffer:
                     uuid.UUID(entry_id),
                 )
                 if row and row["search_log_id"]:
-                    was_used = faithfulness_score >= 0.5
+                    eff_was_used = was_used if was_used is not None else (faithfulness_score >= 0.5)
                     await conn.execute(
                         """
                         UPDATE search_logs
                         SET faithfulness_score = $2,
-                            was_used = $3,
-                            judgment_source = 'faithfulness',
-                            updated_at = $4
+                            relevance_score = COALESCE($3, relevance_score),
+                            was_used = $4,
+                            judgment_source = $5,
+                            updated_at = $6
                         WHERE id = $1
                         """,
                         row["search_log_id"],
                         faithfulness_score,
-                        was_used,
+                        relevance_score,
+                        eff_was_used,
+                        judgment_source,
                         datetime.now(timezone.utc),
                     )
         except Exception as e:
-            logger.debug("response_buffer.sync_to_search_log failed: %s", e)
+            logger.warning("response_buffer.sync_to_search_log failed for entry=%s: %s", entry_id, e)
 
     async def get_stats(self, days: int = 7) -> dict[str, Any]:
         """Return buffer stats for the last N days."""

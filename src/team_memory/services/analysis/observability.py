@@ -1,11 +1,12 @@
 """Full-pipeline observability aggregation & exception-driven ops digest.
 
-Aggregates 5 subsystems into a single lightweight payload (zero Prometheus/Grafana):
+Aggregates 6 subsystems into a single lightweight payload (zero Prometheus/Grafana):
   1. Ingestion (daily writes, 7d trend, consecutive zero-write workdays, daemon queue)
   2. Maintenance (AutoDream & Janitor last run age + real business outputs)
   3. Knowledge Graph (entities, relationships, isolated node rate, 7d graph assist, Graph Lift)
   4. Retrieval (daily searches, hit rate, P50/P95 latency, avg tokens, Golden Eval ablation & trend)
   5. Infra (embedding coverage, PG latency, embedding/daemon probe status)
+  6. Scoring (7d implicit/explicit feedback, adoption rate, contradictions, relevance, SLA redlines)
 """
 
 from __future__ import annotations
@@ -40,6 +41,13 @@ MAINTENANCE_STALE_HOURS = 48.0
 BACKUP_STALE_HOURS = 48.0
 P95_LATENCY_RED_MS = 8000.0
 EVAL_RECALL_DROP_WARN = 0.05
+
+# Scoring loop SLA redline thresholds
+SCORING_EMPTY_RUN_WORKDAYS = 3
+SCORING_EMPTY_RUN_SEARCH_MIN = 20
+SCORING_ADOPTED_MIN_JUDGED = 10
+SCORING_ADOPTED_RATE_LOW = 0.01
+SCORING_ADOPTED_RATE_HIGH = 0.80
 
 
 def _resolve_default_backup_dir() -> Path:
@@ -195,6 +203,106 @@ def _worst_status(*statuses: str) -> str:
     return max(statuses, key=_status_rank) if statuses else "green"
 
 
+def recent_workday_dates(
+    count: int = SCORING_EMPTY_RUN_WORKDAYS,
+    today: date | None = None,
+) -> list[date]:
+    """Return the most recent ``count`` Mon-Fri workday dates (ascending order)."""
+    if count <= 0:
+        return []
+    cursor = today or datetime.now(timezone.utc).date()
+    workdays: list[date] = []
+    while len(workdays) < count:
+        if cursor.weekday() < 5:  # Mon=0 .. Fri=4
+            workdays.append(cursor)
+        cursor -= timedelta(days=1)
+    workdays.reverse()
+    return workdays
+
+
+def _count_contradicted_from_reasonings(reasonings: list[Any]) -> int:
+    """Count contradicted experience verdicts from serialized ``response_buffer.judge_reasoning``."""
+    total = 0
+    for raw in reasonings:
+        if not raw or not isinstance(raw, str):
+            continue
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            lowered = raw.lower()
+            total += lowered.count('"contradicted": true') + lowered.count('"contradicted":true')
+            continue
+
+        if isinstance(parsed, list):
+            for item in parsed:
+                if isinstance(item, dict) and item.get("contradicted") is True:
+                    total += 1
+        elif isinstance(parsed, dict) and parsed.get("contradicted") is True:
+            total += 1
+    return total
+
+
+def evaluate_scoring_sla(scoring: dict[str, Any]) -> tuple[str, list[dict[str, str]]]:
+    """Evaluate the scoring loop SLA redlines and mutate ``status``/``reason`` in-place.
+
+    Redlines:
+      1. Empty-run (RED): non-noise searches in recent 3 workdays > 20 while
+         implicit feedback writeback count (positive + negative) == 0.
+      2. Bias/drift (YELLOW): judged non-noise searches in 7d >= 10 while
+         adopted_rate_7d < 1% (too strict / broken chain) or > 80% (rubber-stamp).
+    """
+    alerts: list[dict[str, str]] = []
+    status = "green"
+    reasons: list[str] = []
+
+    non_noise_3wd = int(scoring.get("non_noise_searches_3wd", 0) or 0)
+    if scoring.get("implicit_feedback_3wd") is not None:
+        implicit_fb = int(scoring.get("implicit_feedback_3wd") or 0)
+    else:
+        implicit_fb = int(scoring.get("implicit_positive_7d", 0) or 0) + int(
+            scoring.get("implicit_negative_7d", 0) or 0
+        )
+
+    # Redline 1: Anti-empty-run (RED)
+    if non_noise_3wd > SCORING_EMPTY_RUN_SEARCH_MIN and implicit_fb == 0:
+        status = _worst_status(status, "red")
+        msg = (
+            f"评分闭环疑似空跑：近{SCORING_EMPTY_RUN_WORKDAYS}个工作日非噪音搜索 "
+            f"{non_noise_3wd} 次 (>{SCORING_EMPTY_RUN_SEARCH_MIN})，但隐式反馈回写数为 0"
+        )
+        reasons.append(msg)
+        alerts.append({"subsystem": "scoring", "level": "red", "message": msg})
+
+    # Redline 2: Anti-bias / drift (YELLOW)
+    judged_7d = int(scoring.get("judged_non_noise_7d", 0) or 0)
+    adopted_rate = scoring.get("adopted_rate_7d")
+    if judged_7d >= SCORING_ADOPTED_MIN_JUDGED and adopted_rate is not None:
+        rate = float(adopted_rate)
+        if rate < SCORING_ADOPTED_RATE_LOW:
+            status = _worst_status(status, "yellow")
+            msg = f"采纳率过低 ({rate * 100:.1f}% < 1%，已评估 {judged_7d} 次)，疑似门槛过严或链路断链"
+            reasons.append(msg)
+            alerts.append({"subsystem": "scoring", "level": "yellow", "message": msg})
+        elif rate > SCORING_ADOPTED_RATE_HIGH:
+            status = _worst_status(status, "yellow")
+            msg = f"采纳率过高 ({rate * 100:.1f}% > 80%，已评估 {judged_7d} 次)，疑似裁判放水失真"
+            reasons.append(msg)
+            alerts.append({"subsystem": "scoring", "level": "yellow", "message": msg})
+
+    scoring["status"] = status
+    if reasons:
+        scoring["reason"] = "；".join(reasons)
+    else:
+        rate_str = f"{float(adopted_rate) * 100:.1f}%" if adopted_rate is not None else "N/A"
+        pos_7d = int(scoring.get("implicit_positive_7d", 0) or 0)
+        neg_7d = int(scoring.get("implicit_negative_7d", 0) or 0)
+        exp_7d = int(scoring.get("explicit_feedback_7d", 0) or 0)
+        pending_buf = int(scoring.get("pending_eval_buffer", 0) or 0)
+        scoring["reason"] = f"采纳率 {rate_str} · 隐式+{pos_7d}/-{neg_7d} 显式{exp_7d} · 待评 {pending_buf}"
+
+    return status, alerts
+
+
 def evaluate_subsystem_statuses(
     *,
     ingestion: dict[str, Any],
@@ -202,8 +310,9 @@ def evaluate_subsystem_statuses(
     knowledge_graph: dict[str, Any],
     retrieval: dict[str, Any],
     infra: dict[str, Any],
+    scoring: dict[str, Any] | None = None,
 ) -> tuple[str, list[dict[str, str]]]:
-    """Apply the 5 health redlines to compute subsystem status lamps & alerts."""
+    """Apply the subsystem health redlines to compute status lamps & alerts."""
     alerts: list[dict[str, str]] = []
 
     # 1. Ingestion
@@ -358,13 +467,21 @@ def evaluate_subsystem_statuses(
     else:
         infra["reason"] = f"向量 {coverage * 100:.1f}% · PG {infra.get('pg_latency_ms', 0)}ms"
 
-    overall = _worst_status(
+    statuses = [
         ingestion["status"],
         maintenance["status"],
         knowledge_graph["status"],
         retrieval["status"],
         infra["status"],
-    )
+    ]
+
+    # 6. Scoring loop SLA (optional for backward compatibility with 5-subsystem callers)
+    if scoring is not None:
+        scoring_status, scoring_alerts = evaluate_scoring_sla(scoring)
+        statuses.append(scoring_status)
+        alerts.extend(scoring_alerts)
+
+    overall = _worst_status(*statuses)
     return overall, alerts
 
 
@@ -395,6 +512,14 @@ async def get_observability_overview(
     start_date = today - timedelta(days=days - 1)
     start_ts = datetime(start_date.year, start_date.month, start_date.day, tzinfo=timezone.utc)
     seven_days_ago = now_utc - timedelta(days=7)
+    workdays_3 = recent_workday_dates(SCORING_EMPTY_RUN_WORKDAYS, today=today)
+    workdays_3_start_date = workdays_3[0] if workdays_3 else (today - timedelta(days=SCORING_EMPTY_RUN_WORKDAYS))
+    workdays_3_start_ts = datetime(
+        workdays_3_start_date.year,
+        workdays_3_start_date.month,
+        workdays_3_start_date.day,
+        tzinfo=timezone.utc,
+    )
 
     # Probe daemon concurrently with DB queries
     daemon_data = await _fetch_daemon_status(daemon_status_url)
@@ -425,6 +550,13 @@ async def get_observability_overview(
     graph_hits_7d = 0
     latencies_7d: list[float] = []
     tokens_7d: list[int] = []
+    non_noise_searches_3wd = 0
+    judged_non_noise_7d = 0
+    adopted_7d = 0
+    relevances_7d: list[float] = []
+    contradicted_7d = 0
+    pending_eval_buffer = 0
+    implicit_feedback_3wd = 0
     feedback_stats: dict[str, int] = {
         "explicit_total": 0,
         "implicit_total": 0,
@@ -520,7 +652,8 @@ async def get_observability_overview(
             sl_rows = (
                 await session.execute(
                     sa_text(
-                        "SELECT created_at, result_ids, stage_metrics, stage_counts, returned_tokens "
+                        "SELECT created_at, result_ids, stage_metrics, stage_counts, returned_tokens, "
+                        "is_noise, was_used, relevance_score "
                         "FROM search_logs "
                         "WHERE created_at >= :start_ts "
                         "ORDER BY created_at ASC"
@@ -529,7 +662,16 @@ async def get_observability_overview(
                 )
             ).fetchall()
 
-            for created_at, result_ids, stage_metrics, stage_counts, ret_tokens in sl_rows:
+            for (
+                created_at,
+                result_ids,
+                stage_metrics,
+                stage_counts,
+                ret_tokens,
+                is_noise,
+                was_used,
+                relevance_score,
+            ) in sl_rows:
                 if created_at is None:
                     continue
                 dt = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
@@ -563,6 +705,17 @@ async def get_observability_overview(
                     if tok is not None:
                         tokens_7d.append(tok)
 
+                if is_noise is not True:
+                    if dt_utc >= workdays_3_start_ts:
+                        non_noise_searches_3wd += 1
+                    if dt_utc >= seven_days_ago:
+                        if was_used is not None:
+                            judged_non_noise_7d += 1
+                            if was_used is True:
+                                adopted_7d += 1
+                        if isinstance(relevance_score, (int, float)):
+                            relevances_7d.append(float(relevance_score))
+
             # 5. Feedback loop stats (explicit vs implicit)
             try:
                 fb_row = (
@@ -589,11 +742,18 @@ async def get_observability_overview(
                                 COUNT(*) FILTER (
                                     WHERE source = 'implicit_judge' AND rating <= 2
                                       AND created_at >= :seven_days_ago
-                                ) AS imp_neg_7d
+                                ) AS imp_neg_7d,
+                                COUNT(*) FILTER (
+                                    WHERE source = 'implicit_judge' AND (rating >= 4 OR rating <= 2)
+                                      AND created_at >= :workdays_3_start_ts
+                                ) AS imp_3wd
                             FROM experience_feedbacks
                             """
                         ),
-                        {"seven_days_ago": seven_days_ago},
+                        {
+                            "seven_days_ago": seven_days_ago,
+                            "workdays_3_start_ts": workdays_3_start_ts,
+                        },
                     )
                 ).fetchone()
                 if fb_row:
@@ -605,8 +765,47 @@ async def get_observability_overview(
                         "implicit_positive_7d": int(fb_row[4] or 0),
                         "implicit_negative_7d": int(fb_row[5] or 0),
                     }
+                    implicit_feedback_3wd = int(fb_row[6] or 0)
             except Exception as fb_exc:
                 logger.debug("Feedback stats query skipped: %s", fb_exc)
+
+            # 5b. Scoring buffer backlog & contradiction counts (response_buffer)
+            try:
+                pending_row = (
+                    await session.execute(
+                        sa_text(
+                            """
+                            SELECT COUNT(*)
+                            FROM response_buffer rb
+                            LEFT JOIN search_logs sl ON rb.search_log_id = sl.id
+                            WHERE rb.evaluated = FALSE
+                              AND sl.is_noise IS NOT TRUE
+                              AND NOT (char_length(rb.query) < 12 AND rb.query !~ '[A-Za-z]{4,}')
+                            """
+                        )
+                    )
+                ).fetchone()
+                if pending_row:
+                    pending_eval_buffer = int(pending_row[0] or 0)
+
+                contra_rows = (
+                    await session.execute(
+                        sa_text(
+                            """
+                            SELECT judge_reasoning
+                            FROM response_buffer
+                            WHERE evaluated = TRUE
+                              AND created_at >= :seven_days_ago
+                              AND judge_reasoning IS NOT NULL
+                              AND judge_reasoning LIKE '%contradicted%'
+                            """
+                        ),
+                        {"seven_days_ago": seven_days_ago},
+                    )
+                ).fetchall()
+                contradicted_7d = _count_contradicted_from_reasonings([r[0] for r in contra_rows])
+            except Exception as rb_exc:
+                logger.debug("Response buffer scoring stats query skipped: %s", rb_exc)
 
             # 6. LLM & Embedding usage ledger aggregation (7d / 30d by caller)
             try:
@@ -746,12 +945,30 @@ async def get_observability_overview(
         **backup_info,
     }
 
+    # Assemble Scoring loop health
+    adopted_rate_7d = round(adopted_7d / judged_non_noise_7d, 4) if judged_non_noise_7d > 0 else None
+    avg_relevance_7d = round(sum(relevances_7d) / len(relevances_7d), 4) if relevances_7d else None
+    scoring = {
+        "implicit_positive_7d": feedback_stats["implicit_positive_7d"],
+        "implicit_negative_7d": feedback_stats["implicit_negative_7d"],
+        "explicit_feedback_7d": feedback_stats["explicit_7d"],
+        "adopted_rate_7d": adopted_rate_7d,
+        "adopted_7d": adopted_7d,
+        "judged_non_noise_7d": judged_non_noise_7d,
+        "non_noise_searches_3wd": non_noise_searches_3wd,
+        "implicit_feedback_3wd": implicit_feedback_3wd,
+        "contradicted_7d": contradicted_7d,
+        "avg_relevance_7d": avg_relevance_7d,
+        "pending_eval_buffer": pending_eval_buffer,
+    }
+
     overall_status, alerts = evaluate_subsystem_statuses(
         ingestion=ingestion,
         maintenance=maintenance,
         knowledge_graph=knowledge_graph,
         retrieval=retrieval,
         infra=infra,
+        scoring=scoring,
     )
 
     return {
@@ -766,6 +983,7 @@ async def get_observability_overview(
             "knowledge_graph": knowledge_graph,
             "retrieval": retrieval,
             "infra": infra,
+            "scoring": scoring,
         },
     }
 
@@ -807,16 +1025,21 @@ def format_ops_digest(
     kg = subs.get("knowledge_graph") or {}
     ret = subs.get("retrieval") or {}
     inf = subs.get("infra") or {}
+    scoring = subs.get("scoring") or {}
+
+    lamp_items: list[tuple[str, str]] = [
+        ("ingestion", "写入"),
+        ("maintenance", "维护"),
+        ("knowledge_graph", "图谱"),
+        ("retrieval", "召回"),
+        ("infra", "底座"),
+    ]
+    if scoring:
+        lamp_items.append(("scoring", "评分"))
 
     lamp_bar = " ".join(
         f"{_LAMP_ICON.get((subs.get(k) or {}).get('status', 'green'), '⚪')}{label}"
-        for k, label in (
-            ("ingestion", "写入"),
-            ("maintenance", "维护"),
-            ("knowledge_graph", "图谱"),
-            ("retrieval", "召回"),
-            ("infra", "底座"),
-        )
+        for k, label in lamp_items
     )
 
     avg_7d = float(ing.get("avg_7d", 0.0))
@@ -867,8 +1090,24 @@ def format_ops_digest(
             f"Daemon {inf.get('daemon_status', 'down')}{backup_suffix}"
         ),
     ]
+    if scoring:
+        s_status = scoring.get("status", "green")
+        s_rate = scoring.get("adopted_rate_7d")
+        s_rate_str = f"{float(s_rate) * 100:.1f}%" if s_rate is not None else "N/A"
+        s_rel = scoring.get("avg_relevance_7d")
+        s_rel_str = f"{float(s_rel):.2f}" if s_rel is not None else "N/A"
+        scoring_line = (
+            f"评分: {_LAMP_ICON.get(s_status, '⚪')} 采纳率 {s_rate_str} · "
+            f"隐式+{scoring.get('implicit_positive_7d', 0)}/-{scoring.get('implicit_negative_7d', 0)} "
+            f"显式{scoring.get('explicit_feedback_7d', 0)} · "
+            f"矛盾 {scoring.get('contradicted_7d', 0)} · 相关度 {s_rel_str} · "
+            f"待评 {scoring.get('pending_eval_buffer', 0)}"
+        )
+        if s_status != "green" and scoring.get("reason"):
+            scoring_line += f" | {scoring['reason']}"
+        lines.append(scoring_line)
     if alerts:
-        top_alerts = "；".join(str(a.get("message", "")) for a in alerts[:2])
+        top_alerts = "；".join(str(a.get("message", "")) for a in alerts[:3])
         lines.append(f"异常: {top_alerts}")
     return "\n".join(lines[:10] if weekly else lines)
 

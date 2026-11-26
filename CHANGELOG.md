@@ -6,6 +6,17 @@
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-11-26
+
+### Added
+
+- **Coding Agent 逐条归因评分体系与 5 道稳定性护城河**：
+  - 在 `src/team_memory/daemon/quality/faithfulness_judge.py` 新增 `AttributionJudge`（兼容 `FaithfulnessJudge`），废弃整篇回复 RAGAS 分母，改为逐条输出 `relevance / adopted / evidence_quote / contradicted`，并内置代码级 **Evidence-Required** 硬门禁（无 ≥4 字证据片段强降级 `adopted=False`）与 `usage_ledger` 每日预算熔断（默认 200 次/天）。
+  - 修复 `src/team_memory/services/analysis/implicit_feedback.py` 与 `response_buffer.py` 在 PostgreSQL 强制 RLS 下的回写通道，实现 `search_logs.relevance_score / was_used`、`experience_feedbacks`、`experiences.implicit_positive_count / implicit_negative_count` 真实闭环回写；内置单日 ±2 限幅、`verified / is_pinned` 金标豁免与 `contradicted → possibly_stale` 自动标旧。
+  - 移除 `hooks.py` 中 `subprocess.Popen(..., stderr=DEVNULL)` 黑洞子进程，升级为 Daemon 常驻异步评估 Worker（重试 ≤3 次 + 完整结构化日志）。
+  - 新增 20 题裁判校准集 `evals/judge_calibration_set.json`、`scripts/calibrate_judge.py` 与 `make calibrate-judge`（Precision ≥ 85% 门禁，实测 `gbu-gemini-3.8-flash` Adopted Precision/Recall = 100%）。
+  - 在 `src/team_memory/services/analysis/observability.py` 新增第 6 子系统 `scoring` 与 3 条不可造假自检红线（防空跑红灯、防判偏黄灯），完整接入 `/api/observability/overview` 与 `make ops-digest`。
+
 ## [0.4.1] — 2026-11-26
 
 ### Fixed
